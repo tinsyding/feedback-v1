@@ -31,8 +31,9 @@ feedback/
 ## 运维与部署规范
 
 - 远端服务器部署路径标准：
-  - `/www/wwwroot/JF/feedback-v1` -> 对应旧版系统（nginx `root` 直接指向此处）
-  - `/www/wwwroot/JF/feedback` -> 指向 `feedback-v1` 的软链接（兼容旧路径）
+  - `/www/wwwroot/JF/feedback-git` -> git 仓库克隆（含 `feedback-v1/` 子目录），发版即 `git pull`
+  - nginx `root` 直接指向 `feedback-git/feedback-v1`（旧 `feedback-v1` 目录保留作紧急回滚）
+  - `/www/wwwroot/JF/feedback` -> 指向旧 `feedback-v1` 的软链接（兼容旧路径，已非线上根）
 - 线上 nginx 由宝塔面板管理（`feedback.wxjifang.cn.conf`），仓库 `feedback-v1/nginx.conf`
   为线上镜像存档；面板侧硬化片段位于
   `vhost/nginx/extension/feedback.wxjifang.cn/zz-feedback-security.conf`
