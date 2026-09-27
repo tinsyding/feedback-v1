@@ -1,0 +1,2281 @@
+/* ===== Question Bank Specific Styles ===== */
+
+/* 针对横屏显示器优化：拓宽页面容器并充分利用左右两侧留白，释放宽屏大视野 */
+.upload-page .upload-shell {
+    max-width: min(97vw, 1860px) !important;
+    width: 97vw !important;
+    margin: 0 auto !important;
+    padding: 16px 20px 24px !important;
+}
+
+@media (max-width: 1200px) {
+    .upload-page .upload-shell {
+        max-width: 98vw !important;
+        width: 98vw !important;
+        padding: 14px 16px 20px !important;
+    }
+}
+
+.qb-selectors {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 0;
+}
+
+@media (max-width: 640px) {
+    .qb-selectors {
+        grid-template-columns: 1fr;
+    }
+}
+
+.qb-select-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.qb-select-group label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.qb-select {
+    width: 100%;
+    padding: 10px 38px 10px 14px;
+    font-size: 0.9rem;
+    font-family: inherit;
+    font-weight: 500;
+    background-color: var(--bg-quaternary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    outline: none;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 14px 14px;
+    transition: all 0.2s;
+}
+
+.qb-select option {
+    background-color: #1e1e24;
+    color: var(--text-primary);
+    padding: 9px 12px;
+}
+
+.qb-select:hover {
+    border-color: var(--border-hover);
+    background-color: var(--bg-hover);
+}
+
+.qb-select:focus {
+    border-color: var(--accent);
+    background-color: var(--bg-quaternary);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+/* Question list */
+.question-list-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    padding: 0 2px;
+}
+
+.question-list-header h3 {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.question-list-actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* 操作按钮已收归 common.css .btn，此处删除旧 .qb-action-btn 定义 */
+
+/* Question items */
+.question-items {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 60vh;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.question-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    transition: all 0.2s;
+    animation: qItemIn 0.25s ease-out;
+}
+
+@keyframes qItemIn {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.question-item:hover {
+    border-color: var(--text-muted);
+}
+
+.question-topic-input {
+    flex: 1;
+    min-height: 38px;
+    padding: 8px 12px;
+    font-size: 0.88rem;
+    line-height: 1.55;
+    font-family: inherit;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xs, 6px);
+    outline: none;
+    box-sizing: border-box;
+    resize: vertical;
+    overflow-y: hidden;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    width: 100%;
+}
+
+.question-topic-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.question-topic-input::placeholder {
+    color: var(--text-muted);
+}
+
+.question-topic-input.input-error {
+    border-color: #ef4444 !important;
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.25) !important;
+    background: rgba(239, 68, 68, 0.04);
+}
+
+.question-main-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    flex: 1;
+    min-width: 240px;
+}
+
+.question-field-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+}
+
+.question-field-row.question-topic-row {
+    align-items: flex-start;
+}
+
+.question-field-row.question-topic-row .topic-label {
+    margin-top: 8px;
+}
+
+.question-field-label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    min-width: 58px;
+    text-align: right;
+    user-select: none;
+    flex-shrink: 0;
+}
+
+.question-field-label.topic-label {
+    color: var(--text-primary);
+}
+
+.question-field-label.video-label {
+    color: #a78bfa;
+}
+
+.question-video-input-wrap {
+    flex: 1;
+    height: 36px;
+    box-sizing: border-box;
+    min-width: 140px;
+    display: flex;
+    align-items: center;
+    position: relative;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xs, 6px);
+    padding: 0 8px 0 10px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.question-video-input-wrap:focus-within {
+    border-color: #8b5cf6;
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2);
+}
+
+.question-video-input-wrap .video-input-icon {
+    color: #8b5cf6;
+    margin-right: 6px;
+    flex-shrink: 0;
+    opacity: 0.85;
+}
+
+.question-video-input {
+    flex: 1;
+    height: 100%;
+    min-width: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 0.86rem;
+    font-family: inherit;
+    padding: 0;
+    outline: none;
+}
+
+.question-video-input::placeholder {
+    color: var(--text-muted);
+}
+
+.video-preview-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    background: rgba(139, 92, 246, 0.15);
+    color: #a78bfa;
+    margin-left: 6px;
+    flex-shrink: 0;
+    transition: all 0.2s;
+    text-decoration: none;
+}
+
+.video-preview-link:hover {
+    background: #8b5cf6;
+    color: #ffffff;
+    transform: scale(1.08);
+}
+
+.question-id-tags {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    min-width: 56px;
+    max-width: 56px;
+    flex-shrink: 0;
+}
+
+.q-tag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+    padding: 0 6px;
+    border-radius: var(--radius-sm);
+    background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.question-actions {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.question-action-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.question-action-btn:hover {
+    background: var(--bg-secondary);
+    color: var(--accent);
+}
+
+.question-action-btn.question-remove-btn:hover {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+}
+
+.question-action-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* Empty state：已收归 common.css .empty-state，此处删除旧 .qb-empty 定义 */
+
+/* Status badge */
+.qb-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.qb-status.saved {
+    background: rgba(34, 197, 94, 0.1);
+    color: #22c55e;
+}
+
+.qb-status.unsaved {
+    background: rgba(251, 191, 36, 0.1);
+    color: #fbbf24;
+}
+
+.qb-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+/* Saved data list */
+/* Saved data list: Step 1 直接可见与学科多维筛选 */
+.saved-data-section {
+    margin-top: 24px;
+}
+
+.saved-filter-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px 16px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    margin-bottom: 16px;
+}
+
+.saved-category-box {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+}
+
+.saved-category-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.saved-filter-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    min-width: 84px;
+    flex-shrink: 0;
+    user-select: none;
+}
+
+.saved-filter-title svg {
+    color: var(--accent);
+    flex-shrink: 0;
+}
+
+.saved-subject-tabs,
+.saved-tier-tabs,
+.saved-grade-tabs,
+.saved-week-tabs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+/* 分类 tab 已收归 common.css .ui-pill，此处删除旧定义 */
+
+.saved-category-top-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.saved-category-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    flex: 1;
+}
+
+.saved-search-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+/* 已收归 .ui-search：旧输入框/容器定义删除，保留重置按钮 */
+.saved-search-actions .ui-search {
+    width: 190px;
+    max-width: 100%;
+}
+
+.saved-reset-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 34px;
+    padding: 0 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    font-family: inherit;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.saved-reset-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--bg-elevated, var(--bg-primary));
+}
+
+.saved-data-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px;
+    max-height: 480px;
+    overflow-y: auto;
+    padding: 4px 4px 14px 2px;
+}
+
+.saved-data-card {
+    display: flex;
+    flex-direction: column;
+    padding: 14px 16px;
+    background: var(--bg-primary);
+    border: 1.5px solid var(--border-color);
+    border-radius: var(--radius-md);
+    transition: all 0.2s cubic-bezier(0.25, 0.1, 0.25, 1.0);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    position: relative;
+    cursor: pointer;
+}
+
+.saved-data-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+}
+
+.saved-data-card.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-glow), 0 6px 18px rgba(0,0,0,0.1);
+}
+
+.saved-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.saved-card-tags {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.saved-badge {
+    padding: 3px 8px;
+    border-radius: var(--radius-xs, 6px);
+    font-size: 0.76rem;
+    font-weight: 700;
+}
+.saved-badge.badge-math {
+    background: rgba(59, 130, 246, 0.15);
+    color: #3b82f6;
+    border: 1px solid rgba(59, 130, 246, 0.3);
+}
+.saved-badge.badge-english {
+    background: rgba(139, 92, 246, 0.15);
+    color: #8b5cf6;
+    border: 1px solid rgba(139, 92, 246, 0.3);
+}
+.saved-badge.badge-physics {
+    background: rgba(6, 182, 212, 0.15);
+    color: #06b6d4;
+    border: 1px solid rgba(6, 182, 212, 0.3);
+}
+.saved-badge.badge-chemistry {
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+.saved-badge.badge-chinese {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+.saved-badge.badge-default {
+    background: rgba(99, 102, 241, 0.15);
+    color: #6366f1;
+    border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+.saved-season-tag {
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: #6366f1;
+    background: rgba(99, 102, 241, 0.12);
+    padding: 2px 8px;
+    border-radius: var(--radius-xs, 6px);
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    display: inline-flex;
+    align-items: center;
+}
+
+.saved-grade-tag {
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    padding: 2px 8px;
+    border-radius: var(--radius-xs, 6px);
+    border: 1px solid var(--border-color);
+}
+
+.saved-card-time {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.saved-card-body {
+    flex: 1;
+    margin-bottom: 12px;
+}
+
+.saved-card-title {
+    margin: 0 0 6px;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.saved-card-subinfo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.saved-question-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.saved-question-count svg {
+    width: 14px;
+    height: 14px;
+}
+
+.saved-card-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-color);
+}
+
+.saved-btn.edit-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    border-radius: var(--radius-xs, 6px);
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 2px 6px var(--accent-glow);
+}
+
+.saved-btn.edit-btn:hover {
+    filter: brightness(1.1);
+    transform: scale(1.02);
+}
+
+.saved-btn.edit-btn svg {
+    width: 14px;
+    height: 14px;
+}
+
+.saved-btn.delete-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: var(--radius-xs, 6px);
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.saved-btn.delete-btn:hover {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.2);
+}
+
+.saved-btn.delete-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* Bottom save bar */
+.qb-save-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 0;
+    gap: 16px;
+}
+
+.qb-save-bar .save-info {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+}
+
+/* PDF Upload feature */
+.pdf-upload-group {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin: 0 4px;
+}
+
+.pdf-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.2s;
+    max-width: 120px;
+    position: relative;
+    white-space: nowrap;
+}
+
+.pdf-btn svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+}
+
+.pdf-btn.empty {
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    border-color: var(--border-color);
+}
+.pdf-btn.empty:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.pdf-btn.uploading {
+    background: var(--bg-secondary);
+    color: var(--accent);
+    cursor: wait;
+    opacity: 0.8;
+}
+.pdf-btn.uploading svg {
+    animation: spin 1s linear infinite;
+}
+
+.pdf-btn.uploaded {
+    background: rgba(34, 197, 94, 0.1);
+    color: #16a34a;
+    border-color: rgba(34, 197, 94, 0.2);
+}
+.pdf-btn.uploaded:hover {
+    background: rgba(34, 197, 94, 0.15);
+}
+
+.pdf-btn-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pdf-remove-btn {
+    display: none;
+    position: absolute;
+    right: -6px;
+    top: -6px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #ef4444;
+    color: white;
+    border: none;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+}
+.pdf-btn.uploaded:hover .pdf-remove-btn {
+    display: flex;
+}
+.pdf-remove-btn svg {
+    width: 10px;
+    height: 10px;
+}
+.pdf-remove-btn:hover {
+    transform: scale(1.1);
+}
+
+@keyframes spin {
+    100% { transform: rotate(360deg); }
+}
+
+/* ===== Three-step wizard (错题本；按钮已收归 .btn) ===== */
+
+/* Step navigation bar */
+.qb-step-nav {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 4px 2px;
+}
+
+.qb-step-nav.between {
+    justify-content: space-between;
+}
+
+/* Step hint text */
+.qb-step-hint {
+    margin: 0;
+    font-size: 0.85rem;
+    line-height: 1.6;
+    color: var(--text-secondary);
+}
+
+/* Step 2 upload list — 左/右两个上传卡片 */
+.qb-upload-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+.qb-upload-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 36px 20px;
+    border: 1.5px dashed var(--border-color);
+    border-radius: 16px;
+    background: var(--bg-quaternary);
+    text-align: center;
+    transition: all 0.2s;
+}
+
+.qb-upload-item:hover {
+    border-color: var(--accent);
+    background: var(--bg-hover);
+}
+
+.qb-upload-item .btn {
+    padding: 12px 22px;
+    font-size: 0.9rem;
+}
+
+.qb-upload-item .btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+.qb-upload-status {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.qb-upload-status.completed {
+    color: var(--success);
+    font-weight: 600;
+}
+
+@media (max-width: 640px) {
+    .qb-upload-list {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Editable question ID (题号) input */
+.question-id-input {
+    width: 50px;
+    height: 44px;
+    line-height: 44px;
+    padding: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+    font-family: inherit;
+    text-align: center;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1.5px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    outline: none;
+    box-sizing: border-box;
+    transition: all 0.2s;
+}
+
+.question-id-input:hover {
+    border-color: var(--accent);
+}
+
+.question-id-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+    background: var(--bg-elevated, var(--bg-primary));
+}
+
+/* Hide number input spinners for a cleaner look */
+.question-id-input::-webkit-outer-spin-button,
+.question-id-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.question-id-input[type=number] {
+    -moz-appearance: textfield;
+}
+
+/* Per-question PDF action buttons - fixed width to guarantee alignment across rows */
+.question-pdf-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-shrink: 0;
+    width: 236px;
+    min-width: 236px;
+    max-width: 236px;
+}
+
+.q-pdf-btn.uploading {
+    background: var(--bg-secondary);
+    color: var(--accent);
+    cursor: wait;
+    opacity: 0.8;
+}
+
+.q-pdf-btn.uploading svg {
+    animation: spin 1s linear infinite;
+}
+
+.q-pdf-btn.uploaded {
+    background: rgba(34, 197, 94, 0.1);
+    color: #16a34a;
+    border-color: rgba(34, 197, 94, 0.2);
+}
+
+.q-pdf-btn.uploaded:hover {
+    background: rgba(34, 197, 94, 0.16);
+}
+
+/* Step indicators clickable hover */
+.step-item {
+    cursor: pointer;
+    user-select: none;
+    transition: transform 0.2s, opacity 0.2s;
+}
+.step-item:hover .step-dot {
+    transform: scale(1.08);
+    box-shadow: 0 0 16px var(--accent-glow);
+}
+.step-item.completed .step-dot {
+    background: var(--success);
+    color: #fff;
+}
+
+/* PDF preview dialog */
+.pdf-preview-box {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    width: 95vw;
+    max-width: 1160px;
+    height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+    animation: dialogSlideIn 0.25s cubic-bezier(0.25, 0.1, 0.25, 1.0);
+}
+
+.pdf-preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+}
+
+.pdf-preview-header .dialog-title {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.pdf-preview-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border: none;
+    border-radius: 50%;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.pdf-preview-close:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    transform: scale(1.06);
+}
+
+.pdf-preview-close svg {
+    width: 18px;
+    height: 18px;
+}
+
+.pdf-preview-frame-wrap {
+    flex: 1;
+    padding: 12px 18px;
+    min-height: 0;
+    background: var(--bg-primary);
+}
+
+.pdf-preview-frame-wrap iframe {
+    width: 100%;
+    height: 100%;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: #fff;
+}
+
+.pdf-preview-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+}
+
+/* ===== Step 3: Page Annotation & Grid ===== */
+.mapping-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+}
+
+.mapping-view-tabs {
+    display: flex;
+    gap: 6px;
+    background: var(--bg-primary);
+    padding: 4px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+}
+
+.mapping-view-tab {
+    padding: 6px 14px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    font-family: inherit;
+    border: none;
+    border-radius: var(--radius-xs, 6px);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.mapping-view-tab:hover {
+    color: var(--text-primary);
+}
+
+.mapping-view-tab.active {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 2px 8px var(--accent-glow);
+}
+
+.mapping-tools {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.mapping-zoom-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.zoom-label {
+    font-weight: 600;
+    margin-right: 2px;
+}
+
+.zoom-btn {
+    padding: 4px 10px;
+    font-size: 0.76rem;
+    font-weight: 600;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xs, 6px);
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.zoom-btn:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+}
+
+.zoom-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.mapping-quick-actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* Sections view container: 强制左右分栏对照 */
+.mapping-sections-container,
+.mapping-sections-container.view-split,
+.mapping-sections-container.view-all,
+.mapping-sections-container.view-exercise,
+.mapping-sections-container.view-answer {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+    gap: 0 !important;
+    border: 1.5px solid var(--border-color);
+    border-radius: var(--radius-lg, 12px);
+    background: var(--bg-secondary);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    position: relative;
+    overflow: hidden;
+}
+
+.mapping-sections-container #section-exercise,
+.mapping-sections-container #section-answer {
+    display: flex !important;
+    flex-direction: column;
+    min-width: 0;
+    padding: 18px 20px;
+}
+
+/* 左侧题目栏与显眼分界线 */
+.mapping-section#section-exercise {
+    position: relative;
+    border-right: 3px solid #6366f1;
+    box-shadow: 4px 0 16px -2px rgba(99, 102, 241, 0.25);
+    z-index: 2;
+}
+
+/* 贯穿上下的立体高亮分界条 */
+.mapping-section#section-exercise::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: -3px;
+    bottom: 0;
+    width: 3px;
+    background: linear-gradient(180deg, #3b82f6 0%, #6366f1 50%, #8b5cf6 100%);
+    box-shadow: 0 0 10px rgba(99, 102, 241, 0.6);
+    pointer-events: none;
+}
+
+.mapping-section#section-answer {
+    position: relative;
+    z-index: 1;
+}
+
+@media (max-width: 860px) {
+    .mapping-sections-container,
+    .mapping-sections-container.view-split,
+    .mapping-sections-container.view-all,
+    .mapping-sections-container.view-exercise,
+    .mapping-sections-container.view-answer {
+        grid-template-columns: 1fr !important;
+    }
+    .mapping-section#section-exercise {
+        border-right: none;
+        border-bottom: 3px solid #6366f1;
+        box-shadow: 0 4px 16px -2px rgba(99, 102, 241, 0.25);
+    }
+    .mapping-section#section-exercise::after {
+        top: auto;
+        bottom: -3px;
+        left: 0;
+        right: 0;
+        width: 100%;
+        height: 3px;
+        background: linear-gradient(90deg, #3b82f6 0%, #6366f1 50%, #8b5cf6 100%);
+    }
+}
+
+.mapping-section-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 14px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.title-badge {
+    padding: 3px 8px;
+    border-radius: var(--radius-xs, 6px);
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.title-badge.exercise {
+    background: rgba(59, 130, 246, 0.15);
+    color: #3b82f6;
+    border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.title-badge.answer {
+    background: rgba(139, 92, 246, 0.15);
+    color: #8b5cf6;
+    border: 1px solid rgba(139, 92, 246, 0.3);
+}
+
+.section-hint {
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--text-muted);
+    margin-left: auto;
+}
+
+/* Page Grid Sizes: 强制大图预览与稳定垂直滚动（单列宽幅左右对照） */
+.page-grid {
+    display: grid !important;
+    gap: 18px !important;
+    max-height: 76vh !important;
+    overflow-y: auto !important;
+    align-content: start !important;
+    grid-auto-rows: max-content !important;
+    padding: 6px 10px 20px 4px !important;
+    scroll-behavior: smooth !important;
+}
+
+.page-grid,
+.page-grid.size-small,
+.page-grid.size-medium,
+.page-grid.size-large,
+.page-grid.size-xlarge {
+    grid-template-columns: 1fr !important;
+}
+
+/* Page Card: 固定最小高度，禁止被压缩，撑满分栏宽度 */
+.page-card {
+    position: relative;
+    display: flex !important;
+    flex-direction: column !important;
+    border: 1.5px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    transition: transform 0.2s cubic-bezier(0.25, 0.1, 0.25, 1.0), border-color 0.2s, box-shadow 0.2s;
+    flex-shrink: 0 !important;
+    min-height: 200px !important;
+    width: 100% !important;
+}
+
+.page-card:hover {
+    transform: translateY(-3px);
+    border-color: var(--accent);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22), 0 0 12px var(--accent-glow);
+}
+
+.page-card.paired {
+    border-color: rgba(48, 209, 88, 0.45);
+}
+
+.page-thumb-wrap {
+    position: relative;
+    width: 100%;
+    cursor: zoom-in;
+    background: #ffffff;
+    overflow: hidden;
+    flex: 1 0 auto !important;
+    min-height: 180px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 6px;
+}
+
+.page-thumb {
+    width: 100% !important;
+    height: auto !important;
+    max-height: min(68vh, 650px) !important;
+    display: block !important;
+    object-fit: contain !important;
+    background: #ffffff;
+    transition: transform 0.25s ease;
+}
+
+.page-thumb-wrap:hover .page-thumb {
+    transform: scale(1.02);
+}
+
+/* Page Zoom Badge (Top-Right of preview) */
+.page-zoom-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 4;
+    background: rgba(15, 23, 42, 0.72);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    color: #f1f5f9;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    opacity: 0.75;
+    transition: opacity 0.2s ease, transform 0.2s ease, background 0.2s ease;
+    pointer-events: none;
+}
+
+.page-thumb-wrap:hover .page-zoom-badge {
+    opacity: 1;
+    transform: scale(1.04);
+    background: rgba(15, 23, 42, 0.9);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.page-zoom-badge svg {
+    width: 13px;
+    height: 13px;
+}
+
+/* Page Stepper Floating Center Bar */
+.page-stepper-center {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 6;
+    background: rgba(18, 20, 26, 0.90);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1.5px solid rgba(255, 255, 255, 0.22);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.38), 0 2px 8px rgba(0, 0, 0, 0.2);
+    border-radius: 999px;
+    padding: 5px 8px 5px 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    user-select: none;
+    cursor: default;
+    transition: transform 0.2s cubic-bezier(0.25, 0.1, 0.25, 1.0), box-shadow 0.2s, border-color 0.2s;
+}
+
+.page-thumb-wrap:hover .page-stepper-center {
+    border-color: rgba(var(--accent-rgb, 10, 132, 255), 0.7);
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.48), 0 0 16px rgba(var(--accent-rgb, 10, 132, 255), 0.3);
+    transform: translate(-50%, -50%) scale(1.03);
+}
+
+.stepper-label {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #e2e8f0;
+    letter-spacing: 0.5px;
+    user-select: none;
+    margin-right: 2px;
+}
+
+.stepper-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    padding: 0;
+    outline: none;
+    flex-shrink: 0;
+}
+
+.stepper-btn:hover {
+    background: var(--accent, #0a84ff);
+    border-color: var(--accent, #0a84ff);
+    color: #ffffff;
+    transform: scale(1.12);
+    box-shadow: 0 2px 10px rgba(var(--accent-rgb, 10, 132, 255), 0.45);
+}
+
+.stepper-btn:active {
+    transform: scale(0.9);
+}
+
+.stepper-btn svg {
+    display: block;
+    pointer-events: none;
+}
+
+.page-card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-color);
+    flex-shrink: 0 !important;
+}
+
+.page-no-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.page-paired-indicator {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--system-green, #30d158);
+    box-shadow: 0 0 6px rgba(48, 209, 88, 0.5);
+    margin-left: 2px;
+}
+
+.page-status-badge {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-tertiary);
+    border: 1px solid var(--border-color);
+    transition: all 0.2s ease;
+}
+
+.page-status-badge.paired {
+    background: rgba(48, 209, 88, 0.12);
+    color: var(--system-green, #30d158);
+    border-color: rgba(48, 209, 88, 0.35);
+}
+
+.page-label-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.page-label-input {
+    width: 48px;
+    height: 32px;
+    padding: 0;
+    font-size: 1.15rem;
+    font-weight: 800;
+    font-family: inherit;
+    text-align: center;
+    background: #ffffff;
+    color: #09090b;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    outline: none;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+}
+
+.page-label-input:focus {
+    border-color: var(--accent, #0a84ff);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb, 10, 132, 255), 0.35);
+}
+
+@keyframes numberPop {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.18); border-color: var(--accent, #0a84ff); }
+    100% { transform: scale(1); }
+}
+
+.page-label-input.pulse-active {
+    animation: numberPop 0.25s ease-out;
+}
+
+/* Hide number input spinners */
+.page-label-input::-webkit-outer-spin-button,
+.page-label-input::-webkit-inner-spin-button,
+.question-id-input::-webkit-inner-spin-button,
+.question-id-input::-webkit-outer-spin-button,
+#lightbox-page-label::-webkit-inner-spin-button,
+#lightbox-page-label::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.page-label-input[type=number],
+.question-id-input[type=number],
+#lightbox-page-label[type=number],
+input[type=number] {
+    -moz-appearance: textfield;
+}
+
+/* 题号智能顺延柔和脉冲动画 */
+@keyframes cascadeHighlight {
+    0% {
+        border-color: #22c55e !important;
+        box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.5) !important;
+        background-color: #dcfce7 !important;
+        transform: scale(1.08);
+    }
+    50% {
+        border-color: #22c55e !important;
+        box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.3) !important;
+        background-color: #f0fdf4 !important;
+        transform: scale(1.04);
+    }
+    100% {
+        border-color: transparent;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+        background-color: #ffffff;
+        transform: scale(1);
+    }
+}
+
+.page-label-input.cascade-highlight {
+    animation: cascadeHighlight 1.2s ease-out;
+}
+
+/* Step 3 顶部工具栏操作区 */
+.mapping-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.cascade-toggle-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+    padding: 5px 10px;
+    border-radius: var(--radius-sm, 8px);
+    background: var(--bg-tertiary, rgba(255, 255, 255, 0.05));
+    border: 1px solid var(--border-color);
+    transition: all 0.2s ease;
+}
+
+.cascade-toggle-label:hover {
+    color: var(--text-primary);
+    border-color: #22c55e;
+    background: rgba(34, 197, 94, 0.08);
+}
+
+.cascade-toggle-label input[type="checkbox"] {
+    accent-color: #22c55e;
+    cursor: pointer;
+    width: 15px;
+    height: 15px;
+}
+
+/* ===== High-Definition Page Lightbox Dialog ===== */
+.page-lightbox-box {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    width: 96vw;
+    max-width: 1680px;
+    height: 94vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+    overflow: hidden;
+    animation: dialogSlideIn 0.25s cubic-bezier(0.25, 0.1, 0.25, 1.0);
+}
+
+.page-lightbox-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    gap: 16px;
+    flex-shrink: 0;
+}
+
+.page-lightbox-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.lightbox-label-editor {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+}
+
+.lightbox-label-editor input {
+    width: 58px;
+    padding: 4px 6px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    text-align: center;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1.5px solid var(--accent);
+    border-radius: var(--radius-xs, 6px);
+    outline: none;
+}
+
+.lightbox-stepper-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.stepper-btn.sm {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    background: var(--bg-primary, #ffffff);
+    border: 1px solid var(--border-color, #e2e8f0);
+    color: var(--text-primary, #0f172a);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    padding: 0;
+}
+
+.stepper-btn.sm:hover {
+    background: var(--accent, #6366f1);
+    color: #ffffff;
+    border-color: var(--accent, #6366f1);
+    transform: scale(1.06);
+}
+
+.stepper-btn.sm svg {
+    display: block;
+    pointer-events: none;
+}
+
+.page-lightbox-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.lightbox-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.lightbox-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--text-muted);
+}
+
+.lightbox-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+.lightbox-zoom-val {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    min-width: 44px;
+    text-align: center;
+}
+
+.page-lightbox-body {
+    position: relative;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: auto;
+    background: #111114;
+    min-height: 0;
+}
+
+.page-lightbox-viewport {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    padding: 16px;
+    box-sizing: border-box;
+    overflow: auto;
+}
+
+#lightbox-img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    background: #ffffff;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+    border-radius: 6px;
+    transition: transform 0.15s ease-out;
+    transform-origin: center center;
+}
+
+.lightbox-nav-btn {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 48px;
+    height: 48px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(30, 30, 34, 0.75);
+    backdrop-filter: blur(10px);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 10;
+    transition: all 0.2s;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+
+.lightbox-nav-btn.prev {
+    left: 20px;
+}
+
+.lightbox-nav-btn.next {
+    right: 20px;
+}
+
+.lightbox-nav-btn:hover {
+    background: var(--accent);
+    transform: translateY(-50%) scale(1.1);
+}
+
+.lightbox-nav-btn:disabled {
+    opacity: 0.25;
+    cursor: not-allowed;
+    transform: translateY(-50%);
+}
+
+.lightbox-nav-btn svg {
+    width: 22px;
+    height: 22px;
+}
+
+.page-lightbox-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 20px;
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+/* ===== Step 4: Question List & PDF Cut Previews ===== */
+.question-filter-wrapper {
+    margin-left: auto;
+}
+
+/* 题目过滤搜索框：已收归 common.css .ui-search，此处删除旧定义 */
+.question-filter-wrapper .ui-search {
+    width: 220px;
+    max-width: 100%;
+}
+
+/* Question item with rich cut preview */
+.question-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 14px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    transition: all 0.2s;
+    animation: qItemIn 0.25s ease-out;
+}
+
+.question-item:hover {
+    border-color: var(--border-hover);
+    background: var(--bg-hover);
+}
+
+/* Cut PDF Preview Cards in Step 4 */
+.question-pdf-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-shrink: 0;
+    width: 236px;
+    min-width: 236px;
+    max-width: 236px;
+}
+
+.q-pdf-thumb-card {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 114px;
+    min-width: 114px;
+    max-width: 114px;
+    height: 52px;
+    padding: 4px 6px 4px 4px;
+    box-sizing: border-box;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+    position: relative;
+    overflow: hidden;
+}
+
+.q-pdf-thumb-card:hover {
+    border-color: var(--accent);
+    background: var(--accent-glow);
+    transform: translateY(-1px);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
+}
+
+.q-pdf-mini-thumb {
+    width: 32px;
+    height: 42px;
+    object-fit: cover;
+    background: #ffffff;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.empty-thumb-wrap {
+    width: 32px;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-secondary);
+    border: 1px dashed var(--border-color);
+    border-radius: 4px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    transition: all 0.2s;
+}
+
+.q-pdf-thumb-card:hover .empty-thumb-wrap {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.q-pdf-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+}
+
+.q-pdf-tag-title {
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.q-pdf-status-text {
+    font-size: 0.65rem;
+    color: var(--success);
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.q-pdf-status-text.empty {
+    color: var(--text-muted);
+}
+
+.q-pdf-status-text.uploading {
+    color: var(--accent);
+}
+
+/* Empty state styling */
+.q-pdf-thumb-card.empty {
+    border-style: dashed;
+    border-color: var(--border-color);
+    background: var(--bg-primary);
+    opacity: 0.88;
+}
+
+.q-pdf-thumb-card.empty:hover {
+    border-color: var(--accent);
+    border-style: solid;
+    background: var(--accent-glow);
+    opacity: 1;
+}
+
+/* Exercise is required */
+.q-pdf-thumb-card.empty.required-empty {
+    border-color: rgba(239, 68, 68, 0.4);
+    background: rgba(239, 68, 68, 0.02);
+}
+
+.q-pdf-thumb-card.empty.required-empty:hover {
+    border-color: #ef4444;
+    background: rgba(239, 68, 68, 0.06);
+}
+
+.q-pdf-thumb-card.empty.required-empty .empty-thumb-wrap {
+    border-color: rgba(239, 68, 68, 0.4);
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.05);
+}
+
+.q-pdf-thumb-card.empty.required-empty .q-pdf-status-text {
+    color: #ef4444;
+    font-weight: 500;
+}
+
+.q-pdf-thumb-card.pulse-active {
+    border-color: #ef4444 !important;
+    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.35) !important;
+    animation: qbPulseError 0.6s ease-in-out 3 alternate;
+}
+
+@keyframes qbPulseError {
+    from { transform: scale(1); }
+    to { transform: scale(1.04); }
+}
+
+/* Uploading animation */
+.q-pdf-thumb-card.uploading {
+    border-color: var(--accent);
+    background: var(--accent-glow);
+    cursor: wait;
+}
+
+.spin-icon {
+    animation: qbCardSpin 1s linear infinite;
+}
+
+@keyframes qbCardSpin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Quick Hover Popover */
+.quick-hover-popover {
+    position: fixed;
+    z-index: 1000;
+    width: 320px;
+    background: var(--bg-elevated);
+    border: 1.5px solid var(--accent);
+    border-radius: var(--radius-md);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+    padding: 8px;
+    pointer-events: none;
+    opacity: 0;
+    transform: scale(0.96);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.quick-hover-popover.active {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.quick-hover-popover .popover-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+    padding-left: 2px;
+}
+
+.quick-hover-popover img {
+    width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 4px;
+    background: #ffffff;
+}
+
+.pdf-action-manage-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border: none;
+    background: transparent;
+    border-radius: 50%;
+    color: var(--text-muted);
+    cursor: pointer;
+    margin-left: auto;
+    padding: 0;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+}
+
+.pdf-action-manage-btn:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+@media (max-width: 768px) {
+    .question-item {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .question-main-fields {
+        min-width: 100%;
+        order: 2;
+    }
+    .question-id-tags {
+        order: 1;
+    }
+    .question-pdf-actions {
+        order: 3;
+    }
+    .question-actions {
+        order: 4;
+        margin-left: auto;
+    }
+    .question-field-label {
+        min-width: 62px;
+        font-size: 0.78rem;
+    }
+}
+
+/* ==========================================================================
+   Light Mode Overhaul for Question Bank (错题本)
+   ========================================================================== */
+
+/* Step 1: Selectors */
+[data-theme="light"] .qb-select {
+    background-color: #ffffff !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 12px center !important;
+    background-size: 14px 14px !important;
+    color: #0f172a !important;
+    border: 1px solid rgba(0, 0, 0, 0.15) !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .qb-select:hover {
+    border-color: rgba(0, 0, 0, 0.28) !important;
+    background-color: #f8fafc !important;
+}
+
+[data-theme="light"] .qb-select:focus {
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15) !important;
+}
+
+[data-theme="light"] .qb-select option {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+}
+
+/* Category Filter Tabs：已收归 common.css .ui-pill，此处删除旧定义 */
+
+/* Search and Reset in Saved Section（搜索框已收归 .ui-search） */
+
+[data-theme="light"] .saved-reset-btn {
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.14);
+    color: #475569;
+}
+
+[data-theme="light"] .saved-reset-btn:hover {
+    background: #f1f5f9;
+    border-color: #3b82f6;
+    color: #2563eb;
+}
+
+/* Saved Data Cards */
+[data-theme="light"] .saved-data-card {
+    background: #ffffff !important;
+    border: 1.5px solid rgba(0, 0, 0, 0.12) !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .saved-data-card:hover {
+    border-color: #3b82f6 !important;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .saved-grade-tag {
+    background: #f1f5f9;
+    border-color: #e2e8f0;
+    color: #475569;
+}
+
+[data-theme="light"] .saved-card-actions {
+    border-top-color: rgba(0, 0, 0, 0.08);
+}
+
+/* Step 2: PDF Upload Items */
+[data-theme="light"] .qb-upload-item {
+    background: #f8fafc !important;
+    border-color: rgba(0, 0, 0, 0.18) !important;
+}
+
+[data-theme="light"] .qb-upload-item:hover {
+    border-color: #3b82f6 !important;
+    background: #f0f7ff !important;
+}
+
+/* Step 3: Page Mapping / Grid */
+[data-theme="light"] .mapping-sections-container {
+    background: #f8fafc !important;
+    border-color: rgba(0, 0, 0, 0.12) !important;
+}
+
+[data-theme="light"] .page-card {
+    background: #ffffff !important;
+    border-color: rgba(0, 0, 0, 0.12) !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .page-card-footer {
+    background: #f8fafc !important;
+    border-top-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+[data-theme="light"] .zoom-btn {
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.14);
+    color: #475569;
+}
+
+[data-theme="light"] .zoom-btn:hover {
+    border-color: #3b82f6;
+    color: #0f172a;
+}
+
+[data-theme="light"] .zoom-btn.active {
+    background: #3b82f6;
+    border-color: #3b82f6;
+    color: #ffffff;
+}
+
+[data-theme="light"] .question-id-input {
+    background: #ffffff !important;
+    border-color: rgba(0, 0, 0, 0.15) !important;
+    color: #0f172a !important;
+}
+
+[data-theme="light"] .question-id-input:focus {
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15) !important;
+}
+
+/* Step 4: Questions List */
+[data-theme="light"] .question-item {
+    background: #ffffff !important;
+    border: 1px solid rgba(0, 0, 0, 0.12) !important;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .question-item:hover {
+    border-color: rgba(0, 0, 0, 0.22) !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* 搜索框浅色覆盖已随 .ui-search 收归，此处删除旧定义 */
+
+[data-theme="light"] .q-pdf-thumb-card {
+    background: #ffffff !important;
+    border-color: rgba(0, 0, 0, 0.14) !important;
+}
+
+[data-theme="light"] .q-pdf-thumb-card:hover {
+    background: #eff6ff !important;
+    border-color: #3b82f6 !important;
+}
+
+[data-theme="light"] .empty-thumb-wrap {
+    background: #f1f5f9 !important;
+    border-color: rgba(0, 0, 0, 0.14) !important;
+}
+
+/* PDF Preview Modal */
+[data-theme="light"] .pdf-preview-box {
+    background: #ffffff !important;
+    border: 1px solid rgba(0, 0, 0, 0.12) !important;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.18) !important;
+}
+
+[data-theme="light"] .pdf-preview-header {
+    background: #f8fafc !important;
+    border-bottom-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+[data-theme="light"] .pdf-preview-footer {
+    background: #f8fafc !important;
+    border-top-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+[data-theme="light"] .pdf-preview-close {
+    background: #f1f5f9;
+    color: #64748b;
+}
+
+[data-theme="light"] .pdf-preview-close:hover {
+    background: #e2e8f0;
+    color: #0f172a;
+}
+

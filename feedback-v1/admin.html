@@ -1,0 +1,1036 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+
+<head>
+    <script>
+        (function () {
+            // 默认跟随系统（与教师端一致），用户手动切换后记住选择
+            const savedTheme = localStorage.getItem('admin_theme');
+            const theme = (savedTheme === 'light' || savedTheme === 'dark')
+                ? savedTheme
+                : (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+            document.documentElement.setAttribute('data-theme', theme);
+        })();
+    </script>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>管理控制台 - JF反馈系统 Pro</title>
+    <meta name="description" content="JF反馈系统管理员控制台">
+    <script>
+        (function () {
+            // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 Date.now()（会杀死全部缓存）
+            const v = '20260927';
+            document.write(`<link rel="stylesheet" href="css/admin.css?v=${v}">`);
+            document.write(`<link rel="stylesheet" href="css/tokens.css?v=${v}">`);
+        })();
+    </script>
+    <style>
+        body, body.admin-body { opacity: 1 !important; visibility: visible !important; }
+    </style>
+</head>
+
+<body class="admin-body page-ready ready">
+
+    <!-- Toast Notification Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- Floating Table Wheel Zoom HUD -->
+    <div id="table-zoom-hud" class="table-zoom-hud" onclick="resetActiveTableZoom()" title="点击恢复 100% 原始大小"></div>
+
+    <!-- Confirm Dialog Modal -->
+    <div class="modal-overlay" id="confirm-modal" style="display: none;">
+        <div class="modal-box" style="max-width: 440px;">
+            <div class="modal-header">
+                <h4 id="confirm-modal-title">提示</h4>
+                <button class="modal-close" onclick="resolveConfirm(false)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="modal-body" id="confirm-modal-body" style="font-size: 0.95rem; line-height: 1.6;"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn secondary" onclick="resolveConfirm(false)">取消</button>
+                <button type="button" class="btn primary" id="confirm-modal-ok-btn" onclick="resolveConfirm(true)">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Change Password Modal -->
+    <div class="modal-overlay" id="change-pwd-modal" style="display: none;">
+        <div class="modal-box" style="max-width: 440px;">
+            <div class="modal-header">
+                <h4>修改当前管理员密码</h4>
+                <button class="modal-close" onclick="closeChangePwdModal()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-grid" style="display: flex; flex-direction: column; gap: 14px;">
+                    <div class="form-field full-span">
+                        <label>原密码 *</label>
+                        <input type="password" id="pwd-old" placeholder="请输入当前旧密码" autocomplete="current-password">
+                    </div>
+                    <div class="form-field full-span">
+                        <label>新密码 *</label>
+                        <input type="password" id="pwd-new" placeholder="请输入新密码（至少6位）" autocomplete="new-password">
+                    </div>
+                    <div class="form-field full-span">
+                        <label>确认新密码 *</label>
+                        <input type="password" id="pwd-confirm" placeholder="请再次输入新密码" autocomplete="new-password">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn secondary" onclick="closeChangePwdModal()">取消</button>
+                <button type="button" class="btn primary" id="btn-save-pwd" onclick="submitChangePwd()">保存新密码</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="admin-container">
+        <!-- Sidebar Navigation -->
+        <aside class="admin-sidebar">
+            <div class="sidebar-header">
+                <a href="admin.html" class="sidebar-brand" style="text-decoration: none; padding: 4px 8px;">
+                    <span style="font-size: 1.18rem; font-weight: 800; color: var(--text-primary); letter-spacing: 0.5px;">控制台</span>
+                </a>
+                <button class="sidebar-close-btn" id="sidebar-close-btn" onclick="closeMobileMenu()" title="关闭导航">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+
+            <nav class="sidebar-nav">
+                <div class="nav-group">
+                    <span class="nav-group-title">控制中心</span>
+                    <div class="nav-items-list">
+                        <a href="#" class="nav-item active" data-tab="config">
+                            <div class="nav-item-left">
+                                <div class="nav-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <circle cx="12" cy="12" r="3"></circle>
+                                        <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"></path>
+                                    </svg>
+                                </div>
+                                <span class="nav-text">系统配置</span>
+                            </div>
+                        </a>
+                        <a href="#" class="nav-item" data-tab="records">
+                            <div class="nav-item-left">
+                                <div class="nav-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                        <circle cx="9" cy="7" r="4"></circle>
+                                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                                        <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                                    </svg>
+                                </div>
+                                <span class="nav-text">学生学情错题</span>
+                            </div>
+                            <span class="nav-item-badge" id="nav-records-badge">0 条</span>
+                        </a>
+                        <a href="#" class="nav-item" data-tab="teachers">
+                            <div class="nav-item-left">
+                                <div class="nav-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                        <circle cx="12" cy="7" r="4"></circle>
+                                    </svg>
+                                </div>
+                                <span class="nav-text">教师账号管理</span>
+                            </div>
+                            <span class="nav-item-badge" id="nav-teachers-badge">0 人</span>
+                        </a>
+                        <a href="#" class="nav-item" data-tab="logs">
+                            <div class="nav-item-left">
+                                <div class="nav-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"></path>
+                                        <polyline points="14 2 14 8 20 8"></polyline>
+                                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                                    </svg>
+                                </div>
+                                <span class="nav-text">操作审计日志</span>
+                            </div>
+                        </a>
+                        <a href="#" class="nav-item" data-tab="database">
+                            <div class="nav-item-left">
+                                <div class="nav-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                                        <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+                                        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                                    </svg>
+                                </div>
+                                <span class="nav-text">数据库管理</span>
+                            </div>
+                            <span class="nav-item-badge" id="nav-db-badge">8 张表</span>
+                        </a>
+                        <a href="#" class="nav-item" data-tab="changelog">
+                            <div class="nav-item-left">
+                                <div class="nav-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M12 20v-6M12 8V2M6 14l-4-4 4-4M18 10l4 4-4 4"></path>
+                                    </svg>
+                                </div>
+                                <span class="nav-text">更新日志公告</span>
+                            </div>
+                        </a>
+                    </div>
+                </div>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="user-profile-card">
+                    <div class="user-avatar-circle">
+                        <span id="user-avatar-letter">A</span>
+                    </div>
+                    <div class="user-meta">
+                        <div class="user-name-row" id="admin-username">管理员</div>
+                        
+                    </div>
+                    <button type="button" class="user-pwd-btn" onclick="openChangePwdModal()" title="修改登录密码">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0110 0v4"></path></svg>
+                    </button>
+                </div>
+                <button class="logout-action-btn" onclick="logout()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"></path>
+                        <polyline points="16 17 21 12 16 7"></polyline>
+                        <line x1="21" y1="12" x2="9" y2="12"></line>
+                    </svg>
+                    <span>退出登录</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main View Area -->
+        <main class="admin-main">
+            <!-- App Bar Header -->
+            <header class="main-header">
+                <div class="header-left">
+                    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="openMobileMenu()" title="展开导航" aria-label="展开导航菜单">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="3" y1="12" x2="21" y2="12"></line>
+                            <line x1="3" y1="6" x2="21" y2="6"></line>
+                            <line x1="3" y1="18" x2="21" y2="18"></line>
+                        </svg>
+                    </button>
+                    <div>
+                        <div class="breadcrumb-trail">
+                            <span>控制台</span>
+                            <span class="breadcrumb-separator">/</span>
+                            <span class="breadcrumb-active" id="header-breadcrumb">系统配置</span>
+                        </div>
+                        <div class="header-title-block" style="margin-top: 2px;">
+                            <h1 id="page-title">系统配置</h1>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="header-right">
+                    <!-- Theme Switcher -->
+                    <button class="theme-toggle-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="切换日间 / 暗夜模式">
+                        <svg class="sun-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="5"></circle>
+                            <line x1="12" y1="1" x2="12" y2="3"></line>
+                            <line x1="12" y1="21" x2="12" y2="23"></line>
+                            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                            <line x1="1" y1="12" x2="3" y2="12"></line>
+                            <line x1="21" y1="12" x2="23" y2="12"></line>
+                            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                        </svg>
+                        <svg class="moon-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                        </svg>
+                        <span id="theme-toggle-text">暗夜模式</span>
+                    </button>
+                    <a href="index.html" class="header-quick-link" target="_blank" title="在新标签页中打开反馈系统前台">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                            <polyline points="15 3 21 3 21 9"></polyline>
+                            <line x1="10" y1="14" x2="21" y2="3"></line>
+                        </svg>
+                        <span>前往反馈前台</span>
+                    </a>
+                </div>
+            </header>
+
+            <!-- Main Content Tabs -->
+            <div class="main-content">
+
+                <!-- TAB 1: SYSTEM CONFIG -->
+                <div id="config-tab" class="tab-content active">
+                    <div class="config-container">
+                        <!-- Hero Card -->
+                        <div class="config-hero-card">
+                            <h2 class="hero-env-title" style="margin: 0 0 16px 0;">当前学期：<span class="hl" id="info-env-text">2026 年 · 秋季学期</span></h2>
+
+                            <div class="hero-metrics-grid" style="margin-top: 0;">
+                                <div class="hero-metric-item">
+                                    <span class="metric-label">教学年份</span>
+                                    <span class="metric-val blue" id="hero-metric-year">2026 年</span>
+                                </div>
+                                <div class="hero-metric-item">
+                                    <span class="metric-label">教学季度</span>
+                                    <span class="metric-val purple" id="hero-metric-season">秋</span>
+                                </div>
+                                <div class="hero-metric-item">
+                                    <span class="metric-label">教学周期</span>
+                                    <span class="metric-val green" id="hero-metric-weeks">18 周</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Season Card Selection Section -->
+                        <!-- Unified Semester Settings Section (学期设定：学年、季节、周数) -->
+                        <div class="glass-card settings-section-card" style="padding: 20px 22px;">
+                            <div class="section-header" style="margin-bottom: 18px;">
+                                <div class="section-icon blue">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                                        <line x1="16" y1="2" x2="16" y2="6"></line>
+                                        <line x1="8" y1="2" x2="8" y2="6"></line>
+                                        <line x1="3" y1="10" x2="21" y2="10"></line>
+                                    </svg>
+                                </div>
+                                <div class="section-titles">
+                                    <h3 style="font-size: 1.05rem;">学期设定</h3>
+                                </div>
+                            </div>
+
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; align-items: stretch;">
+                                <!-- 1. 当前学年 -->
+                                <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 14px 16px; display: flex; flex-direction: column; justify-content: space-between; gap: 10px;">
+                                    <div style="font-size: 0.86rem; font-weight: 600; color: var(--text-secondary); display: flex; align-items: center; gap: 6px;">
+                                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                                        <span>当前学年</span>
+                                    </div>
+                                    <div class="input-with-suffix" style="width: 100%;">
+                                        <input type="number" id="semester-year" min="2020" max="2035" value="2026" oninput="updateOverviewText()" style="width: 100%;">
+                                        <span class="suffix">年</span>
+                                    </div>
+                                </div>
+
+                                <!-- 2. 季节 -->
+                                <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 14px 16px; display: flex; flex-direction: column; justify-content: space-between; gap: 10px;">
+                                    <div style="font-size: 0.86rem; font-weight: 600; color: var(--text-secondary); display: flex; align-items: center; gap: 6px;">
+                                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line></svg>
+                                        <span>学期季节</span>
+                                    </div>
+                                    <div class="season-cards-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; width: 100%; margin: 0;">
+                                        <div class="season-card-item" id="season-spring" onclick="setSeason('spring')" style="padding: 7px 0; text-align: center;">
+                                            <div class="season-card-name" style="font-size: 0.92rem;">春</div>
+                                        </div>
+                                        <div class="season-card-item" id="season-summer" onclick="setSeason('summer')" style="padding: 7px 0; text-align: center;">
+                                            <div class="season-card-name" style="font-size: 0.92rem;">暑</div>
+                                        </div>
+                                        <div class="season-card-item active" id="season-autumn" onclick="setSeason('autumn')" style="padding: 7px 0; text-align: center;">
+                                            <div class="season-card-name" style="font-size: 0.92rem;">秋</div>
+                                        </div>
+                                        <div class="season-card-item" id="season-winter" onclick="setSeason('winter')" style="padding: 7px 0; text-align: center;">
+                                            <div class="season-card-name" style="font-size: 0.92rem;">寒</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 3. 周数 -->
+                                <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 14px 16px; display: flex; flex-direction: column; justify-content: space-between; gap: 10px;">
+                                    <div style="font-size: 0.86rem; font-weight: 600; color: var(--text-secondary); display: flex; align-items: center; gap: 6px;">
+                                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                                        <span>总周次</span>
+                                    </div>
+                                    <div class="input-with-suffix" style="width: 100%;">
+                                        <input type="number" id="semester-weeks" min="1" max="30" value="14" oninput="updateOverviewText()" style="width: 100%;">
+                                        <span class="suffix" id="weeks-unit-suffix">周</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 题目视频讲解二维码开关 -->
+                        <div class="glass-card settings-section-card" style="padding: 16px 20px;">
+                            <div class="setting-row" style="align-items: center;">
+                                <div class="setting-info-block" style="flex: 1; padding-right: 20px;">
+                                    <div style="display: flex; align-items: center; gap: 10px;">
+                                        <h4 style="margin: 0; font-size: 0.96rem; font-weight: 600; color: var(--text-primary);">题目视频讲解二维码</h4>
+                                        <span id="retest-qrcode-status-badge" class="badge-status status-badge active">开启状态</span>
+                                    </div>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 12px; flex-shrink: 0;">
+                                    <label class="switch-control" title="切换是否在下载的PDF中嵌入视频讲解二维码">
+                                        <input type="checkbox" id="retest-qrcode-toggle" onchange="onRetestQrToggleChange()">
+                                        <span class="switch-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Floating Action Bar -->
+                        <div class="floating-action-bar">
+                            <div class="action-bar-status">
+                                <span id="save-status" class="save-status"></span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 14px;">
+                                <button class="btn primary" onclick="saveConfig()">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"></path>
+                                        <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                                        <polyline points="7 3 7 8 15 8"></polyline>
+                                    </svg>
+                                    <span>保存配置</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB: STUDENT RECORDS -->
+                <div id="records-tab" class="tab-content">
+                    <!-- Multi-dimensional Tag Filter Panel -->
+                    <div class="records-filter-panel" id="rec-filter-panel">
+                        <!-- Populated dynamically by renderRecordsFilters() -->
+                    </div>
+
+                    <!-- Pro Records Toolbar -->
+                    <div class="pro-toolbar">
+                        <div class="toolbar-filter-group">
+                            <div class="search-input-wrap" style="width: 260px;">
+                                <svg class="search-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="11" cy="11" r="8"></circle>
+                                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                </svg>
+                                <input type="text" id="rec-search-input" placeholder="搜索姓名、学号、批次号、Token、评语..." oninput="debounceLoadRecordsData()">
+                            </div>
+
+                            <select id="rec-per-page" class="custom-select" onchange="changeRecordsPerPage(this.value)">
+                                <option value="20">20 条/页</option>
+                                <option value="50">50 条/页</option>
+                                <option value="100">100 条/页</option>
+                            </select>
+
+                            <button type="button" class="btn secondary" id="rec-reset-filter-btn" onclick="resetRecordsFilters()" style="display: none; padding: 6px 12px; font-size: 0.82rem;" title="重置并清空所有筛选条件">
+                                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+                                <span>重置筛选</span>
+                            </button>
+                        </div>
+
+                        <div class="toolbar-actions-group">
+                            <!-- 学情表格缩放控制器 -->
+                            <div class="table-zoom-group" id="rec-zoom-group" title="表格缩放：支持按住 Ctrl + 鼠标滚轮 实时缩放">
+                                <button type="button" class="btn-zoom-action" onclick="changeRecTableZoom(-0.1)" title="缩小表格 (Ctrl + 滚轮向下)">
+                                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                </button>
+                                <span class="zoom-value-pill" id="rec-zoom-value-pill" onclick="resetRecTableZoom()" title="点击恢复 100% 原始大小">100%</span>
+                                <button type="button" class="btn-zoom-action" onclick="changeRecTableZoom(0.1)" title="放大表格 (Ctrl + 滚轮向上)">
+                                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                </button>
+                            </div>
+                            <button type="button" class="btn secondary" id="rec-view-mode-btn" onclick="toggleRecordsViewMode()" title="切换卡片/表格视图">
+                                <span id="rec-view-mode-icon" style="display:inline-flex;align-items:center;">
+                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                                </span>
+                                <span id="rec-view-mode-text">卡片视图</span>
+                            </button>
+                            <button class="btn danger-subtle" id="rec-batch-delete-btn" style="display: none;" onclick="batchDeleteRecords()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="3 6 5 6 21 6"></polyline>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                </svg>
+                                <span>批量删除 (<span id="rec-selected-count">0</span>)</span>
+                            </button>
+                            <button class="btn secondary" onclick="loadRecordsData(recCurrentPage)" title="刷新当前学情数据">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                                </svg>
+                                <span>刷新</span>
+                            </button>
+                            <button class="btn primary" onclick="openRecordCreateModal()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                                </svg>
+                                <span>新增学情记录</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Records Table Card -->
+                    <div class="table-card">
+                        <div class="table-wrapper" id="rec-table-wrapper">
+                            <table class="data-table" id="rec-data-table">
+                                <thead id="rec-thead">
+                                    <tr>
+                                        <th style="width: 42px; text-align: center;">
+                                            <input type="checkbox" id="rec-select-all" onchange="toggleSelectAllRecords(this.checked)" style="accent-color: var(--primary); cursor: pointer;">
+                                        </th>
+                                        <th class="th-sortable" style="width: 140px;" onclick="setRecordsSort('student_name')">学生姓名</th>
+                                        <th style="width: 180px;">年级 / 班层 / 学科</th>
+                                        <th class="th-sortable" style="width: 75px; text-align: center;" onclick="setRecordsSort('week_num')">周次</th>
+                                        <th class="th-sortable" style="width: 125px; text-align: center;" onclick="setRecordsSort('homework_score')">课后巩固成绩</th>
+                                        <th class="th-sortable" style="width: 190px;" onclick="setRecordsSort('error_count')">错题题号</th>
+                                        <th style="width: 125px; max-width: 135px;">评语</th>
+                                        <th class="th-sortable" style="width: 115px;" onclick="setRecordsSort('created_by')">责任教师</th>
+                                        <th class="th-sortable cell-mono" style="width: 100px;" onclick="setRecordsSort('updated_at')">更改时间</th>
+                                        <th style="width: 80px; text-align: right;">快捷操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="rec-tbody">
+                                    <tr>
+                                        <td colspan="10" class="table-empty">
+                                            <div class="empty-state">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                                    <circle cx="9" cy="7" r="4"></circle>
+                                                </svg>
+                                                <span>正在加载学情记录...</span>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="db-cards-wrapper" id="rec-cards-wrapper" style="display: none;"></div>
+                        <div class="table-pagination" id="rec-pagination"></div>
+                    </div>
+                </div>
+
+                <!-- TAB: TEACHERS (独立教师账号管理) -->
+                <div id="teachers-tab" class="tab-content">
+                    <!-- Pro Toolbar -->
+                    <div class="pro-toolbar">
+                        <div class="toolbar-filter-group">
+                            <div class="search-input-wrap" style="width: 260px;">
+                                <svg class="search-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="11" cy="11" r="8"></circle>
+                                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                </svg>
+                                <input type="text" id="teacher-search-input" placeholder="搜索账号、教师姓名、初始密码..." oninput="debounceLoadTeachersData()">
+                            </div>
+
+                            <select id="teacher-status-filter" class="custom-select" onchange="loadTeachersData(1)">
+                                <option value="">全部状态</option>
+                                <option value="1">正常 (允许登录)</option>
+                                <option value="0">已停用</option>
+                            </select>
+
+                            <select id="teacher-per-page" class="custom-select" onchange="changeTeachersPerPage(this.value)">
+                                <option value="20">20 条/页</option>
+                                <option value="50">50 条/页</option>
+                                <option value="100">100 条/页</option>
+                            </select>
+                        </div>
+
+                        <div class="toolbar-action-group">
+                            <button type="button" class="btn secondary" id="teacher-batch-delete-btn" style="display: none; color: var(--error); border-color: rgba(239, 68, 68, 0.3);" onclick="batchDeleteTeachers()">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                <span id="teacher-batch-delete-text">批量删除 (0)</span>
+                            </button>
+                            <button type="button" class="btn primary" onclick="openDbRecordModal(null, 'users')">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                <span>新增教师账号</span>
+                            </button>
+                            <button type="button" class="btn secondary" onclick="loadTeachersData()" title="刷新教师列表">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                                <span>刷新</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Teachers Table Card -->
+                    <div class="glass-card table-glass-card">
+                        <div class="data-table-wrapper" id="teacher-table-wrapper">
+                            <table class="data-table" id="teacher-data-table">
+                                <thead id="teacher-thead">
+                                    <tr>
+                                        <th style="width: 44px; text-align: center;">
+                                            <input type="checkbox" id="teacher-select-all" onchange="toggleSelectAllTeachers(this)" style="accent-color: var(--primary); cursor: pointer;">
+                                        </th>
+                                        <th class="th-sortable" onclick="setTeacherSort('id')" style="width: 80px; cursor: pointer; user-select: none;" title="点击切换按ID正序/倒序">ID</th>
+                                        <th class="th-sortable" onclick="setTeacherSort('username')" style="width: 140px; cursor: pointer; user-select: none;" title="点击切换按账号正序/倒序">登录账号</th>
+                                        <th class="th-sortable" onclick="setTeacherSort('real_name')" style="width: 170px; cursor: pointer; user-select: none;" title="点击切换按姓名正序/倒序">教师姓名</th>
+                                        <th class="th-sortable" onclick="setTeacherSort('status')" style="width: 110px; cursor: pointer; user-select: none;" title="点击切换按状态正序/倒序">账号状态</th>
+                                        <th class="th-sortable" onclick="setTeacherSort('assistant_count')" style="width: 110px; text-align: center; cursor: pointer; user-select: none;" title="点击切换按助教数量正序/倒序">助教数量</th>
+                                        <th style="width: 80px; text-align: right;">快捷操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="teacher-tbody">
+                                    <!-- Populated dynamically -->
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Pagination Bar -->
+                        <div class="table-pagination" id="teacher-pagination">
+                            <!-- Populated dynamically by renderTeacherPagination() -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 2: OPERATION LOGS -->
+                <div id="logs-tab" class="tab-content">
+                    <!-- KPI Metric Cards Bar -->
+                    <div class="metrics-pill-bar">
+                        <div class="metric-pill-card">
+                            <div class="metric-icon-bubble total">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                            </div>
+                            <div class="metric-data-col">
+                                <span class="metric-data-num" id="stat-total">0</span>
+                                <span class="metric-data-title">全部日志</span>
+                            </div>
+                        </div>
+                        <div class="metric-pill-card">
+                            <div class="metric-icon-bubble error">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+                            </div>
+                            <div class="metric-data-col">
+                                <span class="metric-data-num stat-error" id="stat-error">0</span>
+                                <span class="metric-data-title">错误 (Error)</span>
+                            </div>
+                        </div>
+                        <div class="metric-pill-card">
+                            <div class="metric-icon-bubble warn">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                            </div>
+                            <div class="metric-data-col">
+                                <span class="metric-data-num stat-warn" id="stat-warn">0</span>
+                                <span class="metric-data-title">警示 (Warn)</span>
+                            </div>
+                        </div>
+                        <div class="metric-pill-card">
+                            <div class="metric-icon-bubble action">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                            </div>
+                            <div class="metric-data-col">
+                                <span class="metric-data-num stat-action" id="stat-action">0</span>
+                                <span class="metric-data-title">业务操作 (Action)</span>
+                            </div>
+                        </div>
+                        <div class="metric-pill-card">
+                            <div class="metric-icon-bubble info">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                            </div>
+                            <div class="metric-data-col">
+                                <span class="metric-data-num stat-info" id="stat-info">0</span>
+                                <span class="metric-data-title">常规信息 (Info)</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Filter Toolbar -->
+                    <div class="pro-toolbar">
+                        <div class="toolbar-filter-group">
+                            <div class="search-input-wrap">
+                                <svg class="search-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="11" cy="11" r="8"></circle>
+                                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                </svg>
+                                <input type="text" id="log-search-filter" placeholder="搜索详情、主题或报错关键字..." oninput="debounceLoadLogs()">
+                            </div>
+
+                            <select id="log-date-filter" class="custom-select" onchange="loadLogs()">
+                                <option value="">近 7 天</option>
+                            </select>
+
+                            <select id="log-level-filter" class="custom-select" onchange="loadLogs()">
+                                <option value="">全部级别</option>
+                                <option value="error">Error (系统错误)</option>
+                                <option value="warn">Warn (操作警告)</option>
+                                <option value="action">Action (业务操作)</option>
+                                <option value="info">Info (常规信息)</option>
+                            </select>
+
+                            <select id="log-module-filter" class="custom-select" onchange="loadLogs()">
+                                <option value="">全部模块</option>
+                            </select>
+
+                            <select id="log-event-filter" class="custom-select" onchange="loadLogs()">
+                                <option value="">全部事件</option>
+                            </select>
+
+                            <input type="text" id="log-ip-filter" class="custom-input" style="width: 130px;" placeholder="筛选 IP..." oninput="debounceLoadLogs()">
+                            <input type="text" id="log-fingerprint-filter" class="custom-input" style="width: 140px;" placeholder="筛选指纹..." oninput="debounceLoadLogs()">
+                        </div>
+
+                        <div class="toolbar-actions-group">
+                            <button class="btn secondary" onclick="exportLogs()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path>
+                                    <polyline points="7 10 12 15 17 10"></polyline>
+                                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                                </svg>
+                                <span>导出 CSV</span>
+                            </button>
+                            <button class="btn secondary" onclick="loadLogs()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M23 4v6h-6"></path>
+                                    <path d="M1 20v-6h6"></path>
+                                    <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"></path>
+                                </svg>
+                                <span>刷新</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Logs Pro Table -->
+                    <div class="table-card">
+                        <div class="table-wrapper">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 15%;">记录时间</th>
+                                        <th style="width: 9%;">事件级别</th>
+                                        <th style="width: 11%;">所属模块</th>
+                                        <th style="width: 16%;">事件类型</th>
+                                        <th>事件详情 / 诊断报文</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="logs-tbody">
+                                    <tr>
+                                        <td colspan="5" class="table-empty">
+                                            <div class="empty-state">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"></path>
+                                                    <polyline points="14 2 14 8 20 8"></polyline>
+                                                </svg>
+                                                <span>正在加载日志...</span>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="table-pagination" id="logs-pagination"></div>
+                    </div>
+                </div>
+
+                <!-- TAB 3: DATABASE MANAGEMENT -->
+                <div id="database-tab" class="tab-content">
+                    <!-- Segmented Table Pills Switcher -->
+                    <div class="db-tabs-bar" id="db-tabs-bar">
+                        <!-- Populated by loadDbTables() -->
+                    </div>
+
+                    <!-- Pro DB Toolbar -->
+                    <div class="pro-toolbar">
+                        <div class="toolbar-filter-group">
+                            <div class="search-input-wrap" style="width: 260px;">
+                                <svg class="search-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="11" cy="11" r="8"></circle>
+                                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                </svg>
+                                <input type="text" id="db-search-input" placeholder="模糊搜索当前表记录..." oninput="debounceLoadDbData()">
+                            </div>
+
+                            <!-- Dynamic Extra Filters (Batch, Week, Err filters) -->
+                            <div id="db-extra-filters" style="display: inline-flex; gap: 8px; align-items: center;"></div>
+
+                            <select id="db-per-page" class="custom-select" onchange="changeDbPerPage(this.value)">
+                                <option value="20">20 条/页</option>
+                                <option value="50">50 条/页</option>
+                                <option value="100">100 条/页</option>
+                            </select>
+                        </div>
+
+                        <div class="toolbar-actions-group">
+                            <!-- 数据库表格缩放控制器 -->
+                            <div class="table-zoom-group" id="db-zoom-group" title="表格缩放：支持按住 Ctrl + 鼠标滚轮 实时缩放">
+                                <button type="button" class="btn-zoom-action" onclick="changeDbTableZoom(-0.1)" title="缩小表格 (Ctrl + 滚轮向下)">
+                                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                </button>
+                                <span class="zoom-value-pill" id="db-zoom-value-pill" onclick="resetDbTableZoom()" title="点击恢复 100% 原始大小">100%</span>
+                                <button type="button" class="btn-zoom-action" onclick="changeDbTableZoom(0.1)" title="放大表格 (Ctrl + 滚轮向上)">
+                                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                </button>
+                            </div>
+                            <button type="button" class="btn secondary" id="db-view-mode-btn" onclick="toggleDbViewMode()" title="切换卡片/表格视图">
+                                <span id="db-view-mode-icon" style="display:inline-flex;align-items:center;">
+                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                                </span>
+                                <span id="db-view-mode-text">卡片视图</span>
+                            </button>
+                            <button class="btn danger-subtle" id="db-batch-delete-btn" style="display: none;" onclick="batchDeleteDbRecords()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="3 6 5 6 21 6"></polyline>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                </svg>
+                                <span>批量删除 (<span id="db-selected-count">0</span>)</span>
+                            </button>
+                            <button class="btn secondary" onclick="loadDbData(dbCurrentPage)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                                </svg>
+                                <span>刷新</span>
+                            </button>
+                            <button class="btn primary" onclick="openDbRecordModal()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                                </svg>
+                                <span>新增数据记录</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- DB Pro Table Card -->
+                    <div class="table-card">
+                        <div class="table-wrapper" id="db-table-wrapper">
+                            <table class="data-table" id="db-data-table">
+                                <thead id="db-thead">
+                                    <!-- Populated dynamically -->
+                                </thead>
+                                <tbody id="db-tbody">
+                                    <tr>
+                                        <td colspan="12" class="table-empty">
+                                            <div class="empty-state">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                    <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                                                    <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+                                                    <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                                                </svg>
+                                                <span>正在载入数据表记录...</span>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="db-cards-wrapper" id="db-cards-wrapper" style="display: none;"></div>
+                        <div class="table-pagination" id="db-pagination"></div>
+                    </div>
+                </div>
+
+                <!-- TAB 4: CHANGELOG -->
+                <div id="changelog-tab" class="tab-content">
+                    <div class="pro-toolbar" style="margin-bottom: 24px;">
+                        <div>
+                            <h2 style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin:0;">版本与更新公告</h2>
+                        </div>
+                        <button class="btn primary" onclick="openChangelogModal()">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                            <span>新增更新日志</span>
+                        </button>
+                    </div>
+
+                    <div class="table-card">
+                        <div class="table-wrapper">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 20%;">版本号 / 发布日期</th>
+                                        <th style="width: 35%;">更新主标题</th>
+                                        <th style="width: 25%;">弹窗推送控制</th>
+                                        <th style="width: 20%; text-align: right;">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="changelog-tbody">
+                                    <!-- Populated dynamically -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- Mobile Drawer Overlay -->
+    <div class="mobile-overlay" id="mobile-overlay" onclick="closeMobileMenu()"></div>
+
+    <!-- Modal: DB Record (Create / Edit) -->
+    <div class="modal-overlay" id="db-record-modal" style="display: none;">
+        <div class="modal-box" style="max-width: 760px;">
+            <div class="modal-header">
+                <h4 id="db-modal-title">新增数据记录</h4>
+                <button class="modal-close" onclick="closeDbRecordModal()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="db-record-form" onsubmit="event.preventDefault(); saveDbRecord();">
+                    <input type="hidden" id="db-record-pk" value="">
+                    <div id="db-form-fields-container">
+                        <!-- Dynamic fields rendered by openDbRecordModal() -->
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn secondary" onclick="closeDbRecordModal()">取消</button>
+                <button type="button" class="btn primary" id="db-modal-save-btn" onclick="saveDbRecord()">保存数据记录</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: DB Record Detail -->
+    <div class="modal-overlay" id="db-detail-modal" style="display: none;">
+        <div class="modal-box" style="max-width: 860px; max-height: 90vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <h4 id="db-detail-title">数据记录详细视图</h4>
+                <button class="modal-close" onclick="closeDbDetailModal()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="modal-body" id="db-detail-body" style="overflow-y: auto; padding: 20px 22px;">
+                <!-- Populated dynamically -->
+            </div>
+            <div class="modal-footer" style="padding: 12px 20px; border-top: 1px solid var(--border-color); display: flex; align-items: center; justify-content: flex-end; gap: 10px;">
+                <button class="btn secondary" onclick="closeDbDetailModal()">关闭详情</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Token Search Student -->
+    <div class="modal-overlay" id="token-search-modal" style="display: none;" onclick="if(event.target===this) closeTokenSearchModal()">
+        <div class="modal-box" style="max-width: 720px; max-height: 90vh; display: flex; flex-direction: column;">
+            <div class="modal-header" style="flex-shrink: 0;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div class="section-icon blue">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                    </div>
+                    <div>
+                        <h4 style="margin: 0; font-size: 1.05rem; font-weight: 700; color: var(--text-primary);">Token 智能反查学生</h4>
+                        <span style="font-size: 0.78rem; color: var(--text-muted); display: block; margin-top: 2px;">输入错题本 Token、家长访问链接或加密串，即刻反查学生与完整学情</span>
+                    </div>
+                </div>
+                <button class="modal-close" onclick="closeTokenSearchModal()" title="关闭 (Esc)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="modal-body" style="padding: 20px 24px; overflow-y: auto; flex: 1;">
+                <!-- Search Input Bar -->
+                <div style="display: flex; gap: 8px; align-items: stretch; margin-bottom: 16px;">
+                    <div style="position: relative; flex: 1;">
+                        <input type="text" id="token-modal-input" placeholder="粘贴 Token 或完整错题本链接 (如 elWy8pZZdB)..."
+                               style="width: 100%; height: 42px; padding: 0 38px 0 14px; font-size: 0.92rem; border-radius: var(--radius-md); border: 1px solid var(--border-color); background: var(--bg-input); color: var(--text-primary); font-family: var(--font-mono); outline: none; box-sizing: border-box;"
+                               oninput="toggleTokenModalClearBtn()"
+                               onkeydown="if(event.key==='Enter') doSearchStudentByToken()">
+                        <button type="button" id="token-modal-clear-btn" onclick="clearTokenModalInput()" title="清空输入"
+                                style="display: none; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px;">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                        </button>
+                    </div>
+                    <button type="button" class="btn secondary" onclick="pasteFromClipboardToTokenSearch()" title="从剪贴板粘贴" style="padding: 0 14px; height: 42px; display: flex; align-items: center; gap: 6px; font-size: 0.86rem; flex-shrink: 0;">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>
+                        <span>粘贴</span>
+                    </button>
+                    <button type="button" class="btn primary" id="token-modal-search-btn" onclick="doSearchStudentByToken()" style="padding: 0 18px; height: 42px; display: flex; align-items: center; gap: 6px; font-size: 0.9rem; flex-shrink: 0;">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        <span>立即反查</span>
+                    </button>
+                </div>
+
+                <!-- Status / Result Container -->
+                <div id="token-search-result-box">
+                    <div style="text-align: center; padding: 36px 16px; border: 1px dashed var(--border-color); border-radius: var(--radius-md); background: var(--bg-subtle);">
+                        <div class="empty-state-icon primary">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="22" y1="12" x2="18" y2="12"></line><line x1="6" y1="12" x2="2" y2="12"></line><line x1="12" y1="6" x2="12" y2="2"></line><line x1="12" y1="22" x2="12" y2="18"></line></svg>
+                        </div>
+                        <div style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">支持多种输入格式精准反查学生</div>
+                        <div style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.7; max-width: 460px; margin: 0 auto;">
+                            • <b>10位短 Token</b>：例如 <code>elWy8pZZdB</code><br>
+                            • <b>完整链接</b>：例如 <code>https://vip.wxjifang.cn/retest.html?token=...</code><br>
+                            • <b>历史加密串</b>：系统将自动在数据库、索引档案库及加密还原库中协同检索
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="flex-shrink: 0; display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 0.76rem; color: var(--text-muted);">提示：可随时按下快捷键 <kbd style="background: var(--bg-surface); padding: 2px 5px; border-radius: 4px; border: 1px solid var(--border-color); font-family: var(--font-mono);">Ctrl + K</kbd> 唤出此窗口</span>
+                <button type="button" class="btn secondary" onclick="closeTokenSearchModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Changelog (Create / Edit) -->
+    <div class="modal-overlay" id="changelog-modal" style="display: none;">
+        <div class="modal-box" style="max-width: 640px;">
+            <div class="modal-header">
+                <h4 id="cl-modal-title">新增更新日志</h4>
+                <button class="modal-close" onclick="closeChangelogModal()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="cl-id">
+                <div style="display:flex; gap: 14px; margin-bottom: 14px;">
+                    <div style="flex:1;">
+                        <label style="display:block; margin-bottom:6px; font-size:0.85rem; font-weight:600; color:var(--text-secondary);">版本号 *</label>
+                        <input type="text" id="cl-version" class="custom-input" style="width:100%; box-sizing:border-box;" placeholder="例如: v2.1.0">
+                    </div>
+                    <div style="flex:1;">
+                        <label style="display:block; margin-bottom:6px; font-size:0.85rem; font-weight:600; color:var(--text-secondary);">发布日期 *</label>
+                        <input type="date" id="cl-date" class="custom-input" style="width:100%; box-sizing:border-box;">
+                    </div>
+                </div>
+                <div style="margin-bottom: 14px;">
+                    <label style="display:block; margin-bottom:6px; font-size:0.85rem; font-weight:600; color:var(--text-secondary);">更新主标题 *</label>
+                    <input type="text" id="cl-title" class="custom-input" style="width:100%; box-sizing:border-box;" placeholder="例如: 教师端作业批改体验升级与数据库可视化">
+                </div>
+                <div style="margin-bottom: 14px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <label style="font-size:0.85rem; font-weight:600; color:var(--text-secondary);">更新明细条目</label>
+                        <button class="btn secondary" style="padding:4px 10px; font-size:0.8rem;" onclick="addChangelogItemRow()">+ 新增条目</button>
+                    </div>
+                    <div id="cl-items-container" style="display:flex; flex-direction:column; gap:8px; max-height:260px; overflow-y:auto; padding-right:4px;"></div>
+                </div>
+                <div style="display:flex; align-items:center; gap: 10px; margin-bottom: 8px; background: var(--bg-subtle); padding: 12px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+                    <input type="checkbox" id="cl-active" style="width: 18px; height: 18px; accent-color: var(--primary); cursor:pointer;">
+                    <label for="cl-active" style="font-size:0.92rem; color: var(--text-primary); cursor: pointer; font-weight:500;">设为当前推送日志 (未读前台访客将自动收到置顶弹窗)</label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn secondary" onclick="closeChangelogModal()">取消</button>
+                <button class="btn primary" onclick="saveChangelog()">保存日志内容</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JAVASCRIPT APPLICATION LOGIC -->
+
+    <!-- Floating Batch Action Dock -->
+    <div class="floating-batch-dock" id="floating-batch-dock">
+        <div class="dock-info">
+            <span class="dock-badge" id="dock-selected-count">0</span>
+            <span>已选记录</span>
+        </div>
+        <div class="dock-actions">
+            <button type="button" class="btn danger-subtle" onclick="triggerDockBatchDelete()" style="padding: 5px 12px; font-size: 0.82rem;">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+                <span>批量删除</span>
+            </button>
+            <button type="button" class="btn secondary" onclick="clearAllSelections()" style="padding: 5px 12px; font-size: 0.82rem;">
+                <span>取消选择</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- JAVASCRIPT APPLICATION LOGIC -->
+    <script>
+        (function () {
+            // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
+            const v = '20260927';
+            document.write(`<script src="js/admin.js?v=${v}"><\/script>`);
+        })();
+    </script>
+</body>
+
+</html>

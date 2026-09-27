@@ -1,0 +1,1055 @@
+/* ==========================================================================
+   Front-End User Authentication Modal & Navigation Status Styles
+   ========================================================================== */
+
+/* 全screen overlay 与卡片已收归 common.css dialog-overlay / dialog-box，
+   表单内控件样式保留在本文件。 */
+
+/* Card Header */
+.front-auth-header {
+    text-align: center;
+    margin-bottom: 22px;
+}
+
+.front-auth-icon-bubble {
+    width: 54px;
+    height: 54px;
+    margin: 0 auto 14px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, rgba(10, 132, 255, 0.2) 0%, rgba(191, 90, 242, 0.2) 100%);
+    border: 1px solid rgba(10, 132, 255, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent, #0a84ff);
+    box-shadow: 0 8px 20px -4px rgba(10, 132, 255, 0.3);
+}
+
+.front-auth-icon-bubble svg {
+    width: 28px;
+    height: 28px;
+}
+
+.front-auth-title {
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: var(--text-primary, #fff);
+    margin: 0 0 6px;
+    letter-spacing: -0.02em;
+}
+
+.front-auth-subtitle {
+    font-size: 0.88rem;
+    color: var(--text-secondary, #ababae);
+    margin: 0;
+}
+
+/* Card Header Tip */
+.front-auth-tip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 18px;
+    background: rgba(10, 132, 255, 0.08);
+    border: 1px solid rgba(10, 132, 255, 0.22);
+    border-radius: 12px;
+    font-size: 0.92rem;
+    font-weight: 500;
+    color: var(--accent, #0a84ff);
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    user-select: none;
+}
+
+.front-auth-tip:hover {
+    background: rgba(10, 132, 255, 0.16);
+    border-color: rgba(10, 132, 255, 0.4);
+    transform: translateY(-1px);
+}
+
+.front-auth-tip:active {
+    transform: translateY(0) scale(0.98);
+}
+
+/* Transition Notice Banner */
+.front-auth-notice {
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 22px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+}
+
+.front-auth-notice-icon {
+    color: #f59e0b;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+.front-auth-notice-icon svg {
+    width: 18px;
+    height: 18px;
+}
+
+.front-auth-notice-content {
+    font-size: 0.84rem;
+    line-height: 1.5;
+    color: var(--text-primary, #f0f0f2);
+}
+
+.front-auth-notice-title {
+    font-weight: 700;
+    color: #f59e0b;
+    margin-bottom: 2px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.front-auth-notice-badge {
+    font-size: 0.72rem;
+    background: rgba(245, 158, 11, 0.2);
+    color: #f59e0b;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+.front-auth-code {
+    display: inline-block;
+    background: rgba(245, 158, 11, 0.22);
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    color: #f59e0b;
+    font-family: var(--font-mono, monospace);
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 5px;
+    margin: 0 2px;
+}
+
+/* Form Styles */
+.front-auth-form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.front-auth-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.front-auth-label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-secondary, #ababae);
+}
+
+.front-auth-input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.front-auth-input-icon {
+    position: absolute;
+    left: 12px;
+    width: 16px;
+    height: 16px;
+    color: var(--text-muted, #6d6d72);
+    pointer-events: none;
+    transition: color 0.2s;
+}
+
+.front-auth-input {
+    width: 100%;
+    padding: 11px 14px 11px 38px;
+    font-size: 0.92rem;
+    background: var(--bg-tertiary, #28282c);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.13));
+    border-radius: 10px;
+    color: var(--text-primary, #f0f0f2);
+    transition: all 0.2s;
+    outline: none;
+    font-family: inherit;
+    box-sizing: border-box;
+}
+
+.front-auth-input:focus {
+    border-color: var(--accent, #0a84ff);
+    box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.2);
+    background: var(--bg-elevated, #1e1e22);
+}
+
+.front-auth-input:focus + .front-auth-input-icon,
+.front-auth-input-wrapper:focus-within .front-auth-input-icon {
+    color: var(--accent, #0a84ff);
+}
+
+/* Error Message */
+.front-auth-error {
+    background: rgba(255, 69, 58, 0.12);
+    border: 1px solid rgba(255, 69, 58, 0.3);
+    color: #ff453a;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 0.84rem;
+    display: none;
+    align-items: center;
+    gap: 8px;
+    animation: shake 0.3s ease;
+}
+
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20%, 60% { transform: translateX(-5px); }
+    40%, 80% { transform: translateX(5px); }
+}
+
+/* Submit Button */
+.front-auth-submit {
+    margin-top: 6px;
+    padding: 12px 18px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #fff;
+    background: var(--accent-gradient, linear-gradient(135deg, #0a84ff 0%, #3a9cff 100%));
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    box-shadow: 0 4px 14px rgba(10, 132, 255, 0.35);
+    transition: all 0.2s;
+}
+
+.front-auth-submit:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(10, 132, 255, 0.45);
+}
+
+.front-auth-submit:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+.front-auth-submit:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+/* Navigation User Status Pill */
+.nav-user-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.13));
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-primary, #f0f0f2);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.nav-user-badge .user-avatar-icon {
+    width: 14px;
+    height: 14px;
+    color: var(--accent, #0a84ff);
+}
+
+.nav-user-badge .btn-nav-logout {
+    background: none;
+    border: none;
+    padding: 2px 6px;
+    margin-left: 2px;
+    color: var(--text-muted, #6d6d72);
+    font-size: 0.78rem;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.nav-user-badge .btn-nav-logout:hover {
+    color: #ff453a;
+    background: rgba(255, 69, 58, 0.1);
+}
+
+.nav-user-badge .btn-nav-reset-pwd {
+    background: none;
+    border: none;
+    padding: 2px 6px;
+    margin-left: 4px;
+    color: var(--text-muted, #6d6d72);
+    font-size: 0.78rem;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.nav-user-badge .btn-nav-reset-pwd:hover {
+    color: var(--accent, #0a84ff);
+    background: rgba(10, 132, 255, 0.12);
+}
+
+.front-auth-close-btn {
+    position: absolute;
+    top: 14px;
+    right: 16px;
+    background: none;
+    border: none;
+    font-size: 1.1rem;
+    color: var(--text-secondary, #ababae);
+    cursor: pointer;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.front-auth-close-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary, #fff);
+}
+
+.front-auth-footer-links {
+    margin-top: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.front-auth-link {
+    background: none;
+    border: none;
+    color: var(--accent, #0a84ff);
+    font-size: 0.82rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.front-auth-link:hover {
+    text-decoration: underline;
+    background: rgba(10, 132, 255, 0.08);
+}
+
+.front-auth-reset-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-primary, #fff);
+    margin-bottom: 4px;
+}
+
+.front-auth-reset-desc {
+    font-size: 0.8rem;
+    color: var(--text-secondary, #ababae);
+    line-height: 1.4;
+}
+
+.front-auth-warn-tip {
+    font-size: 0.78rem;
+    color: #f59e0b;
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    border-radius: 6px;
+    padding: 6px 10px;
+    margin-top: 6px;
+    line-height: 1.4;
+    display: none;
+}
+
+/* Light Theme Overrides（overlay 与卡片已收归 dialog 体系，此处仅保留表单控件） */
+
+[data-theme="light"] .front-auth-input {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+    color: #0f172a;
+}
+
+[data-theme="light"] .front-auth-input:focus {
+    background: #ffffff;
+    border-color: #007aff;
+}
+
+[data-theme="light"] .front-auth-notice {
+    background: #fffbeb;
+    border-color: #fde68a;
+    color: #92400e;
+}
+
+[data-theme="light"] .front-auth-notice-title {
+    color: #b45309;
+}
+
+[data-theme="light"] .front-auth-code {
+    background: #fef3c7;
+    border-color: #fcd34d;
+    color: #b45309;
+}
+
+[data-theme="light"] .nav-user-badge {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #1e293b;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .front-auth-tip {
+    background: rgba(0, 122, 255, 0.08);
+    border-color: rgba(0, 122, 255, 0.22);
+    color: #007aff;
+}
+
+[data-theme="light"] .front-auth-tip:hover {
+    background: rgba(0, 122, 255, 0.15);
+    border-color: rgba(0, 122, 255, 0.4);
+}
+
+/* ==========================================================================
+   Assistant (助教) Management & Status Styles
+   ========================================================================== */
+
+/* Role Badges in Nav */
+.badge-role-teacher {
+    font-size: 0.72rem;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(10, 132, 255, 0.14);
+    color: #0a84ff;
+    border: 1px solid rgba(10, 132, 255, 0.28);
+    font-weight: 600;
+}
+
+.badge-role-assistant {
+    font-size: 0.72rem;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(168, 85, 247, 0.15);
+    color: #c084fc;
+    border: 1px solid rgba(168, 85, 247, 0.3);
+    font-weight: 600;
+}
+
+.nav-user-badge .btn-nav-assistant-mgr {
+    background: none;
+    border: none;
+    padding: 2px 8px;
+    margin-left: 4px;
+    color: var(--text-secondary, #ababae);
+    font-size: 0.78rem;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.nav-user-badge .btn-nav-assistant-mgr:hover {
+    color: var(--accent, #0a84ff);
+    background: rgba(10, 132, 255, 0.12);
+}
+
+/* Assistant Modal：外壳已收归 dialog-box wide，内容区样式保留在本文件 */
+
+.front-assistant-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 18px;
+}
+
+.front-assistant-title-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.front-assistant-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-primary, #fff);
+    margin: 0;
+}
+
+/* Toolbar */
+.front-assistant-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.front-assistant-count {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text-primary, #f0f0f2);
+}
+
+.front-assistant-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-assistant-refresh,
+.btn-assistant-add {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 1px solid transparent;
+}
+
+.btn-assistant-refresh {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-secondary, #ababae);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+.btn-assistant-refresh:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--text-primary, #fff);
+}
+
+.btn-assistant-add {
+    background: var(--accent, #0a84ff);
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(10, 132, 255, 0.35);
+}
+
+.btn-assistant-add:hover {
+    background: var(--accent-hover, #0070e0);
+    box-shadow: 0 4px 12px rgba(10, 132, 255, 0.45);
+    transform: translateY(-1px);
+}
+
+/* Sub Form Box (Add / Edit Form) */
+.assistant-sub-form-box {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(10, 132, 255, 0.28);
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin: 14px 0 6px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    animation: fadeInSlide 0.2s ease-out;
+}
+
+@keyframes fadeInSlide {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.assistant-sub-title {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--text-primary, #fff);
+    margin-bottom: 12px;
+}
+
+.assistant-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+}
+
+.assistant-form-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.assistant-form-field label {
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--text-secondary, #ababae);
+}
+
+.assistant-form-field label .req {
+    color: #ff453a;
+}
+
+.assistant-form-field input {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    padding: 7px 10px;
+    color: var(--text-primary, #fff);
+    font-size: 0.84rem;
+    outline: none;
+    transition: all 0.2s;
+}
+
+.assistant-form-field select,
+.assistant-select {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-color: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    padding: 7px 32px 7px 10px;
+    color: var(--text-primary, #fff);
+    font-size: 0.84rem;
+    outline: none;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 14px 14px;
+    transition: all 0.2s;
+}
+
+.assistant-form-field select option,
+.assistant-select option {
+    background-color: #1e1e24;
+    color: #fff;
+    padding: 8px 12px;
+}
+
+.assistant-form-field input:focus,
+.assistant-form-field select:focus,
+.assistant-select:focus {
+    border-color: var(--accent, #0a84ff);
+    background-color: rgba(10, 132, 255, 0.06);
+    box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.2);
+}
+
+/* Fixed Teacher Prefix Input Group */
+.assistant-input-prefix-group {
+    display: flex;
+    align-items: stretch;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    overflow: hidden;
+    transition: all 0.2s;
+}
+
+.assistant-input-prefix-group:focus-within {
+    border-color: var(--accent, #0a84ff);
+    background: rgba(10, 132, 255, 0.06);
+    box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.2);
+}
+
+.assistant-input-prefix {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 10px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--accent, #0a84ff);
+    font-family: var(--font-mono, monospace);
+    font-weight: 700;
+    font-size: 0.84rem;
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+    user-select: none;
+    white-space: nowrap;
+}
+
+.assistant-input-prefix-group input {
+    flex: 1;
+    min-width: 0;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 7px 10px;
+    color: var(--text-primary, #fff);
+    font-size: 0.84rem;
+    outline: none;
+}
+
+.assistant-form-field select option {
+    background: #1e1e28;
+    color: #fff;
+}
+
+.assistant-sub-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.btn-sub-cancel,
+.btn-sub-confirm {
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 1px solid transparent;
+}
+
+.btn-sub-cancel {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-secondary, #ababae);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+.btn-sub-cancel:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--text-primary, #fff);
+}
+
+.btn-sub-confirm {
+    background: var(--accent, #0a84ff);
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(10, 132, 255, 0.3);
+}
+
+.btn-sub-confirm:hover {
+    background: var(--accent-hover, #0070e0);
+    box-shadow: 0 4px 12px rgba(10, 132, 255, 0.4);
+}
+
+/* Assistant Cards List */
+.assistant-list-wrapper {
+    overflow-y: auto;
+    max-height: 420px;
+    margin-top: 14px;
+    padding-right: 2px;
+}
+
+.assistant-cards-grid {
+    display: grid;
+    gap: 10px;
+}
+
+.assistant-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    transition: all 0.2s;
+}
+
+.assistant-card:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(10, 132, 255, 0.25);
+    transform: translateY(-1px);
+}
+
+.assistant-card.disabled {
+    opacity: 0.6;
+    background: rgba(255, 255, 255, 0.015);
+}
+
+.assistant-card-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.assistant-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 5px;
+}
+
+.assistant-name {
+    font-weight: 700;
+    font-size: 0.94rem;
+    color: var(--text-primary, #fff);
+}
+
+.assistant-uname {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.8rem;
+    color: var(--accent, #0a84ff);
+}
+
+.assistant-status-pill {
+    font-size: 0.72rem;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+.assistant-status-pill.status-active {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.assistant-status-pill.status-disabled {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.assistant-card-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-size: 0.76rem;
+    color: var(--text-secondary, #ababae);
+}
+
+.assistant-meta-item code {
+    background: rgba(255, 255, 255, 0.08);
+    padding: 1px 4px;
+    border-radius: 4px;
+    font-family: var(--font-mono, monospace);
+    color: #f59e0b;
+}
+
+.assistant-card-ops {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.assistant-btn-copy,
+.assistant-btn-edit,
+.assistant-btn-del {
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.2s;
+}
+
+.assistant-btn-copy {
+    background: rgba(var(--success-rgb), 0.12);
+    color: var(--success-light, #34d399);
+    border-color: rgba(var(--success-rgb), 0.25);
+}
+
+.assistant-btn-copy:hover {
+    background: rgba(var(--success-rgb), 0.22);
+    color: var(--success);
+}
+
+.assistant-btn-edit {
+    background: rgba(var(--accent-rgb), 0.12);
+    color: var(--accent-secondary);
+    border-color: rgba(var(--accent-rgb), 0.25);
+}
+
+.assistant-btn-edit:hover {
+    background: rgba(var(--accent-rgb), 0.22);
+    color: var(--accent-tertiary);
+}
+
+.assistant-btn-del {
+    background: rgba(var(--error-rgb), 0.1);
+    color: var(--error-light, #f87171);
+    border-color: rgba(var(--error-rgb), 0.2);
+}
+
+.assistant-btn-del:hover {
+    background: rgba(var(--error-rgb), 0.2);
+    color: var(--error);
+}
+
+/* Upload Page Notice for Assistant */
+.assistant-upload-notice {
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    border-radius: 14px;
+    padding: 16px 20px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    animation: fadeInSlide 0.3s ease-out;
+}
+
+.assistant-notice-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: rgba(245, 158, 11, 0.2);
+    color: #f59e0b;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.assistant-notice-icon svg {
+    width: 20px;
+    height: 20px;
+}
+
+.assistant-notice-body {
+    flex: 1;
+}
+
+.assistant-notice-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #f59e0b;
+    margin-bottom: 3px;
+}
+
+.assistant-notice-desc {
+    font-size: 0.84rem;
+    color: var(--text-primary, #f0f0f2);
+    line-height: 1.45;
+}
+
+.assistant-notice-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    background: #f59e0b;
+    color: #000;
+    font-weight: 600;
+    font-size: 0.84rem;
+    border-radius: 8px;
+    text-decoration: none;
+    flex-shrink: 0;
+    transition: all 0.2s;
+}
+
+.assistant-notice-btn:hover {
+    background: #d97706;
+    color: #fff;
+    transform: translateY(-1px);
+}
+
+/* Question Bank Readonly Banner & Badges */
+.qb-assistant-readonly-banner {
+    background: linear-gradient(90deg, rgba(10, 132, 255, 0.12), rgba(56, 189, 248, 0.12));
+    border: 1px solid rgba(10, 132, 255, 0.3);
+    border-radius: 12px;
+    padding: 12px 18px;
+    margin-bottom: 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.88rem;
+    color: var(--text-primary, #f0f0f2);
+    line-height: 1.5;
+}
+
+.badge-assistant-readonly {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background: rgba(10, 132, 255, 0.12);
+    border: 1px solid rgba(10, 132, 255, 0.3);
+    border-radius: 8px;
+    font-size: 0.85rem;
+    color: var(--accent, #0a84ff);
+    font-weight: 600;
+}
+
+/* Light Mode Overrides for Assistant UI（卡片外壳已收归 dialog 体系） */
+
+[data-theme="light"] .front-assistant-toolbar {
+    border-color: #f1f5f9;
+}
+
+[data-theme="light"] .assistant-sub-form-box {
+    background: #f0f7ff;
+    border-color: #bae6fd;
+}
+
+[data-theme="light"] .assistant-input-prefix-group {
+    background: #ffffff;
+    border-color: #cbd5e1;
+}
+
+[data-theme="light"] .assistant-input-prefix {
+    background: #f1f5f9;
+    border-right-color: #e2e8f0;
+    color: #0284c7;
+}
+
+[data-theme="light"] .assistant-input-prefix-group input {
+    color: #0f172a;
+}
+
+[data-theme="light"] .assistant-form-field input {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #0f172a;
+}
+
+[data-theme="light"] .assistant-form-field select,
+[data-theme="light"] .assistant-select {
+    background-color: #ffffff;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 14px 14px;
+    border-color: #cbd5e1;
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .assistant-form-field select option,
+[data-theme="light"] .assistant-select option {
+    background-color: #ffffff;
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .assistant-card {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+}
+
+[data-theme="light"] .assistant-card:hover {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+}
+
+[data-theme="light"] .btn-assistant-refresh,
+[data-theme="light"] .btn-sub-cancel {
+    background: #f1f5f9;
+    color: #475569;
+    border-color: #e2e8f0;
+}
+
+[data-theme="light"] .assistant-upload-notice {
+    background: #fffbeb;
+    border-color: #fde68a;
+}
+
+[data-theme="light"] .assistant-notice-desc {
+    color: #92400e;
+}
+
+/* 助教行内按钮浅色：已走主题变量，此处删除旧硬编码覆盖 */
+
+[data-theme="light"] #assistant-created-box {
+    background: #f0fdf4;
+    border-color: #bbf7d0;
+}
+
+[data-theme="light"] .assistant-credentials-panel {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+}
+

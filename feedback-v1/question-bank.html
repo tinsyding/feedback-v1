@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>题库管理</title>
+    <meta name="description" content="管理每次作业中每道题的知识点描述，用于生成针对性巩固建议">
+    <script>
+        (function () {
+            // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
+            const v = '20260927';
+            document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
+            document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
+            document.write(`<link rel="stylesheet" href="css/question-bank.css?v=${v}">`);
+            document.write(`<link rel="stylesheet" href="css/auth.css?v=${v}">`);
+            document.write(`<link rel="stylesheet" href="css/tokens.css?v=${v}">`);
+        })();
+    </script>
+    <!-- PDF 核心库：PDF-Lib (切片合并) + PDF.js (页面缩略图高清晰渲染) -->
+    <script src="js/libs/pdf-lib.min.js"></script>
+    <script src="js/libs/pdfjs/pdf.min.js"></script>
+    <script>
+        if (window.pdfjsLib) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'js/libs/pdfjs/pdf.worker.min.js';
+        }
+    </script>
+</head>
+
+<body class="upload-page">
+
+    <!-- Animated background orbs -->
+    <div class="bg-orbs" aria-hidden="true">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+
+    <div class="upload-shell">
+        <!-- Top navigation bar -->
+        <nav class="upload-nav">
+            <div class="nav-brand">
+                <a class="brand-back-btn" href="upload.html" onclick="if(history.length>1){history.back();return false;}" title="返回上一页">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </a>
+            </div>
+            <div class="nav-actions">
+                <label class="theme-slider-switch" title="切换主题">
+                    <input type="checkbox" id="theme-toggle-input" onchange="toggleTheme(this)">
+                    <span class="theme-slider-track">
+                        <span class="theme-slider-thumb">
+                            <svg class="thumb-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <circle cx="12" cy="12" r="5"></circle>
+                                <line x1="12" y1="1" x2="12" y2="3"></line>
+                                <line x1="12" y1="21" x2="12" y2="23"></line>
+                                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                                <line x1="1" y1="12" x2="3" y2="12"></line>
+                                <line x1="21" y1="12" x2="23" y2="12"></line>
+                                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                            </svg>
+                            <svg class="thumb-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                            </svg>
+                        </span>
+                    </span>
+                </label>
+            </div>
+        </nav>
+
+        <!-- Main content -->
+        <main class="upload-main">
+            <!-- Step indicators -->
+            <div class="step-indicators">
+                <div class="step-item active" data-step="1" onclick="handleStepIndicatorClick(1)">
+                    <div class="step-dot"><span>1</span></div>
+                    <span class="step-label">选择学科</span>
+                </div>
+                <div class="step-line"></div>
+                <div class="step-item" data-step="2" onclick="handleStepIndicatorClick(2)">
+                    <div class="step-dot"><span>2</span></div>
+                    <span class="step-label">上传PDF</span>
+                </div>
+                <div class="step-line"></div>
+                <div class="step-item" data-step="3" onclick="handleStepIndicatorClick(3)">
+                    <div class="step-dot"><span>3</span></div>
+                    <span class="step-label">标注题号</span>
+                </div>
+                <div class="step-line"></div>
+                <div class="step-item" data-step="4" onclick="handleStepIndicatorClick(4)">
+                    <div class="step-dot"><span>4</span></div>
+                    <span class="step-label">编辑题目</span>
+                </div>
+            </div>
+
+            <!-- Step 1: 选择学科 -->
+            <section class="step-panel active" id="step-1">
+                <div class="config-grid">
+                    <div class="config-card glass-card" style="grid-column: 1 / -1;">
+                        <div class="config-card-header">
+                            <div class="config-card-icon"
+                                style="background: linear-gradient(135deg, #f59e0b22, #d9770622); color: #f59e0b;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+                                    <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+                                </svg>
+                            </div>
+                            <h3 style="flex:1; margin:0;">错题本</h3>
+                        </div>
+                        <div class="config-card-body">
+                            <div class="qb-selectors">
+                                <div class="qb-select-group" style="display: none;">
+                                    <label>年份</label>
+                                    <select class="qb-select" id="qb-year" onchange="onSelectorChange()">
+                                        <option value="2026">2026 年</option>
+                                        <option value="2025">2025 年</option>
+                                        <option value="2027">2027 年</option>
+                                        <option value="2024">2024 年</option>
+                                    </select>
+                                </div>
+                                <div class="qb-select-group" style="display: none;">
+                                    <label>学期</label>
+                                    <select class="qb-select" id="qb-season" onchange="onSelectorChange()">
+                                        <option value="春">🌸 春季</option>
+                                        <option value="暑">☀️ 暑假</option>
+                                        <option value="秋">🍁 秋季</option>
+                                        <option value="寒">❄️ 寒假</option>
+                                    </select>
+                                </div>
+                                <div class="qb-select-group">
+                                    <label>学科</label>
+                                    <select class="qb-select" id="qb-subject" onchange="onSelectorChange()">
+                                        <option value="" selected>请选择学科</option>
+                                        <option value="数学">数学</option>
+                                        <option value="英语">英语</option>
+                                        <option value="物理">物理</option>
+                                        <option value="化学">化学</option>
+                                        <option value="语文">语文</option>
+                                    </select>
+                                </div>
+                                <div class="qb-select-group">
+                                    <label>年级</label>
+                                    <select class="qb-select" id="qb-grade" onchange="onSelectorChange()">
+                                        <option value="" selected>请选择年级</option>
+                                        <option value="七年级先学">七年级先学</option>
+                                        <option value="七年级">七年级</option>
+                                        <option value="八年级">八年级</option>
+                                        <option value="九年级">九年级</option>
+                                        <option value="高一先学">高一先学</option>
+                                        <option value="高一">高一</option>
+                                        <option value="高二">高二</option>
+                                    </select>
+                                </div>
+                                <div class="qb-select-group">
+                                    <label>班层</label>
+                                    <select class="qb-select" id="qb-tier" onchange="onSelectorChange()">
+                                        <option value="" selected>请选择班层</option>
+                                        <option value="U">U</option>
+                                        <option value="S+">S+</option>
+                                        <option value="S">S</option>
+                                        <option value="A+">A+</option>
+                                        <option value="A">A</option>
+                                    </select>
+                                </div>
+                                <div class="qb-select-group">
+                                    <label>课后巩固专题</label>
+                                    <select class="qb-select" id="qb-week" onchange="onSelectorChange()">
+                                        <option value="" selected>请选择专题</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="qb-step-nav" style="grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                        <span style="font-size: 0.85rem; color: var(--text-secondary);">若需上传新错题本，选好上方分类后点击下一步：</span>
+                        <button class="btn primary" onclick="goNextFromStep1()">录入新错题本 / 下一步</button>
+                    </div>
+
+                    <!-- Saved data overview directly in Step 1 -->
+                    <div class="config-card glass-card saved-data-section" style="grid-column: 1 / -1;">
+                        <div class="config-card-header">
+                            <div class="config-card-icon"
+                                style="background: linear-gradient(135deg, #22c55e22, #16a34a22); color: #22c55e;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path
+                                        d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z">
+                                    </path>
+                                    <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                                    <polyline points="7 3 7 8 15 8"></polyline>
+                                </svg>
+                            </div>
+                            <div style="flex:1; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                                <h3 style="margin:0;">已保存的题库数据</h3>
+                                <span class="qb-section-badge" id="saved-total-count">0 个专题</span>
+                            </div>
+                            <span class="section-hint">点击卡片「去更改」即可直接修改对应题库，无需重新上传</span>
+                        </div>
+                        <div class="config-card-body">
+                            <!-- 筛选/选择 UI -->
+                            <div class="saved-filter-bar">
+                                <!-- 分类选项框 (Category Option Box) -->
+                                <div class="saved-category-box">
+                                    <div class="saved-category-row saved-category-top-row">
+                                        <div class="saved-category-left">
+                                            <span class="saved-filter-title">
+                                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <path d="M4 6h16M4 12h16M4 18h7"></path>
+                                                </svg>
+                                                学科分类：
+                                            </span>
+                                            <div class="saved-subject-tabs" id="saved-subject-tabs">
+                                                <!-- 动态渲染各学科标签 -->
+                                            </div>
+                                        </div>
+                                        <div class="saved-search-actions">
+                                            <div class="ui-search" style="height: 34px;">
+                                                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <circle cx="11" cy="11" r="8"></circle>
+                                                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                                </svg>
+                                                <input type="text" id="saved-search-input" placeholder="搜索专题/关键词..." oninput="onSavedFilterChange()">
+                                            </div>
+                                            <button type="button" class="saved-reset-btn" onclick="resetSavedFilters()" title="重置所有筛选条件">
+                                                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                                                    <path d="M3 3v5h5"></path>
+                                                </svg>
+                                                重置
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="saved-category-row">
+                                        <span class="saved-filter-title">
+                                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                                                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                                            </svg>
+                                            班层分类：
+                                        </span>
+                                        <div class="saved-tier-tabs" id="saved-tier-tabs">
+                                            <!-- 动态渲染班层标签 -->
+                                        </div>
+                                    </div>
+                                    <div class="saved-category-row">
+                                        <span class="saved-filter-title">
+                                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                                                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
+                                            </svg>
+                                            年级分类：
+                                        </span>
+                                        <div class="saved-grade-tabs" id="saved-grade-tabs">
+                                            <!-- 动态渲染年级标签 -->
+                                        </div>
+                                    </div>
+                                    <div class="saved-category-row">
+                                        <span class="saved-filter-title">
+                                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                                                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                                                <line x1="16" y1="2" x2="16" y2="6"></line>
+                                                <line x1="8" y1="2" x2="8" y2="6"></line>
+                                                <line x1="3" y1="10" x2="21" y2="10"></line>
+                                            </svg>
+                                            专题分类：
+                                        </span>
+                                        <div class="saved-week-tabs" id="saved-week-tabs">
+                                            <!-- 动态渲染专题标签 -->
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="saved-data-grid" id="saved-data-grid">
+                                <!-- 动态渲染题库卡片 -->
+                            </div>
+                            <div class="empty-state" id="saved-empty" style="display:none;">
+                                <div class="empty-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                                        <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                                        <polyline points="7 3 7 8 15 8"></polyline>
+                                    </svg>
+                                </div>
+                                <p class="empty-text" id="saved-empty-text">暂无保存的题目数据</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Step 2: 上传 PDF -->
+            <section class="step-panel" id="step-2">
+                <div class="config-grid">
+                    <div class="config-card glass-card" style="grid-column: 1 / -1;">
+                        <div class="config-card-header">
+                            <div class="config-card-icon"
+                                style="background: linear-gradient(135deg, #3b82f622, #2563eb22); color: #3b82f6;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                    <polyline points="14 2 14 8 20 8"></polyline>
+                                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                                </svg>
+                            </div>
+                            <h3 style="flex:1; margin:0;">上传 PDF</h3>
+                        </div>
+                        <div class="config-card-body">
+                            <p class="qb-step-hint">
+                                请分别上传整本「题目 PDF」和「答案 PDF」，每页一道题、两文件页数需一致。
+                                <br>系统将按页分割并自动生成题目（第 1 页 = 第 1 题）。
+                            </p>
+                            <div class="qb-upload-list">
+                                <div class="qb-upload-item">
+                                    <button class="btn" onclick="selectBatchPdf('exercise')">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                            <polyline points="7 10 12 15 17 10"></polyline>
+                                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                                        </svg>
+                                        上传题目 PDF
+                                    </button>
+                                    <span class="qb-upload-status" id="batch-exercise-status">未上传</span>
+                                </div>
+                                <div class="qb-upload-item">
+                                    <button class="btn" onclick="selectBatchPdf('answer')">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                                        </svg>
+                                        上传答案 PDF
+                                    </button>
+                                    <span class="qb-upload-status" id="batch-answer-status">未上传</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="qb-step-nav between" style="grid-column: 1 / -1;">
+                        <button class="btn sm" onclick="goBack()">上一步</button>
+                        <button class="btn primary" id="step2-next-btn" onclick="goNextFromStep2()" disabled>下一步</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Step 3: 页面预览标注 -->
+            <section class="step-panel" id="step-3">
+                <div class="config-grid">
+                    <div class="config-card glass-card" style="grid-column: 1 / -1;">
+                        <div class="config-card-header">
+                            <div class="config-card-icon"
+                                style="background: linear-gradient(135deg, #8b5cf622, #7c3aed22); color: #8b5cf6;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                                    <line x1="3" y1="9" x2="21" y2="9"></line>
+                                    <line x1="9" y1="21" x2="9" y2="9"></line>
+                                </svg>
+                            </div>
+                            <h3 style="flex:1; margin:0;">页面标注</h3>
+                            <div class="mapping-toolbar-actions">
+                                <label class="cascade-toggle-label" title="开启后，修改多页题目的题号时，会自动顺延调整后续页面的题号，无需逐页手动修改">
+                                    <input type="checkbox" id="auto-cascade-numbers" checked onchange="toggleAutoCascade(this.checked)">
+                                    <span>题号智能顺延</span>
+                                </label>
+                                <button type="button" class="btn sm" id="undo-cascade-btn" style="display:none;" onclick="undoLastLabelChange()" title="撤销上次题号顺延调整">
+                                    ↩ 撤销顺延
+                                </button>
+                                <span class="qb-status unsaved" id="mapping-status">
+                                    <span class="qb-status-dot"></span>
+                                    <span id="mapping-status-text">待标注</span>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="config-card-body">
+                            <p class="qb-step-hint">请为每一页输入它对应的作业题号。跨多页的题目/答案，填成同一个题号即可（已开启 <b>题号智能顺延</b>：当把多页题目的第 2 页改成 5 时，后续原本的 7 会自动换回 6 并整体顺延）。点击任意缩略图可全屏放大查阅。</p>
+
+                            <div class="mapping-sections-container view-split" id="mapping-sections-container">
+                                <div class="mapping-section" id="section-exercise">
+                                    <h4 class="mapping-section-title">
+                                        <span class="title-badge exercise">题目 PDF</span>
+                                        共 <span id="qpdf-page-count">0</span> 页
+                                        <span class="section-hint">点击卡片放大查看原题</span>
+                                    </h4>
+                                    <div class="page-grid size-large" id="qpdf-page-grid"></div>
+                                </div>
+
+                                <div class="mapping-section" id="section-answer">
+                                    <h4 class="mapping-section-title">
+                                        <span class="title-badge answer">答案 PDF</span>
+                                        共 <span id="apdf-page-count">0</span> 页
+                                        <span class="section-hint">点击卡片放大查看解析</span>
+                                    </h4>
+                                    <div class="page-grid size-large" id="apdf-page-grid"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="qb-step-nav between" style="grid-column: 1 / -1;">
+                        <button class="btn sm" onclick="goBack()">上一步</button>
+                        <button class="btn primary" id="mapping-next-btn" onclick="goNextFromMapping()">完成标注并导入</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Step 4: 编辑题目 -->
+            <section class="step-panel" id="step-4">
+                <div class="config-grid">
+                    <div class="config-card glass-card" style="grid-column: 1 / -1;">
+                        <div class="config-card-header">
+                            <div class="config-card-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <line x1="8" y1="6" x2="21" y2="6"></line>
+                                    <line x1="8" y1="12" x2="21" y2="12"></line>
+                                    <line x1="8" y1="18" x2="21" y2="18"></line>
+                                    <circle cx="4" cy="6" r="1"></circle>
+                                    <circle cx="4" cy="12" r="1"></circle>
+                                    <circle cx="4" cy="18" r="1"></circle>
+                                </svg>
+                            </div>
+                            <h3 style="flex:1; margin:0;">题目列表</h3>
+                            <span class="qb-status unsaved" id="qb-status">
+                                <span class="qb-status-dot"></span>
+                                <span id="qb-status-text">未保存</span>
+                            </span>
+                        </div>
+                        <div class="config-card-body">
+                            <div class="question-list-header">
+                                <div class="question-list-actions">
+                                    <button class="btn sm" onclick="addQuestion()">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                                        </svg>
+                                        添加题目
+                                    </button>
+                                    <button class="btn danger sm" onclick="clearAllQuestions()">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <polyline points="3 6 5 6 21 6"></polyline>
+                                            <path
+                                                d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2">
+                                            </path>
+                                        </svg>
+                                        清空
+                                    </button>
+                                </div>
+                                <div class="question-filter-wrapper">
+                                    <div class="ui-search">
+                                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                                            <circle cx="11" cy="11" r="8"></circle>
+                                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                        </svg>
+                                        <input type="text" id="qb-search-input" placeholder="按题号、知识点或微课链接过滤..." oninput="onQuestionSearch(this.value)">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="question-items" id="question-items">
+                                <!-- Dynamically rendered -->
+                            </div>
+
+                            <div class="qb-save-bar">
+                                <span class="save-info" id="save-info"></span>
+                                <button class="btn primary" onclick="saveQuestions()" id="save-btn">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path
+                                            d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z">
+                                        </path>
+                                        <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                                        <polyline points="7 3 7 8 15 8"></polyline>
+                                    </svg>
+                                    保存
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="qb-step-nav between" style="grid-column: 1 / -1;">
+                        <button class="btn sm" onclick="goBack()">返回学科选择</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Generic dialog -->
+    <div class="dialog-overlay" id="custom-dialog">
+        <div class="dialog-box">
+            <div class="dialog-header">
+                <h3 class="dialog-title" id="dialog-title">提示</h3>
+            </div>
+            <div class="dialog-body">
+                <div id="dialog-body"></div>
+                <div class="dialog-input-wrap" id="dialog-input-wrap">
+                    <textarea class="dialog-input" id="dialog-input" rows="3"></textarea>
+                </div>
+            </div>
+            <div class="dialog-footer">
+                <button class="btn secondary" id="dialog-cancel">取消</button>
+                <button class="btn primary" id="dialog-confirm">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PDF preview dialog -->
+    <div class="dialog-overlay" id="pdf-preview-dialog">
+        <div class="pdf-preview-box">
+            <div class="pdf-preview-header">
+                <h3 class="dialog-title" id="pdf-preview-title">PDF 预览</h3>
+                <button class="pdf-preview-close" onclick="closePdfPreview()" title="关闭">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <div class="pdf-preview-frame-wrap">
+                <iframe id="pdf-preview-frame" src="" title="PDF 预览"></iframe>
+            </div>
+            <div class="pdf-preview-footer">
+                <button class="btn secondary" onclick="closePdfPreview()">关闭</button>
+                <button class="btn primary" onclick="openPdfInNewTab()">在新窗口打开</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- High-Definition Page Lightbox Dialog -->
+    <div class="dialog-overlay" id="page-lightbox-dialog">
+        <div class="page-lightbox-box">
+            <div class="page-lightbox-header">
+                <div class="page-lightbox-title-wrap">
+                    <h3 class="dialog-title" id="lightbox-title">页面高清预览</h3>
+                    <div class="lightbox-label-editor">
+                        <label for="lightbox-page-label">对应题号</label>
+                        <div class="lightbox-stepper-controls">
+                            <button type="button" class="stepper-btn sm" onclick="stepLightboxLabel(-1, event)" title="题号减 1">
+                                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                            </button>
+                            <input type="number" id="lightbox-page-label" min="1" step="1" onwheel="this.blur()" onkeydown="if(event.key==='Enter') this.blur()" onchange="onLightboxLabelChange(this.value)">
+                            <button type="button" class="stepper-btn sm" onclick="stepLightboxLabel(1, event)" title="题号加 1">
+                                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="page-lightbox-controls">
+                    <button type="button" class="lightbox-btn" onclick="zoomLightboxImage(-0.25)" title="缩小 (-)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
+                    </button>
+                    <span class="lightbox-zoom-val" id="lightbox-zoom-val">100%</span>
+                    <button type="button" class="lightbox-btn" onclick="zoomLightboxImage(0.25)" title="放大 (+)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
+                    </button>
+                    <button type="button" class="lightbox-btn" onclick="resetLightboxZoom()" title="适应屏幕">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path></svg>
+                    </button>
+                    <button type="button" class="pdf-preview-close" onclick="closePageLightbox()" title="关闭 (ESC)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="page-lightbox-body" id="lightbox-body">
+                <button type="button" class="lightbox-nav-btn prev" id="lightbox-prev-btn" onclick="navigateLightbox(-1)" title="上一页 (←)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                </button>
+                <div class="page-lightbox-viewport" id="lightbox-viewport">
+                    <img id="lightbox-img" src="" alt="页面高清大图">
+                </div>
+                <button type="button" class="lightbox-nav-btn next" id="lightbox-next-btn" onclick="navigateLightbox(1)" title="下一页 (→)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </button>
+            </div>
+            <div class="page-lightbox-footer">
+                <span class="lightbox-nav-info" id="lightbox-nav-info">第 1 / 1 页</span>
+                <span class="lightbox-hint">快捷键：← 上一页 | → 下一页 | ESC 退出</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Floating Hover Preview Popover -->
+    <div id="quick-hover-popover" class="quick-hover-popover">
+        <div class="popover-title" id="popover-title">题目预览</div>
+        <img id="popover-img" src="" alt="预览">
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        (function () {
+            // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
+            const v = '20260927';
+            document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
+            document.write(`<script src="js/common.js?v=${v}"><\/script>`);
+            document.write(`<script src="js/auth.js?v=${v}"><\/script>`);
+            document.write(`<script src="js/question-bank.js?v=${v}"><\/script>`);
+        })();
+    </script>
+</body>
+
+</html>

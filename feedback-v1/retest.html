@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>专属错题本</title>
+    <!-- PDF-Lib 本地极速加载，彻底摆脱外部 CDN 阻塞与网络超时 -->
+    <script src="js/libs/pdf-lib.min.js"></script>
+    <!-- 二维码生成引擎 本地极速加载 -->
+    <script src="js/libs/qrcode.min.js"></script>
+    <!-- PDF.js 本地加载：用于离线后台题目墨水扫描与高度识别 -->
+    <script src="js/libs/pdfjs/pdf.min.js"></script>
+    <script>
+        if (window.pdfjsLib) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'js/libs/pdfjs/pdf.worker.min.js';
+        }
+    </script>
+    <!-- 移动端远程调试控制台 (链接添加 &debug=1 时自动激活 F12 控制台面板) -->
+    <script src="js/libs/vconsole.min.js"></script>
+    <script>
+        if (window.location.search.includes('debug=1') || window.location.hash.includes('debug')) {
+            try { new VConsole(); } catch(e) {}
+        }
+    </script>
+    <link rel="stylesheet" href="css/retest.css?v=20260927">
+    <link rel="stylesheet" href="css/tokens.css?v=20260927">
+</head>
+<body>
+
+<!-- WeChat In-App Browser Warning & Copy Bar -->
+<div id="wechat-bar" class="wechat-bar" style="display: none;">
+    <div class="wechat-bar-left">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+        <span>微信内下载若遇阻，可复制链接至外部浏览器</span>
+    </div>
+    <div style="display: flex; gap: 6px; align-items: center;">
+        <button class="btn-copy-link" onclick="copyCurrentLink()">复制页面链接</button>
+        <button class="btn-copy-link" style="background:#fef3c7;border-color:#d97706;color:#92400e;" onclick="showWeChatGuide()">指引</button>
+    </div>
+</div>
+
+<div class="shell">
+
+    <!-- Main Content Container Card -->
+    <div class="card">
+
+        <!-- 1. LOADING STATE -->
+        <div id="loading-state" class="loading-box">
+            <div class="spinner"></div>
+            <div class="loading-text">正在调取错题本...</div>
+        </div>
+
+        <!-- 2. ERROR STATE -->
+        <div id="error-state" class="error-box">
+            <div class="error-icon-wrap">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="15" y1="9" x2="9" y2="15"></line>
+                    <line x1="9" y1="9" x2="15" y2="15"></line>
+                </svg>
+            </div>
+            <div class="error-title">访问链接已失效</div>
+            <p class="error-desc" id="error-message">请联系负责老师重新获取专属错题本链接。</p>
+            <a href="https://contact.wxjifang.cn" target="_blank" rel="noopener noreferrer" class="error-contact-btn">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+                极方教师联系方式 &rarr;
+            </a>
+        </div>
+
+        <!-- 3. SECURITY VERIFICATION GATE -->
+        <div id="verify-state" class="verify-box">
+            <h1 class="verify-header-title">身份验证</h1>
+
+            <!-- Error Banner -->
+            <div id="verify-error" class="verify-err-banner">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+                <span id="verify-error-text">输入信息有误</span>
+            </div>
+
+            <form id="verify-form" onsubmit="handleVerifySubmit(event)">
+                <div class="form-item">
+                    <input type="text" id="verify-name" class="form-input" style="padding-left:14px;" placeholder="请输入学生姓名" autocomplete="off" required>
+                </div>
+
+                <div class="form-item">
+                    <div class="captcha-row">
+                        <input type="text" id="verify-captcha" class="form-input captcha-input" placeholder="4位验证码" maxlength="4" autocomplete="off" required>
+                        <div class="captcha-img-box" onclick="refreshCaptcha()" title="点击换一张">
+                            <img id="captcha-img" src="" alt="验证码" />
+                        </div>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn-submit-verify" id="btn-verify-submit">
+                    <span>进入错题本</span>
+                </button>
+            </form>
+        </div>
+
+        <!-- 4. CONTENT STATE (STUDENT DASHBOARD & DOWNLOADS) -->
+        <div id="content-state" class="content-box">
+
+            <!-- Profile & Spacing Control Bar -->
+            <div class="profile-bar">
+                <div class="profile-identity">
+                    <span class="subject-badge" id="info-subject">数学</span>
+                    <h2 class="student-name-text" id="info-name">-</h2>
+                    <span class="topic-current-pill" id="info-week-display">-</span>
+                    <a href="https://contact.wxjifang.cn" target="_blank" rel="noopener noreferrer" class="hero-contact-badge" title="极方教师联系方式">
+                        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+                        <span>教师联系方式</span>
+                        <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                    </a>
+                </div>
+                <div class="spacing-control" title="题目作答留白距离">
+                    <span class="spacing-label-prefix">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="7 8 12 3 17 8"></polyline>
+                            <polyline points="7 16 12 21 17 16"></polyline>
+                            <line x1="12" y1="3" x2="12" y2="21"></line>
+                        </svg>
+                        留白
+                    </span>
+                    <div class="spacing-select-wrapper">
+                        <select id="beta-spacing-select" onchange="onBetaSpacingSelect(this.value)">
+                            <option value="16">0.5 厘米</option>
+                            <option value="26">1 厘米</option>
+                            <option value="40">1.5 厘米</option>
+                            <option value="56">2 厘米</option>
+                            <option value="70">2.5 厘米</option>
+                            <option value="85">3 厘米</option>
+                            <option value="120">4 厘米</option>
+                            <option value="145">5 厘米</option>
+                            <option value="180">6 厘米</option>
+                            <option value="220">8 厘米</option>
+                        </select>
+                        <svg class="spacing-chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3-Column Metrics Dashboard -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-val score"><span id="info-score">-</span><small id="info-score-unit">分</small></div>
+                    <div class="stat-label">巩固成绩</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-val avg"><span id="info-avg-score">-</span><small>分</small></div>
+                    <div class="stat-label">当次均分</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-val error"><span id="info-count">0</span><small>道</small></div>
+                    <div class="stat-label">待练错题</div>
+                </div>
+            </div>
+
+            <!-- Topic Strip (when >1 week) -->
+            <div class="topics-strip" id="week-tabs-wrapper" style="display:none;">
+                <div class="topics-scroll" id="week-tabs"></div>
+                <button type="button" class="btn-all-topics" id="btn-open-grid" onclick="openTopicGridModal()">
+                    <span id="topic-grid-btn-text">全部 ▾</span>
+                </button>
+            </div>
+
+            <!-- Empty Notice Hint -->
+            <div class="empty-hint" id="no-pdf-hint" style="display:none;">
+                题库整理中，暂无错题文件
+            </div>
+
+            <!-- Action Download Buttons -->
+            <div class="action-group">
+                <button class="btn-download-main" id="btn-topic-download" onclick="openDownloadModal(false)">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    <span id="btn-topic-label">下载当次错题本 (PDF)</span>
+                </button>
+
+                <button class="btn-download-sub" id="merge-all-section" style="display:none;" onclick="openDownloadModal(true)">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                    </svg>
+                    <span>合并下载全部专题 (PDF)</span>
+                </button>
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+<!-- Topic Grid Modal (Quick jump among all 20+ topics) -->
+<div id="topic-grid-modal" class="choice-overlay" onclick="handleTopicGridOverlayClick(event)">
+    <div class="topic-grid-card">
+        <div class="topic-grid-header">
+            <div>
+                <div class="topic-grid-title">全部专题速查</div>
+                <div class="topic-grid-subtitle" id="topic-grid-subtitle">点击直接切换专题</div>
+            </div>
+            <button class="topic-grid-close" onclick="closeTopicGridModal()">✕</button>
+        </div>
+        <div class="topic-grid-list" id="topic-grid-list">
+            <!-- Dynamic 4-Column Topic Tiles Rendered Here -->
+        </div>
+    </div>
+</div>
+
+<!-- Choice Modal (Choose Exercise only or Exercise + Answer) -->
+<div id="choice-modal" class="choice-overlay" onclick="handleChoiceOverlayClick(event)">
+    <div class="choice-card">
+        <div class="choice-header">
+            <div class="choice-title">选择下载版本</div>
+            <div class="choice-subtitle" id="choice-modal-subtitle" style="display:none;"></div>
+        </div>
+        <div class="choice-options">
+            <!-- Option 1: 仅错题题目 -->
+            <button class="choice-opt-btn" onclick="selectDownloadVersion('exercise')">
+                <div class="choice-opt-icon blue">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                    </svg>
+                </div>
+                <div class="choice-opt-text">
+                    <div class="choice-opt-title">仅错题题目 (重练版)</div>
+                </div>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </button>
+
+            <!-- Option 2: 错题题目+答案 -->
+            <button class="choice-opt-btn" onclick="selectDownloadVersion('answer')">
+                <div class="choice-opt-icon amber">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+                        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+                    </svg>
+                </div>
+                <div class="choice-opt-text">
+                    <div class="choice-opt-title">题目 + 答案解析 (详解版)</div>
+                </div>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </button>
+        </div>
+        <button class="choice-btn-cancel" onclick="closeDownloadModal()">取消</button>
+    </div>
+</div>
+
+<!-- Synthesis Progress Modal -->
+<div id="progress-modal" class="progress-overlay">
+    <div class="progress-card">
+        <div class="progress-spinner"></div>
+        <div class="progress-title" id="progress-modal-title">正在生成 PDF...</div>
+        <div class="progress-status-desc" id="progress-modal-desc">请稍候...</div>
+    </div>
+</div>
+
+<!-- WeChat Download Ready Modal -->
+<div id="wechat-download-modal" class="choice-overlay" style="display:none;" onclick="handleWeChatModalOverlayClick(event)">
+    <div class="choice-card" style="text-align: center;">
+        <div class="wechat-dl-icon-circle">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+        </div>
+        <div class="choice-title" style="margin-bottom: 6px;">错题本生成完毕</div>
+        <div class="wechat-dl-filename" id="wechat-modal-filename">-</div>
+
+        <div class="wechat-dl-actions">
+            <!-- Action 1: Open / Trigger download -->
+            <button type="button" class="btn-card-action btn-blue" style="width: 100%; justify-content: center;" onclick="executeWeChatDownload()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                <span>立即调起下载 / 预览</span>
+            </button>
+
+            <!-- Action 2: Copy Direct Download Link -->
+            <button type="button" class="btn-card-action btn-outline" style="width: 100%; justify-content: center; background: #f8fafc; border: 1.5px solid #cbd5e1; color: var(--text-main);" onclick="copyDownloadUrl()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span>复制下载直链</span>
+            </button>
+        </div>
+
+        <div class="wechat-dl-notice">
+            若微信内下载受阻，可点击「复制下载直链」粘贴至手机浏览器打开。
+        </div>
+
+        <button type="button" class="choice-btn-cancel" style="margin-top: 14px;" onclick="closeWeChatDownloadModal()">完成 / 关闭</button>
+    </div>
+</div>
+
+<!-- WeChat Guide Mask (Top-Right Pointer) -->
+<div id="wechat-guide-mask" class="wechat-guide-overlay" style="display:none;" onclick="hideWeChatGuide()">
+    <div class="wechat-guide-arrow">
+        <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="7" y1="17" x2="17" y2="7"></line>
+            <polyline points="7 7 17 7 17 17"></polyline>
+        </svg>
+    </div>
+    <div class="wechat-guide-card">
+        <div style="font-size: 1.05rem; font-weight: 800; margin-bottom: 6px;">请在手机浏览器中打开</div>
+        <div style="font-size: 0.85rem; opacity: 0.95; line-height: 1.5;">
+            点击右上角 <strong style="color: #fbbf24; font-size: 1.1rem;">···</strong><br>
+            选择 <strong style="color: #60a5fa; font-size: 1.05rem;">「在浏览器打开」</strong><br>
+            即可直接下载与打印错题本
+        </div>
+        <div style="margin-top: 12px; font-size: 0.72rem; opacity: 0.75;">（轻触任意位置关闭指引）</div>
+    </div>
+</div>
+
+
+<!-- Toast Notice -->
+<div id="toast" class="toast">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12"></polyline>
+    </svg>
+    <span id="toast-text">已复制到剪贴板</span>
+</div>
+
+<script src="js/retest.js?v=20260923c"></script>
+</body>
+</html>

@@ -1,0 +1,80 @@
+# ============================================================
+# Git Ignore Configuration for Feedback Project
+# ============================================================
+
+# Logs & Temporary Files
+*.log
+*.tmp
+*.temp
+*.exe
+feedback_debug.log
+debug_screenshots/
+
+# Environment & Sensitive configs
+.env
+.env.*
+!.env.example
+*.local.php
+*.local.json
+config.local.json
+
+# v1 生产凭据与密钥（绝不入库；部署时手动放置）
+feedback-v1/config.json
+
+# v1 学生 PII 与派生数据（学情档案/Token映射/题库镜像/上传PDF/原始CSV备份）
+feedback-v1/data/history/*
+!feedback-v1/data/history/.gitkeep
+feedback-v1/data/qbank/*
+!feedback-v1/data/qbank/.gitkeep
+feedback-v1/data/pdfs/*
+!feedback-v1/data/pdfs/.gitkeep
+feedback-v1/data/uploads/*
+!feedback-v1/data/uploads/.gitkeep
+
+# 运维备份与本地扫描产物
+backups_server/
+_enc.txt
+
+# 桌面发送工具的本地运行产物（真实学生数据/日志/截图/打包输出，绝不入库）
+feedback-v1/tools/desktop-sender/feedback_history.json
+feedback-v1/tools/desktop-sender/测试.json
+feedback-v1/tools/desktop-sender/dist/
+__pycache__/
+
+# Database dumps & production backups
+backups/
+*.dump
+*.sql.gz
+
+# Sensitive seed accounts
+feedback-v1/data/seeds/
+
+
+# Cert challenge leftovers & OS junk (never commit)
+feedback-v1/.well-known/
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Node / Frontend dependencies & build outputs
+node_modules/
+dist/
+.turbo/
+.cache/
+
+# Python cache & virtual environment
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# Feedback-v1 specific data
+feedback-v1/data/logs/*
+!feedback-v1/data/logs/.gitkeep
+feedback-v1/data/temp/*
+!feedback-v1/data/temp/.gitkeep

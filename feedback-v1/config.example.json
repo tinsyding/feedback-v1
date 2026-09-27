@@ -1,0 +1,9 @@
+{
+    "_comment": "defaultSeason: spring/summer/autumn/winter (春/暑/秋/寒). semesterYear: 当前学年. semesterWeeks: 学期总周/次数. retestQuestionSpacing: 错题本拼页题目间隙(pt). retestQrCodeEnabled: 下载PDF是否包含视频讲解二维码. 注意: retestSecret 等敏感密钥已脱敏并解耦至 api/secret_key.local.php 或 RETEST_SECRET 环境变量管理，严禁写在公开配置文件中。",
+    "semesterYear": 2026,
+    "defaultSeason": "autumn",
+    "semesterWeeks": 18,
+    "forceIntegerScores": true,
+    "retestQuestionSpacing": 26,
+    "retestQrCodeEnabled": false
+}

@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>403 &middot; GitHub</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22 fill=%22%2324292f%22><path d=%22M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z%22/></svg>">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0d1117;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .page-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .bg-stars {
+            position: absolute;
+            inset: -40px;
+            width: calc(100% + 80px);
+            height: calc(100% + 80px);
+            background: radial-gradient(circle at 50% 35%, rgba(255, 255, 255, 0.08) 0%, transparent 65%);
+            z-index: 1;
+            will-change: transform;
+            transition: transform 0.1s ease-out;
+            pointer-events: none;
+        }
+
+        .scene-container {
+            position: relative;
+            z-index: 2;
+            width: 90%;
+            max-width: 820px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            will-change: transform;
+            transition: transform 0.1s ease-out;
+        }
+
+        .scene-img {
+            width: 100%;
+            height: auto;
+            max-height: 70vh;
+            display: block;
+            filter: drop-shadow(0 20px 35px rgba(0, 0, 0, 0.3));
+            pointer-events: none;
+        }
+
+        .error-meta {
+            margin-top: 18px;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.85);
+        }
+
+        .error-title {
+            font-size: clamp(22px, 3.5vw, 32px);
+            font-weight: 600;
+            letter-spacing: -0.02em;
+            margin-bottom: 6px;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+
+        .error-subtitle {
+            font-size: clamp(13px, 1.8vw, 15px);
+            color: rgba(255, 255, 255, 0.6);
+            font-weight: 400;
+            letter-spacing: 0.02em;
+        }
+
+        @media (max-width: 768px) {
+            .scene-container {
+                max-width: 94%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page-container" id="container">
+        <div class="bg-stars" id="bgLayer"></div>
+        <div class="scene-container" id="sceneContainer">
+            <img class="scene-img" 
+                 src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAwIiBoZWlnaHQ9IjM2MCIgdmlld0JveD0iMCAwIDgwMCAzNjAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9Imc0MDNfc2t5IiB4MT0iNDAwIiB5MT0iMCIgeDI9IjQwMCIgeTI9IjM2MCIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjMTYxYjIyIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iIzBkMTExNyIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0iZzQwM19udW0iIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iI2Y4NTE0OSIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjUwJSIgc3RvcC1jb2xvcj0iI2RhMzYzMyIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiM4ZTE1MTkiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9Imc0MDNfc2hpZWxkIiB4MT0iMCIgeTE9IjAiIHgyPSIwIiB5Mj0iMSI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiNmMDg4M2UiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjYmQ1NjFkIi8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJnNDAzX29jdG8iIHgxPSIwIiB5MT0iMCIgeDI9IjAiIHkyPSIxIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iIzIxMjYyZCIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiMxNjFiMjIiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8ZmlsdGVyIGlkPSJnbG93NDAzIiB4PSItMjAlIiB5PSItMjAlIiB3aWR0aD0iMTQwJSIgaGVpZ2h0PSIxNDAlIj4KICAgICAgPGZlR2F1c3NpYW5CbHVyIHN0ZERldmlhdGlvbj0iOCIgcmVzdWx0PSJibHVyIi8+CiAgICAgIDxmZUNvbXBvc2l0ZSBpbj0iU291cmNlR3JhcGhpYyIgaW4yPSJibHVyIiBvcGVyYXRvcj0ib3ZlciIvPgogICAgPC9maWx0ZXI+CiAgPC9kZWZzPgoKICA8IS0tIFN0YXJzIC8gU3BhY2UgZHVzdCAtLT4KICA8Y2lyY2xlIGN4PSIxMjAiIGN5PSI1MCIgcj0iMS41IiBmaWxsPSIjZmZmZmZmIiBvcGFjaXR5PSIwLjQiLz4KICA8Y2lyY2xlIGN4PSIyODAiIGN5PSI4MCIgcj0iMSIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iMC4zIi8+CiAgPGNpcmNsZSBjeD0iNjgwIiBjeT0iNjAiIHI9IjIiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuNSIvPgogIDxjaXJjbGUgY3g9IjUyMCIgY3k9IjQwIiByPSIxIiBmaWxsPSIjZmZmZmZmIiBvcGFjaXR5PSIwLjMiLz4KICA8Y2lyY2xlIGN4PSI3MTAiIGN5PSIxMTAiIHI9IjEuNSIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iMC40Ii8+CiAgPGNpcmNsZSBjeD0iOTAiIGN5PSIxNDAiIHI9IjEiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuMiIvPgoKICA8IS0tIEdyb3VuZCBwbGF0Zm9ybSBlbGxpcHNlIC0tPgogIDxlbGxpcHNlIGN4PSI0MDAiIGN5PSIzMTAiIHJ4PSIzNDAiIHJ5PSI0MiIgZmlsbD0iIzE2MWIyMiIvPgogIDxlbGxpcHNlIGN4PSI0MDAiIGN5PSIzMTAiIHJ4PSIyNzAiIHJ5PSIzMiIgZmlsbD0iIzIxMjYyZCIgb3BhY2l0eT0iMC42Ii8+CgogIDwhLS0gM0QgTW9ub2xpdGggTnVtYmVycyAiNDAzIiBpbiBiYWNrZ3JvdW5kIC0tPgogIDxnIGZvbnQtZmFtaWx5PSItYXBwbGUtc3lzdGVtLCBCbGlua01hY1N5c3RlbUZvbnQsICdTZWdvZSBVSScsIFJvYm90bywgc2Fucy1zZXJpZiIgZm9udC13ZWlnaHQ9IjkwMCIgZm9udC1zaXplPSIxNjAiIGxldHRlci1zcGFjaW5nPSI4IiBvcGFjaXR5PSIwLjM1Ij4KICAgIDx0ZXh0IHg9IjQwMCIgeT0iMjQ1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjMzAzNjNkIj40MDM8L3RleHQ+CiAgPC9nPgogIDxnIGZvbnQtZmFtaWx5PSItYXBwbGUtc3lzdGVtLCBCbGlua01hY1N5c3RlbUZvbnQsICdTZWdvZSBVSScsIFJvYm90bywgc2Fucy1zZXJpZiIgZm9udC13ZWlnaHQ9IjkwMCIgZm9udC1zaXplPSIxNjAiIGxldHRlci1zcGFjaW5nPSI4IiBvcGFjaXR5PSIwLjg1Ij4KICAgIDx0ZXh0IHg9IjQwMCIgeT0iMjQwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSJ1cmwoI2c0MDNfbnVtKSIgZmlsdGVyPSJ1cmwoI2dsb3c0MDMpIj40MDM8L3RleHQ+CiAgPC9nPgoKICA8IS0tIEd1YXJkIEJhcnJpZXIgLyBGb3JjZWZpZWxkIEdyaWQgTGluZSAtLT4KICA8cGF0aCBkPSJNMTYwIDMwNSBMNjQwIDMwNSIgc3Ryb2tlPSIjZjg1MTQ5IiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1kYXNoYXJyYXk9IjggNiIgb3BhY2l0eT0iMC43Ii8+CgogIDwhLS0gT2N0b2NhdCBTZW50aW5lbCBCb2R5IC0tPgogIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDM0NSwgMTQ1KSI+CiAgICA8IS0tIFNoYWRvdyB1bmRlciBPY3RvY2F0IC0tPgogICAgPGVsbGlwc2UgY3g9IjU1IiBjeT0iMTYwIiByeD0iNTUiIHJ5PSIxMiIgZmlsbD0iIzA5MGQxMiIgb3BhY2l0eT0iMC44Ii8+CgogICAgPCEtLSBUZW50YWNsZXMgLS0+CiAgICA8IS0tIEZhciBsZWZ0IHRlbnRhY2xlIC0tPgogICAgPHBhdGggZD0iTTIyIDEzNSBDLTUgMTQ1IC0xMCAxNjIgMTAgMTYyIEMyNSAxNjIgMzUgMTUwIDMwIDEzNSBaIiBmaWxsPSIjMWIyMTI5Ii8+CiAgICA8IS0tIEZhciByaWdodCB0ZW50YWNsZSAtLT4KICAgIDxwYXRoIGQ9Ik04OCAxMzUgQzExNSAxNDUgMTIwIDE2MiAxMDAgMTYyIEM4NSAxNjIgNzUgMTUwIDgwIDEzNSBaIiBmaWxsPSIjMWIyMTI5Ii8+CiAgICA8IS0tIE1pZGRsZSBsZWZ0IHRlbnRhY2xlIC0tPgogICAgPHBhdGggZD0iTTM4IDE0MCBDMjUgMTU1IDM1IDE2NSA0OCAxNjIgQzU4IDE2MCA1NSAxNDUgNDggMTQwIFoiIGZpbGw9IiMyNjJjMzYiLz4KICAgIDwhLS0gTWlkZGxlIHJpZ2h0IHRlbnRhY2xlIC0tPgogICAgPHBhdGggZD0iTTcyIDE0MCBDODUgMTU1IDc1IDE2NSA2MiAxNjIgQzUyIDE2MCA1NSAxNDUgNjIgMTQwIFoiIGZpbGw9IiMyNjJjMzYiLz4KCiAgICA8IS0tIE9jdG9jYXQgVG9yc28gLS0+CiAgICA8cGF0aCBkPSJNMjUgODAgQzIwIDExNSAzMCAxNDUgNTUgMTQ1IEM4MCAxNDUgOTAgMTE1IDg1IDgwIFoiIGZpbGw9IiMyMTI2MmQiLz4KCiAgICA8IS0tIE9jdG9jYXQgSGVhZCAtLT4KICAgIDxwYXRoIGQ9Ik0xMiA0NSBDMTAgMTggMzAgNSA1NSA1IEM4MCA1IDEwMCAxOCA5OCA0NSBDOTggNzIgODAgODUgNTUgODUgQzMwIDg1IDEyIDcyIDEyIDQ1IFoiIGZpbGw9IiMyMTI2MmQiLz4KCiAgICA8IS0tIExlZnQgRWFyIC0tPgogICAgPHBhdGggZD0iTTE4IDIwIEw1IDIgQzIgLTIgNiAwIDE2IDggWiIgZmlsbD0iIzIxMjYyZCIvPgogICAgPHBhdGggZD0iTTE3IDE4IEw3IDUgQzUgMyA4IDQgMTUgOSBaIiBmaWxsPSIjZWE2MDQ1IiBvcGFjaXR5PSIwLjc1Ii8+CgogICAgPCEtLSBSaWdodCBFYXIgLS0+CiAgICA8cGF0aCBkPSJNOTIgMjAgTDEwNSAyIEMxMDggLTIgMTA0IDAgOTQgOCBaIiBmaWxsPSIjMjEyNjJkIi8+CiAgICA8cGF0aCBkPSJNOTMgMTggTDEwMyA1IEMxMDUgMyAxMDIgNCA5NSA5IFoiIGZpbGw9IiNlYTYwNDUiIG9wYWNpdHk9IjAuNzUiLz4KCiAgICA8IS0tIEN1dGUgRmFjZSBGYWNlcGxhdGUgKFBlYWNoKSAtLT4KICAgIDxlbGxpcHNlIGN4PSI1NSIgY3k9IjUyIiByeD0iMzMiIHJ5PSIyNCIgZmlsbD0iI2ZkZTNjOCIvPgoKICAgIDwhLS0gRXllcyAtLT4KICAgIDxlbGxpcHNlIGN4PSI0MyIgY3k9IjQ4IiByeD0iNC41IiByeT0iNiIgZmlsbD0iIzFiMWYyNCIvPgogICAgPGNpcmNsZSBjeD0iNDEuNSIgY3k9IjQ2IiByPSIxLjgiIGZpbGw9IiNmZmZmZmYiLz4KICAgIDxlbGxpcHNlIGN4PSI2NyIgY3k9IjQ4IiByeD0iNC41IiByeT0iNiIgZmlsbD0iIzFiMWYyNCIvPgogICAgPGNpcmNsZSBjeD0iNjUuNSIgY3k9IjQ2IiByPSIxLjgiIGZpbGw9IiNmZmZmZmYiLz4KCiAgICA8IS0tIEN1dGUgTm9zZSAmIE1vdXRoIC0tPgogICAgPHBvbHlnb24gcG9pbnRzPSI1NSw1NCA1Myw1NyA1Nyw1NyIgZmlsbD0iI2VhNjA0NSIvPgogICAgPHBhdGggZD0iTTUxIDYwIEM1MyA2MiA1NSA2MiA1NSA2MCBDNTUgNjIgNTcgNjIgNTkgNjAiIHN0cm9rZT0iIzhiNGEzZSIgc3Ryb2tlLXdpZHRoPSIxLjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgZmlsbD0ibm9uZSIvPgoKICAgIDwhLS0gU2VjdXJpdHkgT2ZmaWNlciBWaXNvciAvIENhcCBCYWRnZSAtLT4KICAgIDxwYXRoIGQ9Ik0zOCAxMiBRNTUgNiA3MiAxMiBMNjggMTggUTU1IDE0IDQyIDE4IFoiIGZpbGw9IiNmMDg4M2UiLz4KICAgIDxwb2x5Z29uIHBvaW50cz0iNTUsMTAgNTIsMTUgNTgsMTUiIGZpbGw9IiNmZmZmZmYiLz4KCiAgICA8IS0tIFNoaWVsZCBpbiBmb3JlZ3JvdW5kIHRlbnRhY2xlIC0tPgogICAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoNjgsIDg1KSI+CiAgICAgIDxwYXRoIGQ9Ik0wIDggQzAgMCAyNiAtOCAyNiAtOCBDMjYgLTggNTIgMCA1MiA4IEM1MiAzNSAyNiA1NSAyNiA1NSBDMjYgNTUgMCAzNSAwIDggWiIgZmlsbD0idXJsKCNnNDAzX3NoaWVsZCkiIGZpbHRlcj0idXJsKCNnbG93NDAzKSIvPgogICAgICA8cGF0aCBkPSJNNSAxMCBDNSA0IDI2IC0zIDI2IC0zIEMyNiAtMyA0NyA0IDQ3IDEwIEM0NyAzMiAyNiA0OCAyNiA0OCBDMjYgNDggNSAzMiA1IDEwIFoiIGZpbGw9IiMxYjFmMjQiIG9wYWNpdHk9IjAuODUiLz4KICAgICAgPCEtLSBLZXlob2xlIGluc2lkZSBzaGllbGQgLS0+CiAgICAgIDxjaXJjbGUgY3g9IjI2IiBjeT0iMTgiIHI9IjUiIGZpbGw9IiNmMDg4M2UiLz4KICAgICAgPHBvbHlnb24gcG9pbnRzPSIyMy41LDIwIDI4LjUsMjAgMjcuNSwzMCAyNC41LDMwIiBmaWxsPSIjZjA4ODNlIi8+CiAgICA8L2c+CiAgPC9nPgo8L3N2Zz4=" 
+                 alt="403 403 · Forbidden">
+            <div class="error-meta">
+                <h1 class="error-title">403 · Forbidden</h1>
+                <p class="error-subtitle">Access denied. You don't have permission to view this resource.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            const bgLayer = document.getElementById('bgLayer');
+            const sceneContainer = document.getElementById('sceneContainer');
+
+            let mouseX = 0, mouseY = 0;
+            let currentX = 0, currentY = 0;
+            let reqId = null;
+
+            function onMouseMove(e) {
+                const halfW = window.innerWidth / 2;
+                const halfH = window.innerHeight / 2;
+                mouseX = (e.clientX - halfW) / halfW;
+                mouseY = (e.clientY - halfH) / halfH;
+                if (!reqId) {
+                    reqId = requestAnimationFrame(updateParallax);
+                }
+            }
+
+            function updateParallax() {
+                currentX += (mouseX - currentX) * 0.08;
+                currentY += (mouseY - currentY) * 0.08;
+
+                if (bgLayer) {
+                    bgLayer.style.transform = `translate3d(${currentX * 14}px, ${currentY * 10}px, 0)`;
+                }
+                if (sceneContainer) {
+                    sceneContainer.style.transform = `translate3d(${currentX * -24}px, ${currentY * -16}px, 0)`;
+                }
+
+                if (Math.abs(mouseX - currentX) > 0.001 || Math.abs(mouseY - currentY) > 0.001) {
+                    reqId = requestAnimationFrame(updateParallax);
+                } else {
+                    reqId = null;
+                }
+            }
+
+            window.addEventListener('mousemove', onMouseMove, { passive: true });
+
+            if (window.DeviceOrientationEvent) {
+                window.addEventListener('deviceorientation', function(e) {
+                    if (e.gamma !== null && e.beta !== null) {
+                        mouseX = Math.min(Math.max(e.gamma / 30, -1), 1);
+                        mouseY = Math.min(Math.max((e.beta - 45) / 30, -1), 1);
+                        if (!reqId) {
+                            reqId = requestAnimationFrame(updateParallax);
+                        }
+                    }
+                }, { passive: true });
+            }
+        })();
+    </script>
+</body>
+</html>

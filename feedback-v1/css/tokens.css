@@ -1,0 +1,86 @@
+/**
+ * ============================================================================
+ * 全站设计 Token（单一事实来源，UI 统一第一步）
+ * 加载顺序：必须在 common.css / 各页样式 / admin.css / retest.css 之后引入，
+ * 同名变量以后来者为准实现收敛；各页原变量名保留为兼容别名。
+ * 发版改动本文件时，同步 bump 各页 ASSET_V。
+ * ============================================================================
+ */
+
+:root {
+    /* ---------- 品牌色（ canonical：后台 slate + #2563eb 系） ---------- */
+    --brand-500: #2563eb;
+    --brand-600: #1d4ed8;
+    --brand-700: #1e40af;
+    --brand-secondary: #3a9cff;
+    --brand-tertiary: #6bb4ff;
+    --brand-rgb: 37, 99, 235;
+    --brand-light: rgba(37, 99, 235, 0.12);
+    --brand-border: rgba(37, 99, 235, 0.25);
+    --brand-glow: rgba(37, 99, 235, 0.2);
+    --brand-gradient: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+
+    /* ---------- 圆角（ canonical：后台 scale） ---------- */
+    --radius-xs: 4px;
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+    --radius-full: 9999px;
+
+    /* ---------- 字体 ---------- */
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+
+    /* ---------- 阴影（ canonical：后台 scale） ---------- */
+    --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.07), 0 1px 2px -1px rgba(0, 0, 0, 0.07);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.07);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.08);
+    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+
+    /* ---------- 层级阶梯（目标值；存量代码逐步迁移，新代码直接使用） ----------
+       overlay 1000 < modal 1100 < toast 1200；紧急置顶使用 --z-max。
+       注意：现存 .toast(99999) 暂未迁移到梯子，
+       因 toast 需盖住弹窗，改动前需回归验证。 */
+    --z-dropdown: 50;
+    --z-sticky: 100;
+    --z-overlay: 1000;
+    --z-modal: 1100;
+    --z-toast: 1200;
+    --z-max: 9999;
+
+    /* ---------- 兼容别名：教师端旧变量名（原 Apple 蓝 #0a84ff 系） ---------- */
+    --accent: var(--brand-500);
+    --accent-hover: var(--brand-600);
+    --accent-primary: var(--brand-500);
+    --accent-secondary: var(--brand-secondary);
+    --accent-tertiary: var(--brand-tertiary);
+    --accent-rgb: var(--brand-rgb);
+    --accent-glow: var(--brand-glow);
+    --accent-gradient: var(--brand-gradient);
+
+    /* ---------- 兼容别名：后台变量名（浅色值即 canonical，无变化） ---------- */
+    --primary: var(--brand-500);
+    --primary-hover: var(--brand-600);
+    --transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 浅色主题：品牌保持不变，仅发光强度跟随 */
+[data-theme="light"] {
+    --brand-glow: rgba(37, 99, 235, 0.15);
+    --brand-gradient: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+    --accent-glow: var(--brand-glow);
+    --accent-gradient: var(--brand-gradient);
+}
+
+/* 深色主题：统一后台深色主色（原 #3b82f6 → #2563eb，与浅色一致） */
+[data-theme="dark"] {
+    --primary: var(--brand-500);
+    --primary-hover: var(--brand-600);
+}
+
+/* 全站正文字体收敛（与各页 body 同优先级，以加载顺序后来者为准） */
+body {
+    font-family: var(--font-sans);
+}

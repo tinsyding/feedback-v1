@@ -1,0 +1,613 @@
+<?php
+/**
+ * 题库知识点管理 API (MySQL 优先 + JSON 灾备)
+ * 
+ * GET    ?action=list[&year=2026][&season=春][&subject=数学][&grade=七年级][&search=关键词] -> 获取题目列表
+ * GET    ?action=get&subject=数学&grade=七年级&tier=S+&week=3[&year=2026][&season=春]       -> 获取指定题目数据
+ * POST   JSON body {year, season, subject, grade, tier, week, questions}                    -> 保存/更新题目数据
+ * DELETE ?subject=数学&grade=七年级&tier=S+&week=3[&year=2026][&season=春]                  -> 删除指定题目数据
+ */
+
+require_once __DIR__ . '/bootstrap.php';
+
+// 引入数据库核心模块
+require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/logs.php';
+
+// Data directory for JSON backup
+$dataDir = __DIR__ . '/../data/qbank';
+if (!is_dir($dataDir)) {
+    mkdir($dataDir, 0755, true);
+}
+
+// 读取系统配置中的默认年份和学期（_comment 为合法 JSON 字段，直接解码后忽略）
+$configFile = __DIR__ . '/../config.json';
+$config = [];
+if (file_exists($configFile)) {
+    $rawConfig = file_get_contents($configFile);
+    $config = json_decode($rawConfig, true) ?: [];
+}
+
+$defaultSemesterYear = intval($config['semesterYear'] ?? 2026);
+$defaultSeasonCode = strval($config['defaultSeason'] ?? 'autumn');
+
+/**
+ * 规范化学期字符串为中文枚举 (春/暑/秋/寒)
+ */
+function normalizeSeason($season, $fallback = '秋') {
+    if (empty($season)) return $fallback;
+    $map = [
+        'spring' => '春',
+        'summer' => '暑',
+        'autumn' => '秋',
+        'winter' => '寒',
+        '春季'   => '春',
+        '暑假'   => '暑',
+        '秋季'   => '秋',
+        '寒假'   => '寒',
+        '春'     => '春',
+        '暑'     => '暑',
+        '秋'     => '秋',
+        '寒'     => '寒',
+    ];
+    $lower = strtolower(trim($season));
+    return $map[$lower] ?? $map[$season] ?? $fallback;
+}
+
+$defaultSeasonZh = normalizeSeason($defaultSeasonCode, '春');
+
+/**
+ * 获取备份 JSON 文件路径 (兼容带年份/学期与老版不带年份/学期格式)
+ */
+function getFilePath($dataDir, $subject, $grade, $tier, $week, $year = null, $season = null) {
+    if ($year !== null && $season !== null) {
+        $yearSeasonName = rawurlencode($year) . '_' . rawurlencode($season) . '_' . rawurlencode($subject) . '_' . rawurlencode($grade) . '_' . rawurlencode($tier) . '_week' . intval($week);
+        $fullPath = $dataDir . '/' . $yearSeasonName . '.json';
+        if (file_exists($fullPath)) {
+            return $fullPath;
+        }
+    }
+    // 兼容原版无年份学期文件名
+    $legacyName = rawurlencode($subject) . '_' . rawurlencode($grade) . '_' . rawurlencode($tier) . '_week' . intval($week);
+    $legacyPath = $dataDir . '/' . $legacyName . '.json';
+    if (file_exists($legacyPath)) {
+        return $legacyPath;
+    }
+    // 默认写入路径（若指定了年份学期则采用新命名，否则老命名）
+    if ($year !== null && $season !== null) {
+        $yearSeasonName = rawurlencode($year) . '_' . rawurlencode($season) . '_' . rawurlencode($subject) . '_' . rawurlencode($grade) . '_' . rawurlencode($tier) . '_week' . intval($week);
+        return $dataDir . '/' . $yearSeasonName . '.json';
+    }
+    return $legacyPath;
+}
+
+/**
+ * 解析文件名以备回退
+ */
+function parseFileName($filename, $defaultYear, $defaultSeason) {
+    $name = pathinfo($filename, PATHINFO_FILENAME);
+    // 新版格式: {year}_{season}_{subject}_{grade}_{tier}_week{N}.json
+    if (preg_match('/^(\d+)_(.+)_(.+)_(.+)_(.+)_week(\d+)$/', $name, $matches)) {
+        return [
+            'year' => intval($matches[1]),
+            'season' => normalizeSeason(rawurldecode($matches[2])),
+            'subject' => rawurldecode($matches[3]),
+            'grade' => rawurldecode($matches[4]),
+            'tier' => rawurldecode($matches[5]),
+            'week' => intval($matches[6])
+        ];
+    }
+    // 原版格式: {subject}_{grade}_{tier}_week{N}.json
+    if (preg_match('/^(.+)_(.+)_(.+)_week(\d+)$/', $name, $matches)) {
+        return [
+            'year' => $defaultYear,
+            'season' => $defaultSeason,
+            'subject' => rawurldecode($matches[1]),
+            'grade' => rawurldecode($matches[2]),
+            'tier' => rawurldecode($matches[3]),
+            'week' => intval($matches[4])
+        ];
+    }
+    // 早期遗留格式: {subject}_{tier}_week{N}.json
+    if (preg_match('/^(.+)_(.+)_week(\d+)$/', $name, $matches)) {
+        return [
+            'year' => $defaultYear,
+            'season' => $defaultSeason,
+            'subject' => rawurldecode($matches[1]),
+            'grade' => '未指定年级',
+            'tier' => rawurldecode($matches[2]),
+            'week' => intval($matches[3])
+        ];
+    }
+    return null;
+}
+
+// ========== 路由请求 ==========
+$method = $_SERVER['REQUEST_METHOD'];
+
+try {
+    switch ($method) {
+        case 'GET':
+            requireAuth();
+            $action = $_GET['action'] ?? 'list';
+            
+            if ($action === 'list') {
+                $yearFilter = !empty($_GET['year']) && $_GET['year'] !== 'all' ? intval($_GET['year']) : null;
+                $seasonFilter = !empty($_GET['season']) && $_GET['season'] !== 'all' ? normalizeSeason($_GET['season']) : null;
+                $subjectFilter = !empty($_GET['subject']) && $_GET['subject'] !== 'all' ? trim($_GET['subject']) : null;
+                $gradeFilter = !empty($_GET['grade']) && $_GET['grade'] !== 'all' ? trim($_GET['grade']) : null;
+                $searchFilter = !empty($_GET['search']) ? trim($_GET['search']) : null;
+
+                $dbItems = [];
+                $dbSuccess = false;
+
+                try {
+                    $where = [];
+                    $params = [];
+                    if ($yearFilter !== null) {
+                        $where[] = "`year` = ?";
+                        $params[] = $yearFilter;
+                    }
+                    if ($seasonFilter !== null) {
+                        $where[] = "`season` = ?";
+                        $params[] = $seasonFilter;
+                    }
+                    if ($subjectFilter !== null) {
+                        $where[] = "`subject` = ?";
+                        $params[] = $subjectFilter;
+                    }
+                    if ($gradeFilter !== null) {
+                        $where[] = "`grade` = ?";
+                        $params[] = $gradeFilter;
+                    }
+                    if ($searchFilter !== null) {
+                        $where[] = "(`subject` LIKE ? OR `grade` LIKE ? OR `tier` LIKE ?)";
+                        $kw = '%' . $searchFilter . '%';
+                        $params[] = $kw;
+                        $params[] = $kw;
+                        $params[] = $kw;
+                    }
+
+                    $whereClause = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
+                    $sql = "SELECT `id`, `year`, `season`, `subject`, `grade`, `tier`, `week`, 
+                                   `question_count` AS `questionCount`, 
+                                   ROUND(UNIX_TIMESTAMP(`updated_at`)*1000) AS `updatedAt` 
+                            FROM `qbank_weeks` {$whereClause} 
+                            ORDER BY `year` DESC, `season` ASC, `updated_at` DESC";
+                    $dbItems = DB::fetchAll($sql, $params);
+                    $dbSuccess = true;
+                } catch (Throwable $e) {
+                    error_log("DB qbank list query error: " . $e->getMessage());
+                    $dbSuccess = false;
+                }
+
+                if ($dbSuccess) {
+                    echo json_encode(['success' => true, 'data' => $dbItems], JSON_UNESCAPED_UNICODE);
+                    exit;
+                }
+
+                // 数据库异常时的备用逻辑: 读取本地 JSON 文件
+                $files = glob($dataDir . '/*.json');
+                $items = [];
+                if ($files) {
+                    foreach ($files as $file) {
+                        $meta = parseFileName(basename($file), $defaultSemesterYear, $defaultSeasonZh);
+                        if ($meta) {
+                            if ($yearFilter !== null && $meta['year'] !== $yearFilter) continue;
+                            if ($seasonFilter !== null && $meta['season'] !== $seasonFilter) continue;
+                            if ($subjectFilter !== null && $meta['subject'] !== $subjectFilter) continue;
+                            if ($gradeFilter !== null && $meta['grade'] !== $gradeFilter) continue;
+
+                            $content = json_decode(file_get_contents($file), true);
+                            $items[] = [
+                                'year' => $meta['year'],
+                                'season' => $meta['season'],
+                                'subject' => $meta['subject'],
+                                'grade' => $meta['grade'] ?? '未指定年级',
+                                'tier' => $meta['tier'],
+                                'week' => $meta['week'],
+                                'questionCount' => count($content['questions'] ?? []),
+                                'updatedAt' => $content['updatedAt'] ?? filemtime($file) * 1000
+                            ];
+                        }
+                    }
+                }
+                usort($items, function($a, $b) {
+                    return ($b['updatedAt'] ?? 0) - ($a['updatedAt'] ?? 0);
+                });
+                echo json_encode(['success' => true, 'data' => $items, 'fallback' => true], JSON_UNESCAPED_UNICODE);
+                
+            } elseif ($action === 'get') {
+                $subject = trim($_GET['subject'] ?? '');
+                $grade = trim($_GET['grade'] ?? '');
+                $tier = trim($_GET['tier'] ?? '');
+                $week = intval($_GET['week'] ?? 0);
+                $year = !empty($_GET['year']) ? intval($_GET['year']) : $defaultSemesterYear;
+                $season = normalizeSeason($_GET['season'] ?? '', $defaultSeasonZh);
+                
+                if (!$subject || !$grade || !$tier || !$week) {
+                    http_response_code(400);
+                    echo json_encode(['success' => false, 'error' => '缺少必要参数: subject, grade, tier, week'], JSON_UNESCAPED_UNICODE);
+                    exit;
+                }
+
+                // 1. 优先从 MySQL 数据库精准查询
+                try {
+                    $qbank = DB::fetchOne(
+                        "SELECT `id`, `year`, `season`, `subject`, `grade`, `tier`, `week`, `question_count`, `created_by`, `updated_by`, `updated_at`,
+                                ROUND(UNIX_TIMESTAMP(`updated_at`)*1000) AS `updatedAt` 
+                         FROM `qbank_weeks` 
+                         WHERE `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? 
+                         LIMIT 1",
+                        [$year, $season, $subject, $grade, $tier, $week]
+                    );
+
+                    // 兜底: 若指定年份/学期未找到，尝试按学科/年级/班层/周次查询最新记录
+                    if (!$qbank) {
+                        $qbank = DB::fetchOne(
+                            "SELECT `id`, `year`, `season`, `subject`, `grade`, `tier`, `week`, `question_count`, `created_by`, `updated_by`, `updated_at`,
+                                    ROUND(UNIX_TIMESTAMP(`updated_at`)*1000) AS `updatedAt` 
+                             FROM `qbank_weeks` 
+                             WHERE `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? 
+                             ORDER BY `year` DESC, `updated_at` DESC LIMIT 1",
+                            [$subject, $grade, $tier, $week]
+                        );
+                    }
+
+                    if ($qbank) {
+                        $qRows = DB::fetchAll(
+                            "SELECT `question_num` AS `id`, `topic`, `video_url`, `exercise_pdf`, `exercise_name`, `exercise_thumb`, 
+                                    `answer_pdf`, `answer_name`, `answer_thumb` 
+                             FROM `qbank_questions` 
+                             WHERE `qbank_id` = ? 
+                             ORDER BY `question_num` ASC",
+                            [$qbank['id']]
+                        );
+
+                        $questions = [];
+                        foreach ($qRows as $qr) {
+                            $questions[] = [
+                                'id' => intval($qr['id']),
+                                'topic' => $qr['topic'] ?? '',
+                                'videoUrl' => $qr['video_url'] ?? '',
+                                'exercisePdf' => [
+                                    'url' => $qr['exercise_pdf'] ?? '',
+                                    'name' => $qr['exercise_name'] ?? '',
+                                    'status' => !empty($qr['exercise_pdf']) ? 'uploaded' : 'empty',
+                                    'thumb' => $qr['exercise_thumb'] ?? ''
+                                ],
+                                'answerPdf' => [
+                                    'url' => $qr['answer_pdf'] ?? '',
+                                    'name' => $qr['answer_name'] ?? '',
+                                    'status' => !empty($qr['answer_pdf']) ? 'uploaded' : 'empty',
+                                    'thumb' => $qr['answer_thumb'] ?? ''
+                                ]
+                            ];
+                        }
+
+                        $operator = !empty($qbank['updated_by']) ? $qbank['updated_by'] : ($qbank['created_by'] ?? '');
+                        $operatorName = '';
+                        if (!empty($operator)) {
+                            $uRow = DB::fetchOne("SELECT real_name FROM users WHERE username = ? LIMIT 1", [$operator]);
+                            if ($uRow && !empty($uRow['real_name'])) {
+                                $operatorName = $uRow['real_name'];
+                            }
+                        }
+
+                        $result = [
+                            'year' => intval($qbank['year']),
+                            'season' => $qbank['season'],
+                            'subject' => $qbank['subject'],
+                            'grade' => $qbank['grade'],
+                            'tier' => $qbank['tier'],
+                            'week' => intval($qbank['week']),
+                            'questionCount' => intval($qbank['question_count'] ?? count($questions)),
+                            'createdBy' => $qbank['created_by'] ?? '',
+                            'updatedBy' => $qbank['updated_by'] ?? '',
+                            'operator' => $operator,
+                            'operatorName' => $operatorName,
+                            'updatedAt' => floatval($qbank['updatedAt']),
+                            'updatedAtFormatted' => !empty($qbank['updated_at']) ? date('Y-m-d H:i', strtotime($qbank['updated_at'])) : '',
+                            'questions' => $questions
+                        ];
+
+                        echo json_encode(['success' => true, 'data' => $result], JSON_UNESCAPED_UNICODE);
+                        exit;
+                    }
+                } catch (Throwable $e) {
+                    error_log("DB qbank get error: " . $e->getMessage());
+                }
+                
+                // 2. 数据库中未找到时，回退检查本地 JSON 文件
+                $filePath = getFilePath($dataDir, $subject, $grade, $tier, $week, $year, $season);
+                if (file_exists($filePath)) {
+                    $content = json_decode(file_get_contents($filePath), true);
+                    if ($content) {
+                        $content['year'] = $content['year'] ?? $year;
+                        $content['season'] = $content['season'] ?? $season;
+                        $content['questionCount'] = count($content['questions'] ?? []);
+                        if (empty($content['updatedAtFormatted']) && !empty($content['updatedAt'])) {
+                            $content['updatedAtFormatted'] = date('Y-m-d H:i', round($content['updatedAt'] / 1000));
+                        }
+                    }
+                    echo json_encode(['success' => true, 'data' => $content], JSON_UNESCAPED_UNICODE);
+                } else {
+                    echo json_encode(['success' => true, 'data' => null], JSON_UNESCAPED_UNICODE);
+                }
+            } else {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'error' => '未知操作: ' . $action], JSON_UNESCAPED_UNICODE);
+            }
+            break;
+            
+        case 'POST':
+            requireAuth();
+
+            // 助教权限拦截：助教只能查看题库，禁止增删改
+            if (($_SESSION['user_role'] ?? '') === 'assistant') {
+                http_response_code(403);
+                echo json_encode(['success' => false, 'error' => '助教账号仅具备查看题库权限，禁止修改或保存题目'], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+
+            // 保存/更新题目数据
+            $input = json_decode(file_get_contents('php://input'), true);
+            
+            if (!$input) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'error' => '无效的 JSON 数据'], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+            
+            $subject = trim($input['subject'] ?? '');
+            $grade = trim($input['grade'] ?? '');
+            $tier = trim($input['tier'] ?? '');
+            $week = intval($input['week'] ?? 0);
+            $year = !empty($input['year']) ? intval($input['year']) : $defaultSemesterYear;
+            $season = normalizeSeason($input['season'] ?? '', $defaultSeasonZh);
+            $questions = $input['questions'] ?? [];
+            $currentTeacher = trim($_SESSION['username'] ?? ($input['teacher_username'] ?? ''));
+            
+            if (!$subject || !$grade || !$tier || !$week) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'error' => '缺少必要字段: subject, grade, tier, week'], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+            
+            if (!is_array($questions) || empty($questions)) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'error' => '题目列表不能为空，请至少添加一道题目'], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+
+            // 自动清理知识点末尾的标点符号，并严格校验必填项（知识点与错题/题目PDF）
+            foreach ($questions as $idx => &$q) {
+                if (isset($q['topic']) && is_string($q['topic'])) {
+                    $q['topic'] = trim(preg_replace('/[\s,，.。;；:：、\-_—]+$/u', '', trim($q['topic'])));
+                }
+                $qNum = $q['id'] ?? ($q['question_num'] ?? ($idx + 1));
+                $topic = trim($q['topic'] ?? '');
+                $exUrl = $q['exercisePdf']['url'] ?? ($q['exercise_pdf'] ?? '');
+
+                if ($topic === '') {
+                    http_response_code(400);
+                    echo json_encode(['success' => false, 'error' => "第 {$qNum} 题【知识点】为必填项，请填写完整！"], JSON_UNESCAPED_UNICODE);
+                    exit;
+                }
+                if (empty($exUrl)) {
+                    http_response_code(400);
+                    echo json_encode(['success' => false, 'error' => "第 {$qNum} 题【错题文件】（题目PDF）为必传项，请上传！"], JSON_UNESCAPED_UNICODE);
+                    exit;
+                }
+            }
+            unset($q);
+
+            $currentTimeMs = round(microtime(true) * 1000);
+
+            // 1. 同步入库 MySQL
+            $dbSaved = false;
+            try {
+                $db = DB::getConnection();
+                if ($db) {
+                    $db->beginTransaction();
+
+                    // 插入或更新专题主表
+                    $stmtWeek = $db->prepare("
+                        INSERT INTO `qbank_weeks` (`year`, `season`, `subject`, `grade`, `tier`, `week`, `question_count`, `created_by`, `updated_by`, `updated_at`)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        ON DUPLICATE KEY UPDATE 
+                            `question_count` = VALUES(`question_count`),
+                            `created_by` = IF(`created_by` = '' OR `created_by` IS NULL, VALUES(`created_by`), `created_by`),
+                            `updated_by` = IF(VALUES(`updated_by`) != '', VALUES(`updated_by`), `updated_by`),
+                            `updated_at` = CURRENT_TIMESTAMP
+                    ");
+                    $stmtWeek->execute([$year, $season, $subject, $grade, $tier, $week, count($questions), $currentTeacher, $currentTeacher]);
+
+                    $qbankId = DB::fetchValue(
+                        "SELECT `id` FROM `qbank_weeks` WHERE `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? LIMIT 1",
+                        [$year, $season, $subject, $grade, $tier, $week]
+                    );
+
+                    if ($qbankId) {
+                        $keepQnums = [];
+                        $stmtQuestion = $db->prepare("
+                            INSERT INTO `qbank_questions` 
+                                (`qbank_id`, `year`, `season`, `subject`, `grade`, `tier`, `week`, `question_num`, `topic`, `video_url`,
+                                 `exercise_pdf`, `exercise_name`, `exercise_thumb`, 
+                                 `answer_pdf`, `answer_name`, `answer_thumb`, `created_by`, `updated_by`, `updated_at`)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                            ON DUPLICATE KEY UPDATE 
+                                `topic` = VALUES(`topic`),
+                                `video_url` = VALUES(`video_url`),
+                                `exercise_pdf` = VALUES(`exercise_pdf`),
+                                `exercise_name` = VALUES(`exercise_name`),
+                                `exercise_thumb` = VALUES(`exercise_thumb`),
+                                `answer_pdf` = VALUES(`answer_pdf`),
+                                `answer_name` = VALUES(`answer_name`),
+                                `answer_thumb` = VALUES(`answer_thumb`),
+                                `created_by` = IF(`created_by` = '' OR `created_by` IS NULL, VALUES(`created_by`), `created_by`),
+                                `updated_by` = IF(VALUES(`updated_by`) != '', VALUES(`updated_by`), `updated_by`),
+                                `updated_at` = CURRENT_TIMESTAMP
+                        ");
+
+                        foreach ($questions as $q) {
+                            $qNum = intval($q['id'] ?? ($q['question_num'] ?? ($q['num'] ?? 0)));
+                            if ($qNum <= 0) continue;
+                            $keepQnums[] = $qNum;
+
+                            $topic = trim($q['topic'] ?? '');
+                            if (mb_strlen($topic, 'UTF-8') > 60000) {
+                                $topic = mb_substr($topic, 0, 60000, 'UTF-8');
+                            }
+                            $videoUrl = trim($q['videoUrl'] ?? ($q['video_url'] ?? ''));
+                            $exUrl = $q['exercisePdf']['url'] ?? '';
+                            $exName = $q['exercisePdf']['name'] ?? '';
+                            $exThumb = $q['exercisePdf']['thumb'] ?? '';
+                            $ansUrl = $q['answerPdf']['url'] ?? '';
+                            $ansName = $q['answerPdf']['name'] ?? '';
+                            $ansThumb = $q['answerPdf']['thumb'] ?? '';
+
+                            $stmtQuestion->execute([
+                                $qbankId, $year, $season, $subject, $grade, $tier, $week,
+                                $qNum, $topic, $videoUrl, $exUrl, $exName, $exThumb, $ansUrl, $ansName, $ansThumb,
+                                $currentTeacher, $currentTeacher
+                            ]);
+                        }
+
+                        // 清除本次已删除的题目题号
+                        if (!empty($keepQnums)) {
+                            $inNums = implode(',', array_map('intval', $keepQnums));
+                            $db->exec("DELETE FROM `qbank_questions` WHERE `qbank_id` = {$qbankId} AND `question_num` NOT IN ({$inNums})");
+                        } else {
+                            $db->exec("DELETE FROM `qbank_questions` WHERE `qbank_id` = {$qbankId}");
+                        }
+
+                        $db->commit();
+                        $dbSaved = true;
+                    } else {
+                        $db->rollBack();
+                    }
+                }
+            } catch (Throwable $e) {
+                if (isset($db) && $db && $db->inTransaction()) {
+                    $db->rollBack();
+                }
+                error_log("DB qbank save error: " . $e->getMessage());
+            }
+
+            // 2. 同步写入 JSON 文件作为灾备和静态镜像
+            $data = [
+                'year' => $year,
+                'season' => $season,
+                'subject' => $subject,
+                'grade' => $grade,
+                'tier' => $tier,
+                'week' => intval($week),
+                'questions' => $questions,
+                'updatedAt' => $currentTimeMs
+            ];
+            
+            $filePath = getFilePath($dataDir, $subject, $grade, $tier, $week, $year, $season);
+            @file_put_contents($filePath, json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+            
+            // 记录保存题库的审计日志
+            if (function_exists('recordServerLog')) {
+                recordServerLog('action', 'qbank', 'save_questions', [
+                    'year'           => $year,
+                    'season'         => $season,
+                    'subject'        => $subject,
+                    'grade'          => $grade,
+                    'tier'           => $tier,
+                    'week'           => $week,
+                    'question_count' => count($questions)
+                ], [
+                    'operator' => $currentTeacher
+                ]);
+            }
+
+            echo json_encode([
+                'success' => true, 
+                'message' => '保存成功',
+                'data' => $data,
+                'dbSaved' => $dbSaved
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+            
+        case 'DELETE':
+            requireAuth();
+
+            // 助教权限拦截：助教只能查看题库，禁止增删改
+            if (($_SESSION['user_role'] ?? '') === 'assistant') {
+                http_response_code(403);
+                echo json_encode(['success' => false, 'error' => '助教账号仅具备查看题库权限，禁止删除题目'], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+
+            $subject = trim($_GET['subject'] ?? '');
+            $grade = trim($_GET['grade'] ?? '');
+            $tier = trim($_GET['tier'] ?? '');
+            $week = intval($_GET['week'] ?? 0);
+            $year = !empty($_GET['year']) ? intval($_GET['year']) : null;
+            $season = !empty($_GET['season']) ? normalizeSeason($_GET['season']) : null;
+            $delTeacher = trim($_SESSION['username'] ?? ($_GET['teacher_username'] ?? ''));
+            
+            if (!$subject || !$grade || !$tier || !$week) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'error' => '缺少必要参数: subject, grade, tier, week'], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+            
+            // 1. 从 MySQL 级联删除
+            try {
+                if ($year !== null && $season !== null) {
+                    $qbankId = DB::fetchValue(
+                        "SELECT `id` FROM `qbank_weeks` WHERE `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? LIMIT 1",
+                        [$year, $season, $subject, $grade, $tier, $week]
+                    );
+                } else {
+                    $qbankId = DB::fetchValue(
+                        "SELECT `id` FROM `qbank_weeks` WHERE `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? LIMIT 1",
+                        [$subject, $grade, $tier, $week]
+                    );
+                }
+
+                if ($qbankId) {
+                    DB::execute("DELETE FROM `qbank_questions` WHERE `qbank_id` = ?", [$qbankId]);
+                    DB::execute("DELETE FROM `qbank_weeks` WHERE `id` = ?", [$qbankId]);
+                }
+            } catch (Throwable $e) {
+                error_log("DB qbank delete error: " . $e->getMessage());
+            }
+
+            // 2. 从文件系统删除
+            $filePath = getFilePath($dataDir, $subject, $grade, $tier, $week, $year, $season);
+            if (file_exists($filePath)) {
+                @unlink($filePath);
+            }
+            
+            // 记录删除题库的审计日志
+            if (function_exists('recordServerLog')) {
+                recordServerLog('warn', 'qbank', 'delete_questions', [
+                    'year'    => $year,
+                    'season'  => $season,
+                    'subject' => $subject,
+                    'grade'   => $grade,
+                    'tier'    => $tier,
+                    'week'    => $week
+                ], [
+                    'operator' => $delTeacher
+                ]);
+            }
+
+            echo json_encode(['success' => true, 'message' => '删除成功'], JSON_UNESCAPED_UNICODE);
+            break;
+            
+        default:
+            http_response_code(405);
+            echo json_encode(['success' => false, 'error' => '不支持的请求方法'], JSON_UNESCAPED_UNICODE);
+    }
+} catch (Throwable $e) {
+    error_log("qbank.php error: " . $e->getMessage() . "\n" . $e->getTraceAsString());
+    http_response_code(500);
+    echo json_encode(['success' => false, 'error' => '题库系统服务异常，请稍后重试'], JSON_UNESCAPED_UNICODE);
+}
