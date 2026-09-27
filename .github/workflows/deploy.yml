@@ -20,6 +20,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Preflight check secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          missing=""
+          [ -z "$DEPLOY_HOST" ] && missing="$missing DEPLOY_HOST"
+          [ -z "$DEPLOY_PORT" ] && missing="$missing DEPLOY_PORT"
+          [ -z "$DEPLOY_USER" ] && missing="$missing DEPLOY_USER"
+          [ -z "$DEPLOY_SSH_KEY" ] && missing="$missing DEPLOY_SSH_KEY"
+          if [ -n "$missing" ]; then
+            echo "缺少 Secrets:$missing"
+            echo "请到仓库 Settings → Secrets and variables → Actions → New repository secret 添加，名字必须完全一致（含下划线，区分大小写）。"
+            exit 1
+          fi
+          echo "secrets OK"
+          if ! echo "$DEPLOY_PORT" | grep -Eq '^[0-9]+$'; then
+            echo "DEPLOY_PORT 必须是纯数字端口，当前值非法。"
+            exit 1
+          fi
+
       - name: Set up SSH key
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
