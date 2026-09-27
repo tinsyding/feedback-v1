@@ -26,7 +26,7 @@ require_once __DIR__ . '/../api/db.php';
 const MIGRATIONS_DIR = __DIR__ . '/migrations';
 const TRACKING_TABLE = 'schema_migrations';
 
-/** 按语句切分 SQL：跳过单引号/双引号/反引号字符串与 --、#、/* */ 注释内的分号 */
+/** 按语句切分 SQL：跳过引号字符串与各类注释内的分号 */
 function splitStatements(string $sql): array {
     $stmts = [];
     $buf = '';
