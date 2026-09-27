@@ -160,7 +160,8 @@ function cmdMigrate(): void {
         echo "applying $ver ... ";
         $stmts = splitStatements(file_get_contents($file));
         try {
-            $db->beginTransaction();
+            // 注意：MySQL 的 DDL 自带隐式提交，显式事务包不住混合迁移；
+            // 因此逐条执行、失败即停且不记录版本，靠“迁移必须幂等”保证可重入。
             foreach ($stmts as $stmt) {
                 // 跳过纯注释残留与 USE（连接已指向 feedback 库）
                 $head = strtoupper(ltrim($stmt));
@@ -171,14 +172,10 @@ function cmdMigrate(): void {
             }
             $ins = $db->prepare("INSERT INTO `" . TRACKING_TABLE . "` (`version`) VALUES (?)");
             $ins->execute([$ver]);
-            $db->commit();
             echo "OK (" . count($stmts) . " statements)\n";
             $done++;
         } catch (Throwable $e) {
-            if ($db->inTransaction()) {
-                $db->rollBack();
-            }
-            fwrite(STDERR, "FAILED: " . $e->getMessage() . "\n");
+            fwrite(STDERR, "FAILED: " . $e->getMessage() . "（版本未记录，修复后可重跑）\n");
             exit(1);
         }
     }
