@@ -1,0 +1,69 @@
+name: Deploy to production
+
+# main 分支每次 push 自动部署到宝塔生产机。
+# 所需 Secrets（仓库 Settings → Secrets and variables → Actions → New repository secret）：
+#   DEPLOY_HOST     服务器 IP（当前 106.14.62.196）
+#   DEPLOY_PORT     SSH 端口（当前 28964）
+#   DEPLOY_USER     SSH 用户（当前 root）
+#   DEPLOY_SSH_KEY  私钥内容（id_github_actions，含 BEGIN/END 行）
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Set up SSH key
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      - name: Pull latest code on server
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          SSH="ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 $DEPLOY_USER@$DEPLOY_HOST"
+          $SSH "cd /www/wwwroot/JF/feedback-git && git pull --ff-only && git rev-parse HEAD"
+          # 统一属主与权限（pull 以 root 执行，新文件归 root，需交还 www）
+          $SSH "chown -R www:www /www/wwwroot/JF/feedback-git && cd /www/wwwroot/JF/feedback-git && find feedback-v1 -type d -exec chmod 755 {} + && find feedback-v1 -type f -exec chmod 644 {} + && chmod 700 .git && echo PERMS-OK"
+
+      - name: Smoke test
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          SSH="ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 $DEPLOY_USER@$DEPLOY_HOST"
+          # 1. 线上代码版本必须等于本次推送的提交
+          REMOTE_SHA=$($SSH "git -C /www/wwwroot/JF/feedback-git rev-parse HEAD")
+          if [ "$REMOTE_SHA" != "$GITHUB_SHA" ]; then
+            echo "version mismatch: server=$REMOTE_SHA expected=$GITHUB_SHA"
+            exit 1
+          fi
+          echo "version OK: $REMOTE_SHA"
+          # 2. 关键页面与接口必须 200
+          check() {
+            code=$(curl -sk -m 20 -o /dev/null -w "%{http_code}" "$1")
+            if [ "$code" = "200" ]; then echo "PASS $1"; else echo "FAIL $1 => $code"; exit 1; fi
+          }
+          check "https://feedback.wxjifang.cn/upload.html"
+          check "https://feedback.wxjifang.cn/viewer.html"
+          check "https://feedback.wxjifang.cn/question-bank.html"
+          check "https://feedback.wxjifang.cn/admin.html"
+          check "https://feedback.wxjifang.cn/api/auth.php?action=check"
+          check "https://feedback.wxjifang.cn/api/public_config.php"
+          check "https://feedback.wxjifang.cn/css/tokens.css"
+          check "https://feedback.wxjifang.cn/js/upload.js"
+          check "https://vip.wxjifang.cn/retest.html"

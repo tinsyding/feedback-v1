@@ -38,3 +38,7 @@ feedback/
   为线上镜像存档；面板侧硬化片段位于
   `vhost/nginx/extension/feedback.wxjifang.cn/zz-feedback-security.conf`
   （拦截 `/config.json` 与 `*.local.php`），面板升级不会覆盖该目录。
+- 自动部署：`main` 分支每次 push 触发 `.github/workflows/deploy.yml`，
+  经 GitHub Actions ssh 到服务器执行 `git pull` + 权限修复 + 冒烟检查。
+  首次配置需在仓库 Secrets 中填入 `DEPLOY_HOST/DEPLOY_PORT/DEPLOY_USER/DEPLOY_SSH_KEY`
+ （详见 workflow 文件头注释）。
