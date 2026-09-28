@@ -81,10 +81,18 @@
 - 管理员：`save { log }`（设 active 会互斥）、`delete { id }`、`setActive { id }`。文件型存储（`data/changelog.json`）。
 
 ## 7. 文件上传类（教师）
-
 - `upload_pdf.php`：POST `file`（仅 PDF，≤20MB）→ `{ success, url: data/pdfs/xxx.pdf, originalName }`，供题库切片。
 - `upload_capture.php`：POST `file`（csv/xlsx/xls/json，≤10MB）+`fingerprint/type` → 按指纹归档到 `data/uploads/`（30 天清理），用于问题排查。
 - `public_config.php`：公开脱敏配置（semesterYear/defaultSeason/semesterWeeks/forceIntegerScores/retestQuestionSpacing/retestQrCodeEnabled），扁平输出；`config.json` 禁止直读，密钥永不外泄。
+
+## 8. `desktop.php` — 桌面发送工具云端诊断（教师账号密码，HTTPS）
+
+桌面端为单机程序，老师点按钮**手动上传**（不静默）：诊断日志进 `system_logs`（`module=desktop`，后台日志页可过滤），发送历史快照进 `desktop_uploads` 表（一人一行 upsert，admin 通用 CRUD 可查）。
+
+- 鉴权：每次请求带 `{ username, password }`，验 `users` 表 bcrypt（测试账号 `0` 拒绝）；失败记 warn 日志。
+- 限频：每 IP 每分钟 30 次；载荷上限：日志 ≤100 条/次，历史 ≤512KB。
+- `POST ?action=upload_logs` `{ username, password, client?, entries: [{ts?, level?, msg}] }` → `{ saved }`。level 只认 info/warn/error/action，msg 截断 2000 字。
+- `POST ?action=upload_history` `{ username, password, client?, history: {...} }` → `{ bytes }`。
 
 ## 版本与契约
 
