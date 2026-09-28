@@ -658,6 +658,81 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         }
     }
 
+    // Beta 新增：知识点横条 PNG 缓存（key 含宽度，不同切片宽度复用不串）
+    const topicBadgeCache = {};
+
+    function topicBadgeRoundRect(ctx, x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+    }
+
+    /**
+     * Beta 新增：把知识点文字渲染成横条 PNG DataURL（pdf-lib 内置字体无中文，只能走 canvas，
+     * 与题目二维码牌同路线）。返回 null 时调用方跳过，不影响正文排版。
+     */
+    function generateTopicBadgeDataUrl(topicText, widthPt) {
+        const label = '知识点：' + String(topicText || '').trim().slice(0, 80);
+        if (!label || label === '知识点：') return null;
+        const wPt = Math.max(120, Math.min(540, Number(widthPt) || 540));
+        const cacheKey = wPt.toFixed(1) + '___' + label;
+        if (topicBadgeCache[cacheKey]) {
+            return topicBadgeCache[cacheKey];
+        }
+        try {
+            const K = 2; // 2 倍超采样，保证打印清晰
+            const hpx = 20 * K;
+            const wpx = Math.max(240, Math.round(wPt * K));
+            const badgeCanvas = document.createElement('canvas');
+            badgeCanvas.width = wpx;
+            badgeCanvas.height = hpx;
+            const ctx = badgeCanvas.getContext('2d');
+
+            // 浅蓝底 + 描边
+            topicBadgeRoundRect(ctx, 1, 1, wpx - 2, hpx - 2, 9 * K);
+            ctx.fillStyle = '#eff6ff';
+            ctx.fill();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#bfdbfe';
+            ctx.stroke();
+
+            // 左侧蓝色色条
+            ctx.fillStyle = '#2563eb';
+            ctx.fillRect(0, 5 * K, 3 * K, hpx - 10 * K);
+
+            // 文字（超宽截断加省略号）
+            const padL = 9 * K;
+            const padR = 6 * K;
+            ctx.font = '700 ' + (12 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+            ctx.textBaseline = 'middle';
+            const maxW = wpx - padL - padR;
+            let shown = label;
+            while (shown.length > 1 && ctx.measureText(shown).width > maxW) {
+                shown = shown.slice(0, -1);
+            }
+            if (shown !== label) {
+                shown = shown.slice(0, -1) + '…';
+            }
+            ctx.fillStyle = '#1e40af';
+            ctx.fillText(shown, padL, hpx / 2 + K);
+
+            const dataUrl = badgeCanvas.toDataURL('image/png');
+            topicBadgeCache[cacheKey] = dataUrl;
+            return dataUrl;
+        } catch (err) {
+            console.warn('generateTopicBadge failed:', err);
+            return null;
+        }
+    }
+
     // Download & Merge PDFs with modal progress feedback
     async function downloadMergedPdf(type, allWeeks) {
         if (!retestData) return;
@@ -935,6 +1010,10 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             const TOP_MARGIN = 26;
             const BOTTOM_MARGIN = 28;
             const SEPARATOR_HEIGHT = (window.retestQuestionSpacing && window.retestQuestionSpacing >= 8) ? window.retestQuestionSpacing : 26;
+            // Beta 新增：含答案版每道题首切片上方的知识点横条（条高 20pt + 下间距 6pt）
+            const TOPIC_BANNER_H = 20;
+            const TOPIC_BANNER_GAP = 6;
+            const TOPIC_BANNER_BLOCK = TOPIC_BANNER_H + TOPIC_BANNER_GAP;
 
             const mergedPdf = await PDFLib.PDFDocument.create();
             let currentPage = null;
@@ -945,6 +1024,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 const qItem = pdfsToMerge[i];
                 const targetUrl = typeof qItem === 'string' ? qItem : qItem.url;
                 const videoUrl = (typeof qItem === 'object' && qItem.videoUrl) ? String(qItem.videoUrl).trim() : '';
+                const qTopic = (typeof qItem === 'object' && qItem.topic) ? String(qItem.topic).trim() : '';
                 const qNum = typeof qItem === 'object' ? (qItem.errorNum || (i + 1)) : (i + 1);
 
                 try {
@@ -966,10 +1046,13 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                         const { topCropPt, bottomCutPt, effectiveHeightPt, isFullPage } = bounds;
 
                         // 检查当前页剩余空间是否足够
+                        // Beta 新增：含答案版每道题首切片附带知识点横条，预留其高度（含答案版才有，练习版不受影响）
+                        const showTopicBanner = (type === 'answer' && pIdx === 0 && !!qTopic);
                         const isPageTop = (!currentPage || currentY >= (PAGE_HEIGHT - TOP_MARGIN - 5));
                         const neededH = isPageTop ? effectiveHeightPt : (SEPARATOR_HEIGHT + effectiveHeightPt);
+                        const neededHWithBanner = neededH + (showTopicBanner ? TOPIC_BANNER_BLOCK : 0);
 
-                        if (!currentPage || (currentY - neededH < BOTTOM_MARGIN) || (isFullPage && !isPageTop)) {
+                        if (!currentPage || (currentY - neededHWithBanner < BOTTOM_MARGIN) || (isFullPage && !isPageTop)) {
                             // 空间不足，或当前是整页大题且当前页已被占用 -> 开新 A4 页
                             currentPage = mergedPdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
                             currentY = PAGE_HEIGHT - TOP_MARGIN;
@@ -1003,6 +1086,25 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                         const drawW = origW * scale;
                         const drawH = effectiveHeightPt * scale;
                         const drawX = (PAGE_WIDTH - drawW) / 2;
+
+                        // Beta 新增：含答案版在每道题首切片上方绘制知识点横条（失败则跳过，不挡正文）
+                        if (showTopicBanner) {
+                            try {
+                                const badgeUrl = generateTopicBadgeDataUrl(qTopic, drawW);
+                                if (badgeUrl) {
+                                    const badgeImg = await mergedPdf.embedPng(badgeUrl);
+                                    currentPage.drawImage(badgeImg, {
+                                        x: drawX,
+                                        y: currentY - TOPIC_BANNER_H,
+                                        width: drawW,
+                                        height: TOPIC_BANNER_H
+                                    });
+                                    currentY -= TOPIC_BANNER_BLOCK;
+                                }
+                            } catch (badgeErr) {
+                                console.warn('Topic badge embed skipped:', badgeErr);
+                            }
+                        }
 
                         currentPage.drawPage(embedded, {
                             x: drawX,
