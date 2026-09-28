@@ -2464,6 +2464,12 @@ class FeedbackSender:
         if any(os.path.abspath(f["path"]) == norm for f in self.loaded_files):
             return 0
 
+        # 同名不同路径拦截：历史档案按文件名建档，同名文件会串发送状态，
+        # 来源列也无法区分。必须先改名再载入（放文件读取之前，失败不污染档案）。
+        base = os.path.basename(file_path)
+        if any(os.path.basename(f["path"]) == base for f in self.loaded_files):
+            raise ValueError(f"队列中已有同名文件「{base}」，不同目录的同名文件会共用发送记录导致串档。请先将其中一个重命名后再载入。")
+
         raw_data = load_feedback_data_from_file(file_path)
 
         if not isinstance(raw_data, list) or len(raw_data) == 0:
