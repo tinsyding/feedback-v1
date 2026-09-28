@@ -1792,8 +1792,9 @@ class FeedbackSender:
         self.root.minsize(920, 660)
         self.root.configure(bg="#F5F7FA")
 
-        # 数据与状态
+        # 数据与状态（多文件队列：loaded_files 记录来源，self.data 为合并发送队列）
         self.data = []
+        self.loaded_files = []
         self.is_running = False
         self.current_file_path = ""
         self.send_logs = []
@@ -2071,7 +2072,7 @@ class FeedbackSender:
         file_frame = tk.Frame(parent, bg="#F5F7FA")
         file_frame.pack(side="top", fill="x", pady=(0, 8))
 
-        select_btn = ttk.Button(file_frame, text="📂 选择反馈文件 (JSON / HTML)", command=self.select_file, width=26)
+        select_btn = ttk.Button(file_frame, text="📂 选择反馈文件 (可多选)", command=self.select_files, width=26)
         select_btn.pack(side="left")
 
         history_btn = ttk.Button(file_frame, text="📜 班级发送历史", command=self.open_history_dialog, width=15)
@@ -2083,15 +2084,22 @@ class FeedbackSender:
         debug_btn = ttk.Button(file_frame, text="🖼️ 调试截图", command=self.open_debug_dir, width=12)
         debug_btn.pack(side="left", padx=(8, 0))
 
+        clear_btn = ttk.Button(file_frame, text="清空", command=self.clear_all_files, width=8)
+        clear_btn.pack(side="left", padx=(8, 0))
+
         self.file_label = tk.Label(
             file_frame,
-            text=" 请先载入导出的 feedback.json 或 .html 快照文件",
+            text=" 请先载入导出的 feedback.json 或 .html 快照文件（可多选追加）",
             font=("Microsoft YaHei", 10),
             fg="#909399",
             bg="#F5F7FA",
             anchor="w",
         )
         self.file_label.pack(side="left", fill="x", expand=True, padx=(10, 0))
+
+        # 已载入文件条（文件名 + 条数 + 移除按钮）
+        self.files_frame = tk.Frame(parent, bg="#F5F7FA")
+        self.files_frame.pack(side="top", fill="x", pady=(0, 8))
 
     def _create_content_paned(self, parent):
         """主内容分栏区：左侧名单，右侧实时消息预览"""
@@ -2128,19 +2136,21 @@ class FeedbackSender:
         tree_frame = tk.Frame(left_frame, bg="#F5F7FA")
         tree_frame.pack(fill="both", expand=True)
 
-        columns = ("勾选", "序号", "姓名", "状态")
+        columns = ("勾选", "序号", "姓名", "状态", "来源")
         self.tree = ttk.Treeview(tree_frame, columns=columns, show="headings", selectmode="browse")
 
         self.tree.heading("勾选", text="勾选 (☑)")
         self.tree.heading("序号", text="序号")
         self.tree.heading("姓名", text="学员标识/姓名")
         self.tree.heading("状态", text="状态")
+        self.tree.heading("来源", text="来源文件")
 
         # 调宽学员姓名列与状态列，首次进入舒展不拥挤
         self.tree.column("勾选", width=65, minwidth=60, anchor="center")
         self.tree.column("序号", width=55, minwidth=50, anchor="center")
-        self.tree.column("姓名", width=260, minwidth=200, anchor="w")
+        self.tree.column("姓名", width=220, minwidth=160, anchor="w")
         self.tree.column("状态", width=160, minwidth=140, anchor="center")
+        self.tree.column("来源", width=110, minwidth=80, anchor="center")
 
         tree_scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=tree_scroll.set)
@@ -2366,12 +2376,76 @@ class FeedbackSender:
 
     # ================= 数据载入与表格交互 =================
 
+    def flash_status(self, msg, color="#67C23A", ms=2500):
+        """底部状态栏短暂提示后自动恢复（非阻塞轻提示，发送中也可安全调用）"""
+        try:
+            prev = (self.status_label.cget("text"), self.status_label.cget("fg"))
+        except Exception:
+            return
+        try:
+            self.status_label.config(text=msg, fg=color)
+        except Exception:
+            return
+
+        def _restore():
+            try:
+                if self.status_label.cget("text") == msg:
+                    self.status_label.config(text=prev[0], fg=prev[1])
+            except Exception:
+                pass
+        try:
+            self.root.after(ms, _restore)
+        except Exception:
+            pass
+
+    def _short_file_label(self, file_path):
+        """文件短标签：优先用历史档案里的班级名，否则用文件名（去扩展名，超长截断）"""
+        try:
+            detail = self.history_mgr.get_class_details(os.path.basename(file_path))
+            if detail and detail.get("class_name"):
+                return str(detail["class_name"])
+        except Exception:
+            pass
+        stem = os.path.splitext(os.path.basename(file_path))[0]
+        return stem if len(stem) <= 12 else (stem[:12] + "…")
+
+    def _load_one_file(self, file_path):
+        """载入单个文件并追加到发送队列。返回新增条数；已载入过返回 0；格式错误抛异常。
+        每条数据打上 _src_file（全路径）与 _src_label（展示用短标签）。"""
+        norm = os.path.abspath(file_path)
+        if any(os.path.abspath(f["path"]) == norm for f in self.loaded_files):
+            return 0
+
+        raw_data = load_feedback_data_from_file(file_path)
+
+        if not isinstance(raw_data, list) or len(raw_data) == 0:
+            raise ValueError("未能从该文件中提取到有效的学生反馈记录！")
+
+        # 先同步历史档案，再取班级短标签
+        self.history_mgr.sync_file_loaded(file_path, raw_data)
+        label = self._short_file_label(file_path)
+        for item in raw_data:
+            if isinstance(item, dict):
+                item["_src_file"] = file_path
+                item["_src_label"] = label
+        self.data.extend(raw_data)
+        self.loaded_files.append({
+            "path": file_path,
+            "name": os.path.basename(file_path),
+            "label": label,
+            "count": len(raw_data),
+        })
+        # 首个文件兼容旧的 current_file_path 用法
+        if not self.current_file_path:
+            self.current_file_path = file_path
+        return len(raw_data)
+
     def select_file(self, target_path: str = None):
-        """选择 JSON 或 HTML 快照文件 (支持外部直接传入路径)"""
+        """选择单个反馈文件（替换当前队列；历史记录窗口的重载走此入口，保持旧行为）"""
         if target_path:
-            file_path = target_path
+            paths = [target_path]
         else:
-            file_path = filedialog.askopenfilename(
+            sel = filedialog.askopenfilename(
                 title="选择反馈数据文件 (JSON / HTML 快照)",
                 filetypes=[
                     ("反馈数据文件 (*.json, *.html, *.htm)", "*.json;*.html;*.htm"),
@@ -2380,35 +2454,148 @@ class FeedbackSender:
                     ("所有文件 (*.*)", "*.*"),
                 ],
             )
-        if not file_path:
-            return
-
-        try:
-            raw_data = load_feedback_data_from_file(file_path)
-
-            if not isinstance(raw_data, list) or len(raw_data) == 0:
-                messagebox.showerror("格式错误", "未能从该文件中提取到有效的学生反馈记录！")
+            if not sel:
                 return
+            paths = [sel]
+        self.clear_queue_silent()
+        self._append_files(paths)
 
-            self.data = raw_data
-            self.current_file_path = file_path
-            # 同步归档到班级历史记录档案中
-            self.history_mgr.sync_file_loaded(file_path, self.data)
+    def select_files(self):
+        """选择多个反馈文件（追加到当前队列）"""
+        paths = filedialog.askopenfilenames(
+            title="选择反馈数据文件，可多选 (JSON / HTML 快照)",
+            filetypes=[
+                ("反馈数据文件 (*.json, *.html, *.htm)", "*.json *.html *.htm"),
+                ("HTML 网页快照 (*.html, *.htm)", "*.html *.htm"),
+                ("JSON 文件 (*.json)", "*.json"),
+                ("所有文件 (*.*)", "*.*"),
+            ],
+        )
+        if not paths:
+            return
+        self._append_files(list(paths))
 
-            filename = os.path.basename(file_path)
-            ext = os.path.splitext(file_path)[1].lower()
-            type_badge = "HTML 快照" if ext in [".html", ".htm"] else "JSON"
-            self.file_label.config(text=f" ✓ 已载入: {filename} [{type_badge}] ({len(self.data)} 条)", fg="#67C23A")
+    def _append_files(self, paths):
+        """批量追加文件，逐个容错，汇总提示（含跨文件重名预警）"""
+        added = 0
+        skipped = 0
+        failed = []
+        for p in paths:
+            try:
+                n = self._load_one_file(p)
+                if n > 0:
+                    added += n
+                else:
+                    skipped += 1
+            except Exception as e:
+                failed.append(f"{os.path.basename(p)}：{e}")
+        if failed:
+            messagebox.showerror("读取错误", "以下文件读取失败：\n" + "\n".join(failed))
+        self.refresh_queue_ui()
+        if added > 0:
+            dup_names = self._find_cross_file_duplicates()
+            tip = f"✓ 已载入 {len(self.loaded_files)} 个文件，共 {len(self.data)} 条反馈数据。"
+            if dup_names:
+                shown = "、".join(dup_names[:5])
+                more = f"等{len(dup_names)}人" if len(dup_names) > 5 else ""
+                tip += f"\n⚠️ {shown}{more}在多个文件中都出现，将按每条各发一次。"
+                try:
+                    self.status_label.config(text=tip, fg="#E6A23C")
+                except Exception:
+                    pass
+            else:
+                try:
+                    self.status_label.config(text=tip + "请核对名单后点击开始。", fg="#67C23A")
+                except Exception:
+                    pass
+        elif skipped > 0 and not failed:
+            self.flash_status("所选文件均已在队列中，未重复载入", "#909399")
 
-            self.load_preview()
-            self.start_btn.config(state="normal")
-            self.retry_failed_btn.config(state="disabled")
-            self.export_btn.config(state="disabled")
-            self.send_logs = []
+    def _find_cross_file_duplicates(self):
+        """找出出现在多个文件中的学生姓名（按纯姓名比对，用于提醒）"""
+        seen_files = {}
+        for item in self.data:
+            if not isinstance(item, dict):
+                continue
+            full = str(item.get("studentName") or item.get("name") or "").strip()
+            if not full:
+                continue
+            m = re.match(r"^(\d+)[\s\-_\.、]*(.*)$", full)
+            name = (m.group(2).strip() if m else full) or full
+            f = item.get("_src_file", "")
+            seen_files.setdefault(name, set()).add(f)
+        return sorted([n for n, fs in seen_files.items() if len(fs) > 1])
 
-            self.status_label.config(text=f"✓ 已就绪，共 {len(self.data)} 条反馈数据。请核对名单后点击开始。", fg="#67C23A")
-        except Exception as e:
-            messagebox.showerror("读取错误", f"读取反馈文件失败：\n{e}")
+    def remove_one_file(self, file_path):
+        """从队列移除单个文件（含其全部条目），历史发送记录保留"""
+        if self.is_running:
+            self.flash_status("发送中，无法移除文件", "#E6A23C")
+            return
+        norm = os.path.abspath(file_path)
+        self.loaded_files = [f for f in self.loaded_files if os.path.abspath(f["path"]) != norm]
+        self.data = [it for it in self.data
+                     if not (isinstance(it, dict) and os.path.abspath(it.get("_src_file", "\0")) == norm)]
+        if self.current_file_path and os.path.abspath(self.current_file_path) == norm:
+            self.current_file_path = self.loaded_files[0]["path"] if self.loaded_files else ""
+        self.refresh_queue_ui()
+        self.flash_status(f"已移除文件：{os.path.basename(file_path)}")
+
+    def clear_all_files(self):
+        """清空整个发送队列（不删历史记录）"""
+        if self.is_running:
+            self.flash_status("发送中，无法清空", "#E6A23C")
+            return
+        self.clear_queue_silent()
+        self.refresh_queue_ui()
+        self.flash_status("已清空发送队列")
+
+    def clear_queue_silent(self):
+        """静默清空内存队列（换文件/清空时用，不碰历史档案）"""
+        self.data = []
+        self.loaded_files = []
+        self.current_file_path = ""
+        self.send_logs = []
+
+    def refresh_queue_ui(self):
+        """刷新文件条、汇总标签、预览表与按钮状态"""
+        # 文件条
+        for w in self.files_frame.winfo_children():
+            try:
+                w.destroy()
+            except Exception:
+                pass
+        for f in self.loaded_files:
+            chip = tk.Frame(self.files_frame, bg="#ECF5FF", highlightbackground="#409EFF",
+                            highlightthickness=1, padx=8, pady=3)
+            chip.pack(side="left", padx=(0, 6), pady=2)
+            tk.Label(chip, text=f"{f['label']}（{f['count']}条）", font=("Microsoft YaHei", 9),
+                     fg="#303133", bg="#ECF5FF").pack(side="left")
+            tk.Button(chip, text="×", font=("Microsoft YaHei", 9, "bold"), fg="#F56C6C",
+                      bg="#ECF5FF", bd=0, activebackground="#ECF5FF",
+                      command=lambda p=f["path"]: self.remove_one_file(p)).pack(side="left", padx=(4, 0))
+
+        total = len(self.data)
+        if self.loaded_files:
+            ext0 = os.path.splitext(self.loaded_files[0]["name"])[1].lower()
+            type_badge = "HTML 快照" if ext0 in [".html", ".htm"] else "JSON"
+            mixed = len({os.path.splitext(f["name"])[1].lower() for f in self.loaded_files}) > 1
+            self.file_label.config(
+                text=f" ✓ 已载入: {len(self.loaded_files)} 个文件 [{type_badge}{' +混合' if mixed else ''}] ({total} 条)",
+                fg="#67C23A")
+        else:
+            self.file_label.config(text=" 请先载入导出的 feedback.json 或 .html 快照文件（可多选追加）", fg="#909399")
+
+        self.load_preview()
+        has_data = total > 0
+        self.start_btn.config(state="normal" if has_data else "disabled")
+        self.retry_failed_btn.config(state="disabled")
+        self.export_btn.config(state="disabled" if not self.send_logs else "normal")
+        self.send_logs = [] if not has_data else self.send_logs
+
+        if has_data:
+            self.status_label.config(text=f"✓ 已就绪，共 {total} 条反馈数据。请核对名单后点击开始。", fg="#67C23A")
+        else:
+            self.status_label.config(text="暂无数据，请先载入反馈文件。", fg="#909399")
 
     def load_preview(self):
         """载入列表预览 (智能同步历史记录中的已发送/失败状态)"""
@@ -2418,7 +2605,9 @@ class FeedbackSender:
         completed_count = 0
         for i, item in enumerate(self.data):
             student_name = item.get("studentName") or item.get("name") or "未知学生"
-            hist_status = self.history_mgr.get_student_historical_status(self.current_file_path, student_name)
+            src_file = item.get("_src_file") or self.current_file_path
+            src_label = item.get("_src_label") or os.path.splitext(os.path.basename(src_file or ""))[0]
+            hist_status = self.history_mgr.get_student_historical_status(src_file, student_name)
 
             if "✓" in hist_status or "已发送" in hist_status:
                 status_text = "✓ 已发送"
@@ -2431,7 +2620,7 @@ class FeedbackSender:
                 status_text = "待发送"
                 chk = "☑"
 
-            self.tree.insert("", "end", values=(chk, i + 1, student_name, status_text))
+            self.tree.insert("", "end", values=(chk, i + 1, student_name, status_text, src_label))
 
         self.progress["maximum"] = len(self.data)
         self.progress["value"] = completed_count
@@ -2466,7 +2655,7 @@ class FeedbackSender:
             name = item.get("studentName") or item.get("name") or "未知学生"
             msg = item.get("message") or item.get("feedbackText") or "（无文案内容）"
 
-            self.preview_title_label.config(text=f"学生: {name} (第 {idx + 1} 项)")
+            self.preview_title_label.config(text=f"学生: {name} (第 {idx + 1} 项)" + (f" [{item.get('_src_label')}]" if item.get('_src_label') else ""))
             self.preview_len_label.config(text=f"字数: {len(msg)}")
 
             self.preview_text.config(state="normal")
@@ -2558,7 +2747,13 @@ class FeedbackSender:
             values[3] = "待发送"
             self.tree.item(item, values=values)
             s_name = str(values[2]).strip()
-            self.history_mgr.update_student_status(self.current_file_path, s_name, "未发送", "-")
+            try:
+                row_idx = int(values[1]) - 1
+                row_item = self.data[row_idx] if 0 <= row_idx < len(self.data) else {}
+                src_file = row_item.get("_src_file") if isinstance(row_item, dict) else None
+            except Exception:
+                src_file = None
+            self.history_mgr.update_student_status(src_file or self.current_file_path, s_name, "未发送", "-")
         self.progress["value"] = 0
         self._update_progress_label(0, len(self.data))
         self._refresh_start_button_text()
@@ -2573,12 +2768,13 @@ class FeedbackSender:
             self.start_btn.config(text="▶ 开始发送")
 
     def update_status(self, index, status):
-        """更新表格中的状态"""
+        """更新表格中的状态（保留来源列）"""
         items = self.tree.get_children()
         if index < len(items):
             item = items[index]
             values = self.tree.item(item, "values")
-            self.tree.item(item, values=(values[0], values[1], values[2], status))
+            src = values[4] if len(values) > 4 else ""
+            self.tree.item(item, values=(values[0], values[1], values[2], status, src))
             self.tree.see(item)
 
     def reorder_roster_after_completion(self):
@@ -2605,6 +2801,7 @@ class FeedbackSender:
                 "name": name,
                 "status": status,
                 "is_sent": is_sent,
+                "label": (data_item.get("_src_label") if isinstance(data_item, dict) else "") or "",
             })
 
         unsent_rows = [r for r in rows if not r["is_sent"]]
@@ -2624,7 +2821,7 @@ class FeedbackSender:
         for new_idx, r in enumerate(reordered):
             # 未完成的项保持勾选状态，方便老师一键重试或核对；已发送项默认取消勾选
             chk_sym = "☑" if not r["is_sent"] else "☐"
-            self.tree.insert("", "end", values=(chk_sym, new_idx + 1, r["name"], r["status"]))
+            self.tree.insert("", "end", values=(chk_sym, new_idx + 1, r["name"], r["status"], r["label"]))
 
         # 自动选中并展示首个未完成学生
         children = self.tree.get_children()
@@ -2675,7 +2872,9 @@ class FeedbackSender:
             return
 
         wecom_found = find_and_activate_wecom()
-        tip_msg = f"即将发送 {len(to_send_indices)} 条反馈消息。\n\n"
+        file_count = len(getattr(self, "loaded_files", []))
+        tip_msg = f"即将发送 {len(to_send_indices)} 条反馈消息"
+        tip_msg += f"（来自 {file_count} 个文件）。\n\n" if file_count > 1 else "。\n\n"
         if wecom_found:
             tip_msg += "✓ 已自动检测并激活企业微信主窗口。\n"
         else:
@@ -2790,13 +2989,14 @@ class FeedbackSender:
             item = self.data[i]
             student_name = item.get("studentName") or item.get("name") or ""
             message = item.get("message") or item.get("feedbackText") or ""
+            src_label = item.get("_src_label") or ""
 
             # 更新界面状态
             self.root.after(
                 0,
-                lambda idx=i, name=student_name, cur=current_loop_idx + 1, tot=len(to_send_indices): (
+                lambda idx=i, name=student_name, cur=current_loop_idx + 1, tot=len(to_send_indices), src=src_label: (
                     self.status_label.config(
-                        text=f"📤 正在发送 [{cur}/{tot}]: {name}", fg="#409EFF"
+                        text=f"📤 正在发送 [{cur}/{tot}]: {name}" + (f"（{src}）" if src else ""), fg="#409EFF"
                     ),
                     self.update_status(idx, "发送中..."),
                     self.tree.see(self.tree.get_children()[idx]),
@@ -2818,31 +3018,31 @@ class FeedbackSender:
                 success_count += 1
                 consecutive_sent += 1
                 self.root.after(0, lambda idx=i: self.update_status(idx, "✓ 已发送"))
-                self.history_mgr.update_student_status(self.current_file_path, student_name, "✓ 已发送", now_str)
+                self.history_mgr.update_student_status(item.get("_src_file") or self.current_file_path, student_name, "✓ 已发送", now_str)
                 self.send_logs.append(
-                    {"index": i + 1, "name": student_name, "status": "成功", "time": now_str, "msg_len": len(message)}
+                    {"index": i + 1, "name": student_name, "status": "成功", "time": now_str, "msg_len": len(message), "file": item.get("_src_label", "")}
                 )
             elif send_result == "NOT_FOUND":
                 not_found_count += 1
                 self.root.after(0, lambda idx=i: self.update_status(idx, "⚠️ 无此联系人"))
-                self.history_mgr.update_student_status(self.current_file_path, student_name, "⚠️ 无此联系人", now_str)
+                self.history_mgr.update_student_status(item.get("_src_file") or self.current_file_path, student_name, "⚠️ 无此联系人", now_str)
                 self.send_logs.append(
-                    {"index": i + 1, "name": student_name, "status": "无此联系人", "time": now_str, "msg_len": len(message)}
+                    {"index": i + 1, "name": student_name, "status": "无此联系人", "time": now_str, "msg_len": len(message), "file": item.get("_src_label", "")}
                 )
             elif send_result == "DESC_ONLY":
                 desc_only_count += 1
                 self.root.after(0, lambda idx=i: self.update_status(idx, "⚠️ 仅他人描述(拦截)"))
-                self.history_mgr.update_student_status(self.current_file_path, student_name, "⚠️ 仅他人描述(拦截)", now_str)
+                self.history_mgr.update_student_status(item.get("_src_file") or self.current_file_path, student_name, "⚠️ 仅他人描述(拦截)", now_str)
                 self.send_logs.append(
-                    {"index": i + 1, "name": student_name, "status": "仅他人描述(拦截)", "time": now_str, "msg_len": len(message)}
+                    {"index": i + 1, "name": student_name, "status": "仅他人描述(拦截)", "time": now_str, "msg_len": len(message), "file": item.get("_src_label", "")}
                 )
             elif send_result in ["HEADER_MISMATCH", "UNCERTAIN_INTERCEPT"]:
                 header_mismatch_count += 1
                 status_str = "⚠️ 标题不符(拦截)" if send_result == "HEADER_MISMATCH" else "⚠️ 存疑拦截"
                 self.root.after(0, lambda idx=i, st=status_str: self.update_status(idx, st))
-                self.history_mgr.update_student_status(self.current_file_path, student_name, status_str, now_str)
+                self.history_mgr.update_student_status(item.get("_src_file") or self.current_file_path, student_name, status_str, now_str)
                 self.send_logs.append(
-                    {"index": i + 1, "name": student_name, "status": status_str, "time": now_str, "msg_len": len(message)}
+                    {"index": i + 1, "name": student_name, "status": status_str, "time": now_str, "msg_len": len(message), "file": item.get("_src_label", "")}
                 )
             elif send_result == "ABORTED":
                 interrupted = True
@@ -2850,9 +3050,9 @@ class FeedbackSender:
             else:
                 fail_count += 1
                 self.root.after(0, lambda idx=i: self.update_status(idx, "✗ 失败"))
-                self.history_mgr.update_student_status(self.current_file_path, student_name, "✗ 失败", now_str)
+                self.history_mgr.update_student_status(item.get("_src_file") or self.current_file_path, student_name, "✗ 失败", now_str)
                 self.send_logs.append(
-                    {"index": i + 1, "name": student_name, "status": "失败", "time": now_str, "msg_len": len(message)}
+                    {"index": i + 1, "name": student_name, "status": "失败", "time": now_str, "msg_len": len(message), "file": item.get("_src_label", "")}
                 )
 
             # 更新进度条
@@ -3193,9 +3393,9 @@ class FeedbackSender:
         try:
             with open(save_path, "w", newline="", encoding="utf-8-sig") as f:
                 writer = csv.writer(f)
-                writer.writerow(["序号", "学生学号/姓名", "发送状态", "发送时间", "消息字数"])
+                writer.writerow(["序号", "学生学号/姓名", "来源文件", "发送状态", "发送时间", "消息字数"])
                 for log in self.send_logs:
-                    writer.writerow([log["index"], log["name"], log["status"], log["time"], log["msg_len"]])
+                    writer.writerow([log["index"], log["name"], log.get("file", ""), log["status"], log["time"], log["msg_len"]])
             messagebox.showinfo("导出成功", f"发送记录已成功导出至：\n{save_path}")
         except Exception as e:
             messagebox.showerror("导出失败", f"保存 CSV 失败：\n{e}")
