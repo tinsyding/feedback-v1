@@ -630,10 +630,38 @@
             display: none;
         }
 
-        /* 专题 tab 已收归 common.css .ui-pill；此处仅保留横滑不压缩与“最新”角标 */
+        /* 专题 tab 胶囊（本页自包含：retest.html 不加载 common.css，
+           全局样式会污染本浅色页；此处仅保留横滑不压缩与“最新”角标之外的基座+选中态） */
         #week-tabs .ui-pill {
             flex-shrink: 0;
             position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 7px 15px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            font-family: inherit;
+            color: var(--text-secondary);
+            background: #f1f5f9;
+            border: 1px solid var(--border-subtle);
+            border-radius: 999px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.15s ease;
+        }
+
+        #week-tabs .ui-pill:hover {
+            border-color: var(--primary);
+            color: var(--text-main);
+            background: var(--primary-light);
+        }
+
+        #week-tabs .ui-pill.active {
+            background: var(--primary-gradient);
+            border-color: var(--primary);
+            color: #ffffff;
+            box-shadow: 0 4px 10px rgba(37, 99, 235, 0.25);
         }
 
         .ui-pill.has-badge::after {
