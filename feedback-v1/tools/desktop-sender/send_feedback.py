@@ -137,29 +137,67 @@ def get_app_base_dir() -> str:
     return script_dir
 
 
-# 持久化数据子目录名（ASCII，避免中文路径在部分环境下的问题；与 Web 端 data/ 区分）
-DATA_SUBDIR = "appdata"
+# 用户数据目录名（ASCII，避免中文路径在部分环境下的问题）
+USER_DATA_DIRNAME = "JFFeedback"
+# exe 旁旧数据目录（历史版本用过，保留作迁移源）
+LEGACY_DATA_SUBDIR = "appdata"
+
+
+def _move_into(src: str, dst: str) -> None:
+    """把文件搬进目标位置（目标已存在则跳过，不覆盖）。"""
+    try:
+        if os.path.isfile(src) and not os.path.exists(dst):
+            os.replace(src, dst)
+    except Exception:
+        pass
+
+
+def _get_user_documents_dir() -> str:
+    """取当前用户的「文档」目录（含 OneDrive 重定向的兼容）。
+    返回 \"\" 表示取不到。"""
+    candidates = []
+    try:
+        candidates.append(os.path.join(os.path.expanduser("~"), "Documents"))
+    except Exception:
+        pass
+    try:
+        up = os.environ.get("USERPROFILE", "")
+        if up:
+            candidates.append(os.path.join(up, "Documents"))
+            candidates.append(os.path.join(up, "OneDrive", "Documents"))
+    except Exception:
+        pass
+    for c in candidates:
+        try:
+            if c and os.path.isdir(c):
+                return c
+        except Exception:
+            continue
+    return ""
 
 
 def _migrate_legacy_data(base_dir: str, data_dir: str) -> None:
-    """一次性迁移：把此前落在根目录的老数据搬进 appdata/。
-    不做会丢失已发送记录（程序以为没人发过，有重发风险），所以必须在首次运行时自动搬。"""
+    """一次性迁移：把 exe 旁的老数据（appdata/ 子目录 + 更早的根目录散文件）
+    搬进新的用户数据目录。不覆盖目标已有文件；搬完不删源目录。
+    不做会丢失已发送记录（程序以为没人发过，有重发风险），所以必须自动搬。"""
     legacy_files = ["feedback_history.json", "feedback_debug.log", "feedback_debug.log.bak"]
     try:
         os.makedirs(data_dir, exist_ok=True)
-        for name in legacy_files:
-            src = os.path.join(base_dir, name)
-            dst = os.path.join(data_dir, name)
-            if os.path.isfile(src) and not os.path.exists(dst):
-                try:
-                    os.replace(src, dst)
-                except Exception:
-                    pass
-        legacy_shots = os.path.join(base_dir, "debug_screenshots")
-        new_shots = os.path.join(data_dir, "debug_screenshots")
-        if os.path.isdir(legacy_shots) and not os.path.exists(new_shots):
+        sources = [os.path.join(base_dir, LEGACY_DATA_SUBDIR), base_dir]
+        for src_dir in sources:
+            for name in legacy_files:
+                _move_into(os.path.join(src_dir, name), os.path.join(data_dir, name))
+        for src_dir in sources:
+            legacy_shots = os.path.join(src_dir, "debug_screenshots")
+            new_shots = os.path.join(data_dir, "debug_screenshots")
             try:
-                os.replace(legacy_shots, new_shots)
+                if os.path.isdir(legacy_shots):
+                    if not os.path.exists(new_shots):
+                        os.replace(legacy_shots, new_shots)
+                    else:
+                        for fn in os.listdir(legacy_shots):
+                            _move_into(os.path.join(legacy_shots, fn),
+                                       os.path.join(new_shots, fn))
             except Exception:
                 pass
     except Exception:
@@ -168,15 +206,25 @@ def _migrate_legacy_data(base_dir: str, data_dir: str) -> None:
 
 def get_data_dir() -> str:
     """获取持久化数据（如历史记录、日志、截图）存储目录。
-    统一放在根目录下的 appdata/ 子目录，保持 exe 同级干净。"""
+    优先放在当前用户「文档」下的 JFFeedback/（重装/换 exe 位置不丢，且多用户互不串）；
+    取不到或写不了时回退到 exe 旁的 appdata/。"""
     base_dir = get_app_base_dir()
-    data_dir = os.path.join(base_dir, DATA_SUBDIR)
-    _migrate_legacy_data(base_dir, data_dir)
+    fallback = os.path.join(base_dir, LEGACY_DATA_SUBDIR)
+    docs = _get_user_documents_dir()
+    if docs:
+        data_dir = os.path.join(docs, USER_DATA_DIRNAME)
+        try:
+            os.makedirs(data_dir, exist_ok=True)
+            _migrate_legacy_data(base_dir, data_dir)
+            return data_dir
+        except Exception:
+            pass
+    _migrate_legacy_data(base_dir, fallback)
     try:
-        os.makedirs(data_dir, exist_ok=True)
+        os.makedirs(fallback, exist_ok=True)
     except Exception:
         pass
-    return data_dir
+    return fallback
 
 
 LOG_FILE_PATH = os.path.join(get_data_dir(), "feedback_debug.log")
