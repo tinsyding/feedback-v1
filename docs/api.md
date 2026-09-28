@@ -85,14 +85,20 @@
 - `upload_capture.php`：POST `file`（csv/xlsx/xls/json，≤10MB）+`fingerprint/type` → 按指纹归档到 `data/uploads/`（30 天清理），用于问题排查。
 - `public_config.php`：公开脱敏配置（semesterYear/defaultSeason/semesterWeeks/forceIntegerScores/retestQuestionSpacing/retestQrCodeEnabled），扁平输出；`config.json` 禁止直读，密钥永不外泄。
 
-## 8. `desktop.php` — 桌面发送工具云端诊断（教师账号密码，HTTPS）
+## 8. `desktop.php` — 桌面发送工具云端诊断（匿名机器上报 + 教师账号兼容）
 
-桌面端为单机程序，老师点按钮**手动上传**（不静默）：诊断日志进 `system_logs`（`module=desktop`，后台日志页可过滤），发送历史快照进 `desktop_uploads` 表（一人一行 upsert，admin 通用 CRUD 可查）。
+桌面端为单机程序，启动时后台上报诊断日志、退出时追加上报发送历史（daemon 线程，
+退出时最多等 5 秒），供管理员远程协助排查；无按钮无弹窗。上报方以机器指纹标识，
+服务端记为未核验来源（`operator=anon:*`），仅供排查参考，不作业务依据。
 
-- 鉴权：每次请求带 `{ username, password }`，验 `users` 表 bcrypt（测试账号 `0` 拒绝）；失败记 warn 日志。
+- 日志进 `system_logs`（`module=desktop`，后台日志页可过滤），历史快照进 `desktop_uploads`
+  表（一人/一机一行 upsert，admin 通用 CRUD 可查）。
+- 兼容旧版：仍可传 `username/password`，经 `users` 表 bcrypt 核验后记为该教师
+  （测试账号 `0` 拒绝）；不传则必须带 `client` 指纹，否则 400。
 - 限频：每 IP 每分钟 30 次；载荷上限：日志 ≤100 条/次，历史 ≤512KB。
-- `POST ?action=upload_logs` `{ username, password, client?, entries: [{ts?, level?, msg}] }` → `{ saved }`。level 只认 info/warn/error/action，msg 截断 2000 字。
-- `POST ?action=upload_history` `{ username, password, client?, history: {...} }` → `{ bytes }`。
+- `POST ?action=upload_logs` `{ client, entries: [{ts?, level?, msg}] }` → `{ saved }`。
+  level 只认 info/warn/error/action，msg 截断 2000 字。
+- `POST ?action=upload_history` `{ client, history: {...} }` → `{ bytes }`。
 
 ## 版本与契约
 

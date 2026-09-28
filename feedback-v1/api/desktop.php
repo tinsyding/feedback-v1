@@ -2,16 +2,20 @@
 /**
  * 桌面发送工具云端诊断接口 (api/desktop.php)
  *
- * 背景：教师端 exe 为单机程序，出问题只能看本地日志。本接口允许老师
- * 在桌面端点按钮“手动上传”诊断日志与发送历史（含学生隐私数据，必须显式确认），
- * 便于管理员远程协助排查（后台日志页按 module=desktop 过滤；历史快照走 admin 通用 CRUD 查 desktop_uploads 表）。
+ * 桌面端为单机程序，启动/退出时自动在后台上报诊断日志与发送历史，
+ * 供管理员远程协助排查（后台日志页按 module=desktop 过滤；历史快照走 admin 通用 CRUD 查 desktop_uploads 表）。
+ * 无需账号密码：上报方以机器指纹标识，服务端记为未核验来源（operator=anon:*），
+ * 仅用于排查参考，不作为业务依据。
  *
- * 鉴权：每次请求携带教师账号密码（HTTPS 传输，服务端用 password_verify 校验，不存储明文）。
+ * 上报内容：diagnostic 日志（末尾 300 行）、发送历史快照。含学生隐私数据，
+ * 上报即视为老师知情（程序内不再二次弹窗）。
+ *
  * 限频：每 IP 每分钟最多 30 次（文件锁计数，与 logs.php 同策略）。
  * 载荷上限：日志 ≤100 条/次；历史快照 ≤512KB（超限 413）。
  *
- * POST ?action=upload_logs     { username, password, client?, entries: [{ts?, level?, msg}] }
- * POST ?action=upload_history  { username, password, client?, history: {...} }
+ * POST ?action=upload_logs     { client, entries: [{ts?, level?, msg}] }
+ * POST ?action=upload_history  { client, history: {...} }
+ * 兼容旧版桌面端：仍可传 username/password，经 users 表 bcrypt 核验后记为该教师。
  */
 
 require_once __DIR__ . '/bootstrap.php';
@@ -87,8 +91,20 @@ $username = trim((string)($input['username'] ?? ''));
 $password = (string)($input['password'] ?? '');
 $clientTag = substr(trim((string)($input['client'] ?? '')), 0, 100);
 
-$user = desktopAuthTeacher($username, $password);
-$realName = $user['real_name'] ?? $username;
+// 身份归属：提供账号密码则核验为教师；否则按匿名机器上报（需带 client 指纹）
+$operator = '';
+$realName = '';
+if ($username === '' && $password === '') {
+    $fp = substr(preg_replace('/[^A-Za-z0-9_\-]/', '', $clientTag) ?: 'pc', 0, 50);
+    if ($clientTag === '') {
+        sendResponse(false, null, '缺少机器标识', 400);
+    }
+    $operator = 'anon:' . $fp;
+} else {
+    $user = desktopAuthTeacher($username, $password);
+    $realName = $user['real_name'] ?? $username;
+    $operator = $username;
+}
 
 switch ($action) {
     case 'upload_logs': {
@@ -114,16 +130,16 @@ switch ($action) {
                 'client' => $clientTag,
                 'client_ts' => isset($e['ts']) ? substr((string)$e['ts'], 0, 40) : ''
             ], [
-                'operator' => $username
+                'operator' => $operator
             ]);
             $saved++;
         }
         recordServerLog('action', 'desktop', 'cloud_logs_uploaded', [
-            'username' => $username,
+            'username' => $operator,
             'real_name' => $realName,
             'count' => $saved,
             'client' => $clientTag,
-            'message' => "教师 {$username} 上传了 {$saved} 条桌面端诊断日志"
+            'message' => "桌面端 {$operator} 上传了 {$saved} 条诊断日志"
         ]);
         sendResponse(true, ['saved' => $saved, 'message' => "已上传 {$saved} 条诊断日志"]);
         break;
@@ -145,18 +161,18 @@ switch ($action) {
             DB::execute(
                 "INSERT INTO `desktop_uploads` (`username`, `payload`, `client_info`) VALUES (?, ?, ?)
                  ON DUPLICATE KEY UPDATE `payload` = VALUES(`payload`), `client_info` = VALUES(`client_info`), `updated_at` = CURRENT_TIMESTAMP",
-                [$username, $payload, $clientTag]
+                [$operator, $payload, $clientTag]
             );
         } catch (Throwable $e) {
             error_log("desktop history upload error: " . $e->getMessage());
             sendResponse(false, null, '发送历史入库失败', 500);
         }
         recordServerLog('action', 'desktop', 'cloud_history_uploaded', [
-            'username' => $username,
+            'username' => $operator,
             'real_name' => $realName,
             'bytes' => strlen($payload),
             'client' => $clientTag,
-            'message' => "教师 {$username} 上传了发送历史快照"
+            'message' => "桌面端 {$operator} 上传了发送历史快照"
         ]);
         sendResponse(true, ['bytes' => strlen($payload), 'message' => '发送历史已上传，管理员可在后台查看']);
         break;
