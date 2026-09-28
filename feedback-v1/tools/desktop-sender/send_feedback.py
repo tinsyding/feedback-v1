@@ -937,6 +937,143 @@ def verify_chat_header_title(wecom_rect: tuple, target_id: str, target_name: str
     return "UNCERTAIN", ""
 
 
+# ============================================================
+# 云端诊断（手动上传，供管理员远程协助排查）
+# - 只在老师点击按钮后上传，不静默、不自动；发送历史含学生隐私，需二次确认。
+# - 服务端：api/desktop.php（教师账号密码鉴权，HTTPS）。
+# ============================================================
+
+DEFAULT_CLOUD_SERVER = "https://feedback.wxjifang.cn"
+CLOUD_CONFIG_NAME = "desktop_cloud.json"
+CLOUD_LOG_TAIL_LINES = 300
+
+# 本地日志级别 -> 服务端级别（服务端只认 info/warn/error/action）
+_LOG_LEVEL_MAP = {
+    "DEBUG": "info",
+    "INFO": "info",
+    "WARN": "warn",
+    "WARNING": "warn",
+    "ERROR": "error",
+}
+
+
+def cloud_config_path() -> str:
+    """云端诊断配置（服务器地址 + 教师账号）保存在本机 appdata，不入库、不上传"""
+    return os.path.join(get_data_dir(), CLOUD_CONFIG_NAME)
+
+
+def load_cloud_config() -> dict:
+    """读取本机云端配置，缺失返回默认值"""
+    cfg = {"server": DEFAULT_CLOUD_SERVER, "username": "", "password": ""}
+    try:
+        p = cloud_config_path()
+        if os.path.isfile(p):
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                for k in ("server", "username", "password"):
+                    if isinstance(data.get(k), str) and data[k].strip():
+                        cfg[k] = data[k].strip()
+    except Exception:
+        pass
+    if not cfg["server"].startswith(("http://", "https://")):
+        cfg["server"] = DEFAULT_CLOUD_SERVER
+    return cfg
+
+
+def save_cloud_config(cfg: dict) -> bool:
+    """保存本机云端配置（仅本机明文保存，请勿发给他人）"""
+    try:
+        with open(cloud_config_path(), "w", encoding="utf-8") as f:
+            json.dump({
+                "server": str(cfg.get("server", DEFAULT_CLOUD_SERVER)).strip(),
+                "username": str(cfg.get("username", "")).strip(),
+                "password": str(cfg.get("password", "")),
+            }, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        log(f"云端配置保存失败: {e}", "WARN")
+        return False
+
+
+def cloud_post(server: str, action: str, payload: dict, timeout: int = 20) -> dict:
+    """向云端诊断接口 POST JSON，返回解析后的 dict；失败抛 RuntimeError（消息可直接展示）"""
+    import urllib.request
+    import urllib.error
+    server = (server or "").strip().rstrip("/")
+    if not server.startswith(("http://", "https://")):
+        raise RuntimeError("服务器地址必须以 http:// 或 https:// 开头")
+    url = f"{server}/api/desktop.php?action={action}"
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": "application/json", "User-Agent": "JF-Feedback-Sender/1.0"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        try:
+            detail = json.loads(e.read().decode("utf-8", errors="replace"))
+            raise RuntimeError(detail.get("error") or f"服务器返回 HTTP {e.code}")
+        except RuntimeError:
+            raise
+        except Exception:
+            raise RuntimeError(f"服务器返回 HTTP {e.code}")
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"网络连接失败：{e.reason}")
+    except Exception as e:
+        raise RuntimeError(f"请求异常：{e}")
+    try:
+        data = json.loads(raw)
+    except Exception:
+        raise RuntimeError("服务器返回了无法解析的内容")
+    if not isinstance(data, dict) or not data.get("success"):
+        raise RuntimeError((data.get("error") if isinstance(data, dict) else None) or "上传被服务器拒绝")
+    return data.get("data") or {}
+
+
+def parse_log_entries(limit: int = CLOUD_LOG_TAIL_LINES) -> list:
+    """读取本地日志末尾 N 行，解析为 [{ts, level, msg}]（纯函数，可单测）"""
+    entries = []
+    try:
+        if not os.path.isfile(LOG_FILE_PATH):
+            return entries
+        with open(LOG_FILE_PATH, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except Exception:
+        return entries
+    pattern = re.compile(r"^\[(?P<ts>[^\]]+)\]\s*\[(?P<level>[A-Za-z]+)\]\s*(?P<msg>.*)$")
+    for line in lines[-limit:]:
+        line = line.rstrip("\n")
+        if not line.strip():
+            continue
+        m = pattern.match(line)
+        if m:
+            entries.append({
+                "ts": m.group("ts")[:40],
+                "level": _LOG_LEVEL_MAP.get(m.group("level").upper(), "info"),
+                "msg": m.group("msg")[:2000],
+            })
+        else:
+            entries.append({"ts": "", "level": "info", "msg": line[:2000]})
+    return entries
+
+
+def read_history_payload() -> dict:
+    """读取本机发送历史 JSON（纯函数部分可单测；含学生隐私，调用方必须先让用户确认）"""
+    p = os.path.join(get_data_dir(), "feedback_history.json")
+    if not os.path.isfile(p):
+        raise RuntimeError("本机暂无发送历史记录")
+    with open(p, "r", encoding="utf-8", errors="replace") as f:
+        data = json.load(f)
+    if not isinstance(data, dict) or not data:
+        raise RuntimeError("发送历史为空，无需上传")
+    return data
+
+
 class HistoryManager:
     """负责跨班级/文件的发送历史持久化与统计管理"""
     def __init__(self, storage_path: str = None):
@@ -1892,6 +2029,9 @@ class FeedbackSender:
 
         debug_btn = ttk.Button(file_frame, text="🖼️ 调试截图", command=self.open_debug_dir, width=12)
         debug_btn.pack(side="left", padx=(8, 0))
+
+        cloud_btn = ttk.Button(file_frame, text="☁️ 云端诊断", command=self.open_cloud_dialog, width=12)
+        cloud_btn.pack(side="left", padx=(8, 0))
 
         self.file_label = tk.Label(
             file_frame,
@@ -3083,6 +3223,152 @@ class FeedbackSender:
             os.startfile(DEBUG_IMG_DIR)
         except Exception as e:
             messagebox.showerror("打开失败", f"无法打开调试截图目录：\n{e}")
+
+    def open_cloud_dialog(self):
+        """云端诊断对话框：手动上传诊断日志 / 发送历史，供管理员远程协助排查。
+        全程手动触发，不自动上传；发送历史含学生隐私，上传前二次确认。"""
+        cfg = load_cloud_config()
+        dialog = tk.Toplevel(self.root)
+        dialog.title("☁️ 云端诊断（手动上传）")
+        dialog.transient(self.root)
+        dialog.configure(bg="#F5F7FA")
+        dialog.resizable(False, False)
+
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        dw, dh = 460, 330
+        x = max(0, self.root.winfo_x() + (self.root.winfo_width() - dw) // 2)
+        y = max(0, self.root.winfo_y() + (self.root.winfo_height() - dh) // 2)
+        dialog.geometry(f"{dw}x{dh}+{x}+{y}")
+        dialog.bind("<Escape>", lambda e: dialog.destroy())
+
+        body = ttk.Frame(dialog, padding=14)
+        body.pack(fill="both", expand=True)
+
+        tk.Label(
+            body,
+            text="仅在需要协助排查时手动上传，不会自动发送任何数据。",
+            font=("Microsoft YaHei", 9),
+            fg="#909399",
+            bg="#F5F7FA",
+            wraplength=420,
+            justify="left",
+        ).pack(anchor="w", pady=(0, 10))
+
+        form = tk.Frame(body, bg="#F5F7FA")
+        form.pack(fill="x", pady=(0, 6))
+
+        row1 = tk.Frame(form, bg="#F5F7FA")
+        row1.pack(fill="x", pady=3)
+        tk.Label(row1, text="服务器", font=("Microsoft YaHei", 9), bg="#F5F7FA", width=10, anchor="w").pack(side="left")
+        server_ent = ttk.Entry(row1, width=32)
+        server_ent.pack(side="left", fill="x", expand=True, padx=(6, 0))
+        server_ent.insert(0, cfg.get("server", DEFAULT_CLOUD_SERVER))
+
+        row2 = tk.Frame(form, bg="#F5F7FA")
+        row2.pack(fill="x", pady=3)
+        tk.Label(row2, text="教师账号", font=("Microsoft YaHei", 9), bg="#F5F7FA", width=10, anchor="w").pack(side="left")
+        user_ent = ttk.Entry(row2, width=32)
+        user_ent.pack(side="left", fill="x", expand=True, padx=(6, 0))
+        user_ent.insert(0, cfg.get("username", ""))
+
+        row3 = tk.Frame(form, bg="#F5F7FA")
+        row3.pack(fill="x", pady=3)
+        tk.Label(row3, text="登录密码", font=("Microsoft YaHei", 9), bg="#F5F7FA", width=10, anchor="w").pack(side="left")
+        pwd_ent = ttk.Entry(row3, width=32, show="*")
+        pwd_ent.pack(side="left", fill="x", expand=True, padx=(6, 0))
+        pwd_ent.insert(0, cfg.get("password", ""))
+
+        status_var = tk.StringVar(value="账号保存在本机 appdata，仅用于上传，不会发给他人。")
+        tk.Label(
+            body, textvariable=status_var,
+            font=("Microsoft YaHei", 9), fg="#606266", bg="#F5F7FA",
+            wraplength=420, justify="left",
+        ).pack(anchor="w", pady=(4, 10))
+
+        def current_form():
+            return {
+                "server": server_ent.get().strip() or DEFAULT_CLOUD_SERVER,
+                "username": user_ent.get().strip(),
+                "password": pwd_ent.get(),
+            }
+
+        def set_status(msg):
+            self.root.after(0, lambda: status_var.set(msg))
+
+        def do_upload_logs():
+            form_cfg = current_form()
+            if not form_cfg["username"] or not form_cfg["password"]:
+                messagebox.showwarning("缺少账号", "请先填写教师账号和登录密码")
+                return
+            entries = parse_log_entries()
+            if not entries:
+                messagebox.showinfo("无日志", "本地暂无运行日志")
+                return
+            set_status(f"正在上传 {len(entries)} 条诊断日志，请稍候…")
+
+            def _work():
+                try:
+                    data = cloud_post(form_cfg["server"], "upload_logs", {
+                        "username": form_cfg["username"],
+                        "password": form_cfg["password"],
+                        "client": f"{os.environ.get('COMPUTERNAME', 'pc')}",
+                        "entries": entries,
+                    })
+                    save_cloud_config(form_cfg)
+                    log(f"诊断日志已上传云端：{data.get('saved', 0)} 条", "INFO")
+                    set_status(f"上传成功：{data.get('message', '')}")
+                except Exception as e:
+                    log(f"诊断日志上传失败: {e}", "WARN")
+                    set_status(f"上传失败：{e}")
+            Thread(target=_work, daemon=True).start()
+
+        def do_upload_history():
+            form_cfg = current_form()
+            if not form_cfg["username"] or not form_cfg["password"]:
+                messagebox.showwarning("缺少账号", "请先填写教师账号和登录密码")
+                return
+            try:
+                payload = read_history_payload()
+            except Exception as e:
+                messagebox.showinfo("无历史", str(e))
+                return
+            total = 0
+            try:
+                for c in (payload.get("classes") or {}).values():
+                    total += len((c or {}).get("students", []))
+            except Exception:
+                pass
+            ok = messagebox.askyesno(
+                "确认上传",
+                f"即将上传本机发送历史（约 {total} 条学生记录，含学生姓名与反馈原文），\n"
+                "管理员可在后台查看，用于协助排查。\n\n确定上传吗？",
+            )
+            if not ok:
+                return
+            set_status("正在上传发送历史，请稍候…")
+
+            def _work():
+                try:
+                    data = cloud_post(form_cfg["server"], "upload_history", {
+                        "username": form_cfg["username"],
+                        "password": form_cfg["password"],
+                        "client": f"{os.environ.get('COMPUTERNAME', 'pc')}",
+                        "history": payload,
+                    })
+                    save_cloud_config(form_cfg)
+                    log(f"发送历史已上传云端：{data.get('bytes', 0)} 字节", "INFO")
+                    set_status(f"上传成功：{data.get('message', '')}")
+                except Exception as e:
+                    log(f"发送历史上传失败: {e}", "WARN")
+                    set_status(f"上传失败：{e}")
+            Thread(target=_work, daemon=True).start()
+
+        btn_row = tk.Frame(body, bg="#F5F7FA")
+        btn_row.pack(fill="x", pady=(2, 0))
+        ttk.Button(btn_row, text="📤 上传诊断日志", command=do_upload_logs).pack(side="left", expand=True, fill="x", padx=(0, 4))
+        ttk.Button(btn_row, text="📤 上传发送历史", command=do_upload_history).pack(side="left", expand=True, fill="x", padx=(4, 0))
+        ttk.Button(body, text="关闭", command=dialog.destroy, width=10).pack(pady=(12, 0))
 
     def run(self):
         """启动应用"""
