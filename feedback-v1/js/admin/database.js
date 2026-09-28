@@ -764,7 +764,7 @@
                             <td><span style="font-weight:700; color:#38bdf8; font-family:var(--font-mono); font-size:0.95rem;">${r.homework_score ?? '-'}</span></td>
                             <td>${errBadges}</td>
                             <td>${commentPreview}</td>
-                            <td>${r.created_by ? `<span style="font-size:0.78rem; font-weight:600; color:var(--text-primary); background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.25); border-radius:4px; padding:2px 6px; display:inline-flex; align-items:center; gap:4px; white-space:nowrap;"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>${escapeHtml(r.creator_name ? r.creator_name : r.created_by)}</span>` : '<span style="color:var(--text-muted); font-size:0.75rem;">-</span>'}</td>
+                            <td>${r.created_by ? renderCreatorCell(r, false) : '<span style="color:var(--text-muted); font-size:0.75rem;">-</span>'}</td>
                             <td class="cell-mono" style="font-size:0.8rem; color:var(--text-secondary);">${formatTimestamp(r.created_at)}</td>
                             <td style="text-align: right; white-space: nowrap;">
                                 ${r.retest_token ? `<button type="button" class="btn-action retest" onclick="openRetestStudent('${escapeHtml(r.retest_token)}')" title="打开学员/家长端错题本（需输入姓名验证）">错题本</button>` : ''}
@@ -790,7 +790,7 @@
                             <td><span style="background:rgba(255,255,255,0.06); padding:2px 8px; border-radius:4px; font-size:0.82rem; font-weight:600;">${escapeHtml(r.tier || '-')}</span></td>
                             <td><b style="color:#a78bfa;">${escapeHtml(r.subject || '-')}</b></td>
                             <td style="font-weight:700; color: var(--text-primary);">${escapeHtml(r.class_name || '-')}</td>
-                            <td>${r.created_by ? `<span style="font-size:0.78rem; font-weight:600; color:var(--text-primary); background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.25); border-radius:4px; padding:2px 6px; display:inline-flex; align-items:center; gap:4px; white-space:nowrap;"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>${escapeHtml(r.creator_name ? r.creator_name : r.created_by)}</span>` : '<span style="color:var(--text-muted); font-size:0.75rem;">-</span>'}</td>
+                            <td>${r.created_by ? renderCreatorCell(r, false) : '<span style="color:var(--text-muted); font-size:0.75rem;">-</span>'}</td>
                             <td class="cell-mono" style="font-size:0.8rem; color:var(--text-secondary);">${formatTimestamp(r.created_at)}</td>
                             <td style="text-align: right; white-space: nowrap;">
                                 <button type="button" class="btn-action edit" onclick="openDbRecordModal(${r.id})">编辑</button>
@@ -839,7 +839,7 @@
                             <td><b style="color:#a78bfa;">${escapeHtml(r.subject || '-')}</b></td>
                             <td style="text-align: center;"><span style="font-weight:700; color:#93c5fd; font-family:var(--font-mono); font-size:0.95rem;">第 ${r.week ?? '-'} 周</span></td>
                             <td style="text-align: center;"><span style="background:rgba(56,189,248,0.12); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); padding:2px 8px; border-radius:12px; font-size:0.82rem; font-weight:700; font-family:var(--font-mono);">${r.question_count ?? 0} 题</span></td>
-                            <td>${r.created_by ? `<span style="font-size:0.78rem; font-weight:600; color:var(--text-primary); background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.25); border-radius:4px; padding:2px 6px; display:inline-flex; align-items:center; gap:4px; white-space:nowrap;"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>${escapeHtml(r.creator_name ? r.creator_name : r.created_by)}</span>` : '<span style="color:var(--text-muted); font-size:0.75rem;">-</span>'}</td>
+                            <td>${r.created_by ? renderCreatorCell(r, false) : '<span style="color:var(--text-muted); font-size:0.75rem;">-</span>'}</td>
                             <td class="cell-mono" style="font-size:0.8rem; color:var(--text-secondary);">${formatTimestamp(r.updated_at || r.created_at)}</td>
                             <td style="text-align: right; white-space: nowrap;">
                                 <button type="button" class="btn-action edit" onclick="openDbRecordModal(${r.id})">编辑</button>
@@ -877,7 +877,7 @@
                                     ${ansLink}
                                 </div>
                             </td>
-                            <td>${r.created_by ? `<span style="font-size:0.78rem; font-weight:600; color:var(--text-primary); background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.25); border-radius:4px; padding:2px 6px; display:inline-flex; align-items:center; gap:4px; white-space:nowrap;"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>${escapeHtml(r.creator_name ? r.creator_name : r.created_by)}</span>` : '<span style="color:var(--text-muted); font-size:0.75rem;">-</span>'}</td>
+                            <td>${r.created_by ? renderCreatorCell(r, false) : '<span style="color:var(--text-muted); font-size:0.75rem;">-</span>'}</td>
                             <td class="cell-mono" style="font-size:0.8rem; color:var(--text-secondary);">${formatTimestamp(r.updated_at || r.created_at)}</td>
                             <td style="text-align: right; white-space: nowrap;">
                                 <button type="button" class="btn-action edit" onclick="openDbRecordModal(${r.id})">编辑</button>
@@ -1157,7 +1157,7 @@
                                 </div>
                                 <div class="db-card-meta-cell">
                                     <span class="db-card-meta-label">生成教师</span>
-                                    <span style="font-weight:600; color:var(--text-primary);">${r.created_by ? escapeHtml(r.creator_name || r.created_by) : '-'}</span>
+                                    ${renderCreatorCell(r, true)}
                                 </div>
                                 <div class="db-card-meta-cell full-width">
                                     <span class="db-card-meta-label">错题情况</span>
@@ -1203,7 +1203,7 @@
                                 </div>
                                 <div class="db-card-meta-cell">
                                     <span class="db-card-meta-label">录入教师</span>
-                                    <span style="font-weight:600; color:var(--text-primary);">${r.created_by ? escapeHtml(r.creator_name || r.created_by) : '-'}</span>
+                                    ${renderCreatorCell(r, true)}
                                 </div>
                                 <div class="db-card-meta-cell">
                                     <span class="db-card-meta-label">学科 / 班型</span>
@@ -1211,7 +1211,7 @@
                                 </div>
                                 <div class="db-card-meta-cell">
                                     <span class="db-card-meta-label">生成教师</span>
-                                    <span style="font-weight:600; color:var(--text-primary);">${r.created_by ? escapeHtml(r.creator_name || r.created_by) : '-'}</span>
+                                    ${renderCreatorCell(r, true)}
                                 </div>
                             </div>
                             <div class="db-card-footer">
@@ -1286,7 +1286,7 @@
                                 </div>
                                 <div class="db-card-meta-cell">
                                     <span class="db-card-meta-label">录入教师</span>
-                                    <span style="font-weight:600; color:var(--text-primary);">${r.created_by ? escapeHtml(r.creator_name || r.created_by) : '-'}</span>
+                                    ${renderCreatorCell(r, true)}
                                 </div>
                             </div>
                             <div class="db-card-footer">
@@ -2362,7 +2362,7 @@
                                             <span style="font-weight: 500;">${escapeHtml(tierVal)}</span>
                                             ${record.creator_name || record.created_by ? `
                                                 <span style="color: var(--text-muted);">•</span>
-                                                <span style="color: var(--text-secondary); font-size: 0.8rem; display: inline-flex; align-items: center; gap: 4px;"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>${escapeHtml(record.creator_name || record.created_by)}</span>
+                                                <span style="color: var(--text-secondary); font-size: 0.8rem; display: inline-flex; align-items: center; gap: 4px;"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>${(record.creator_owner_username && (!record.creator_role || record.creator_role==='assistant') ? escapeHtml(record.creator_name||record.created_by) + ' [助教｜所属：' + escapeHtml(record.creator_owner_name||record.creator_owner_username) + ' (' + escapeHtml(record.creator_owner_username) + ')]' : escapeHtml(record.creator_name || record.created_by))}</span>
                                             ` : ''}
                                         </div>
                                     </div>
@@ -2569,7 +2569,7 @@
                         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px;">
                             <div style="background:rgba(255,255,255,0.02); padding:8px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
                                 <span style="font-size:0.72rem; color:var(--text-muted);">录入教师：</span>
-                                <span style="font-size:0.85rem; font-weight:600; color:var(--text-primary);">${escapeHtml(record.creator_name || record.created_by || '-')}</span>
+                                <span style="font-size:0.85rem; font-weight:600; color:var(--text-primary);">${renderCreatorCell(record, true)}</span>
                             </div>
                             <div style="background:rgba(255,255,255,0.02); padding:8px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
                                 <span style="font-size:0.72rem; color:var(--text-muted);">录入时间：</span>
@@ -2609,7 +2609,7 @@
                             </div>
                             <div style="background:rgba(255,255,255,0.03); padding:10px 14px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
                                 <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:3px;">录入教师</div>
-                                <div style="font-size:0.95rem; font-weight:600; color:var(--text-primary);">${escapeHtml(record.creator_name || record.created_by || '-')}</div>
+                                <div style="font-size:0.95rem; font-weight:600; color:var(--text-primary);">${renderCreatorCell(record, true)}</div>
                             </div>
                             <div style="background:rgba(255,255,255,0.03); padding:10px 14px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
                                 <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:3px;">更新时间</div>

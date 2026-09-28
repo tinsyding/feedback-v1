@@ -171,6 +171,45 @@
         }
 
         /* ========================================================
+           责任教师单元格：助教创建时追加所属教师账号
+           后端 db_list 已附带 creator_role / creator_owner_username / creator_owner_name
+           ======================================================== */
+        function getCreatorOwnerInfo(r) {
+            if (!r) return null;
+            const ownerU = r.creator_owner_username || '';
+            if (!ownerU) return null;
+            // 仅助教需要展示归属；若后端未给 role 但给了 owner，也展示以免漏标
+            if (r.creator_role && r.creator_role !== 'assistant') return null;
+            return {
+                username: ownerU,
+                name: r.creator_owner_name || ownerU
+            };
+        }
+
+        function renderCreatorCell(r, compact) {
+            if (!r || !r.created_by) return '<span style="color:var(--text-muted); font-size:0.75rem;">-</span>';
+            const displayName = r.creator_name || r.created_by;
+            const owner = getCreatorOwnerInfo(r);
+            const badge = (r.creator_role === 'assistant')
+                ? '<span style="font-size:0.68rem; padding:0 5px; margin-left:4px; border-radius:4px; background:rgba(245,158,11,0.14); color:#f59e0b; border:1px solid rgba(245,158,11,0.35); font-weight:700; vertical-align:1px;">助教</span>'
+                : '';
+            const ownerLine = owner
+                ? `<div style="font-size:0.7rem; color:var(--text-muted); font-weight:400; margin-top:2px; white-space:nowrap;" title="所属教师账号：${escapeHtml(owner.username)}">所属：${escapeHtml(owner.name)} (${escapeHtml(owner.username)})</div>`
+                : '';
+            const title = owner
+                ? `助教 ${r.created_by}（${displayName}），所属教师：${owner.name}（${owner.username}）`
+                : `${displayName}（${r.created_by}）`;
+            if (compact) {
+                return `<span style="font-weight:600; color:var(--text-primary); font-size:0.85rem;" title="${escapeHtml(title)}">${escapeHtml(displayName)}${badge}</span>${ownerLine}`;
+            }
+            return `
+                <span style="font-size:0.78rem; font-weight:600; color:var(--text-primary); background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.25); border-radius:4px; padding:2px 6px; display:inline-flex; align-items:center; gap:4px; white-space:nowrap;" title="${escapeHtml(title)}">
+                    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                    ${escapeHtml(displayName)}${badge}
+                </span>${ownerLine}`;
+        }
+
+        /* ========================================================
            Modal Backdrop & Keyboard Interaction Listeners
            ======================================================== */
         document.addEventListener('click', (e) => {

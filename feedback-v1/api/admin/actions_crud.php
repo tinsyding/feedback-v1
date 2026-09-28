@@ -263,16 +263,42 @@ switch ($action) {
             }
 
             // 附带教师真实姓名（student_records, class_batches, qbank_weeks, qbank_questions, system_logs, generation_batches, student_record_history）
+            // 若创建人为助教，额外附带其所属教师账号（owner），前端用于“助教（所属：教师）”展示
             if (in_array($table, ['student_records', 'class_batches', 'qbank_weeks', 'qbank_questions', 'system_logs', 'generation_batches', 'student_record_history']) && !empty($rows)) {
                 try {
-                    $allTeachers = DB::fetchAll("SELECT `username`, `real_name` FROM `users`");
+                    $allTeachers = DB::fetchAll("SELECT `id`, `username`, `real_name`, `role`, `teacher_id`, `created_by` FROM `users`");
                     $teacherMap = [];
+                    $userByUsername = [];
+                    $userById = [];
                     foreach ($allTeachers as $t) {
                         $teacherMap[$t['username']] = $t['real_name'];
+                        $userByUsername[$t['username']] = $t;
+                        $userById[(int)$t['id']] = $t;
                     }
                     foreach ($rows as &$r) {
                         if (isset($r['created_by'])) {
                             $r['creator_name'] = $teacherMap[$r['created_by']] ?? $r['created_by'];
+                            $creator = $userByUsername[$r['created_by']] ?? null;
+                            $r['creator_role'] = $creator['role'] ?? null;
+                            $r['creator_owner_username'] = null;
+                            $r['creator_owner_name'] = null;
+                            if ($creator && ($creator['role'] ?? '') === 'assistant') {
+                                $owner = null;
+                                $tid = (int)($creator['teacher_id'] ?? 0);
+                                if ($tid > 0 && isset($userById[$tid])) {
+                                    $owner = $userById[$tid];
+                                } elseif (!empty($creator['created_by']) && isset($userByUsername[$creator['created_by']])) {
+                                    $owner = $userByUsername[$creator['created_by']];
+                                }
+                                if ($owner) {
+                                    $r['creator_owner_username'] = $owner['username'];
+                                    $r['creator_owner_name'] = $owner['real_name'] !== '' ? $owner['real_name'] : $owner['username'];
+                                } elseif (!empty($creator['created_by'])) {
+                                    // 所属教师账号已被删除时，仍保留原始账号名字符串，避免前端空白
+                                    $r['creator_owner_username'] = $creator['created_by'];
+                                    $r['creator_owner_name'] = $teacherMap[$creator['created_by']] ?? $creator['created_by'];
+                                }
+                            }
                         }
                         if (isset($r['updated_by'])) {
                             $r['updater_name'] = $teacherMap[$r['updated_by']] ?? $r['updated_by'];

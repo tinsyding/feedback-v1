@@ -326,7 +326,7 @@
                         <td style="text-align: center;"><span style="font-weight: 700; font-family: var(--font-mono);">${r.student_count ?? '-'}</span></td>
                         <td style="text-align: center;"><span style="font-weight: 700; color: #f87171; font-family: var(--font-mono);">${r.error_student_count ?? '-'}</span></td>
                         <td>
-                            ${r.created_by ? `<span style="font-size:0.78rem; font-weight:600; color:var(--text-primary); background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.25); border-radius:4px; padding:2px 6px; white-space:nowrap;">${escapeHtml(r.creator_name ? r.creator_name : r.created_by)}</span>` : '<span style="color:var(--text-muted); font-size:0.75rem;">-</span>'}
+                            ${r.created_by ? renderCreatorCell(r, false) : '<span style="color:var(--text-muted); font-size:0.75rem;">-</span>'}
                         </td>
                         <td class="cell-mono" style="font-size:0.8rem; color:var(--text-secondary);">${formatTimestamp(r.created_at)}</td>
                         <td style="text-align: right; white-space: nowrap;">

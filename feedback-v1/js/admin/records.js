@@ -532,12 +532,7 @@
                         <td>${errBadges}</td>
                         <td>${commentPreview}</td>
                         <td>
-                            ${r.created_by ? `
-                                <span style="font-size:0.78rem; font-weight:600; color:var(--text-primary); background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.25); border-radius:4px; padding:2px 6px; display:inline-flex; align-items:center; gap:4px; white-space:nowrap;">
-                                    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-                                    ${escapeHtml(r.creator_name ? r.creator_name : r.created_by)}
-                                </span>
-                            ` : '<span style="color:var(--text-muted); font-size:0.75rem;">-</span>'}
+                            ${r.created_by ? renderCreatorCell(r, false) : '<span style="color:var(--text-muted); font-size:0.75rem;">-</span>'}
                         </td>
                         <td class="cell-mono" style="font-size:0.8rem; color:var(--text-secondary);" title="最后更改: ${formatTimestamp(r.updated_at || r.created_at)}\n首次录入: ${formatTimestamp(r.created_at)}">${formatTimestamp(r.updated_at || r.created_at, true)}</td>
                         <td style="text-align: right; white-space: nowrap;">
@@ -631,7 +626,7 @@
                             </div>
                             <div class="db-card-meta-cell">
                                 <span class="db-card-meta-label">责任教师</span>
-                                <span style="font-weight:600; color:var(--text-primary); font-size:0.85rem;">${r.created_by ? escapeHtml(r.creator_name || r.created_by) : '-'}</span>
+                                <span style="font-weight:600; color:var(--text-primary); font-size:0.85rem;">${r.created_by ? renderCreatorCell(r, true) : '-'}</span>
                             </div>
                             <div class="db-card-meta-cell">
                                 <span class="db-card-meta-label">首次录入时间</span>
