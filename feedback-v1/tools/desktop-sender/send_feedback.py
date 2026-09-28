@@ -126,8 +126,8 @@ def get_resource_path(relative_path: str) -> str:
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
 
 
-def get_data_dir() -> str:
-    """获取持久化数据（如历史记录、日志、截图）存储目录，保证单文件打包时保存在 exe 所在目录"""
+def get_app_base_dir() -> str:
+    """应用根目录：打包后为 exe 所在目录，源码运行为工程目录（原 get_data_dir 的选址逻辑）"""
     if getattr(sys, 'frozen', False):
         return os.path.dirname(os.path.abspath(sys.executable))
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -135,6 +135,48 @@ def get_data_dir() -> str:
     if os.path.exists(os.path.join(parent_dir, "assets")):
         return parent_dir
     return script_dir
+
+
+# 持久化数据子目录名（ASCII，避免中文路径在部分环境下的问题；与 Web 端 data/ 区分）
+DATA_SUBDIR = "appdata"
+
+
+def _migrate_legacy_data(base_dir: str, data_dir: str) -> None:
+    """一次性迁移：把此前落在根目录的老数据搬进 appdata/。
+    不做会丢失已发送记录（程序以为没人发过，有重发风险），所以必须在首次运行时自动搬。"""
+    legacy_files = ["feedback_history.json", "feedback_debug.log", "feedback_debug.log.bak"]
+    try:
+        os.makedirs(data_dir, exist_ok=True)
+        for name in legacy_files:
+            src = os.path.join(base_dir, name)
+            dst = os.path.join(data_dir, name)
+            if os.path.isfile(src) and not os.path.exists(dst):
+                try:
+                    os.replace(src, dst)
+                except Exception:
+                    pass
+        legacy_shots = os.path.join(base_dir, "debug_screenshots")
+        new_shots = os.path.join(data_dir, "debug_screenshots")
+        if os.path.isdir(legacy_shots) and not os.path.exists(new_shots):
+            try:
+                os.replace(legacy_shots, new_shots)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def get_data_dir() -> str:
+    """获取持久化数据（如历史记录、日志、截图）存储目录。
+    统一放在根目录下的 appdata/ 子目录，保持 exe 同级干净。"""
+    base_dir = get_app_base_dir()
+    data_dir = os.path.join(base_dir, DATA_SUBDIR)
+    _migrate_legacy_data(base_dir, data_dir)
+    try:
+        os.makedirs(data_dir, exist_ok=True)
+    except Exception:
+        pass
+    return data_dir
 
 
 LOG_FILE_PATH = os.path.join(get_data_dir(), "feedback_debug.log")

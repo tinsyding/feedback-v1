@@ -39,6 +39,7 @@ _enc.txt
 feedback-v1/tools/desktop-sender/feedback_history.json
 feedback-v1/tools/desktop-sender/测试.json
 feedback-v1/tools/desktop-sender/dist/
+appdata/
 __pycache__/
 
 # Database dumps & production backups
