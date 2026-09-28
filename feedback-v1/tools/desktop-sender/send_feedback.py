@@ -1003,8 +1003,11 @@ def cloud_post(server: str, action: str, payload: dict, timeout: int = 20) -> di
     return data.get("data") or {}
 
 
-def parse_log_entries(limit: int = CLOUD_LOG_TAIL_LINES) -> list:
-    """读取本地日志末尾 N 行，解析为 [{ts, level, msg}]（纯函数，可单测）"""
+def parse_log_entries(limit: int = CLOUD_LOG_TAIL_LINES, align_task: bool = True) -> list:
+    """读取本地日志末尾，解析为 [{ts, level, msg}]（纯函数，可单测）。
+    align_task=True 时优先对齐到最近一次“批量发送任务启动”，保证至少一个
+    完整任务（启动参数→逐人轨迹→结束统计）不断头；硬上限 1000 行兜底。
+    找不到任务标记时回退为普通末尾 limit 行。"""
     entries = []
     try:
         if not os.path.isfile(LOG_FILE_PATH):
@@ -1013,8 +1016,26 @@ def parse_log_entries(limit: int = CLOUD_LOG_TAIL_LINES) -> list:
             lines = f.readlines()
     except Exception:
         return entries
+    if not lines:
+        return entries
+    TASK_MARK = "批量发送任务启动"
+    HARD_CAP = 1000
+    if align_task:
+        # 只在最近 1000 行内找任务头：找到了就整段带上（天然 ≤1000），
+        # 找不到（任务超大或无任务）就回退普通截尾，把上传体积封顶。
+        window = lines[-HARD_CAP:]
+        start = None
+        for i, line in enumerate(window):
+            if TASK_MARK in line:
+                start = i
+        if start is None:
+            selected = lines[-limit:]
+        else:
+            selected = window[start:]
+    else:
+        selected = lines[-limit:]
     pattern = re.compile(r"^\[(?P<ts>[^\]]+)\]\s*\[(?P<level>[A-Za-z]+)\]\s*(?P<msg>.*)$")
-    for line in lines[-limit:]:
+    for line in selected:
         line = line.rstrip("\n")
         if not line.strip():
             continue
