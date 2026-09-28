@@ -1,0 +1,10 @@
+# 教师端企业微信自动发送工具 - 构建依赖（与本地验证版本锁定一致）
+# 云端构建（.github/workflows/build-tools.yml）与本地 `pyinstaller send_feedback.spec` 共用此表
+pyinstaller==6.22.3
+pillow==12.3.0
+PyAutoGUI==0.9.54
+pyperclip==1.11.0
+pywin32==312
+rapidocr-onnxruntime==1.2.3
+numpy==2.5.3
+opencv-python==5.0.0.93

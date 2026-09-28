@@ -42,3 +42,6 @@ feedback/
   经 GitHub Actions ssh 到服务器执行 `git pull` + 权限修复 + 冒烟检查。
   首次配置需在仓库 Secrets 中填入 `DEPLOY_HOST/DEPLOY_PORT/DEPLOY_USER/DEPLOY_SSH_KEY`
  （详见 workflow 文件头注释）。
+- 桌面工具发版：`git tag tools-x.y && git push origin tools-x.y` 触发
+  `.github/workflows/build-tools.yml`，在云端构建 `反馈工具-x.y.exe`
+  并挂到同名 Release（构建参数锁定见 `tools/desktop-sender/requirements.txt`）。
