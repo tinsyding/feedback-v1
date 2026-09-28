@@ -4,7 +4,7 @@
 Admin 前端脚本自动打包构建工具 (Bundle Admin JS)
 
 功能：
-将 js/admin/ 下的 10 个独立业务模块，按严格依赖顺序合并为单文件 js/admin.js。
+将 js/admin/ 下的 12 个独立业务模块，按严格依赖顺序合并为单文件 js/admin.js。
 既保证日常开发的模块化与低耦合，又确保线上运行的单请求极速加载与零时序风险。
 
 使用方式：
@@ -24,6 +24,7 @@ MODULE_ORDER = [
     ("teachers.js", "教师账号管理 (loadTeachers, render, resetPassword)"),
     ("records.js", "学生学情记录 (loadRecords, filter, aggregate)"),
     ("batches.js", "生成批次记录独立视图 (generation_batches 列表/筛选/删除/跳转学情)"),
+    ("desktop.js", "桌面端云端日志独立视图 (module=desktop 复用 logs 接口)"),
     ("database.js", "Tab 3: 底层数据库通用 CRUD 与版本回滚"),
     ("changelog.js", "Tab 4: 更新日志管理"),
     ("token-search.js", "错题本 Token 快捷反查学情"),
