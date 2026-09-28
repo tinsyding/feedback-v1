@@ -23,6 +23,7 @@ MODULE_ORDER = [
     ("logs.js", "Tab 2: 审计日志管理 (loadLogs, filter)"),
     ("teachers.js", "教师账号管理 (loadTeachers, render, resetPassword)"),
     ("records.js", "学生学情记录 (loadRecords, filter, aggregate)"),
+    ("batches.js", "生成批次记录独立视图 (generation_batches 列表/筛选/删除/跳转学情)"),
     ("database.js", "Tab 3: 底层数据库通用 CRUD 与版本回滚"),
     ("changelog.js", "Tab 4: 更新日志管理"),
     ("token-search.js", "错题本 Token 快捷反查学情"),

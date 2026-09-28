@@ -18,6 +18,10 @@
                 title: '教师账号管理',
                 breadcrumb: '教师账号管理'
             },
+            batches: {
+                title: '生成批次记录',
+                breadcrumb: '生成批次记录'
+            },
             logs: {
                 title: '操作日志',
                 breadcrumb: '操作日志'
@@ -59,6 +63,8 @@
                 initRecordsTab();
             } else if (tab === 'teachers') {
                 initTeachersTab();
+            } else if (tab === 'batches') {
+                initBatchesTab();
             } else if (tab === 'logs') {
                 loadFilters();
                 loadLogs(1);
