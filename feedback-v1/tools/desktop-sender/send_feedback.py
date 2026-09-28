@@ -1051,10 +1051,18 @@ def cloud_upload_async(include_history: bool = False) -> "Thread":
         tag = machine_tag()
         try:
             entries = parse_log_entries()
+            # 服务端单次最多收 100 条，超了按 100 切片分批发（仍在 30次/分钟 限频内）
+            total = 0
+            for i in range(0, len(entries), 100):
+                try:
+                    data = cloud_post(DEFAULT_CLOUD_SERVER, "upload_logs",
+                                      {"client": tag, "entries": entries[i:i + 100]})
+                    total += int(data.get("saved", 0))
+                except Exception as e:
+                    log(f"云端诊断日志分片上传失败[{i // 100 + 1}]: {e}", "DEBUG")
+                    break
             if entries:
-                data = cloud_post(DEFAULT_CLOUD_SERVER, "upload_logs",
-                                  {"client": tag, "entries": entries})
-                log(f"云端诊断日志已自动上报：{data.get('saved', 0)} 条", "DEBUG")
+                log(f"云端诊断日志已自动上报：{total}/{len(entries)} 条", "DEBUG")
         except Exception as e:
             log(f"云端诊断日志自动上报失败: {e}", "DEBUG")
         if not include_history:
