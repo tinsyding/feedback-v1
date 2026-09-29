@@ -1,5 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
 from PyInstaller.utils.hooks import collect_all
+
+# 网站根目录的 favicon.ico 作为 exe 图标（spec 目录 -> feedback-v1/）
+APP_ICON = os.path.join(SPECPATH, '..', '..', 'favicon.ico')
 
 datas = []
 binaries = []
@@ -31,7 +35,8 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='send_feedback',
+    name='极方每周反馈程序',
+    icon=APP_ICON,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

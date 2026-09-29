@@ -1,7 +1,7 @@
 name: Build 反馈工具
 
 # 用法：git tag tools-v1.0 && git push origin tools-v1.0
-# 自动在 Windows 云端构建 exe 并挂到同名 Release 下，附件名为 反馈工具-v1.0.exe。
+# 自动在 Windows 云端构建 exe 并挂到同名 Release 下，附件名为 极方每周反馈程序-v1.0.exe。
 # 构建参数与本地完全一致（复用 send_feedback.spec + requirements.txt 锁定版本）。
 
 on:
@@ -40,8 +40,8 @@ jobs:
       - name: Rename asset
         run: |
           VER="${GITHUB_REF_NAME#tools-}"
-          cp "feedback-v1/tools/desktop-sender/dist/send_feedback.exe" "反馈工具-${VER}.exe"
-          ls -la 反馈工具-*.exe
+          cp "feedback-v1/tools/desktop-sender/dist/极方每周反馈程序.exe" "极方每周反馈程序-${VER}.exe"
+          ls -la 极方每周反馈程序-*.exe
 
       - name: Publish release
         env:
@@ -49,5 +49,5 @@ jobs:
         run: |
           VER="${GITHUB_REF_NAME#tools-}"
           NOTES="自动构建（${GITHUB_SHA:0:7}）。双击即用，无需 Python；首次启动稍慢属正常；建议单独建文件夹存放运行。"
-          gh release create "$GITHUB_REF_NAME" "反馈工具-${VER}.exe" --title "反馈工具 ${VER}" --notes "$NOTES" \
-            || gh release upload "$GITHUB_REF_NAME" "反馈工具-${VER}.exe" --clobber
+          gh release create "$GITHUB_REF_NAME" "极方每周反馈程序-${VER}.exe" --title "极方每周反馈程序 ${VER}" --notes "$NOTES" \
+            || gh release upload "$GITHUB_REF_NAME" "极方每周反馈程序-${VER}.exe" --clobber
