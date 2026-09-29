@@ -4,6 +4,6 @@
     "defaultSeason": "autumn",
     "semesterWeeks": 18,
     "forceIntegerScores": true,
-    "retestQuestionSpacing": 26,
+    "retestQuestionSpacing": 85,
     "retestQrCodeEnabled": false
 }

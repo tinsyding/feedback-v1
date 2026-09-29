@@ -27,12 +27,12 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
     }
 
     // Load configuration & Spacing Management
-    window.retestQuestionSpacing = 26;
+    window.retestQuestionSpacing = 85;
     window.retestQrCodeEnabled = true;
     try {
         const savedSpacing = (localStorage.getItem('retest_question_spacing') || localStorage.getItem('retest_beta_spacing'));
         if (savedSpacing) {
-            window.retestQuestionSpacing = parseInt(savedSpacing) || 26;
+            window.retestQuestionSpacing = parseInt(savedSpacing) || 85;
         }
     } catch(e) {}
 
@@ -44,7 +44,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
     function updateSpacingUI(val) {
         let sp = parseInt(val);
-        if (isNaN(sp)) sp = 26;
+        if (isNaN(sp)) sp = 85;
         sp = Math.max(8, Math.min(260, sp));
         window.retestQuestionSpacing = sp;
 
@@ -933,7 +933,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             const PAGE_HEIGHT = 841.89;
             const TOP_MARGIN = 26;
             const BOTTOM_MARGIN = 28;
-            const SEPARATOR_HEIGHT = (window.retestQuestionSpacing && window.retestQuestionSpacing >= 8) ? window.retestQuestionSpacing : 26;
+            const SEPARATOR_HEIGHT = (window.retestQuestionSpacing && window.retestQuestionSpacing >= 8) ? window.retestQuestionSpacing : 85;
 
             const mergedPdf = await PDFLib.PDFDocument.create();
             let currentPage = null;
