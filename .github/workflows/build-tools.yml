@@ -1,7 +1,7 @@
 name: Build 反馈工具
 
-# 用法：git tag tools-v1.0 && git push origin tools-v1.0
-# 自动在 Windows 云端构建 exe 并挂到同名 Release 下，附件名为 极方每周反馈程序-v1.0.exe。
+# 用法：git tag tools-v1.4 && git push origin tools-v1.4
+# 自动在 Windows 云端构建 exe 并挂到同名 Release 下，附件名为 极方每周反馈程序-v1.4.exe。
 # 构建参数与本地完全一致（复用 send_feedback.spec + requirements.txt 锁定版本）。
 
 on:

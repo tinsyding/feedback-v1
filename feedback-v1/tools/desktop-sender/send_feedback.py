@@ -108,6 +108,9 @@ def preprocess_dropdown_image(pil_img: Image.Image) -> Image.Image:
         log(f"图像预处理异常，降级使用原图: {e}", "WARN")
         return pil_img
 
+# 客户端应用版本号
+APP_VERSION = "v1.4"
+
 # 基础默认延时配置 (秒)
 SEARCH_DELAY = 1.5
 CLICK_DELAY = 0.5
@@ -1114,7 +1117,7 @@ def cloud_post(server: str, action: str, payload: dict, timeout: int = 20) -> di
     req = urllib.request.Request(
         url,
         data=body,
-        headers={"Content-Type": "application/json", "User-Agent": "JF-Feedback-Sender/1.0"},
+        headers={"Content-Type": "application/json", "User-Agent": f"JF-Feedback-Sender/{APP_VERSION}"},
         method="POST",
     )
     try:
@@ -1347,7 +1350,7 @@ def cloud_upload_async(include_history: bool = False) -> "Thread":
             for i in range(0, len(entries), 100):
                 try:
                     data = cloud_post(DEFAULT_CLOUD_SERVER, "upload_logs",
-                                      {"client": tag, "entries": entries[i:i + 100]})
+                                      {"client": tag, "version": APP_VERSION, "entries": entries[i:i + 100]})
                     total += int(data.get("saved", 0))
                 except Exception as e:
                     log(f"云端诊断日志分片上传失败[{i // 100 + 1}]: {e}", "DEBUG")
@@ -1364,7 +1367,7 @@ def cloud_upload_async(include_history: bool = False) -> "Thread":
             return
         try:
             data = cloud_post(DEFAULT_CLOUD_SERVER, "upload_history",
-                              {"client": tag, "history": payload})
+                              {"client": tag, "version": APP_VERSION, "history": payload})
             log(f"云端发送历史已自动上报：{data.get('bytes', 0)} 字节", "DEBUG")
         except Exception as e:
             log(f"云端发送历史自动上报失败: {e}", "DEBUG")
@@ -2036,7 +2039,7 @@ class HistoryDialog:
 class FeedbackSender:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("极方每周反馈程序")
+        self.root.title(f"极方每周反馈程序 {APP_VERSION}")
 
         # 尝试设置窗口图标
         try:
@@ -2086,7 +2089,7 @@ class FeedbackSender:
 
         self.float_win = None
         self.setup_ui()
-        log(f"极方每周反馈程序 初始化完成 | 数据目录: {get_data_dir()} | 日志路径: {LOG_FILE_PATH} | RapidOCR可用: {HAS_RAPIDOCR} | WinOCR可用: {HAS_WINOCR}", "INFO")
+        log(f"极方每周反馈程序 {APP_VERSION} 初始化完成 | 数据目录: {get_data_dir()} | 日志路径: {LOG_FILE_PATH} | RapidOCR可用: {HAS_RAPIDOCR} | WinOCR可用: {HAS_WINOCR}", "INFO")
         # 启动时后台上报诊断日志；关闭时上报日志+发送历史（见 _on_app_close）
         self.root.protocol("WM_DELETE_WINDOW", self._on_app_close)
         try:
@@ -2174,7 +2177,7 @@ class FeedbackSender:
 
         self.title_label = tk.Label(
             header_frame,
-            text="极方每周反馈程序",
+            text=f"极方每周反馈程序 {APP_VERSION}",
             font=("Microsoft YaHei", 16, "bold"),
             bg="#F5F7FA",
             fg="#303133",
