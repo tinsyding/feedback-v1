@@ -37,17 +37,27 @@ jobs:
         working-directory: feedback-v1/tools/desktop-sender
         run: python -m PyInstaller --noconfirm --clean send_feedback.spec
 
-      - name: Rename asset
+      - name: Extract version
+        id: get_version
         run: |
           VER="${GITHUB_REF_NAME#tools-}"
+          echo "version=${VER}" >> $GITHUB_OUTPUT
+
+      - name: Rename asset
+        run: |
+          VER="${{ steps.get_version.outputs.version }}"
           cp "feedback-v1/tools/desktop-sender/dist/极方每周反馈程序.exe" "极方每周反馈程序-${VER}.exe"
           ls -la 极方每周反馈程序-*.exe
 
       - name: Publish release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/tools-')
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          VER="${GITHUB_REF_NAME#tools-}"
-          NOTES="自动构建（${GITHUB_SHA:0:7}）。双击即用，无需 Python；首次启动稍慢属正常；建议单独建文件夹存放运行。"
-          gh release create "$GITHUB_REF_NAME" "极方每周反馈程序-${VER}.exe" --title "极方每周反馈程序 ${VER}" --notes "$NOTES" \
-            || gh release upload "$GITHUB_REF_NAME" "极方每周反馈程序-${VER}.exe" --clobber
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: 极方每周反馈程序 ${{ steps.get_version.outputs.version }}
+          body: |
+            自动构建（${{ github.sha }}）。双击即用，无需 Python；首次启动稍慢属正常；建议单独建文件夹存放运行。
+          files: |
+            极方每周反馈程序-*.exe
