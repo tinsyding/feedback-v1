@@ -9,6 +9,7 @@
 *.exe
 feedback_debug.log
 debug_screenshots/
+pic-example/
 
 # Environment & Sensitive configs
 .env

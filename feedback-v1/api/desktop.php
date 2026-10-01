@@ -25,6 +25,7 @@ require_once __DIR__ . '/logs.php';
 const DESKTOP_MAX_LOG_ENTRIES = 100;
 const DESKTOP_MAX_HISTORY_BYTES = 524288; // 512KB
 const DESKTOP_RATE_LIMIT = 30;
+const DESKTOP_VISION_RATE_LIMIT = 120; // 视觉检测允许更高频调用以适应批量发送节奏
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
@@ -35,7 +36,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 $action = $_GET['action'] ?? '';
 
 /** IP 级限频（桌面端无 session，只能按 IP） */
-function desktopCheckRateLimit(string $ip): void {
+function desktopCheckRateLimit(string $ip, int $limit = DESKTOP_RATE_LIMIT): void {
     $f = sys_get_temp_dir() . '/jf_desktop_rate_' . md5($ip) . '.json';
     $now = time();
     $info = ['count' => 0, 'window' => $now];
@@ -45,9 +46,9 @@ function desktopCheckRateLimit(string $ip): void {
             $info = $cached;
         }
     }
-    if ((int)($info['count'] ?? 0) >= DESKTOP_RATE_LIMIT) {
+    if ((int)($info['count'] ?? 0) >= $limit) {
         http_response_code(429);
-        echo json_encode(['success' => false, 'error' => '上报过于频繁，请稍后再试'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => '请求过于频繁，请稍后再试'], JSON_UNESCAPED_UNICODE);
         exit;
     }
     $info['count'] = (int)($info['count'] ?? 0) + 1;
@@ -83,8 +84,119 @@ function desktopAuthTeacher(string $username, string $password): array {
     return $user;
 }
 
+/**
+ * 调用阿里云百炼 Qwen3.8-Flash 多模态视觉模型
+ */
+function callDashScopeVision(string $apiKey, string $task, string $targetId, string $targetName, string $imageBase64): array {
+    $imgUrl = $imageBase64;
+    if (!str_starts_with($imgUrl, 'data:image/')) {
+        $imgUrl = 'data:image/jpeg;base64,' . $imgUrl;
+    }
+
+    if ($task === 'dropdown') {
+        $prompt = "你是一个企业微信搜索结果分析专家。请根据提供的企业微信搜索下拉列表截图，找出目标联系人在列表中的位置。\n\n" .
+                  "【目标学生信息】：\n" .
+                  "- 目标学号：{$targetId}\n" .
+                  "- 目标姓名：{$targetName}\n\n" .
+                  "【企微下拉列表规则】：\n" .
+                  "1. 列表自上而下每一行为一个搜索结果（依次编号为第 1 项、第 2 项、第 3 项...），忽略顶部分类标题栏（如“联系人”）。\n" .
+                  "2. 【本人备注】：条目主标题直接等于或包含该学生学号或姓名（例如 \"90001张三\"、\"张三妈妈\"、\"90001\"）。\n" .
+                  "3. 【他人描述/聊天记录】：条目主标题是其他人（例如 \"李四妈妈\"、\"初二数学组\"），下方有一行浅灰色小字写着“包含: 90001”或“聊天记录: ...”。这代表在他人聊天中提到了该学生，绝对不是目标本人！\n" .
+                  "4. 【无此联系人】：页面显示“进入全局搜索”、“网络查找”、“未找到相关联系人”等，且上方没有符合本人的独立联系人。\n\n" .
+                  "请输出严格 JSON 格式：\n" .
+                  "{\n" .
+                  "  \"target_found\": true,\n" .
+                  "  \"choice\": 1,\n" .
+                  "  \"matched_title\": \"命中条目的主标题，未找到则填空字符串\",\n" .
+                  "  \"reason\": \"简述判定理由\"\n" .
+                  "}\n\n" .
+                  "【choice 取值】：\n" .
+                  "- 1: 第 1 项即为本人\n" .
+                  "- 2~4: 第 1 项为他人描述，第 choice 项为本人\n" .
+                  "- -2: 列表全是他人描述，无本人独立联系人（安全拦截）\n" .
+                  "- 0: 未找到该联系人 / 显示全局搜索（安全跳过）";
+    } else {
+        $prompt = "你是一个企业微信会话标题核验专家。请仔细观察这张企业微信聊天窗口顶部的标题栏截图，核实当前会话是否为目标学生本人或其家长。\n\n" .
+                  "【目标学生信息】：\n" .
+                  "- 目标学号：{$targetId}\n" .
+                  "- 目标姓名：{$targetName}\n\n" .
+                  "【判断准则】：\n" .
+                  "1. 标题中只要包含目标学号（例如 \"{$targetId}\"）或目标姓名（例如 \"{$targetName}\"、\"{$targetName}妈妈\"、\"{$targetName}家长\"），均判定为匹配成功！允许包含各类表情符号（如 💐、🌸）和系统后缀（如 \"@微信\"）。\n" .
+                  "2. 若标题明确属于其他联系人（例如包含其他学生姓名、其他四位以上学号，且完全不含目标学生），判定为不匹配。\n" .
+                  "3. 若截图完全空白或未见有效文字，判定为存疑。\n\n" .
+                  "请输出严格 JSON 格式：\n" .
+                  "{\n" .
+                  "  \"matched\": true,\n" .
+                  "  \"detected_title\": \"识别出的完整标题文本\",\n" .
+                  "  \"reason\": \"简述判定理由\"\n" .
+                  "}";
+    }
+
+    $payload = [
+        'model' => 'qwen3.8-flash',
+        'enable_thinking' => false,
+        'messages' => [
+            [
+                'role' => 'user',
+                'content' => [
+                    [
+                        'type' => 'image_url',
+                        'image_url' => ['url' => $imgUrl]
+                    ],
+                    [
+                        'type' => 'text',
+                        'text' => $prompt
+                    ]
+                ]
+            ]
+        ],
+        'response_format' => ['type' => 'json_object'],
+        'max_tokens' => 300
+    ];
+
+    $ch = curl_init('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions');
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE),
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => [
+            'Authorization: Bearer ' . $apiKey,
+            'Content-Type: application/json'
+        ],
+        CURLOPT_TIMEOUT => 15,
+        CURLOPT_SSL_VERIFYPEER => true
+    ]);
+
+    $startTime = microtime(true);
+    $response = curl_exec($ch);
+    $durationMs = (int)round((microtime(true) - $startTime) * 1000);
+    $curlErr = curl_error($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($curlErr) {
+        throw new RuntimeException("大模型接口网络异常: " . $curlErr);
+    }
+    if ($httpCode !== 200) {
+        $errDetail = json_decode($response, true);
+        $errMsg = $errDetail['error']['message'] ?? "HTTP {$httpCode}";
+        throw new RuntimeException("大模型服务返回异常: {$errMsg}");
+    }
+
+    $resData = json_decode($response, true);
+    $content = $resData['choices'][0]['message']['content'] ?? '';
+    $parsed = json_decode($content, true);
+    if (!is_array($parsed)) {
+        throw new RuntimeException("模型返回了无法解析的非 JSON 内容");
+    }
+
+    $parsed['duration_ms'] = $durationMs;
+    return $parsed;
+}
+
 $clientIp = getClientIp();
-desktopCheckRateLimit($clientIp);
+$rateLimit = ($action === 'vision_detect') ? DESKTOP_VISION_RATE_LIMIT : DESKTOP_RATE_LIMIT;
+desktopCheckRateLimit($clientIp, $rateLimit);
 
 $input = json_decode(file_get_contents('php://input'), true) ?: [];
 $username = trim((string)($input['username'] ?? ''));
@@ -175,6 +287,64 @@ switch ($action) {
             'message' => "桌面端 {$operator} 上传了发送历史快照"
         ]);
         sendResponse(true, ['bytes' => strlen($payload), 'message' => '发送历史已上传，管理员可在后台查看']);
+        break;
+    }
+
+    case 'vision_detect': {
+        $task = trim((string)($input['task'] ?? ''));
+        if ($task !== 'dropdown' && $task !== 'header') {
+            sendResponse(false, null, '无效的视觉任务类型（仅支持 dropdown 或 header）', 400);
+        }
+        $targetId = trim((string)($input['target_id'] ?? ''));
+        $targetName = trim((string)($input['target_name'] ?? ''));
+        $imageBase64 = trim((string)($input['image'] ?? ''));
+        if ($imageBase64 === '') {
+            sendResponse(false, null, '缺少截屏图像数据', 400);
+        }
+
+        // 获取 DashScope 密钥 (优先 local.php -> 环境变量)
+        $secretKeys = @include __DIR__ . '/secret_key.php';
+        $apiKey = '';
+        if (is_array($secretKeys)) {
+            $apiKey = $secretKeys['dashscopeApiKey'] ?? '';
+        }
+        if (empty($apiKey) && file_exists(__DIR__ . '/secret_key.local.php')) {
+            $localKeys = @include __DIR__ . '/secret_key.local.php';
+            if (is_array($localKeys)) {
+                $apiKey = $localKeys['dashscopeApiKey'] ?? '';
+            }
+        }
+        if (empty($apiKey)) {
+            $apiKey = getenv('DASHSCOPE_API_KEY') ?: '';
+        }
+        if (empty($apiKey)) {
+            sendResponse(false, null, '服务端未配置视觉模型 API 密钥 (DASHSCOPE_API_KEY)', 500);
+        }
+
+        try {
+            $result = callDashScopeVision($apiKey, $task, $targetId, $targetName, $imageBase64);
+            recordServerLog('info', 'desktop', 'vision_detect_success', [
+                'task' => $task,
+                'target_id' => $targetId,
+                'target_name' => $targetName,
+                'client' => $clientTag,
+                'duration_ms' => $result['duration_ms'] ?? 0
+            ], [
+                'operator' => $operator
+            ]);
+            sendResponse(true, $result);
+        } catch (Throwable $e) {
+            recordServerLog('warn', 'desktop', 'vision_detect_failed', [
+                'task' => $task,
+                'target_id' => $targetId,
+                'target_name' => $targetName,
+                'client' => $clientTag,
+                'error' => $e->getMessage()
+            ], [
+                'operator' => $operator
+            ]);
+            sendResponse(false, null, $e->getMessage(), 502);
+        }
         break;
     }
 

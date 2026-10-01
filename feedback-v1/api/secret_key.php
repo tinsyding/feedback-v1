@@ -21,5 +21,6 @@ if ($envSecret === '' || $envSecret === 'your-secret-key-template-placeholder') 
 }
 
 return [
-    'retestSecret' => $envSecret
+    'retestSecret' => $envSecret,
+    'dashscopeApiKey' => getenv('DASHSCOPE_API_KEY') ?: ''
 ];

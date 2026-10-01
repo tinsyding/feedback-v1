@@ -70,7 +70,7 @@ except ImportError:
     HAS_WINOCR = False
 
 HAS_OCR = HAS_RAPIDOCR or HAS_WINOCR
-HAS_SMART_CHECK = HAS_OCR
+HAS_SMART_CHECK = True  # 视觉智能核验综合可用状态 (模式 A 大模型 + 模式 B 本地 OCR)
 _RAPID_OCR_INSTANCE = None
 
 
@@ -868,16 +868,48 @@ def _save_dropdown_debug_shot(crop_img, target_id: str, target_name: str, choice
         log(f"[现场调试快照保存失败]: {se}", "WARN")
 
 
-def detect_dropdown_target(wecom_rect: tuple, target_id: str, target_name: str) -> tuple:
+def detect_dropdown_target(wecom_rect: tuple, target_id: str, target_name: str, mode: str = "A", auto_fallback: bool = True) -> tuple:
     """
-    【模式 B 核心决策总控】
-    调用 RapidOCR / WinOCR 视觉智能识别 (带全分辨率与 DPI 缩放动态适配)
+    【下拉候选框视觉智能决策总控】
+    模式 A: 通义千问 Qwen3.8-Flash 大模型视觉感知 (语义推断、关系消歧)
+    模式 B: 本地 RapidOCR / WinOCR 视觉引擎 (离线、本地)
+    auto_fallback: 模式 A 发生网络或服务端异常时，自动平滑降级至模式 B
+    返回: (choice, reason)
+      choice >= 1: 命中项序号
+      choice == 0: 通讯录中无此联系人 (全局搜索)
+      choice == -2: 仅他人描述 (无本人独立条目)
+      choice == -1: 未确立或出错
     """
-    if HAS_OCR and wecom_rect:
-        return detect_dropdown_target_via_ocr(wecom_rect, target_id, target_name)
+    if not wecom_rect:
+        log("未获取到企业微信窗口坐标，跳过下拉框视觉核验", "WARN")
+        return -1, ""
 
-    log(f"模式 B 视觉核验跳过: HAS_OCR={HAS_OCR}, wecom_rect={wecom_rect}", "WARN")
-    return -1, ""
+    if mode == "A":
+        crop_img = capture_dropdown_crop(wecom_rect)
+        if crop_img:
+            choice, reason = detect_dropdown_target_via_vlm(crop_img, target_id, target_name)
+            if choice != -1:
+                _save_dropdown_debug_shot(crop_img, target_id, target_name, choice, tag="vlm")
+                return choice, reason
+
+            # choice == -1 表示 VLM 调用出错或网络异常
+            if auto_fallback and HAS_OCR:
+                log(f"模式 A (大模型) 视觉识别异常 ({reason})，自动平滑降级为模式 B (本地 OCR)...", "WARN")
+                return detect_dropdown_target_via_ocr(wecom_rect, target_id, target_name)
+            return choice, reason
+        else:
+            if auto_fallback and HAS_OCR:
+                log("截取下拉框区域失败，自动降级至模式 B (本地 OCR)...", "WARN")
+                return detect_dropdown_target_via_ocr(wecom_rect, target_id, target_name)
+            return -1, "截屏失败"
+
+    elif mode == "B":
+        if HAS_OCR:
+            return detect_dropdown_target_via_ocr(wecom_rect, target_id, target_name)
+        log("模式 B 视觉核验跳过: 未安装可用本地 OCR 引擎", "WARN")
+        return -1, ""
+
+    return -1, "智能核验已关闭"
 
 
 def _save_debug_header_shot(crop_img, target_id: str, target_name: str, header_text: str, tag: str):
@@ -895,9 +927,9 @@ def _save_debug_header_shot(crop_img, target_id: str, target_name: str, header_t
         pass
 
 
-def verify_chat_header_title(wecom_rect: tuple, target_id: str, target_name: str, timeout: float = 1.2) -> tuple:
+def verify_chat_header_title_via_ocr(wecom_rect: tuple, target_id: str, target_name: str, timeout: float = 1.2) -> tuple:
     """
-    【方案一：会话标题安全检查点 (Check Point)】
+    【模式 B：会话标题安全检查点 (本地 OCR 轮询)】
     回车进入会话后，带超时的谓词异步轮询（默认最长 timeout 秒，每 80ms 采样一次），
     动态按当前屏幕 DPI 缩放截取企微主窗口右侧聊天区域顶部的标题条，
     核验当前打开的会话是否确实为目标学生（如 '80001李四 @微信'）。
@@ -985,6 +1017,50 @@ def verify_chat_header_title(wecom_rect: tuple, target_id: str, target_name: str
     return "UNCERTAIN", ""
 
 
+def verify_chat_header_title(wecom_rect: tuple, target_id: str, target_name: str, timeout: float = 1.2, mode: str = "A", auto_fallback: bool = True) -> tuple:
+    """
+    【会话标题安全检查点 (Check Point) 总控】
+    回车进入会话后执行二次验证，支持模式 A (Qwen3.8-Flash 大模型) 与模式 B (本地 OCR 引擎)。
+    自动消除切换残影，核验当前会话标题是否为目标学生/家长。
+    返回: (status, detected_title)
+      - 'MATCH': 核验通过
+      - 'MISMATCH': 确凿误选（进入了他人聊天）
+      - 'UNCERTAIN': 未知或无法确认
+    """
+    if not wecom_rect:
+        return "UNCERTAIN", ""
+
+    if mode == "A":
+        # 1. 消除企微会话切换动画的残影 (延时 0.35s)
+        time.sleep(0.35)
+        crop_img = capture_header_crop(wecom_rect)
+        if crop_img:
+            status, detected_title = verify_chat_header_title_via_vlm(crop_img, target_id, target_name)
+            if status in ("MATCH", "MISMATCH"):
+                if status == "MISMATCH":
+                    _save_debug_header_shot(crop_img, target_id, target_name, detected_title, "vlm_mismatch")
+                return status, detected_title
+
+            # status 为 ERROR 或 UNCERTAIN
+            if auto_fallback and HAS_OCR:
+                log(f"模式 A 标题核验异常/无法判定 ({detected_title})，自动平滑降级至模式 B 本地 OCR 轮询...", "WARN")
+                return verify_chat_header_title_via_ocr(wecom_rect, target_id, target_name, timeout=timeout)
+            return status, detected_title
+        else:
+            if auto_fallback and HAS_OCR:
+                log("截取标题条失败，自动降级至模式 B 本地 OCR 轮询...", "WARN")
+                return verify_chat_header_title_via_ocr(wecom_rect, target_id, target_name, timeout=timeout)
+            return "UNCERTAIN", ""
+
+    elif mode == "B":
+        if HAS_OCR:
+            return verify_chat_header_title_via_ocr(wecom_rect, target_id, target_name, timeout=timeout)
+        log("模式 B 标题核验跳过: 未安装可用本地 OCR 引擎", "WARN")
+        return "UNCERTAIN", ""
+
+    return "UNCERTAIN", ""
+
+
 # ============================================================
 # 云端诊断（自动后台上报，供管理员远程协助排查）
 # - 启动时上传诊断日志、退出时追加上传发送历史；daemon 线程，不阻塞界面；
@@ -1049,6 +1125,138 @@ def cloud_post(server: str, action: str, payload: dict, timeout: int = 20) -> di
     if not isinstance(data, dict) or not data.get("success"):
         raise RuntimeError((data.get("error") if isinstance(data, dict) else None) or "上传被服务器拒绝")
     return data.get("data") or {}
+
+
+def image_to_base64_jpeg(pil_img: Image.Image, quality: int = 85) -> str:
+    """将 PIL 图像转换为 base64 编码的 JPEG 字符串"""
+    import io
+    import base64
+    buf = io.BytesIO()
+    rgb_img = pil_img.convert("RGB")
+    rgb_img.save(buf, format="JPEG", quality=quality)
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+
+def call_cloud_vision(task: str, crop_img: Image.Image, target_id: str, target_name: str, timeout: float = 4.5) -> dict:
+    """
+    向服务端 api/desktop.php?action=vision_detect 发起大模型视觉分析请求。
+    task: 'dropdown' | 'header'
+    返回: dict (包含 choice/matched, reason, duration_ms 等)
+    """
+    if not crop_img:
+        return {"success": False, "error": "截屏图像为空"}
+    try:
+        b64_str = image_to_base64_jpeg(crop_img)
+        payload = {
+            "client": machine_tag(),
+            "task": task,
+            "target_id": target_id,
+            "target_name": target_name,
+            "image": f"data:image/jpeg;base64,{b64_str}"
+        }
+        res = cloud_post(DEFAULT_CLOUD_SERVER, "vision_detect", payload, timeout=int(timeout + 1))
+        if isinstance(res, dict):
+            res["success"] = True
+            return res
+        return {"success": False, "error": "服务端未返回有效数据字典"}
+    except Exception as e:
+        log(f"[大模型{task}视觉请求异常]: {e}", "WARN")
+        return {"success": False, "error": str(e)}
+
+
+def capture_dropdown_crop(wecom_rect: tuple):
+    """动态 DPI 自适应截取企微搜索下拉列表区域 (约 380x460 物理像素)"""
+    if not wecom_rect:
+        return None
+    try:
+        wx, wy, ww, wh = wecom_rect
+        wecom_hwnd = get_wecom_hwnd()
+        scale = get_display_scale(wecom_hwnd)
+        vx, vy, vw, vh = get_virtual_screen_bounds()
+
+        offset_y = int(46 * scale)
+        offset_x = int(38 * scale)
+        base_w = int(380 * scale)
+        base_h = int(460 * scale)
+
+        crop_x = max(vx, wx + offset_x)
+        crop_y = max(vy, wy + offset_y)
+        crop_w = max(int(200 * scale), min(base_w, int(ww * 0.45)))
+        crop_h = max(int(120 * scale), min(base_h, wh - offset_y - 10))
+
+        if crop_x + crop_w > vx + vw:
+            crop_w = max(50, (vx + vw) - crop_x)
+        if crop_y + crop_h > vy + vh:
+            crop_h = max(50, (vy + vh) - crop_y)
+
+        return pyautogui.screenshot(region=(crop_x, crop_y, crop_w, crop_h))
+    except Exception as e:
+        log(f"截取下拉框区域异常: {e}", "WARN")
+        return None
+
+
+def capture_header_crop(wecom_rect: tuple):
+    """动态 DPI 自适应截取企微聊天窗口顶部标题条区域 (约 400x52 物理像素)"""
+    if not wecom_rect:
+        return None
+    try:
+        wx, wy, ww, wh = wecom_rect
+        wecom_hwnd = get_wecom_hwnd()
+        scale = get_display_scale(wecom_hwnd)
+        vx, vy, vw, vh = get_virtual_screen_bounds()
+
+        offset_x = int(240 * scale)
+        offset_y = int(4 * scale)
+        base_w = int(400 * scale)
+        base_h = int(52 * scale)
+
+        crop_x = max(vx, wx + offset_x)
+        crop_y = max(vy, wy + offset_y)
+        crop_w = max(int(160 * scale), min(base_w, max(200, ww - int(260 * scale))))
+        crop_h = max(int(40 * scale), base_h)
+
+        if crop_x + crop_w > vx + vw:
+            crop_w = max(50, (vx + vw) - crop_x)
+        if crop_y + crop_h > vy + vh:
+            crop_h = max(30, (vy + vh) - crop_y)
+
+        return pyautogui.screenshot(region=(crop_x, crop_y, crop_w, crop_h))
+    except Exception as e:
+        log(f"截取标题条区域异常: {e}", "WARN")
+        return None
+
+
+def detect_dropdown_target_via_vlm(crop_img, target_id: str, target_name: str) -> tuple:
+    """
+    通过云端大模型 API 分析搜索下拉候选列表
+    返回: (choice, reason)
+    """
+    res = call_cloud_vision("dropdown", crop_img, target_id, target_name)
+    if not res.get("success"):
+        return -1, res.get("error", "VLM 接口调用失败")
+    choice = int(res.get("choice", -1))
+    matched_title = res.get("matched_title", "")
+    reason = res.get("reason", "")
+    log(f"[大模型选人决策] choice={choice}, title='{matched_title}', reason='{reason}'", "INFO")
+    return choice, f"{reason} [模式A·大模型]"
+
+
+def verify_chat_header_title_via_vlm(crop_img, target_id: str, target_name: str) -> tuple:
+    """
+    通过云端大模型 API 核验会话顶部标题栏
+    返回: (status, detected_title)
+    """
+    res = call_cloud_vision("header", crop_img, target_id, target_name)
+    if not res.get("success"):
+        return "ERROR", res.get("error", "VLM 接口调用失败")
+    matched = res.get("matched", False)
+    detected_title = res.get("detected_title", "")
+    reason = res.get("reason", "")
+    log(f"[大模型标题核验] matched={matched}, title='{detected_title}', reason='{reason}'", "INFO")
+    if matched:
+        return "MATCH", f"{detected_title} [模式A·大模型]"
+    else:
+        return "MISMATCH", f"{detected_title} [模式A·大模型]"
 
 
 def parse_log_entries(limit: int = CLOUD_LOG_TAIL_LINES, align_task: bool = True) -> list:
@@ -1854,7 +2062,9 @@ class FeedbackSender:
         self.batch_rest_enable_var = tk.BooleanVar(value=True)
         self.batch_size_var = tk.IntVar(value=DEFAULT_BATCH_SIZE)
         self.batch_delay_var = tk.DoubleVar(value=DEFAULT_BATCH_DELAY)
-        self.smart_ocr_enable_var = tk.BooleanVar(value=HAS_SMART_CHECK)  # 模式 B 智能核验开关 (RapidOCR 视觉纠偏 + 会话标题安全检查点)
+        self.smart_mode_var = tk.StringVar(value="A")  # 视觉智能核验模式: "A"(大模型API), "B"(本地OCR), "OFF"(关闭)
+        self.auto_fallback_var = tk.BooleanVar(value=True)  # 模式 A 异常时自动降级到模式 B
+        self.smart_ocr_enable_var = tk.BooleanVar(value=True)  # 兼容旧开关引用
 
         # 隐藏入口点击计数器
         self._title_click_count = 0
@@ -1998,7 +2208,7 @@ class FeedbackSender:
         dialog.configure(bg="#F5F7FA")
 
         # 弹窗居中
-        dialog_w, dialog_h = 560, 440
+        dialog_w, dialog_h = 580, 520
         x = max(0, self.root.winfo_x() + (self.root.winfo_width() - dialog_w) // 2)
         y = max(0, self.root.winfo_y() + (self.root.winfo_height() - dialog_h) // 2)
         dialog.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
@@ -2012,7 +2222,8 @@ class FeedbackSender:
         temp_batch_enable = tk.BooleanVar(value=self.batch_rest_enable_var.get())
         temp_batch_size = tk.IntVar(value=self.batch_size_var.get())
         temp_batch_delay = tk.DoubleVar(value=self.batch_delay_var.get())
-        temp_smart_ocr = tk.BooleanVar(value=self.smart_ocr_enable_var.get())
+        temp_smart_mode = tk.StringVar(value=self.smart_mode_var.get())
+        temp_auto_fallback = tk.BooleanVar(value=self.auto_fallback_var.get())
 
         # 1. 延时设置
         group_delay = ttk.LabelFrame(container, text="⏱️ 单人发送间隔设置", padding=10)
@@ -2046,29 +2257,57 @@ class FeedbackSender:
             bg="#F5F7FA",
         ).pack(anchor="w")
 
-        # 3. 模式 B 智能核验
-        group_ocr = ttk.LabelFrame(container, text="🎯 模式 B 搜索智能核验与防误发", padding=10)
+        # 3. 视觉智能防误发双防线系统
+        group_ocr = ttk.LabelFrame(container, text="🎯 视觉智能防误发防御体系 (双防线架构)", padding=10)
         group_ocr.pack(fill="x", pady=(0, 12))
 
-        engine_desc_parts = []
-        if HAS_RAPIDOCR:
-            engine_desc_parts.append("✓ RapidOCR (PaddleOCR ONNX) 视觉引擎已就绪 (毫秒级识别/缩放自适应)")
-        elif HAS_WINOCR:
-            engine_desc_parts.append("✓ Windows 原生 WinOCR 视觉引擎已就绪")
+        mode_box = tk.Frame(group_ocr, bg="#F5F7FA")
+        mode_box.pack(fill="x", pady=(0, 4))
 
-        ocr_engine_desc = "\n".join(engine_desc_parts) if engine_desc_parts else "未检测到可用 OCR 引擎"
+        ttk.Radiobutton(
+            mode_box,
+            text="模式 A：大模型视觉 API (通义千问 Qwen3.8-Flash，极高精度/语义抗干扰，推荐)",
+            variable=temp_smart_mode,
+            value="A"
+        ).pack(anchor="w", pady=(0, 2))
+
+        ttk.Radiobutton(
+            mode_box,
+            text="模式 B：本地离线 OCR (RapidOCR / WinOCR，纯本地运行/零 API 成本)",
+            variable=temp_smart_mode,
+            value="B"
+        ).pack(anchor="w", pady=(0, 2))
+
+        ttk.Radiobutton(
+            mode_box,
+            text="关闭智能核验 (仅依赖企业微信默认回车，易受他人描述干扰)",
+            variable=temp_smart_mode,
+            value="OFF"
+        ).pack(anchor="w", pady=(0, 4))
 
         ttk.Checkbutton(
             group_ocr,
-            text="启用模式 B 智能核验与防误发 (RapidOCR 视觉纠偏 + 会话标题安全检查点)",
-            variable=temp_smart_ocr,
+            text="模式 A 异常时自动平滑降级：网络受阻或云端超时自动回退为本地 OCR",
+            variable=temp_auto_fallback,
         ).pack(anchor="w", pady=(0, 4))
+
+        engine_desc_parts = []
+        if HAS_RAPIDOCR:
+            engine_desc_parts.append("本地 RapidOCR: 已就绪")
+        elif HAS_WINOCR:
+            engine_desc_parts.append("本地 WinOCR: 已就绪")
+        else:
+            engine_desc_parts.append("本地 OCR: 未就绪")
+        engine_status_str = " | ".join(engine_desc_parts)
 
         tk.Label(
             group_ocr,
-            text=f"{ocr_engine_desc}\n✓ 第一项为他人描述时：自动按【↓】纠偏至本人\n✓ 进入会话后安全检查点：二次核对聊天顶部标题，非本人自动回滚纠错\n✓ 多次重试仍不符或仅他人描述时：自动安全拦截，100% 杜绝发错人",
+            text=f"【引擎状态】云端大模型: Qwen3.8-Flash 在线 | {engine_status_str}\n"
+                 f"✓ 第 1 道防线（候选纠偏）：智能区分他人描述与独立联系人，自动【↓】纠偏\n"
+                 f"✓ 第 2 道防线（标题核验）：进入会话后二次核验顶部标题，彻底杜绝发错人\n"
+                 f"✓ 终极安全闭环：多次核验不符或仅他人描述时坚决拦截防误发",
             font=("Microsoft YaHei", 9),
-            fg="#67C23A" if HAS_SMART_CHECK else "#F56C6C",
+            fg="#409EFF",
             bg="#F5F7FA",
             justify="left",
         ).pack(anchor="w")
@@ -2083,7 +2322,8 @@ class FeedbackSender:
             temp_batch_enable.set(True)
             temp_batch_size.set(DEFAULT_BATCH_SIZE)
             temp_batch_delay.set(DEFAULT_BATCH_DELAY)
-            temp_smart_ocr.set(HAS_SMART_CHECK)
+            temp_smart_mode.set("A")
+            temp_auto_fallback.set(True)
 
         def do_save():
             try:
@@ -2106,7 +2346,9 @@ class FeedbackSender:
             self.batch_rest_enable_var.set(temp_batch_enable.get())
             self.batch_size_var.set(bs)
             self.batch_delay_var.set(bd)
-            self.smart_ocr_enable_var.set(temp_smart_ocr.get())
+            self.smart_mode_var.set(temp_smart_mode.get())
+            self.auto_fallback_var.set(temp_auto_fallback.get())
+            self.smart_ocr_enable_var.set(temp_smart_mode.get() != "OFF")
 
             dialog.destroy()
             self.status_label.config(text="✓ 高级配置参数已保存更新", fg="#67C23A")
@@ -2934,14 +3176,20 @@ class FeedbackSender:
         else:
             tip_msg += "⚠️ 未自动探测到企业微信，请确保企业微信已在电脑上登录并打开！\n"
 
-        if self.smart_ocr_enable_var.get() and HAS_SMART_CHECK:
+        mode = self.smart_mode_var.get()
+        if mode == "A":
+            fallback_tip = " (已开启异常自动降级至本地OCR)" if self.auto_fallback_var.get() else ""
+            tip_msg += f"✓ 【模式 A·大模型视觉防御】已启用 (Qwen3.8-Flash + 会话标题双重防御){fallback_tip}：语义消歧、精准纠偏并杜绝误发。\n"
+        elif mode == "B":
             engine_desc = []
             if HAS_RAPIDOCR:
-                engine_desc.append("RapidOCR 视觉识别")
+                engine_desc.append("RapidOCR")
             elif HAS_WINOCR:
-                engine_desc.append("WinOCR 视觉识别")
-            engine_str = " + ".join(engine_desc) if engine_desc else "智能核验"
-            tip_msg += f"✓ 【模式 B 智能核验】已启用 ({engine_str} + 会话标题检查点)：将自动避开他人描述，精准纠错并拦截误发。\n"
+                engine_desc.append("WinOCR")
+            engine_str = " + ".join(engine_desc) if engine_desc else "本地视觉"
+            tip_msg += f"✓ 【模式 B·本地智能核验】已启用 ({engine_str} + 会话标题检查点)：避开他人描述，纠错并拦截误发。\n"
+        else:
+            tip_msg += "⚠️ 智能视觉核验已关闭：将走传统回车发送模式。\n"
 
         tip_msg += (
             "\n【安全提示】\n"
@@ -3239,15 +3487,19 @@ class FeedbackSender:
         if not self.safe_sleep(SEARCH_DELAY):
             return "ABORTED"
 
-        # 4. 【模式 B 核心逻辑：下拉框视觉智能核验与初选 (带缩放自适应)】
+        # 4. 【视觉智能核验与初选 (模式 A 大模型 / 模式 B 本地 OCR)】
         choice = -1
         matched_title = ""
         target_id, target_name = parse_student_identifier(search_name)
         wecom_rect = get_wecom_rect()
+        smart_mode = self.smart_mode_var.get()
+        auto_fallback = self.auto_fallback_var.get()
 
-        if self.smart_ocr_enable_var.get() and HAS_SMART_CHECK:
+        if smart_mode != "OFF" and HAS_SMART_CHECK:
             if wecom_rect:
-                choice, matched_title = detect_dropdown_target(wecom_rect, target_id, target_name)
+                choice, matched_title = detect_dropdown_target(
+                    wecom_rect, target_id, target_name, mode=smart_mode, auto_fallback=auto_fallback
+                )
 
                 if choice == 0:
                     # 细分状态 1：无此联系人 / 显示全局搜索
@@ -3315,8 +3567,8 @@ class FeedbackSender:
                 time.sleep(0.2)
                 pyautogui.press("enter")
         else:
-            # 未开启 OCR 模式，走传统两次回车
-            log(f"[{search_name}] 未开启智能OCR，走传统回车进入第1项", "INFO")
+            # 未开启智能模式，走传统两次回车
+            log(f"[{search_name}] 未开启视觉智能核验，走传统回车进入第1项", "INFO")
             pyautogui.press("enter")
             time.sleep(0.2)
             pyautogui.press("enter")
@@ -3324,9 +3576,11 @@ class FeedbackSender:
         if not self.safe_sleep(CLICK_DELAY):
             return "ABORTED"
 
-        # 5. 【方案一核心：会话标题安全检查点 (Check Point) 与自愈回滚】
-        if self.smart_ocr_enable_var.get() and HAS_OCR and wecom_rect:
-            header_status, header_title = verify_chat_header_title(wecom_rect, target_id, target_name, timeout=1.2)
+        # 5. 【会话标题安全检查点 (Check Point) 与自愈回滚】
+        if smart_mode != "OFF" and wecom_rect:
+            header_status, header_title = verify_chat_header_title(
+                wecom_rect, target_id, target_name, timeout=1.2, mode=smart_mode, auto_fallback=auto_fallback
+            )
 
             # 异常感知：检测到会话标题为他人（如进入了 90001张三 @微信，而非 80001李四）
             if header_status == "MISMATCH":
@@ -3358,7 +3612,9 @@ class FeedbackSender:
                     pyautogui.press("enter")
                     time.sleep(0.3)
 
-                    retry_status, retry_title = verify_chat_header_title(wecom_rect, target_id, target_name, timeout=1.0)
+                    retry_status, retry_title = verify_chat_header_title(
+                        wecom_rect, target_id, target_name, timeout=1.0, mode=smart_mode, auto_fallback=auto_fallback
+                    )
                     if retry_status == "MATCH":
                         log(f"[{search_name}] ✓ 自愈纠偏成功！会话已更正为目标本人【{retry_title}】", "INFO")
                         header_status = "MATCH"
