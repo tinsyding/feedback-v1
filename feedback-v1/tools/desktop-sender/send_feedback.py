@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-企业微信自动发送反馈脚本 (模式 B 智能核验与纠错升级版)
+企业微信自动发送反馈脚本 (AI 视觉智能防误发与周次管理版 v1.6)
 功能：
 1. 读取反馈 JSON 文件及网站导出的 HTML 网页快照文件，严格按学生信息逐个发送反馈
-2. 模式 B 搜索智能核验：本地 OCR 秒级识别企微下拉框，若第 1 项为他人描述自动按【↓】选中第 2 项本人，若全是他人描述则安全拦截
-3. 实时消息预览：点击名单任意学生即可在右侧查看完整反馈文案
-4. 智能断点续发与重试：自动跳过已发送记录，支持一键重试失败与拦截项
-5. 前台窗口守护与防失焦：自动寻找企微窗口，检测到焦点被抢夺立即自动暂停，防止误发
-6. 剪贴板安全核验：防止剪贴板延迟导致发错上一个学生的内容
-7. 批次防风控休息：支持每发送 N 人自动休眠，模拟真人节奏
-8. 导出发送记录：一键导出 CSV 报表留档
+2. 发送周次分类管理：支持按周次/周期独立归档，不同周期自动清空已发状态，支持周期筛选与导出
+3. AI 视觉智能防误发双保险：云端 AI + 本地离线引擎自动识别企微下拉框，智能区分本人与他人描述，自动【↓】纠偏；会话顶部标题二次核验防线
+4. 实时消息预览：点击名单任意学生即可在右侧查看完整反馈文案
+5. 智能断点续发与重试：自动跳过当前周期已发送记录，支持一键重试失败与拦截项
+6. 前台窗口守护与防失焦：自动寻找企微窗口，检测到焦点被抢夺立即自动暂停，防止误发
+7. 剪贴板安全核验：防止剪贴板延迟导致发错上一个学生的内容
+8. 批次防风控休息：支持每发送 N 人自动休眠，模拟真人节奏
+9. 导出发送记录：一键导出 CSV 报表留档
 """
 
 import os
@@ -109,7 +110,60 @@ def preprocess_dropdown_image(pil_img: Image.Image) -> Image.Image:
         return pil_img
 
 # 客户端应用版本号
-APP_VERSION = "v1.5"
+APP_VERSION = "v1.6"
+
+
+def detect_cycle_from_string(text: str) -> str:
+    """
+    从文本或文件名中智能提取周次/周期标识
+    支持：
+      - 第 1 周 / 第1周 / 第5周
+      - 第 1 讲 / 第1讲 / 第5讲
+      - 第 1 期 / 第1期 / 第2课
+      - W01 / W1 / Week 2 / Week2
+    提取成功返回标准化字符串（如 '第 1 周'、'第 5 讲'），未匹配返回空字符串 ''
+    """
+    if not text:
+        return ""
+
+    # 1. 匹配中文大写数字：第[一二三四五六七八九十]+周/讲/期/课/次/天/步
+    cn_nums = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}
+    m_cn = re.search(r"第\s*([一二三四五六七八九十]+)\s*([周讲期课次天步])", text)
+    if m_cn:
+        cn_str = m_cn.group(1)
+        val = 0
+        if len(cn_str) == 1 and cn_str in cn_nums:
+            val = cn_nums[cn_str]
+        elif len(cn_str) == 2 and cn_str.startswith('十'):
+            val = 10 + cn_nums.get(cn_str[1], 0)
+        elif len(cn_str) == 2 and cn_str.endswith('十'):
+            val = cn_nums.get(cn_str[0], 1) * 10
+        elif len(cn_str) == 3 and cn_str[1] == '十':
+            val = cn_nums.get(cn_str[0], 1) * 10 + cn_nums.get(cn_str[2], 0)
+        if val > 0:
+            return f"第 {val} {m_cn.group(2)}"
+
+    # 2. 匹配阿拉伯数字：第 X 周/讲/期/课/次/天/步
+    m = re.search(r"第\s*(\d+)\s*([周讲期课次天步])", text)
+    if m:
+        return f"第 {int(m.group(1))} {m.group(2)}"
+
+    # 3. 匹配 Week X / W03 / W 3
+    m2 = re.search(r"(?:^|[\b_\-\s])(?:week|w)\s*0*(\d+)(?:[_\-\s\.]|$)", text, re.IGNORECASE)
+    if m2:
+        return f"第 {int(m2.group(1))} 周"
+
+    return ""
+
+
+def clean_class_name_from_path(file_path: str) -> str:
+    """从文件路径或文件名中提取纯净班级名"""
+    if not file_path:
+        return ""
+    filename = os.path.basename(file_path)
+    base_name = os.path.splitext(filename)[0]
+    clean = re.sub(r"([_\-](反馈快照|反馈|快照|错题|评语))+$", "", base_name, flags=re.I).strip()
+    return clean or base_name
 
 # 基础默认延时配置 (秒)
 SEARCH_DELAY = 1.5
@@ -913,19 +967,19 @@ def detect_dropdown_target(wecom_rect: tuple, target_id: str, target_name: str, 
 
             # choice == -1 表示 VLM 调用出错或网络异常
             if auto_fallback and HAS_OCR:
-                log(f"模式 A (大模型) 视觉识别异常 ({reason})，自动平滑降级为模式 B (本地 OCR)...", "WARN")
+                log(f"云端 AI 视觉识别异常 ({reason})，自动无缝切换为本地备用引擎...", "WARN")
                 return detect_dropdown_target_via_ocr(wecom_rect, target_id, target_name)
             return choice, reason
         else:
             if auto_fallback and HAS_OCR:
-                log("截取下拉框区域失败，自动降级至模式 B (本地 OCR)...", "WARN")
+                log("截取下拉框区域失败，自动切换至本地备用引擎...", "WARN")
                 return detect_dropdown_target_via_ocr(wecom_rect, target_id, target_name)
             return -1, "截屏失败"
 
     elif mode == "B":
         if HAS_OCR:
             return detect_dropdown_target_via_ocr(wecom_rect, target_id, target_name)
-        log("模式 B 视觉核验跳过: 未安装可用本地 OCR 引擎", "WARN")
+        log("本地视觉核验跳过: 未安装可用本地 OCR 引擎", "WARN")
         return -1, ""
 
     return -1, "智能核验已关闭"
@@ -1062,19 +1116,19 @@ def verify_chat_header_title(wecom_rect: tuple, target_id: str, target_name: str
 
             # status 为 ERROR 或 UNCERTAIN
             if auto_fallback and HAS_OCR:
-                log(f"模式 A 标题核验异常/无法判定 ({detected_title})，自动平滑降级至模式 B 本地 OCR 轮询...", "WARN")
+                log(f"云端标题核验异常/存疑 ({detected_title})，自动无缝切换至本地备用引擎...", "WARN")
                 return verify_chat_header_title_via_ocr(wecom_rect, target_id, target_name, timeout=timeout)
             return status, detected_title
         else:
             if auto_fallback and HAS_OCR:
-                log("截取标题条失败，自动降级至模式 B 本地 OCR 轮询...", "WARN")
+                log("截取标题条失败，自动切换至本地备用引擎...", "WARN")
                 return verify_chat_header_title_via_ocr(wecom_rect, target_id, target_name, timeout=timeout)
             return "UNCERTAIN", ""
 
     elif mode == "B":
         if HAS_OCR:
             return verify_chat_header_title_via_ocr(wecom_rect, target_id, target_name, timeout=timeout)
-        log("模式 B 标题核验跳过: 未安装可用本地 OCR 引擎", "WARN")
+        log("本地标题核验跳过: 未安装可用本地 OCR 引擎", "WARN")
         return "UNCERTAIN", ""
 
     return "UNCERTAIN", ""
@@ -1282,7 +1336,7 @@ def detect_dropdown_target_via_vlm(crop_img, target_id: str, target_name: str) -
             choice = -2
 
     log(f"[大模型选人决策] choice={choice}, title='{matched_title}', reason='{reason}'", "INFO")
-    return choice, f"{reason} [模式A·大模型]"
+    return choice, f"{reason}"
 
 
 def verify_chat_header_title_via_vlm(crop_img, target_id: str, target_name: str) -> tuple:
@@ -1298,9 +1352,9 @@ def verify_chat_header_title_via_vlm(crop_img, target_id: str, target_name: str)
     reason = res.get("reason", "")
     log(f"[大模型标题核验] matched={matched}, title='{detected_title}', reason='{reason}'", "INFO")
     if matched:
-        return "MATCH", f"{detected_title} [模式A·大模型]"
+        return "MATCH", f"{detected_title}"
     else:
-        return "MISMATCH", f"{detected_title} [模式A·大模型]"
+        return "MISMATCH", f"{detected_title}"
 
 
 def parse_log_entries(limit: int = CLOUD_LOG_TAIL_LINES, align_task: bool = True) -> list:
@@ -1405,7 +1459,7 @@ def cloud_upload_async(include_history: bool = False) -> "Thread":
 
 
 class HistoryManager:
-    """负责跨班级/文件的发送历史持久化与统计管理"""
+    """负责跨班级/文件/周次的发送历史持久化与统计管理"""
     def __init__(self, storage_path: str = None):
         if storage_path is None:
             storage_path = os.path.join(get_data_dir(), "feedback_history.json")
@@ -1422,6 +1476,15 @@ class HistoryManager:
                         self._data = json.loads(content)
                 if "classes" not in self._data or not isinstance(self._data["classes"], dict):
                     self._data = {"classes": {}}
+                # 向后平滑兼容：补充缺失的 cycle 属性
+                for k, entry in list(self._data["classes"].items()):
+                    if not isinstance(entry, dict):
+                        continue
+                    if "cycle" not in entry or not entry["cycle"]:
+                        cyc = detect_cycle_from_string(entry.get("file_name", "")) or detect_cycle_from_string(entry.get("class_name", "")) or "第 1 周"
+                        entry["cycle"] = cyc
+                    if "class_name" not in entry or not entry["class_name"]:
+                        entry["class_name"] = clean_class_name_from_path(entry.get("file_name", k))
             except Exception as e:
                 print(f"读取历史记录文件异常: {e}")
                 self._data = {"classes": {}}
@@ -1435,6 +1498,38 @@ class HistoryManager:
                 json.dump(self._data, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"保存历史记录异常: {e}")
+
+    def _build_archive_key(self, class_name: str, cycle: str) -> str:
+        c_name = (class_name or "未命名班级").strip()
+        cyc = (cycle or "第 1 周").strip()
+        return f"{c_name} [{cyc}]"
+
+    def _resolve_archive_key(self, file_path_or_name: str, cycle: str = "") -> str:
+        """根据文件名或路径及周次，解析或匹配档案的主键"""
+        if not file_path_or_name:
+            return ""
+        # 1. 直接命中现有 key
+        if file_path_or_name in self._data["classes"]:
+            return file_path_or_name
+
+        c_name = clean_class_name_from_path(file_path_or_name)
+        f_name = os.path.basename(file_path_or_name)
+        cyc = (cycle or "").strip()
+        if not cyc:
+            cyc = detect_cycle_from_string(f_name) or "第 1 周"
+
+        # 2. 匹配 c_name [cyc]
+        target_key = self._build_archive_key(c_name, cyc)
+        if target_key in self._data["classes"]:
+            return target_key
+
+        # 3. 兼容旧的按文件名直接建档的记录
+        if f_name in self._data["classes"]:
+            old_entry = self._data["classes"][f_name]
+            if old_entry.get("cycle") == cyc:
+                return f_name
+
+        return target_key
 
     def _recalc_stats(self, key: str):
         if key not in self._data["classes"]:
@@ -1460,17 +1555,17 @@ class HistoryManager:
             "failed": failed,
         }
 
-    def sync_file_loaded(self, file_path: str, student_data: list):
-        """当载入文件时，按班级/文件名建立档案并同步所有学生"""
+    def sync_file_loaded(self, file_path: str, student_data: list, cycle: str = ""):
+        """当载入文件时，按班级+周次建立或更新档案并同步学生"""
         if not file_path or not student_data:
             return
         filename = os.path.basename(file_path)
-        base_name = os.path.splitext(filename)[0]
-        clean_class_name = re.sub(r"([_\-](反馈快照|反馈|快照|错题|评语))+$", "", base_name, flags=re.I).strip()
-        if not clean_class_name:
-            clean_class_name = base_name
+        clean_class_name = clean_class_name_from_path(file_path)
+        cyc = (cycle or "").strip()
+        if not cyc:
+            cyc = detect_cycle_from_string(filename) or "第 1 周"
 
-        key = filename
+        key = self._build_archive_key(clean_class_name, cyc)
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         if key not in self._data["classes"]:
@@ -1488,6 +1583,7 @@ class HistoryManager:
                 })
             self._data["classes"][key] = {
                 "key": key,
+                "cycle": cyc,
                 "class_name": clean_class_name,
                 "file_name": filename,
                 "file_path": file_path,
@@ -1498,7 +1594,9 @@ class HistoryManager:
         else:
             entry = self._data["classes"][key]
             entry["file_path"] = file_path
+            entry["file_name"] = filename
             entry["class_name"] = clean_class_name
+            entry["cycle"] = cyc
             existing_map = {s["name"]: s for s in entry.get("students", [])}
             merged_list = []
             for idx, item in enumerate(student_data):
@@ -1526,11 +1624,11 @@ class HistoryManager:
         self._recalc_stats(key)
         self.save()
 
-    def update_student_status(self, file_path_or_name: str, student_name: str, status: str, time_str: str = None):
-        """实时更新某学生在此班级/文件中的发送状态"""
+    def update_student_status(self, file_path_or_name: str, student_name: str, status: str, time_str: str = None, cycle: str = ""):
+        """实时更新某学生在特定周次档案中的发送状态"""
         if not file_path_or_name:
             return
-        key = os.path.basename(file_path_or_name)
+        key = self._resolve_archive_key(file_path_or_name, cycle)
         if key not in self._data["classes"]:
             return
         if not time_str:
@@ -1545,11 +1643,11 @@ class HistoryManager:
         self._recalc_stats(key)
         self.save()
 
-    def get_student_historical_status(self, file_path_or_name: str, student_name: str) -> str:
-        """获取某学生在此文件中的历史发送状态"""
+    def get_student_historical_status(self, file_path_or_name: str, student_name: str, cycle: str = "") -> str:
+        """获取某学生在特定周次档案中的历史发送状态"""
         if not file_path_or_name:
             return ""
-        key = os.path.basename(file_path_or_name)
+        key = self._resolve_archive_key(file_path_or_name, cycle)
         if key not in self._data["classes"]:
             return ""
         entry = self._data["classes"][key]
@@ -1557,6 +1655,18 @@ class HistoryManager:
             if s["name"] == student_name:
                 return s.get("status", "")
         return ""
+
+    def get_cycles_list(self) -> list:
+        """获取历史记录中所有出现过的周次/周期列表（去重并智能数字排序）"""
+        cycles = set()
+        for c in self._data["classes"].values():
+            cyc = c.get("cycle")
+            if cyc:
+                cycles.add(cyc)
+        def cycle_sort_key(c_str):
+            m = re.search(r"\d+", c_str)
+            return int(m.group(0)) if m else 999
+        return sorted(list(cycles), key=cycle_sort_key)
 
     def get_classes_list(self) -> list:
         items = list(self._data["classes"].values())
@@ -1599,6 +1709,7 @@ class HistoryDialog:
 
         self.current_class_key = None
         self.current_filter = "ALL"
+        self.filter_cycle_var = tk.StringVar(value="全部周次")
         self.search_class_var = tk.StringVar()
         self.search_student_var = tk.StringVar()
 
@@ -1633,10 +1744,24 @@ class HistoryDialog:
         paned = ttk.PanedWindow(container, orient=tk.HORIZONTAL)
         paned.pack(side="top", fill="both", expand=True)
 
-        # 左侧：班级列表
-        left_frame = ttk.LabelFrame(paned, text="📚 班级 / 文件列表", padding=8)
+        # 左侧：班级列表 (含周次筛选)
+        left_frame = ttk.LabelFrame(paned, text="📚 班级 / 发送周次", padding=8)
         paned.add(left_frame, weight=3)
 
+        # 1. 周次筛选器
+        cycle_filter_frame = tk.Frame(left_frame, bg="#F5F7FA")
+        cycle_filter_frame.pack(fill="x", pady=(0, 4))
+        tk.Label(cycle_filter_frame, text="📅 周次:", bg="#F5F7FA", font=("Microsoft YaHei", 9, "bold")).pack(side="left")
+        self.cycle_filter_combo = ttk.Combobox(
+            cycle_filter_frame,
+            textvariable=self.filter_cycle_var,
+            state="readonly",
+            width=12
+        )
+        self.cycle_filter_combo.pack(side="left", fill="x", expand=True, padx=(4, 0))
+        self.cycle_filter_combo.bind("<<ComboboxSelected>>", lambda e: self._filter_classes())
+
+        # 2. 班级搜索框
         search_frame = tk.Frame(left_frame, bg="#F5F7FA")
         search_frame.pack(fill="x", pady=(0, 6))
 
@@ -1650,14 +1775,16 @@ class HistoryDialog:
 
         self.class_tree = ttk.Treeview(
             class_tree_frame,
-            columns=("class_name", "progress"),
+            columns=("cycle", "class_name", "progress"),
             show="headings",
             selectmode="browse",
         )
-        self.class_tree.heading("class_name", text="班级 / 文件")
+        self.class_tree.heading("cycle", text="周次")
+        self.class_tree.heading("class_name", text="班级名称")
         self.class_tree.heading("progress", text="进度 (已发/总数)")
-        self.class_tree.column("class_name", width=170, minwidth=120, anchor="w")
-        self.class_tree.column("progress", width=95, minwidth=80, anchor="center")
+        self.class_tree.column("cycle", width=75, minwidth=60, anchor="center")
+        self.class_tree.column("class_name", width=145, minwidth=100, anchor="w")
+        self.class_tree.column("progress", width=85, minwidth=70, anchor="center")
 
         class_scroll = ttk.Scrollbar(class_tree_frame, orient="vertical", command=self.class_tree.yview)
         self.class_tree.configure(yscrollcommand=class_scroll.set)
@@ -1806,12 +1933,25 @@ class HistoryDialog:
 
         classes = self.history_mgr.get_classes_list()
         kw = self.search_class_var.get().strip().lower()
+        selected_cycle = self.filter_cycle_var.get().strip()
+
+        # 动态更新周次下拉菜单选项
+        cycles = ["全部周次"] + self.history_mgr.get_cycles_list()
+        self.cycle_filter_combo["values"] = cycles
+        if selected_cycle not in cycles:
+            selected_cycle = "全部周次"
+            self.filter_cycle_var.set("全部周次")
 
         found_item = None
         for c in classes:
             c_name = c.get("class_name", "")
             f_name = c.get("file_name", "")
-            if kw and (kw not in c_name.lower() and kw not in f_name.lower()):
+            c_cycle = c.get("cycle", "第 1 周")
+
+            if selected_cycle != "全部周次" and c_cycle != selected_cycle:
+                continue
+
+            if kw and (kw not in c_name.lower() and kw not in f_name.lower() and kw not in c_cycle.lower()):
                 continue
 
             stats = c.get("stats", {})
@@ -1820,7 +1960,7 @@ class HistoryDialog:
             prog_str = f"{sent} / {total}"
 
             display_title = c_name if c_name else f_name
-            item_id = self.class_tree.insert("", "end", values=(display_title, prog_str), tags=(c["key"],))
+            item_id = self.class_tree.insert("", "end", values=(c_cycle, display_title, prog_str), tags=(c["key"],))
 
             if select_key and c["key"] == select_key:
                 found_item = item_id
@@ -1834,7 +1974,7 @@ class HistoryDialog:
         else:
             self.current_class_key = None
             self.cur_class_title.config(text="暂无历史发送记录")
-            self.cur_class_file.config(text="当您载入文件或开始发送后，系统将自动在此分类归档。")
+            self.cur_class_file.config(text="当您载入文件或开始发送后，系统将自动在此按周次分类归档。")
             self.badge_total.config(text="总计: 0 人")
             self.badge_sent.config(text="✓ 已发送: 0")
             self.badge_unsent.config(text="⏳ 未发送: 0")
@@ -1862,10 +2002,11 @@ class HistoryDialog:
         c_name = detail.get("class_name", "")
         f_name = detail.get("file_name", "")
         f_path = detail.get("file_path", "")
+        c_cycle = detail.get("cycle", "第 1 周")
         up_time = detail.get("last_update_time", "")
 
-        self.cur_class_title.config(text=f"【{c_name}】 {f_name}")
-        self.cur_class_file.config(text=f"文件路径: {f_path}  (最近更新: {up_time})")
+        self.cur_class_title.config(text=f"【{c_name}】 {c_cycle} - {f_name}")
+        self.cur_class_file.config(text=f"周次: {c_cycle} | 文件: {f_path} (最近更新: {up_time})")
 
         stats = detail.get("stats", {})
         total = stats.get("total", 0)
@@ -1968,6 +2109,7 @@ class HistoryDialog:
         if not detail:
             return
         f_path = detail.get("file_path", "")
+        c_cycle = detail.get("cycle", "第 1 周")
         if not f_path or not os.path.exists(f_path):
             messagebox.showwarning(
                 "文件不存在",
@@ -1978,7 +2120,7 @@ class HistoryDialog:
 
         if self.on_reload_file:
             self.dialog.destroy()
-            self.on_reload_file(f_path)
+            self.on_reload_file(f_path, c_cycle)
 
     def _export_class_csv(self):
         if not self.current_class_key:
@@ -1992,7 +2134,9 @@ class HistoryDialog:
             return
 
         c_name = detail.get("class_name", "班级")
-        default_file = f"{c_name}_发送记录_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        c_cycle = detail.get("cycle", "第 1 周")
+        clean_cycle_tag = re.sub(r"\s+", "", c_cycle)
+        default_file = f"{c_name}_{clean_cycle_tag}_发送记录_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
 
         save_path = filedialog.asksaveasfilename(
             title="导出班级记录",
@@ -2008,9 +2152,11 @@ class HistoryDialog:
             import csv
             with open(save_path, "w", newline="", encoding="utf-8-sig") as f:
                 writer = csv.writer(f)
-                writer.writerow(["序号", "学生学号/姓名", "发送状态", "记录时间", "评语字数", "评语内容"])
+                writer.writerow(["周次", "班级", "序号", "学生学号/姓名", "发送状态", "记录时间", "评语字数", "评语内容"])
                 for s in students:
                     writer.writerow([
+                        c_cycle,
+                        c_name,
                         s.get("index", 1),
                         s.get("name", ""),
                         s.get("status", ""),
@@ -2099,6 +2245,8 @@ class FeedbackSender:
         self.current_file_path = ""
         self.send_logs = []
         self.history_mgr = HistoryManager()
+        self.current_cycle = "第 1 周"
+        self.cycle_var = tk.StringVar(value="第 1 周")
 
         # 配置参数变量 (默认保存在内存，可通过隐藏入口配置)
         self.min_delay_var = tk.DoubleVar(value=DEFAULT_MIN_DELAY)
@@ -2252,7 +2400,7 @@ class FeedbackSender:
         dialog.configure(bg="#F5F7FA")
 
         # 弹窗居中
-        dialog_w, dialog_h = 580, 520
+        dialog_w, dialog_h = 560, 310
         x = max(0, self.root.winfo_x() + (self.root.winfo_width() - dialog_w) // 2)
         y = max(0, self.root.winfo_y() + (self.root.winfo_height() - dialog_h) // 2)
         dialog.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
@@ -2266,8 +2414,6 @@ class FeedbackSender:
         temp_batch_enable = tk.BooleanVar(value=self.batch_rest_enable_var.get())
         temp_batch_size = tk.IntVar(value=self.batch_size_var.get())
         temp_batch_delay = tk.DoubleVar(value=self.batch_delay_var.get())
-        temp_smart_mode = tk.StringVar(value=self.smart_mode_var.get())
-        temp_auto_fallback = tk.BooleanVar(value=self.auto_fallback_var.get())
 
         # 1. 延时设置
         group_delay = ttk.LabelFrame(container, text="⏱️ 单人发送间隔设置", padding=10)
@@ -2283,7 +2429,7 @@ class FeedbackSender:
 
         # 2. 防风控休眠
         group_batch = ttk.LabelFrame(container, text="🛡️ 批次防风控休眠设置", padding=10)
-        group_batch.pack(fill="x", pady=(0, 10))
+        group_batch.pack(fill="x", pady=(0, 12))
 
         row2 = tk.Frame(group_batch, bg="#F5F7FA")
         row2.pack(fill="x", pady=(0, 4))
@@ -2301,61 +2447,6 @@ class FeedbackSender:
             bg="#F5F7FA",
         ).pack(anchor="w")
 
-        # 3. 视觉智能防误发双防线系统
-        group_ocr = ttk.LabelFrame(container, text="🎯 视觉智能防误发防御体系 (双防线架构)", padding=10)
-        group_ocr.pack(fill="x", pady=(0, 12))
-
-        mode_box = tk.Frame(group_ocr, bg="#F5F7FA")
-        mode_box.pack(fill="x", pady=(0, 4))
-
-        ttk.Radiobutton(
-            mode_box,
-            text="模式 A：大模型视觉 API (通义千问 Qwen3.8-Flash，极高精度/语义抗干扰，推荐)",
-            variable=temp_smart_mode,
-            value="A"
-        ).pack(anchor="w", pady=(0, 2))
-
-        ttk.Radiobutton(
-            mode_box,
-            text="模式 B：本地离线 OCR (RapidOCR / WinOCR，纯本地运行/零 API 成本)",
-            variable=temp_smart_mode,
-            value="B"
-        ).pack(anchor="w", pady=(0, 2))
-
-        ttk.Radiobutton(
-            mode_box,
-            text="关闭智能核验 (仅依赖企业微信默认回车，易受他人描述干扰)",
-            variable=temp_smart_mode,
-            value="OFF"
-        ).pack(anchor="w", pady=(0, 4))
-
-        ttk.Checkbutton(
-            group_ocr,
-            text="模式 A 异常时自动平滑降级：网络受阻或云端超时自动回退为本地 OCR",
-            variable=temp_auto_fallback,
-        ).pack(anchor="w", pady=(0, 4))
-
-        engine_desc_parts = []
-        if HAS_RAPIDOCR:
-            engine_desc_parts.append("本地 RapidOCR: 已就绪")
-        elif HAS_WINOCR:
-            engine_desc_parts.append("本地 WinOCR: 已就绪")
-        else:
-            engine_desc_parts.append("本地 OCR: 未就绪")
-        engine_status_str = " | ".join(engine_desc_parts)
-
-        tk.Label(
-            group_ocr,
-            text=f"【引擎状态】云端大模型: Qwen3.8-Flash 在线 | {engine_status_str}\n"
-                 f"✓ 第 1 道防线（候选纠偏）：智能区分他人描述与独立联系人，自动【↓】纠偏\n"
-                 f"✓ 第 2 道防线（标题核验）：进入会话后二次核验顶部标题，彻底杜绝发错人\n"
-                 f"✓ 终极安全闭环：多次核验不符或仅他人描述时坚决拦截防误发",
-            font=("Microsoft YaHei", 9),
-            fg="#409EFF",
-            bg="#F5F7FA",
-            justify="left",
-        ).pack(anchor="w")
-
         # 底部操作按钮
         btn_box = tk.Frame(container, bg="#F5F7FA")
         btn_box.pack(side="bottom", fill="x", pady=(6, 0))
@@ -2366,8 +2457,6 @@ class FeedbackSender:
             temp_batch_enable.set(True)
             temp_batch_size.set(DEFAULT_BATCH_SIZE)
             temp_batch_delay.set(DEFAULT_BATCH_DELAY)
-            temp_smart_mode.set("A")
-            temp_auto_fallback.set(True)
 
         def do_save():
             try:
@@ -2390,12 +2479,9 @@ class FeedbackSender:
             self.batch_rest_enable_var.set(temp_batch_enable.get())
             self.batch_size_var.set(bs)
             self.batch_delay_var.set(bd)
-            self.smart_mode_var.set(temp_smart_mode.get())
-            self.auto_fallback_var.set(temp_auto_fallback.get())
-            self.smart_ocr_enable_var.set(temp_smart_mode.get() != "OFF")
 
             dialog.destroy()
-            self.status_label.config(text="✓ 高级配置参数已保存更新", fg="#67C23A")
+            self.status_label.config(text="✓ 运行延时参数已保存更新", fg="#67C23A")
 
         ttk.Button(btn_box, text="恢复默认值", command=do_reset, width=12).pack(side="left")
         ttk.Button(btn_box, text="取消", command=dialog.destroy, width=10).pack(side="right", padx=(8, 0))
@@ -2431,9 +2517,61 @@ class FeedbackSender:
         )
         self.file_label.pack(side="left", fill="x", expand=True, padx=(10, 0))
 
+        # 发送周次 / 周期管理控制栏
+        cycle_bar = tk.Frame(parent, bg="#F5F7FA")
+        cycle_bar.pack(side="top", fill="x", pady=(0, 6))
+
+        tk.Label(
+            cycle_bar,
+            text="📅 发送周次 / 周期:",
+            font=("Microsoft YaHei", 9, "bold"),
+            fg="#303133",
+            bg="#F5F7FA",
+        ).pack(side="left")
+
+        self.cycle_combo = ttk.Combobox(
+            cycle_bar,
+            textvariable=self.cycle_var,
+            values=[f"第 {i} 周" for i in range(1, 25)],
+            width=12,
+            state="normal",
+        )
+        self.cycle_combo.pack(side="left", padx=(6, 8))
+        self.cycle_combo.bind("<<ComboboxSelected>>", self._on_cycle_changed)
+        self.cycle_combo.bind("<FocusOut>", self._on_cycle_changed)
+        self.cycle_combo.bind("<Return>", self._on_cycle_changed)
+
+        tk.Label(
+            cycle_bar,
+            text="（💡 系统按周次独立归档；隔周发送时切换周次，学生名单将自动就绪为【待发送】）",
+            font=("Microsoft YaHei", 9),
+            fg="#909399",
+            bg="#F5F7FA",
+        ).pack(side="left")
+
         # 已载入文件条（文件名 + 条数 + 移除按钮）
         self.files_frame = tk.Frame(parent, bg="#F5F7FA")
         self.files_frame.pack(side="top", fill="x", pady=(0, 8))
+
+    def _on_cycle_changed(self, event=None):
+        """当用户手动切换或输入新周次/周期时，自动联动刷新名单状态"""
+        val = self.cycle_var.get().strip()
+        if not val:
+            val = "第 1 周"
+            self.cycle_var.set(val)
+        if val != self.current_cycle:
+            self.current_cycle = val
+            log(f"当前发送周次已切换为: 【{self.current_cycle}】", "INFO")
+            # 重新同步已载入文件的档案至新周次
+            for f_info in self.loaded_files:
+                f_path = f_info.get("path")
+                if f_path:
+                    try:
+                        raw_data = load_feedback_data_from_file(f_path)
+                        self.history_mgr.sync_file_loaded(f_path, raw_data, cycle=self.current_cycle)
+                    except Exception:
+                        pass
+            self.load_preview()
 
     def _create_content_paned(self, parent):
         """主内容分栏区：左侧名单，右侧实时消息预览"""
@@ -2733,11 +2871,11 @@ class FeedbackSender:
             pass
 
     def _short_file_label(self, file_path):
-        """文件短标签：优先用历史档案里的班级名，否则用文件名（去扩展名，超长截断）"""
+        """文件短标签：优先用纯净班级名，否则用文件名（去扩展名，超长截断）"""
         try:
-            detail = self.history_mgr.get_class_details(os.path.basename(file_path))
-            if detail and detail.get("class_name"):
-                return str(detail["class_name"])
+            c_name = clean_class_name_from_path(file_path)
+            if c_name:
+                return c_name
         except Exception:
             pass
         stem = os.path.splitext(os.path.basename(file_path))[0]
@@ -2761,8 +2899,14 @@ class FeedbackSender:
         if not isinstance(raw_data, list) or len(raw_data) == 0:
             raise ValueError("未能从该文件中提取到有效的学生反馈记录！")
 
-        # 先同步历史档案，再取班级短标签
-        self.history_mgr.sync_file_loaded(file_path, raw_data)
+        # 尝试自动从文件名提取周次并就位
+        detected_cyc = detect_cycle_from_string(base)
+        if detected_cyc:
+            self.current_cycle = detected_cyc
+            self.cycle_var.set(detected_cyc)
+
+        # 先按当前周次同步历史档案，再取班级短标签
+        self.history_mgr.sync_file_loaded(file_path, raw_data, cycle=self.current_cycle)
         label = self._short_file_label(file_path)
         for item in raw_data:
             if isinstance(item, dict):
@@ -2947,7 +3091,7 @@ class FeedbackSender:
             student_name = item.get("studentName") or item.get("name") or "未知学生"
             src_file = item.get("_src_file") or self.current_file_path
             src_label = item.get("_src_label") or os.path.splitext(os.path.basename(src_file or ""))[0]
-            hist_status = self.history_mgr.get_student_historical_status(src_file, student_name)
+            hist_status = self.history_mgr.get_student_historical_status(src_file, student_name, cycle=self.current_cycle)
 
             if "✓" in hist_status or "已发送" in hist_status:
                 status_text = "✓ 已发送"
@@ -3093,7 +3237,7 @@ class FeedbackSender:
                 src_file = row_item.get("_src_file") if isinstance(row_item, dict) else None
             except Exception:
                 src_file = None
-            self.history_mgr.update_student_status(src_file or self.current_file_path, s_name, "未发送", "-")
+            self.history_mgr.update_student_status(src_file or self.current_file_path, s_name, "未发送", "-", cycle=self.current_cycle)
         self.progress["value"] = 0
         self._update_progress_label(0, len(self.data))
         self._refresh_start_button_text()
@@ -3220,20 +3364,8 @@ class FeedbackSender:
         else:
             tip_msg += "⚠️ 未自动探测到企业微信，请确保企业微信已在电脑上登录并打开！\n"
 
-        mode = self.smart_mode_var.get()
-        if mode == "A":
-            fallback_tip = " (已开启异常自动降级至本地OCR)" if self.auto_fallback_var.get() else ""
-            tip_msg += f"✓ 【模式 A·大模型视觉防御】已启用 (Qwen3.8-Flash + 会话标题双重防御){fallback_tip}：语义消歧、精准纠偏并杜绝误发。\n"
-        elif mode == "B":
-            engine_desc = []
-            if HAS_RAPIDOCR:
-                engine_desc.append("RapidOCR")
-            elif HAS_WINOCR:
-                engine_desc.append("WinOCR")
-            engine_str = " + ".join(engine_desc) if engine_desc else "本地视觉"
-            tip_msg += f"✓ 【模式 B·本地智能核验】已启用 ({engine_str} + 会话标题检查点)：避开他人描述，纠错并拦截误发。\n"
-        else:
-            tip_msg += "⚠️ 智能视觉核验已关闭：将走传统回车发送模式。\n"
+        tip_msg += f"✓ 发送周次 / 周期：【{self.current_cycle}】（记录将独立归档至该周次）\n"
+        tip_msg += "✓ 【AI 智能防误发双保险】全自动守护中：已开启下拉智能纠偏与会话标题二次核验双重防线。\n"
 
         tip_msg += (
             "\n【安全提示】\n"
@@ -3350,7 +3482,7 @@ class FeedbackSender:
                 ),
             )
 
-            # 执行单条发送（包含模式 B 智能核验）
+            # 执行单条发送（包含 AI 智能防误发核验）
             send_result = "FAILED"
             try:
                 send_result = self.send_single_feedback(student_name, message)
@@ -3364,21 +3496,21 @@ class FeedbackSender:
                 success_count += 1
                 consecutive_sent += 1
                 self.root.after(0, lambda idx=i: self.update_status(idx, "✓ 已发送"))
-                self.history_mgr.update_student_status(item.get("_src_file") or self.current_file_path, student_name, "✓ 已发送", now_str)
+                self.history_mgr.update_student_status(item.get("_src_file") or self.current_file_path, student_name, "✓ 已发送", now_str, cycle=self.current_cycle)
                 self.send_logs.append(
                     {"index": i + 1, "name": student_name, "status": "成功", "time": now_str, "msg_len": len(message), "file": item.get("_src_label", "")}
                 )
             elif send_result == "NOT_FOUND":
                 not_found_count += 1
                 self.root.after(0, lambda idx=i: self.update_status(idx, "⚠️ 无此联系人"))
-                self.history_mgr.update_student_status(item.get("_src_file") or self.current_file_path, student_name, "⚠️ 无此联系人", now_str)
+                self.history_mgr.update_student_status(item.get("_src_file") or self.current_file_path, student_name, "⚠️ 无此联系人", now_str, cycle=self.current_cycle)
                 self.send_logs.append(
                     {"index": i + 1, "name": student_name, "status": "无此联系人", "time": now_str, "msg_len": len(message), "file": item.get("_src_label", "")}
                 )
             elif send_result == "DESC_ONLY":
                 desc_only_count += 1
                 self.root.after(0, lambda idx=i: self.update_status(idx, "⚠️ 仅他人描述(拦截)"))
-                self.history_mgr.update_student_status(item.get("_src_file") or self.current_file_path, student_name, "⚠️ 仅他人描述(拦截)", now_str)
+                self.history_mgr.update_student_status(item.get("_src_file") or self.current_file_path, student_name, "⚠️ 仅他人描述(拦截)", now_str, cycle=self.current_cycle)
                 self.send_logs.append(
                     {"index": i + 1, "name": student_name, "status": "仅他人描述(拦截)", "time": now_str, "msg_len": len(message), "file": item.get("_src_label", "")}
                 )
@@ -3386,7 +3518,7 @@ class FeedbackSender:
                 header_mismatch_count += 1
                 status_str = "⚠️ 标题不符(拦截)" if send_result == "HEADER_MISMATCH" else "⚠️ 存疑拦截"
                 self.root.after(0, lambda idx=i, st=status_str: self.update_status(idx, st))
-                self.history_mgr.update_student_status(item.get("_src_file") or self.current_file_path, student_name, status_str, now_str)
+                self.history_mgr.update_student_status(item.get("_src_file") or self.current_file_path, student_name, status_str, now_str, cycle=self.current_cycle)
                 self.send_logs.append(
                     {"index": i + 1, "name": student_name, "status": status_str, "time": now_str, "msg_len": len(message), "file": item.get("_src_label", "")}
                 )
@@ -3396,7 +3528,7 @@ class FeedbackSender:
             else:
                 fail_count += 1
                 self.root.after(0, lambda idx=i: self.update_status(idx, "✗ 失败"))
-                self.history_mgr.update_student_status(item.get("_src_file") or self.current_file_path, student_name, "✗ 失败", now_str)
+                self.history_mgr.update_student_status(item.get("_src_file") or self.current_file_path, student_name, "✗ 失败", now_str, cycle=self.current_cycle)
                 self.send_logs.append(
                     {"index": i + 1, "name": student_name, "status": "失败", "time": now_str, "msg_len": len(message), "file": item.get("_src_label", "")}
                 )
@@ -3751,9 +3883,15 @@ class FeedbackSender:
         """打开班级发送历史记录管理中心"""
         HistoryDialog(self.root, self.history_mgr, on_reload_file=self.reload_from_history)
 
-    def reload_from_history(self, file_path: str):
+    def reload_from_history(self, file_path: str, cycle: str = ""):
         """从历史记录窗口重载班级文件到主界面"""
         self.select_file(target_path=file_path)
+        if cycle:
+            self.current_cycle = cycle
+            self.cycle_var.set(cycle)
+            # 重新以此周次同步并刷新名单状态
+            self.history_mgr.sync_file_loaded(file_path, self.data, cycle=self.current_cycle)
+            self.load_preview()
 
     def open_log_file(self):
         """打开本地运行调试日志文件 (feedback_debug.log)"""
