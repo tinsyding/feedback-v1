@@ -37,8 +37,10 @@ _enc.txt
 
 # 桌面发送工具的本地运行产物（真实学生数据/日志/截图/打包输出，绝不入库）
 feedback-v1/tools/desktop-sender/feedback_history.json
-feedback-v1/tools/desktop-sender/测试.json
+feedback-v1/tools/desktop-sender/测试*.json
 feedback-v1/tools/desktop-sender/dist/
+feedback-v1/tools/desktop-sender/build/
+build/
 appdata/
 __pycache__/
 
