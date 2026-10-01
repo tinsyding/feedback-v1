@@ -33,9 +33,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r feedback-v1/tools/desktop-sender/requirements.txt
 
-      - name: Build exe
+      - name: Build exe (Classic & Fluent)
         working-directory: feedback-v1/tools/desktop-sender
-        run: python -m PyInstaller --noconfirm --clean send_feedback.spec
+        run: |
+          python -m PyInstaller --noconfirm --clean send_feedback.spec
+          python -m PyInstaller --noconfirm --clean send_feedback_fluent.spec
 
       - name: Extract version
         id: get_version
@@ -47,6 +49,7 @@ jobs:
         run: |
           VER="${{ steps.get_version.outputs.version }}"
           cp "feedback-v1/tools/desktop-sender/dist/极方每周反馈程序.exe" "极方每周反馈程序-${VER}.exe"
+          cp "feedback-v1/tools/desktop-sender/dist/极方每周反馈程序-Fluent版.exe" "极方每周反馈程序-Fluent版-${VER}.exe"
           ls -la 极方每周反馈程序-*.exe
 
       - name: Publish release
@@ -59,5 +62,9 @@ jobs:
           name: 极方每周反馈程序 ${{ steps.get_version.outputs.version }}
           body: |
             自动构建（${{ github.sha }}）。双击即用，无需 Python；首次启动稍慢属正常；建议单独建文件夹存放运行。
+
+            本发布包含两个平行版本，功能完全一致，请按视觉喜好选用：
+            1. **经典稳定版**：`极方每周反馈程序-${{ steps.get_version.outputs.version }}.exe`（原生传统界面，高兼容性）
+            2. **Fluent 现代版**：`极方每周反馈程序-Fluent版-${{ steps.get_version.outputs.version }}.exe`（采用 Windows 11 Fluent 现代圆角设计，支持深色/浅色一键切换）
           files: |
             极方每周反馈程序-*.exe

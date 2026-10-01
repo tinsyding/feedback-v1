@@ -1,9 +1,11 @@
 # 极方每周反馈程序 (Desktop Feedback Sender)
 
-> **版本**：v1.6  
+> **版本**：v1.6 / v1.6-fluent  
 > **定位**：教师端企业微信自动化专属反馈发送程序（Windows 独立桌面客户端）  
-> **核心源码**：[`send_feedback.py`](send_feedback.py)  
-> **打包配置**：[`send_feedback.spec`](send_feedback.spec) / [`.github/workflows/build-tools.yml`](../../.github/workflows/build-tools.yml)
+> **平行双版本**：
+> 1. **经典稳定版**：[`send_feedback.py`](send_feedback.py) / [`send_feedback.spec`](send_feedback.spec)
+> 2. **Fluent 现代版**：[`send_feedback_fluent.py`](send_feedback_fluent.py) / [`send_feedback_fluent.spec`](send_feedback_fluent.spec)（基于 `sv-ttk`，支持深浅色无缝切换）  
+> **云端流水线**：[`.github/workflows/build-tools.yml`](../../.github/workflows/build-tools.yml)
 
 ---
 
@@ -231,6 +233,8 @@ git push origin tools-v1.6
 
 ### 2. 云端流水线
 工作流 [`.github/workflows/build-tools.yml`](../../.github/workflows/build-tools.yml) 将在 Windows Server 环境中自动执行：
-1. 安装 Python 3.11 与锁定依赖（[`requirements.txt`](requirements.txt)）。
-2. 使用 PyInstaller 与 [`send_feedback.spec`](send_feedback.spec) 完成单文件打包并注入图标。
-3. 自动发布至 GitHub Releases，产物命名为 `极方每周反馈程序-v1.6.exe`。
+1. 安装 Python 与锁定依赖（含 `sv-ttk==2.6.1`）。
+2. 同时使用 PyInstaller 依次编译经典版（[`send_feedback.spec`](send_feedback.spec)）与 Fluent 现代版（[`send_feedback_fluent.spec`](send_feedback_fluent.spec)）。
+3. 自动发布至 GitHub Releases，同时挂载两个独立附件：
+   - `极方每周反馈程序-${VER}.exe`（经典稳定版）
+   - `极方每周反馈程序-Fluent版-${VER}.exe`（Fluent 现代圆角美化版）

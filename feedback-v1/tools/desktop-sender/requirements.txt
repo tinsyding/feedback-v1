@@ -8,3 +8,4 @@ pywin32==312
 rapidocr-onnxruntime==1.2.3
 numpy==2.5.3
 opencv-python==5.0.0.93
+sv-ttk==2.6.1
