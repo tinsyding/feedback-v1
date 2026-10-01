@@ -1,6 +1,6 @@
 # 极方每周反馈程序 (Desktop Feedback Sender)
 
-> **版本**：v1.4  
+> **版本**：v1.5  
 > **定位**：教师端企业微信自动化专属反馈发送程序（Windows 独立桌面客户端）  
 > **核心源码**：[`send_feedback.py`](send_feedback.py)  
 > **打包配置**：[`send_feedback.spec`](send_feedback.spec) / [`.github/workflows/build-tools.yml`](../../.github/workflows/build-tools.yml)

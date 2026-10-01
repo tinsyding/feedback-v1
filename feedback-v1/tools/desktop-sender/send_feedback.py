@@ -109,7 +109,7 @@ def preprocess_dropdown_image(pil_img: Image.Image) -> Image.Image:
         return pil_img
 
 # 客户端应用版本号
-APP_VERSION = "v1.4"
+APP_VERSION = "v1.5"
 
 # 基础默认延时配置 (秒)
 SEARCH_DELAY = 1.5
@@ -872,13 +872,15 @@ def _save_dropdown_debug_shot(crop_img, target_id: str, target_name: str, choice
 
 
 def dismiss_and_clear_search():
-    """安全退出搜索下拉浮层并清空搜索输入框，杜绝残留浮层或焦点干扰后续操作"""
+    """安全退出搜索下拉浮层并彻底清空搜索输入框，杜绝残留文字或焦点干扰后续操作"""
     try:
-        pyautogui.press("esc")
-        time.sleep(0.05)
+        pyautogui.hotkey("ctrl", "f")
+        time.sleep(0.08)
         pyautogui.hotkey("ctrl", "a")
         time.sleep(0.05)
         pyautogui.press("backspace")
+        time.sleep(0.08)
+        pyautogui.press("esc")
         time.sleep(0.05)
         pyautogui.press("esc")
     except Exception as e:
@@ -1255,6 +1257,30 @@ def detect_dropdown_target_via_vlm(crop_img, target_id: str, target_name: str) -
     choice = int(res.get("choice", -1))
     matched_title = res.get("matched_title", "")
     reason = res.get("reason", "")
+    target_found = res.get("target_found", True)
+
+    # 逻辑防御层 1：如果大模型在 target_found 中标记为 False，坚决不允许 choice > 0
+    if target_found is False:
+        if choice > 0:
+            choice = -2 if ("描述" in reason or "聊天记录" in reason or "群聊" in reason) else 0
+
+    # 逻辑防御层 2：如果 reason 明确指出“不存在”、“拦截”、“非独立联系人”、“仅在他人描述”或“聊天记录”
+    intercept_keywords = ["不存在", "拦截", "他人描述", "聊天记录", "群聊", "未找到", "无独立联系人", "并非本人", "非本人"]
+    if any(kw in reason for kw in intercept_keywords):
+        if "仅在他人描述" in reason or "聊天记录" in reason or "群聊" in reason or "他人备注" in reason:
+            choice = -2
+        elif "不存在" in reason or "未找到" in reason:
+            choice = 0
+
+    # 逻辑防御层 3：如果 choice == 1，但 matched_title 既不包含 target_id 也不包含 target_name
+    # 比如模型把【老板（企微）】作为第1项输出 choice: 1，这属于幻觉/模板惯性，坚决纠偏拦截
+    if choice == 1:
+        has_id = bool(target_id and target_id in matched_title)
+        has_name = bool(target_name and target_name in matched_title)
+        if not has_id and not has_name:
+            log(f"[大模型决策纠偏] 警告：模型返回 choice=1 但标题 '{matched_title}' 既不含学号 '{target_id}' 也不含姓名 '{target_name}'，修正为安全拦截 (choice=-2)", "WARN")
+            choice = -2
+
     log(f"[大模型选人决策] choice={choice}, title='{matched_title}', reason='{reason}'", "INFO")
     return choice, f"{reason} [模式A·大模型]"
 
@@ -3492,8 +3518,10 @@ class FeedbackSender:
         if not self.safe_sleep(CLICK_DELAY):
             return "ABORTED"
 
-        # 2. 全选清空搜索框
+        # 2. 全选并删除清空搜索框，杜绝残留文字累加
         pyautogui.hotkey("ctrl", "a")
+        time.sleep(0.04)
+        pyautogui.press("backspace")
         if not self.safe_sleep(0.05):
             return "ABORTED"
 
@@ -3596,61 +3624,19 @@ class FeedbackSender:
                 wecom_rect, target_id, target_name, timeout=1.2, mode=smart_mode, auto_fallback=auto_fallback
             )
 
-            # 异常感知：检测到会话标题为他人（如进入了 90001张三 @微信，而非 80001李四）
+            # 异常感知：检测到会话标题为他人（如进入了其他会话，而非目标学生）
             if header_status == "MISMATCH":
-                log(f"[{search_name}] ⚠️ 会话标题检查点拉响警报！当前处于【{header_title}】，非目标本人！触发自愈回滚...", "WARN")
+                log(f"[{search_name}] ⛔ 会话标题安全检查点拦截！当前处于【{header_title}】，与目标学生不符，立即清空退出以防误发！", "ERROR")
                 self.root.after(
                     0,
                     lambda n=search_name, t=header_title: self.status_label.config(
-                        text=f"🔄 触发自愈纠偏 [{n}]：当前会话为【{t}】，正在重新搜索并尝试下一项...",
-                        fg="#E6A23C",
+                        text=f"⛔ 标题不符已拦截 [{n}]：当前会话为【{t}】，已立即清空退出！",
+                        fg="#F56C6C",
                     ),
                 )
-
-                # 自愈回滚动作：重新按 Ctrl+F 激活搜索，并尝试下一项
-                healed = False
-                current_item = choice if choice >= 1 else 1
-                next_item = current_item + 1
-
-                for attempt in range(next_item, min(next_item + 2, 4)):
-                    log(f"[{search_name}] 自愈尝试：重新唤起搜索并按【↓】尝试第 {attempt} 项...", "INFO")
-                    pyautogui.hotkey("ctrl", "f")
-                    time.sleep(0.25)
-                    safe_copy(search_name)
-                    pyautogui.hotkey("ctrl", "v")
-                    time.sleep(0.7)
-                    for _ in range(attempt - 1):
-                        pyautogui.press("down")
-                        time.sleep(0.12)
-                    time.sleep(0.15)
-                    pyautogui.press("enter")
-                    time.sleep(0.3)
-
-                    retry_status, retry_title = verify_chat_header_title(
-                        wecom_rect, target_id, target_name, timeout=1.0, mode=smart_mode, auto_fallback=auto_fallback
-                    )
-                    if retry_status == "MATCH":
-                        log(f"[{search_name}] ✓ 自愈纠偏成功！会话已更正为目标本人【{retry_title}】", "INFO")
-                        header_status = "MATCH"
-                        header_title = retry_title
-                        healed = True
-                        break
-                    else:
-                        log(f"[{search_name}] 第 {attempt} 项核验仍不匹配: '{retry_title}'", "WARN")
-
-                if not healed and header_status == "MISMATCH":
-                    # 自愈失败，坚决安全拦截，严禁误发！
-                    log(f"[{search_name}] ⛔ 安全拦截：会话标题多次核验仍不符 (当前标题: '{header_title}')，绝不误发！", "ERROR")
-                    self.root.after(
-                        0,
-                        lambda n=search_name, t=header_title: self.status_label.config(
-                            text=f"⛔ 标题不符已拦截 [{n}]：当前会话为【{t}】，已安全拦截防误发！",
-                            fg="#F56C6C",
-                        ),
-                    )
-                    # 安全退出浮层并清空搜索框
-                    dismiss_and_clear_search()
-                    return "HEADER_MISMATCH"
+                # 立即安全退出会话并彻底清空搜索输入框，杜绝盲目按向下键误入智能搜索
+                dismiss_and_clear_search()
+                return "HEADER_MISMATCH"
 
             elif header_status == "UNCERTAIN":
                 # 会话标题未能核准（存疑），坚决触发安全拦截防盲发
