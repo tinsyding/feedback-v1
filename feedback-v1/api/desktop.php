@@ -364,23 +364,11 @@ switch ($action) {
             sendResponse(false, null, '缺少截屏图像数据', 400);
         }
 
-        // 获取 DashScope 密钥 (优先 local.php -> 环境变量)
-        $secretKeys = @include __DIR__ . '/secret_key.php';
-        $apiKey = '';
-        if (is_array($secretKeys)) {
-            $apiKey = $secretKeys['dashscopeApiKey'] ?? '';
-        }
-        if (empty($apiKey) && file_exists(__DIR__ . '/secret_key.local.php')) {
-            $localKeys = @include __DIR__ . '/secret_key.local.php';
-            if (is_array($localKeys)) {
-                $apiKey = $localKeys['dashscopeApiKey'] ?? '';
-            }
-        }
+        // 获取视觉大模型运行时配置 (优先 data/vision_config.json -> secret_key.local.php -> 环境变量)
+        $runtimeCfg = getVisionRuntimeConfig();
+        $apiKey = $runtimeCfg['api_key'] ?? '';
         if (empty($apiKey)) {
-            $apiKey = getenv('DASHSCOPE_API_KEY') ?: '';
-        }
-        if (empty($apiKey)) {
-            sendResponse(false, null, '服务端未配置视觉模型 API 密钥 (DASHSCOPE_API_KEY)', 500);
+            sendResponse(false, null, '服务端未配置视觉模型 API 密钥，请在管理后台【视觉大模型配置】中配置并点击保存', 400);
         }
 
         try {
@@ -405,7 +393,7 @@ switch ($action) {
             ], [
                 'operator' => $operator
             ]);
-            sendResponse(false, null, $e->getMessage(), 502);
+            sendResponse(false, null, $e->getMessage(), 422);
         }
         break;
     }

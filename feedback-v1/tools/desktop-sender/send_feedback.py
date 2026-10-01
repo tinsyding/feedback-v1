@@ -1126,7 +1126,8 @@ def cloud_post(server: str, action: str, payload: dict, timeout: int = 20) -> di
     except urllib.error.HTTPError as e:
         try:
             detail = json.loads(e.read().decode("utf-8", errors="replace"))
-            raise RuntimeError(detail.get("error") or f"服务器返回 HTTP {e.code}")
+            msg = detail.get("error") or detail.get("message") or f"HTTP {e.code}"
+            raise RuntimeError(f"服务器返回: {msg}")
         except RuntimeError:
             raise
         except Exception:
@@ -1154,7 +1155,7 @@ def image_to_base64_jpeg(pil_img: Image.Image, quality: int = 85) -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
-def call_cloud_vision(task: str, crop_img: Image.Image, target_id: str, target_name: str, timeout: float = 4.5) -> dict:
+def call_cloud_vision(task: str, crop_img: Image.Image, target_id: str, target_name: str, timeout: float = 10.0) -> dict:
     """
     向服务端 api/desktop.php?action=vision_detect 发起大模型视觉分析请求。
     task: 'dropdown' | 'header'
