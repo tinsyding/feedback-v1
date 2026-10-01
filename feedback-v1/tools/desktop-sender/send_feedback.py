@@ -868,6 +868,20 @@ def _save_dropdown_debug_shot(crop_img, target_id: str, target_name: str, choice
         log(f"[现场调试快照保存失败]: {se}", "WARN")
 
 
+def dismiss_and_clear_search():
+    """安全退出搜索下拉浮层并清空搜索输入框，杜绝残留浮层或焦点干扰后续操作"""
+    try:
+        pyautogui.press("esc")
+        time.sleep(0.05)
+        pyautogui.hotkey("ctrl", "a")
+        time.sleep(0.05)
+        pyautogui.press("backspace")
+        time.sleep(0.05)
+        pyautogui.press("esc")
+    except Exception as e:
+        log(f"清空搜索框异常: {e}", "DEBUG")
+
+
 def detect_dropdown_target(wecom_rect: tuple, target_id: str, target_name: str, mode: str = "A", auto_fallback: bool = True) -> tuple:
     """
     【下拉候选框视觉智能决策总控】
@@ -3511,11 +3525,8 @@ class FeedbackSender:
                             fg="#F56C6C",
                         ),
                     )
-                    # 安全清空搜索框
-                    pyautogui.hotkey("ctrl", "a")
-                    time.sleep(0.08)
-                    pyautogui.press("backspace")
-                    time.sleep(0.08)
+                    # 安全退出浮层并清空搜索框
+                    dismiss_and_clear_search()
                     return "NOT_FOUND"
 
                 elif choice == -2:
@@ -3528,11 +3539,8 @@ class FeedbackSender:
                             fg="#E6A23C",
                         ),
                     )
-                    # 安全清空搜索框
-                    pyautogui.hotkey("ctrl", "a")
-                    time.sleep(0.08)
-                    pyautogui.press("backspace")
-                    time.sleep(0.08)
+                    # 安全退出浮层并清空搜索框
+                    dismiss_and_clear_search()
                     return "DESC_ONLY"
 
                 elif choice >= 2:
@@ -3549,6 +3557,8 @@ class FeedbackSender:
                         pyautogui.press("down")
                         time.sleep(0.12)
                     time.sleep(0.15)
+                    pyautogui.press("enter")
+                    time.sleep(0.2)
                     pyautogui.press("enter")
                 elif choice == 1:
                     log(f"[{search_name}] 下拉初选第1项即为本人 ({matched_title})，回车进入会话", "INFO")
@@ -3634,12 +3644,8 @@ class FeedbackSender:
                             fg="#F56C6C",
                         ),
                     )
-                    # 清空搜索框防残留
-                    pyautogui.hotkey("ctrl", "f")
-                    time.sleep(0.1)
-                    pyautogui.hotkey("ctrl", "a")
-                    time.sleep(0.08)
-                    pyautogui.press("backspace")
+                    # 安全退出浮层并清空搜索框
+                    dismiss_and_clear_search()
                     return "HEADER_MISMATCH"
 
             elif header_status == "UNCERTAIN":
@@ -3652,11 +3658,7 @@ class FeedbackSender:
                         fg="#F56C6C",
                     ),
                 )
-                pyautogui.hotkey("ctrl", "f")
-                time.sleep(0.1)
-                pyautogui.hotkey("ctrl", "a")
-                time.sleep(0.08)
-                pyautogui.press("backspace")
+                dismiss_and_clear_search()
                 return "UNCERTAIN_INTERCEPT"
 
             elif header_status == "MATCH":
