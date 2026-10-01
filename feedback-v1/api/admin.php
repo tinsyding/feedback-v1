@@ -49,6 +49,12 @@ try {
             require __DIR__ . '/admin/actions_config.php';
             break;
 
+        // --- 2.1 视觉大模型与提示词配置 ---
+        case 'vision_config':
+        case 'test_vision_config':
+            require __DIR__ . '/admin/actions_vision_config.php';
+            break;
+
         // --- 3. 数据表元数据与聚合统计 ---
         case 'db_tables':
         case 'db_schema':

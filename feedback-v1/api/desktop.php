@@ -85,7 +85,52 @@ function desktopAuthTeacher(string $username, string $password): array {
 }
 
 /**
- * 调用阿里云百炼 Qwen3.8-Flash 多模态视觉模型
+ * 获取视觉大模型运行时配置 (优先 data/vision_config.json -> secret_key.local.php -> 环境变量)
+ */
+function getVisionRuntimeConfig(): array {
+    $cfgFile = dirname(__DIR__) . '/data/vision_config.json';
+    $config = [];
+    if (file_exists($cfgFile)) {
+        $parsed = json_decode(@file_get_contents($cfgFile), true);
+        if (is_array($parsed)) {
+            $config = $parsed;
+        }
+    }
+
+    if (empty($config['base_url'])) {
+        $config['base_url'] = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+    }
+    if (empty($config['model'])) {
+        $config['model'] = 'qwen3.8-flash';
+    }
+
+    if (empty($config['api_key'])) {
+        $secretKeyFile = __DIR__ . '/secret_key.local.php';
+        if (file_exists($secretKeyFile)) {
+            $keys = @include $secretKeyFile;
+            if (is_array($keys) && !empty($keys['dashscopeApiKey'])) {
+                $config['api_key'] = $keys['dashscopeApiKey'];
+            }
+        }
+    }
+    if (empty($config['api_key'])) {
+        $secretKeyFile = __DIR__ . '/secret_key.php';
+        if (file_exists($secretKeyFile)) {
+            $keys = @include $secretKeyFile;
+            if (is_array($keys) && !empty($keys['dashscopeApiKey'])) {
+                $config['api_key'] = $keys['dashscopeApiKey'];
+            }
+        }
+    }
+    if (empty($config['api_key'])) {
+        $config['api_key'] = getenv('DASHSCOPE_API_KEY') ?: '';
+    }
+
+    return $config;
+}
+
+/**
+ * 调用多模态视觉模型 (支持根据后台配置动态切换模型、端点与提示词模板)
  */
 function callDashScopeVision(string $apiKey, string $task, string $targetId, string $targetName, string $imageBase64): array {
     $imgUrl = $imageBase64;
@@ -93,47 +138,64 @@ function callDashScopeVision(string $apiKey, string $task, string $targetId, str
         $imgUrl = 'data:image/jpeg;base64,' . $imgUrl;
     }
 
+    $runtimeCfg = getVisionRuntimeConfig();
+    $useApiKey = !empty($apiKey) ? $apiKey : ($runtimeCfg['api_key'] ?? '');
+    $baseUrl = $runtimeCfg['base_url'] ?? 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+    $model = $runtimeCfg['model'] ?? 'qwen3.8-flash';
+
+    if (empty($useApiKey)) {
+        throw new RuntimeException("服务端未配置视觉模型 API 密钥 (DASHSCOPE_API_KEY 或后台设置)");
+    }
+
     if ($task === 'dropdown') {
-        $prompt = "你是一个企业微信搜索下拉结果决策专家。请仔细观察这张企业微信搜索下拉候选人列表的截屏，找出目标学生本人或其家长，并判定其排在候选列表的第几项。\n\n" .
-                  "【目标学生信息】：\n" .
-                  "- 目标学号：{$targetId}\n" .
-                  "- 目标姓名：{$targetName}\n\n" .
-                  "【核心判定准则与红线禁令】：\n" .
-                  "1. 【红线：严禁选择群聊！】：目标必须且只能是“联系人”分类下的独立个人微信/企微联系人！“群聊”分类下的任何群聊（如班级群、教研群、助教群、交流群等）无论其名称或下方包含文字如何，绝对不可作为候选目标！若“联系人”下没有目标本人的独立条目，一律判定为未找到本人！\n" .
-                  "2. 【本人条目判定】：观察“联系人”分类下的条目。条目的主标题（大字加粗标题）中直接包含目标学号（例如 \"{$targetId}\"）或目标姓名（例如 \"{$targetName}\"、\"{$targetName}家长\"、\"{$targetName}妈妈\"）。其下方浅灰色小字即使显示其他微信昵称（如 \"微信昵称: 花开富贵\"），只要主标题是本人备注，即为本人条目！\n" .
-                  "3. 【他人描述/聊天记录】：条目主标题是其他人（例如 \"90001张三@微信\"），下方浅灰色小字写着“描述: {$targetId}”或“包含: {$targetId}”或“聊天记录: ...”。这代表在他人备注或聊天记录中提到了该学生，绝对不是目标本人！\n" .
-                  "4. 【候选条目排序编号】：按搜索结果从上往下可点击的条目顺序计数（第 1 项、第 2 项、第 3 项...，忽略纯分类标签文本如“联系人”）。\n\n" .
-                  "请输出严格 JSON 格式：\n" .
-                  "{\n" .
-                  "  \"target_found\": true,\n" .
-                  "  \"choice\": 1,\n" .
-                  "  \"matched_title\": \"命中条目的主标题，未找到则填空字符串\",\n" .
-                  "  \"reason\": \"简述判定理由\"\n" .
-                  "}\n\n" .
-                  "【choice 取值规范】：\n" .
-                  "- 1: 列表第 1 项即为目标本人独立联系人\n" .
-                  "- 2~4: 列表第 1 项是他人描述，第 choice 项才是目标本人独立联系人（程序将自动按向下键纠偏）\n" .
-                  "- -2: 目标仅在他人描述、聊天记录或群聊中被提及，通讯录中不存在其独立联系人（安全拦截防误发）\n" .
-                  "- 0: 未找到该联系人 / 列表为空 / 显示“进入全局搜索”或“网络查找”（安全跳过）";
+        $template = $runtimeCfg['prompt_dropdown'] ?? '';
+        if (empty($template)) {
+            $template = "你是一个企业微信搜索下拉结果决策专家。请仔细观察这张企业微信搜索下拉候选人列表的截屏，找出目标学生本人或其家长，并判定其排在候选列表的第几项。\n\n" .
+                        "【目标学生信息】：\n" .
+                        "- 目标学号：{target_id}\n" .
+                        "- 目标姓名：{target_name}\n\n" .
+                        "【核心判定准则与红线禁令】：\n" .
+                        "1. 【红线：严禁选择群聊！】：目标必须且只能是“联系人”分类下的独立个人微信/企微联系人！“群聊”分类下的任何群聊（如班级群、教研群、助教群、交流群等）无论其名称或下方包含文字如何，绝对不可作为候选目标！若“联系人”下没有目标本人的独立条目，一律判定为未找到本人！\n" .
+                        "2. 【本人条目判定】：观察“联系人”分类下的条目。条目的主标题（大字加粗标题）中直接包含目标学号（例如 \"{target_id}\"）或目标姓名（例如 \"{target_name}\"、\"{target_name}家长\"、\"{target_name}妈妈\"）。其下方浅灰色小字即使显示其他微信昵称（如 \"微信昵称: 花开富贵\"），只要主标题是本人备注，即为本人条目！\n" .
+                        "3. 【他人描述/聊天记录】：条目主标题是其他人（例如 \"90001张三@微信\"），下方浅灰色小字写着“描述: {target_id}”或“包含: {target_id}”或“聊天记录: ...”。这代表在他人备注或聊天记录中提到了该学生，绝对不是目标本人！\n" .
+                        "4. 【候选条目排序编号】：按搜索结果从上往下可点击的条目顺序计数（第 1 项、第 2 项、第 3 项...，忽略纯分类标签文本如“联系人”）。\n\n" .
+                        "请输出严格 JSON 格式：\n" .
+                        "{\n" .
+                        "  \"target_found\": true,\n" .
+                        "  \"choice\": 1,\n" .
+                        "  \"matched_title\": \"命中条目的主标题，未找到则填空字符串\",\n" .
+                        "  \"reason\": \"简述判定理由\"\n" .
+                        "}\n\n" .
+                        "【choice 取值规范】：\n" .
+                        "- 1: 列表第 1 项即为目标本人独立联系人\n" .
+                        "- 2~4: 列表第 1 项是他人描述，第 choice 项才是目标本人独立联系人（程序将自动按向下键纠偏）\n" .
+                        "- -2: 目标仅在他人描述、聊天记录或群聊中被提及，通讯录中不存在其独立联系人（安全拦截防误发）\n" .
+                        "- 0: 未找到该联系人 / 列表为空 / 显示“进入全局搜索”或“网络查找”（安全跳过）";
+        }
+        $prompt = str_replace(['{target_id}', '{target_name}'], [$targetId, $targetName], $template);
     } else {
-        $prompt = "你是一个企业微信会话标题核验专家。请仔细观察这张企业微信聊天窗口顶部的标题栏截图，核实当前会话是否为目标学生本人或其家长。\n\n" .
-                  "【目标学生信息】：\n" .
-                  "- 目标学号：{$targetId}\n" .
-                  "- 目标姓名：{$targetName}\n\n" .
-                  "【判断准则】：\n" .
-                  "1. 标题中只要包含目标学号（例如 \"{$targetId}\"）或目标姓名（例如 \"{$targetName}\"、\"{$targetName}妈妈\"、\"{$targetName}家长\"），均判定为匹配成功！允许包含各类表情符号（如 💐、🌸）和系统后缀（如 \"@微信\"）。\n" .
-                  "2. 若标题明确属于其他联系人（例如包含其他学生姓名、其他四位以上学号，且完全不含目标学生），判定为不匹配。\n" .
-                  "3. 若截图完全空白或未见有效文字，判定为存疑。\n\n" .
-                  "请输出严格 JSON 格式：\n" .
-                  "{\n" .
-                  "  \"matched\": true,\n" .
-                  "  \"detected_title\": \"识别出的完整标题文本\",\n" .
-                  "  \"reason\": \"简述判定理由\"\n" .
-                  "}";
+        $template = $runtimeCfg['prompt_header'] ?? '';
+        if (empty($template)) {
+            $template = "你是一个企业微信会话标题核验专家。请仔细观察这张企业微信聊天窗口顶部的标题栏截图，核实当前会话是否为目标学生本人或其家长。\n\n" .
+                        "【目标学生信息】：\n" .
+                        "- 目标学号：{target_id}\n" .
+                        "- 目标姓名：{target_name}\n\n" .
+                        "【判断准则】：\n" .
+                        "1. 标题中只要包含目标学号（例如 \"{target_id}\"）或目标姓名（例如 \"{target_name}\"、\"{target_name}妈妈\"、\"{target_name}家长\"），均判定为匹配成功！允许包含各类表情符号（如 💐、🌸）和系统后缀（如 \"@微信\"）。\n" .
+                        "2. 若标题明确属于其他联系人（例如包含其他学生姓名、其他四位以上学号，且完全不含目标学生），判定为不匹配。\n" .
+                        "3. 若截图完全空白或未见有效文字，判定为存疑。\n\n" .
+                        "请输出严格 JSON 格式：\n" .
+                        "{\n" .
+                        "  \"matched\": true,\n" .
+                        "  \"detected_title\": \"识别出的完整标题文本\",\n" .
+                        "  \"reason\": \"简述判定理由\"\n" .
+                        "}";
+        }
+        $prompt = str_replace(['{target_id}', '{target_name}'], [$targetId, $targetName], $template);
     }
 
     $payload = [
-        'model' => 'qwen3.8-flash',
+        'model' => $model,
         'enable_thinking' => false,
         'messages' => [
             [
@@ -154,13 +216,13 @@ function callDashScopeVision(string $apiKey, string $task, string $targetId, str
         'max_tokens' => 300
     ];
 
-    $ch = curl_init('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions');
+    $ch = curl_init($baseUrl);
     curl_setopt_array($ch, [
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE),
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER => [
-            'Authorization: Bearer ' . $apiKey,
+            'Authorization: Bearer ' . $useApiKey,
             'Content-Type: application/json'
         ],
         CURLOPT_TIMEOUT => 15,
@@ -179,7 +241,7 @@ function callDashScopeVision(string $apiKey, string $task, string $targetId, str
     }
     if ($httpCode !== 200) {
         $errDetail = json_decode($response, true);
-        $errMsg = $errDetail['error']['message'] ?? "HTTP {$httpCode}";
+        $errMsg = $errDetail['error']['message'] ?? $errDetail['message'] ?? "HTTP {$httpCode}";
         throw new RuntimeException("大模型服务返回异常: {$errMsg}");
     }
 
