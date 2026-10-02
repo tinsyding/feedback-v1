@@ -18,7 +18,11 @@
 
 ---
 
-## 二、 架构与模块划分
+## 二、 架构与版本基准
+
+> **版本基准定位**：
+> - **底层安全算法**：100% 对齐 Python 两版共同演进的最新 `v2.0`（包含他人提及防误选、失焦自动挂起、周次正则等）；
+> - **产品与 UI 架构**：100% 基于 **新版 Fluent 现代版（`send_feedback_fluent.py`）**，采用 **Navigation Rail 现代侧导航**、多视图分页（工作区/历史/日志/设置）与流式卡片交互，并支持 ☀️/🌙 深浅色无缝切换。
 
 ```
 desktop-sender-rs/
@@ -29,14 +33,16 @@ desktop-sender-rs/
 │   ├── lib.rs            # 核心库导出
 │   ├── types.rs          # 领域模型 (FeedbackItem, DecisionResult, Candidate)
 │   ├── parser.rs         # 学号/姓名正则、周次匹配、JSON/HTML 多策略解析器、决策中枢
+│   ├── sender_engine.rs  # 批量发信异步调度引擎与失焦守护状态机
 │   ├── image_proc.rs     # 图像预处理管线 (去水印、去彩斑、双三次插值放大)
 │   ├── cloud.rs          # 模式 A: 云端大模型视觉 (Qwen3.8-Flash) 与脱敏日志上报
 │   └── automation/
 │       ├── mod.rs        # 自动化子系统入口
 │       ├── win32.rs      # Win32 窗口枚举、句柄激活、DPI 与失焦守护
-│       └── win_ocr.rs    # 模式 B: Windows 10/11 原生 Media.Ocr 中英文免依赖引擎
+│       └── win_ocr.rs    # 模式 B: Windows 10/11 原生 Media.Ocr 引擎及联系人行解析
 └── tests/
-    └── parser_tests.rs   # 单元测试 (名单解析、去水印放大、他人描述避坑自测)
+    ├── parser_tests.rs   # 单元测试 (名单解析、去水印放大、他人描述避坑、OCR行解析)
+    └── engine_tests.rs   # 批量发信调度与状态机集成测试
 ```
 
 ---
