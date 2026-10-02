@@ -5,8 +5,10 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 
+use serde::{Deserialize, Serialize};
+
 /// 自动化发信执行引擎状态
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EngineState {
     Idle,
     Running,
@@ -17,9 +19,12 @@ pub enum EngineState {
 }
 
 /// 引擎向外广播的实时事件（供 GUI 或 CLI 监听渲染）
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum EngineEvent {
-    StateChanged(EngineState),
+    StateChanged {
+        state: EngineState,
+    },
     Progress {
         current: usize,
         total: usize,
@@ -32,13 +37,26 @@ pub enum EngineEvent {
         reason: String,
     },
     Log {
-        level: &'static str,
+        level: String,
         message: String,
     },
 }
 
+impl EngineEvent {
+    pub fn state_changed(state: EngineState) -> Self {
+        Self::StateChanged { state }
+    }
+
+    pub fn log(level: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::Log {
+            level: level.into(),
+            message: message.into(),
+        }
+    }
+}
+
 /// 外部对引擎下发的控制指令
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EngineCommand {
     Start,
     Pause,
@@ -47,7 +65,7 @@ pub enum EngineCommand {
 }
 
 /// 发信引擎运行配置
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineConfig {
     pub batch_size: usize,
     pub item_interval_ms: u64,
@@ -106,26 +124,26 @@ impl<D: AutomationDriver> SenderEngine<D> {
         let mut failed = 0;
 
         let _ = event_tx
-            .send(EngineEvent::StateChanged(EngineState::Running))
+            .send(EngineEvent::state_changed(EngineState::Running))
             .await;
         let _ = event_tx
-            .send(EngineEvent::Log {
-                level: "INFO",
-                message: format!("发信任务启动，总计 {} 位待发送学生", total),
-            })
+            .send(EngineEvent::log(
+                "INFO",
+                format!("发信任务启动，总计 {} 位待发送学生", total),
+            ))
             .await;
 
         let hwnd = match self.driver.find_wecom().await {
             Some(h) => h,
             None => {
                 let _ = event_tx
-                    .send(EngineEvent::Log {
-                        level: "ERROR",
-                        message: "未找到企业微信主窗口，请先打开并登录企微".to_string(),
-                    })
+                    .send(EngineEvent::log(
+                        "ERROR",
+                        "未找到企业微信主窗口，请先打开并登录企微",
+                    ))
                     .await;
                 let _ = event_tx
-                    .send(EngineEvent::StateChanged(EngineState::Stopped))
+                    .send(EngineEvent::state_changed(EngineState::Stopped))
                     .await;
                 return;
             }
@@ -135,13 +153,10 @@ impl<D: AutomationDriver> SenderEngine<D> {
             // 1. 检查外部控制指令
             if self.handle_control_commands(&mut cmd_rx, &event_tx).await == EngineCommand::Stop {
                 let _ = event_tx
-                    .send(EngineEvent::Log {
-                        level: "WARN",
-                        message: "收到停止指令，任务提前终止".to_string(),
-                    })
+                    .send(EngineEvent::log("WARN", "收到停止指令，任务提前终止"))
                     .await;
                 let _ = event_tx
-                    .send(EngineEvent::StateChanged(EngineState::Stopped))
+                    .send(EngineEvent::state_changed(EngineState::Stopped))
                     .await;
                 return;
             }
@@ -149,13 +164,13 @@ impl<D: AutomationDriver> SenderEngine<D> {
             // 2. 前台失焦守护
             while !self.driver.is_wecom_foreground(hwnd).await {
                 let _ = event_tx
-                    .send(EngineEvent::StateChanged(EngineState::FocusLost))
+                    .send(EngineEvent::state_changed(EngineState::FocusLost))
                     .await;
                 let _ = event_tx
-                    .send(EngineEvent::Log {
-                        level: "WARN",
-                        message: "企微窗口失去焦点，已自动挂起发信；请切换回企微窗口继续...".to_string(),
-                    })
+                    .send(EngineEvent::log(
+                        "WARN",
+                        "企微窗口失去焦点，已自动挂起发信；请切换回企微窗口继续...",
+                    ))
                     .await;
                 tokio::time::sleep(Duration::from_millis(800)).await;
             }
@@ -168,16 +183,16 @@ impl<D: AutomationDriver> SenderEngine<D> {
             };
 
             let _ = event_tx
-                .send(EngineEvent::Log {
-                    level: "INFO",
-                    message: format!(
+                .send(EngineEvent::log(
+                    "INFO",
+                    format!(
                         "[{}/{}] 正在处理: {} (学号: {})",
                         i + 1,
                         total,
                         item.clean_name,
                         item.student_id
                     ),
-                })
+                ))
                 .await;
 
             // 3. 搜索联系人
@@ -285,13 +300,13 @@ impl<D: AutomationDriver> SenderEngine<D> {
             // 6. 批次休眠与间隔冷却
             if (i + 1) % self.config.batch_size == 0 && (i + 1) < total {
                 let _ = event_tx
-                    .send(EngineEvent::Log {
-                        level: "INFO",
-                        message: format!(
+                    .send(EngineEvent::log(
+                        "INFO",
+                        format!(
                             "已达到批次阈值 {}，防风控休眠 {} 秒...",
                             self.config.batch_size, self.config.batch_cooldown_sec
                         ),
-                    })
+                    ))
                     .await;
                 tokio::time::sleep(Duration::from_secs(self.config.batch_cooldown_sec)).await;
             } else {
@@ -300,18 +315,18 @@ impl<D: AutomationDriver> SenderEngine<D> {
         }
 
         let _ = event_tx
-            .send(EngineEvent::StateChanged(EngineState::Completed))
+            .send(EngineEvent::state_changed(EngineState::Completed))
             .await;
         let _ = event_tx
-            .send(EngineEvent::Log {
-                level: "INFO",
-                message: format!(
+            .send(EngineEvent::log(
+                "INFO",
+                format!(
                     "发信任务全部结束！总计: {}, 成功: {}, 失败/跳过: {}",
                     total,
                     success,
                     total - success
                 ),
-            })
+            ))
             .await;
     }
 
@@ -323,13 +338,13 @@ impl<D: AutomationDriver> SenderEngine<D> {
         let mut cmd = *rx.borrow();
         if cmd == EngineCommand::Pause {
             let _ = event_tx
-                .send(EngineEvent::StateChanged(EngineState::Paused))
+                .send(EngineEvent::state_changed(EngineState::Paused))
                 .await;
             let _ = event_tx
-                .send(EngineEvent::Log {
-                    level: "WARN",
-                    message: "用户暂停了发信任务，等待恢复...".to_string(),
-                })
+                .send(EngineEvent::log(
+                    "WARN",
+                    "用户暂停了发信任务，等待恢复...",
+                ))
                 .await;
 
             while *rx.borrow() == EngineCommand::Pause {
@@ -339,7 +354,7 @@ impl<D: AutomationDriver> SenderEngine<D> {
             }
             cmd = *rx.borrow();
             let _ = event_tx
-                .send(EngineEvent::StateChanged(EngineState::Running))
+                .send(EngineEvent::state_changed(EngineState::Running))
                 .await;
         }
         cmd

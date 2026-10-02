@@ -62,6 +62,41 @@ pub fn parse_html_embedded_json(html: &str) -> Option<Vec<FeedbackItem>> {
     parse_json(json_text).ok()
 }
 
+/// 解析 HTML 反馈快照，优先提取内嵌 JSON，其次匹配卡片 DOM 节点
+pub fn parse_html(html: &str) -> Result<Vec<FeedbackItem>, String> {
+    if let Some(items) = parse_html_embedded_json(html) {
+        return Ok(items);
+    }
+
+    let card_re = Regex::new(r#"(?s)<div[^>]*class=["'][^"']*(?:feedback-card|student-card)[^"']*["'][^>]*>(.*?)</div>"#).map_err(|e| e.to_string())?;
+    let name_re = Regex::new(r#"(?s)<(?:h\d|div|span)[^>]*class=["'][^"']*student-name[^"']*["'][^>]*>(.*?)</(?:h\d|div|span)>"#).map_err(|e| e.to_string())?;
+    let msg_re = Regex::new(r#"(?s)<(?:pre|div|p)[^>]*class=["'][^"']*(?:message-body|feedback-text)[^"']*["'][^>]*>(.*?)</(?:pre|div|p)>"#).map_err(|e| e.to_string())?;
+
+    let mut items = Vec::new();
+    for card in card_re.captures_iter(html) {
+        let card_html = card.get(1).map_or("", |m| m.as_str());
+        let name = name_re.captures(card_html).and_then(|c| c.get(1)).map_or("", |m| m.as_str()).trim();
+        let msg = msg_re.captures(card_html).and_then(|c| c.get(1)).map_or("", |m| m.as_str()).trim();
+        if !name.is_empty() && !msg.is_empty() {
+            let (id, clean_name) = parse_student_identifier(name);
+            items.push(FeedbackItem {
+                student_name: name.to_string(),
+                message: msg.to_string(),
+                student_id: id,
+                clean_name: if clean_name.is_empty() { name.to_string() } else { clean_name },
+                cycle: detect_cycle_from_string(msg),
+                status: Default::default(),
+            });
+        }
+    }
+
+    if items.is_empty() {
+        Err("未能从 HTML 中提取到学生反馈数据".to_string())
+    } else {
+        Ok(items)
+    }
+}
+
 /// 通用联系人下拉候选安全决策中枢 (与 Python 算法 1:1 对齐)
 pub fn evaluate_contact_candidates(
     contacts: &[ContactCandidate],

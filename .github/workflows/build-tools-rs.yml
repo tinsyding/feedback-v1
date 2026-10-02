@@ -1,4 +1,4 @@
-name: Build Rust 反馈工具 (PoC)
+name: Build Rust 极方反馈工具 (Fluent 桌面版)
 
 on:
   workflow_dispatch:

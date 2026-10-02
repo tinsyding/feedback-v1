@@ -94,7 +94,7 @@ async fn test_sender_engine_full_loop() {
     // 监听事件
     let mut finished = false;
     while let Some(event) = event_rx.recv().await {
-        if let EngineEvent::StateChanged(EngineState::Completed) = event {
+        if let EngineEvent::StateChanged { state: EngineState::Completed } = event {
             finished = true;
             break;
         }

@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>极方每周反馈程序 (Fluent 现代版)</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="theme-light">
+  <div class="app-layout">
+    <!-- 左侧 Navigation Rail 导航边栏 -->
+    <aside class="nav-rail">
+      <div class="brand">
+        <div class="brand-icon">JF</div>
+        <div class="brand-text">
+          <div class="brand-title">极方反馈</div>
+          <div class="wecom-status" id="wecomStatus">
+            <span class="status-dot"></span>
+            <span class="status-label">企微检测中</span>
+          </div>
+        </div>
+      </div>
+
+      <nav class="nav-menu">
+        <button class="nav-item active" data-page="workspace">
+          <span class="nav-icon">🚀</span>
+          <span class="nav-label">发送工作台</span>
+        </button>
+        <button class="nav-item" data-page="history">
+          <span class="nav-icon">📚</span>
+          <span class="nav-label">历史档案</span>
+        </button>
+        <button class="nav-item" data-page="logs">
+          <span class="nav-icon">📊</span>
+          <span class="nav-label">运行日志</span>
+        </button>
+        <button class="nav-item" data-page="settings">
+          <span class="nav-icon">⚙️</span>
+          <span class="nav-label">偏好设置</span>
+        </button>
+      </nav>
+
+      <div class="nav-footer">
+        <button class="theme-toggle" id="themeToggle" title="切换深色/浅色模式">
+          <span class="theme-icon" id="themeIcon">☀️</span>
+        </button>
+        <div class="version-tag">v2.0-rust</div>
+      </div>
+    </aside>
+
+    <!-- 右侧多视图内容区 -->
+    <main class="main-content">
+      <!-- 页面 1: 发送工作台 -->
+      <section class="page-view active" id="pageWorkspace">
+        <!-- 顶部指标卡片 -->
+        <header class="metric-grid">
+          <div class="metric-card active" data-filter="all">
+            <div class="metric-label">总名单</div>
+            <div class="metric-value" id="countTotal">0</div>
+          </div>
+          <div class="metric-card" data-filter="pending">
+            <div class="metric-label">待发送</div>
+            <div class="metric-value text-warning" id="countPending">0</div>
+          </div>
+          <div class="metric-card" data-filter="success">
+            <div class="metric-label">已发送</div>
+            <div class="metric-value text-success" id="countSuccess">0</div>
+          </div>
+          <div class="metric-card" data-filter="failed">
+            <div class="metric-label">异常/跳过</div>
+            <div class="metric-value text-danger" id="countFailed">0</div>
+          </div>
+        </header>
+
+        <!-- 工作台分栏主体 -->
+        <div class="workspace-body">
+          <!-- 左侧：搜索与名单列表 -->
+          <div class="roster-panel">
+            <div class="toolbar">
+              <div class="search-box">
+                <span class="search-icon">🔍</span>
+                <input type="text" id="searchInput" placeholder="搜索姓名或学号..." />
+                <button class="clear-btn" id="searchClearBtn" style="display:none;">✕</button>
+              </div>
+              <div class="file-actions">
+                <button class="btn btn-secondary" id="loadFileBtn">📂 载入数据</button>
+              </div>
+            </div>
+
+            <div class="roster-header">
+              <span class="col-check"><input type="checkbox" id="selectAllCheckbox" checked /></span>
+              <span class="col-id">学号</span>
+              <span class="col-name">姓名</span>
+              <span class="col-cycle">周次</span>
+              <span class="col-status">状态</span>
+            </div>
+
+            <div class="roster-list" id="rosterList">
+              <div class="empty-state">
+                <div class="empty-icon">📥</div>
+                <div class="empty-text">点击上方“载入数据”载入反馈 JSON 或 HTML 文件</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 右侧：选中学生详情与错题本卡片 -->
+          <div class="preview-panel">
+            <div class="preview-card" id="previewCard">
+              <div class="card-header">
+                <div class="student-meta">
+                  <h2 id="previewName">未选择学生</h2>
+                  <span class="id-badge" id="previewId">-</span>
+                  <span class="cycle-badge" id="previewCycle">-</span>
+                </div>
+                <span class="status-pill" id="previewStatus">就绪</span>
+              </div>
+
+              <!-- 专属错题本快速链接栏 -->
+              <div class="retest-card" id="retestCard" style="display: none;">
+                <div class="retest-info">
+                  <span class="retest-icon">📘</span>
+                  <div class="retest-text">
+                    <div class="retest-title">学生专属错题本已就绪</div>
+                    <div class="retest-url" id="retestUrlText">https://vip.wxjifang.cn/retest.html?...</div>
+                  </div>
+                </div>
+                <div class="retest-actions">
+                  <button class="btn btn-sm btn-outline" id="copyRetestBtn">🔗 复制链接</button>
+                  <button class="btn btn-sm btn-outline" id="openRetestBtn">🌐 打开练习</button>
+                </div>
+              </div>
+
+              <div class="message-container">
+                <div class="message-label">
+                  <span>反馈文案预览</span>
+                  <span class="word-count" id="previewWordCount">0 字</span>
+                </div>
+                <textarea class="message-textarea" id="previewMessage" readonly placeholder="选中左侧学生即可查看反馈评语与排版..."></textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 底部全局控制栏 -->
+        <footer class="action-bar">
+          <div class="progress-wrap">
+            <div class="progress-info">
+              <span id="progressText">等待开始任务</span>
+              <span id="progressPct">0%</span>
+            </div>
+            <div class="progress-bar">
+              <div class="progress-fill" id="progressFill" style="width: 0%;"></div>
+            </div>
+          </div>
+
+          <div class="control-buttons">
+            <button class="btn btn-primary" id="startBtn">🚀 开始发送</button>
+            <button class="btn btn-secondary" id="pauseBtn" disabled>⏸ 暂停</button>
+            <button class="btn btn-danger" id="stopBtn" disabled>⏹ 终止</button>
+          </div>
+        </footer>
+      </section>
+
+      <!-- 页面 2: 历史档案 -->
+      <section class="page-view" id="pageHistory">
+        <div class="section-header">
+          <h2>📚 历史发送档案</h2>
+          <p>已归档的周次历史记录，可随时重载到工作台或导出表格。</p>
+        </div>
+        <div class="history-grid">
+          <div class="history-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>周次/班级</th>
+                  <th>学生总数</th>
+                  <th>发送成功率</th>
+                  <th>最后发送时间</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="historyTableBody">
+                <tr>
+                  <td>第 3 周 初二数学培优班</td>
+                  <td>3 人</td>
+                  <td><span class="text-success">100%</span></td>
+                  <td>2026-10-02 23:25</td>
+                  <td><button class="btn btn-sm btn-primary" onclick="loadMockData()">🚀 载入工作台</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 页面 3: 运行日志 -->
+      <section class="page-view" id="pageLogs">
+        <div class="section-header row-between">
+          <div>
+            <h2>📊 运行与诊断控制台</h2>
+            <p>实时记录企微窗口探测、AI 视觉双防线识别过程与发信状态流水。</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-sm btn-secondary" id="clearLogsBtn">清空控制台</button>
+          </div>
+        </div>
+        <div class="console-box" id="consoleBox">
+          <div class="log-line log-info">[23:30:00 INFO] 极方反馈程序 v2.0-rust 原生引擎已初始化完成</div>
+          <div class="log-line log-info">[23:30:01 INFO] Windows 原生 Media.Ocr 引擎就绪 (免模型依赖)</div>
+        </div>
+      </section>
+
+      <!-- 页面 4: 偏好设置 -->
+      <section class="page-view" id="pageSettings">
+        <div class="section-header">
+          <h2>⚙️ 运行偏好设置</h2>
+          <p>微调自动化发信间隔、批次防风控休眠策略与 AI 双保险模式。</p>
+        </div>
+        <div class="settings-grid">
+          <div class="settings-card">
+            <h3>⏱ 发信节拍与时序</h3>
+            <div class="setting-item">
+              <label>单人发送间隔 (毫秒)</label>
+              <input type="number" id="intervalInput" value="1200" min="500" max="5000" step="100" />
+              <span class="setting-desc">模拟人工操作间隙，建议 1000ms ~ 1500ms。</span>
+            </div>
+            <div class="setting-item">
+              <label>防风控批次阈值 (人)</label>
+              <input type="number" id="batchSizeInput" value="15" min="5" max="50" />
+              <span class="setting-desc">每连续发送满指定人数后，自动触发安全休眠。</span>
+            </div>
+            <div class="setting-item">
+              <label>批次休眠时长 (秒)</label>
+              <input type="number" id="batchCooldownInput" value="10" min="5" max="60" />
+              <span class="setting-desc">批次休眠冷却时长，彻底规避企微高频告警。</span>
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <h3>🛡 AI 视觉双保险体系</h3>
+            <div class="setting-item">
+              <label class="switch-label">
+                <span>优先启用模式 A (Qwen3.8-Flash 大模型)</span>
+                <input type="checkbox" id="cloudVisionToggle" checked />
+              </label>
+              <span class="setting-desc">对下拉框截图发起云端语义分析，精准避开他人同名描述干扰。</span>
+            </div>
+            <div class="setting-item">
+              <label class="switch-label">
+                <span>前台失焦自动挂起守护</span>
+                <input type="checkbox" id="focusGuardToggle" checked disabled />
+              </label>
+              <span class="setting-desc">核心安全红线：发信途中若老师切换窗口，立即自动挂起暂停。</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
