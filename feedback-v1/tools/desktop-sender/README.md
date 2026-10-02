@@ -1,11 +1,10 @@
 # 极方每周反馈程序 (Desktop Feedback Sender)
 
-> **版本**：v1.6 / v1.6-fluent  
+> **版本**：v2.0 经典稳定版  
 > **定位**：教师端企业微信自动化专属反馈发送程序（Windows 独立桌面客户端）  
-> **平行双版本**：
-> 1. **经典稳定版**：[`send_feedback.py`](send_feedback.py) / [`send_feedback.spec`](send_feedback.spec)
-> 2. **Fluent 现代版**：[`send_feedback_fluent.py`](send_feedback_fluent.py) / [`send_feedback_fluent.spec`](send_feedback_fluent.spec)（基于 `sv-ttk`，支持深浅色无缝切换）  
-> **云端流水线**：[`.github/workflows/build-tools.yml`](../../.github/workflows/build-tools.yml)
+> **代码实现**：[`send_feedback.py`](send_feedback.py) / 打包规范：[`send_feedback.spec`](send_feedback.spec)  
+> **云端流水线**：[`.github/workflows/build-tools.yml`](../../.github/workflows/build-tools.yml)  
+> *注：新一代 Fluent 现代多视图交互已由独立工程 [`../desktop-sender-rs/`](../desktop-sender-rs/) (Rust + Tauri 2.0) 正式接管。*
 
 ---
 
@@ -26,7 +25,6 @@
 - [六、 数据管理与断点续发](#六-数据管理与断点续发)
 - [七、 云端诊断与运维上报](#七-云端诊断与运维上报)
 - [八、 编译构建与自动化发版](#八-编译构建与自动化发版)
-- [九、 Fluent 现代版全新交互架构 (Navigation Rail)](#九-fluent-现代版全新交互架构-navigation-rail)
 
 ---
 
@@ -271,70 +269,15 @@ git push origin tools-v2.0
 
 工作流 [`.github/workflows/build-tools.yml`](../../.github/workflows/build-tools.yml) 在 Windows runner 上：
 
-1. 安装 Python 3.14 与锁定依赖（`requirements.txt`，已移除 opencv-python）。
-2. 依次执行 `pyinstaller --noupx send_feedback.spec` 与 `send_feedback_fluent.spec`，产出两个目录式文件夹。
+1. 安装 Python 3.14 与锁定依赖（`requirements.txt`，已移除 opencv-python 与 sv-ttk）。
+2. 执行 `pyinstaller --noupx send_feedback.spec`，产出经典稳定版目录式文件夹。
 3. （可选）Authenticode 签名并 `signtool verify` 校验。
 4. 用 Python `zipfile` 打包为 Release 附件（选用 `zipfile` 而非外部压缩工具，
    是为保证中文文件名正确置位 UTF-8 标志位，Windows 资源管理器解压不会乱码）：
 
    - `极方每周反馈程序-${VER}.zip`（经典稳定版）
-   - `极方每周反馈程序-Fluent版-${VER}.zip`（Fluent 现代版）
 
 **教师端安装**：下载 zip → **完整解压**到任意文件夹 → 双击文件夹内的同名 exe。
 
 > 请勿在压缩包内直接运行，也请勿把 exe 单独拖出来。onedir 产物依赖同目录的配套运行库，
 > 单独取走 exe 会启动失败。
-
----
-
-## 九、 Fluent 现代版全新交互架构 (Navigation Rail)
-
-重构后的 Fluent 现代版（[`send_feedback_fluent.py`](send_feedback_fluent.py)）突破了传统 Tkinter 的单一窗体限制，采用 **Windows 11 Fluent 2.0 原生设计范式**，带来颠覆性的全新桌面交互：
-
-```mermaid
-flowchart LR
-    subgraph 左侧边栏 NavigationRail
-        Brand["极方反馈<br/>● 企微连接指示灯"]
-        Nav1["🚀 发送工作台"]
-        Nav2["📚 历史档案"]
-        Nav3["📊 运行日志"]
-        Nav4["⚙️ 偏好设置"]
-        Theme["🌓 浅色 / 深色无缝切换"]
-    end
-
-    subgraph 单页工作区 PageContainer
-        Nav1 --> P1["工作台：周次控制 + 4块可点击统计卡片 + 实时搜索名单 + 错题本解析"]
-        Nav2 --> P2["历史中心：内置全功能班级/周次档案浏览器 + 一键载入工作台"]
-        Nav3 --> P3["日志中心：内置实时动态控制台 + 语法着色 + 云端上报"]
-        Nav4 --> P4["设置中心：卡片式参数调节 (单人延时/批次防风控/AI双保险)"]
-    end
-```
-
-### 1. 核心交互升级特性
-
-1. **左侧 Navigation Rail (侧边导航栏)**：
-   - 告别经典版的全局二级弹窗！所有功能（工作台、历史档案、运行日志、偏好设置）统一在主窗口内**多视图无缝平滑切换**。
-   - 实时企微状态指示灯：`● 企微已连接` / `○ 企微未运行`，无需盲猜企微窗口是否有效就位。
-   - 快捷键深度适配：`Ctrl+1` 工作台、`Ctrl+2` 历史、`Ctrl+3` 日志、`Ctrl+4` / `Ctrl+,` 偏好设置。
-
-2. **数据指标统计卡片 (Metric Cards) 与一键过滤交互**：
-   - 工作台顶部横排 4 块现代卡片：`👥 总名单`、`⏳ 待发送`、`✅ 已发送`、`⚠️ 异常/拦截`。
-   - **交互创新**：卡片兼具过滤器功能！点击“待发送”卡片直接过滤待发名单，点击“异常”卡片直接查看拦截或失败名单，操作一触即达。
-
-3. **即时名单搜索 (Instant Search & Filter Bar)**：
-   - 名单上方提供实时搜索框，输入学生姓名或学号毫秒级实时过滤名单树。
-   - 状态筛选胶囊按钮（全部/待发/已发/异常）与批量快速操作按钮。
-
-4. **学员个性化卡片与专属错题本解析 (Retest Link Card)**：
-   - 右侧不仅高亮呈现个性化评语与字数统计，更具备**智能 URL 解析引擎**：
-   - 自动提取文案中的专属错题本链接（`retest.html?token=...`），自动展示错题本操作面板：
-     - `🔗 复制错题本链接`：一键复制纯链接。
-     - `🌐 浏览器打开`：直接在系统浏览器中快速预览学生的专属错题练习。
-
-5. **内置历史档案中心 (Embedded History)**：
-   - 历史记录直接内置于应用中（按周次筛选、班级搜索、学员明细）。
-   - 提供 **“🚀 载入到工作台直接发送”**，一键将历史档案或重考班级直接无缝载入工作台并就位，免去手动反复找文件的繁琐流程。
-
-6. **透明卡片式设置中心 (Settings)**：
-   - 告别经典版捉迷藏式的“连击标题3次”。
-   - 提供标准的现代设置中心，直观配置单人延时、批次防风控休眠、AI 视觉双保险模式及参数保存。

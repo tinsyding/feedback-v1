@@ -44,7 +44,6 @@ feedback/
  （详见 workflow 文件头注释）。
 - 桌面工具发版：`git tag tools-x.y && git push origin tools-x.y` 触发
   `.github/workflows/build-tools.yml`，在云端构建 `极方每周反馈程序-x.y.zip`
-  与 `极方每周反馈程序-Fluent版-x.y.zip` 并挂到同名 Release
-  （构建参数锁定见 `tools/desktop-sender/requirements.txt`）。
+  并挂到同名 Release（构建参数锁定见 `tools/desktop-sender/requirements.txt`）。
   产物为**目录式分发压缩包**，需完整解压后运行，详见
   `tools/desktop-sender/README.md` 第八章「反误报打包策略」。

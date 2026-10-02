@@ -9,7 +9,7 @@
 # 版本号统一为 2.0.x：
 #   filevers/2,0,x,0 -> 最后一位留给补丁号
 #   prodvers 同上
-#   与 APP_VERSION（send_feedback.py / send_feedback_fluent.py 内常量）保持同步。
+#   与 APP_VERSION（send_feedback.py 内常量）保持同步。
 #
 # 注意：本资源块【不等于】代码签名。签名需要真实的 Authenticode 证书，
 #       如需签名见 README「八、编译构建与自动化发版」中的签名章节。
