@@ -76,7 +76,7 @@ mod imp {
     }
 
     pub fn activate_wecom(hwnd_val: isize) -> bool {
-        let hwnd = HWND(hwnd_val as _);
+        let hwnd = HWND(hwnd_val as *mut _);
         unsafe {
             if !IsWindow(hwnd).as_bool() {
                 return false;
@@ -93,12 +93,12 @@ mod imp {
     pub fn is_foreground(hwnd_val: isize) -> bool {
         unsafe {
             let fg = GetForegroundWindow();
-            fg.0 == hwnd_val as _
+            (fg.0 as isize) == hwnd_val
         }
     }
 
     pub fn get_rect(hwnd_val: isize) -> Option<WindowRect> {
-        let hwnd = HWND(hwnd_val as _);
+        let hwnd = HWND(hwnd_val as *mut _);
         let mut r = RECT::default();
         unsafe {
             if GetWindowRect(hwnd, &mut r).is_ok() {
@@ -122,7 +122,7 @@ mod imp {
                 return None;
             }
 
-            let hdc_screen = GetDC(HWND(0));
+            let hdc_screen = GetDC(HWND(std::ptr::null_mut()));
             let hdc_mem = CreateCompatibleDC(hdc_screen);
             let hbm = CreateCompatibleBitmap(hdc_screen, width, height);
             let old_obj = SelectObject(hdc_mem, hbm);
@@ -156,7 +156,7 @@ mod imp {
             SelectObject(hdc_mem, old_obj);
             DeleteObject(hbm);
             DeleteDC(hdc_mem);
-            ReleaseDC(HWND(0), hdc_screen);
+            ReleaseDC(HWND(std::ptr::null_mut()), hdc_screen);
 
             if lines == 0 {
                 return None;
