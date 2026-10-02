@@ -16,8 +16,8 @@
 
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(2, 0, 0, 0),
-    prodvers=(2, 0, 0, 0),
+    filevers=(2, 1, 0, 0),
+    prodvers=(2, 1, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -31,12 +31,12 @@ VSVersionInfo(
         '080404B0',
         [StringStruct('CompanyName', '极方教育'),
          StringStruct('FileDescription', '极方作业反馈与错题本 - 教师端企业微信自动发送工具'),
-         StringStruct('FileVersion', '2.0.0'),
+         StringStruct('FileVersion', '2.1.0'),
          StringStruct('InternalName', '极方每周反馈程序'),
          StringStruct('LegalCopyright', 'Copyright (C) 极方教育'),
          StringStruct('OriginalFilename', '极方每周反馈程序.exe'),
          StringStruct('ProductName', '极方每周反馈程序'),
-         StringStruct('ProductVersion', '2.0.0'),
+         StringStruct('ProductVersion', '2.1.0'),
          StringStruct('Comments', '教师端企业微信自动化反馈发送客户端，需配合企业微信 PC 客户端使用。')]
       )
     ]),

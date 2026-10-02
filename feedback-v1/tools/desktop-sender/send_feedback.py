@@ -110,7 +110,7 @@ def preprocess_dropdown_image(pil_img: Image.Image) -> Image.Image:
         return pil_img
 
 # 客户端应用版本号
-APP_VERSION = "v2.0"
+APP_VERSION = "v2.1"
 
 
 def detect_cycle_from_string(text: str) -> str:
