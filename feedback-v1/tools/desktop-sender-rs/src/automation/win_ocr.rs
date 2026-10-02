@@ -15,13 +15,18 @@ pub struct OcrRecognizeResult {
 mod imp {
     use super::*;
     use windows::core::HSTRING;
+    use windows::Globalization::Language;
     use windows::Graphics::Imaging::{BitmapPixelFormat, SoftwareBitmap};
     use windows::Media::Ocr::OcrEngine;
-    use windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
+    use windows::Storage::Streams::DataWriter;
 
     pub fn is_windows_ocr_available() -> bool {
-        let lang = HSTRING::from("zh-Hans-CN");
-        OcrEngine::IsLanguageSupported(&lang).unwrap_or(false)
+        if let Ok(lang) = Language::CreateLanguage(&HSTRING::from("zh-Hans-CN")) {
+            if OcrEngine::IsLanguageSupported(&lang).unwrap_or(false) {
+                return true;
+            }
+        }
+        OcrEngine::TryCreateFromUserProfileLanguages().is_ok()
     }
 
     /// 使用 Windows 10/11 原生系统内置离线 OCR 识别图像
@@ -29,30 +34,31 @@ mod imp {
         let rgba = img.to_rgba8();
         let (width, height) = rgba.dimensions();
 
-        let stream = InMemoryRandomAccessStream::new()
-            .map_err(|e| format!("创建流失败: {e}"))?;
-        let writer = DataWriter::CreateDataWriter(&stream)
-            .map_err(|e| format!("创建 DataWriter 失败: {e}"))?;
-
+        let writer = DataWriter::new().map_err(|e| format!("创建 DataWriter 失败: {e}"))?;
         writer
             .WriteBytes(rgba.as_raw())
             .map_err(|e| format!("写入像素流失败: {e}"))?;
-        writer
-            .StoreAsync()
-            .map_err(|e| format!("持久化流失败: {e}"))?
-            .get()
-            .map_err(|e| format!("等待流写入失败: {e}"))?;
+        let buffer = writer
+            .DetachBuffer()
+            .map_err(|e| format!("获取 Buffer 失败: {e}"))?;
 
         let software_bitmap = SoftwareBitmap::CreateCopyFromBuffer(
-            &stream.GetInputStreamAt(0).map_err(|e| format!("获取输入流失败: {e}"))?,
+            &buffer,
             BitmapPixelFormat::Rgba8,
             width as i32,
             height as i32,
         ).map_err(|e| format!("创建 SoftwareBitmap 失败: {e}"))?;
 
-        let lang = HSTRING::from("zh-Hans-CN");
-        let engine = OcrEngine::TryCreateFromLanguage(&lang)
-            .map_err(|e| format!("创建 OcrEngine 失败: {e}"))?;
+        let engine = if let Ok(lang) = Language::CreateLanguage(&HSTRING::from("zh-Hans-CN")) {
+            if OcrEngine::IsLanguageSupported(&lang).unwrap_or(false) {
+                OcrEngine::TryCreateFromLanguage(&lang)
+            } else {
+                OcrEngine::TryCreateFromUserProfileLanguages()
+            }
+        } else {
+            OcrEngine::TryCreateFromUserProfileLanguages()
+        }
+        .map_err(|e| format!("创建 OcrEngine 失败: {e}"))?;
 
         let ocr_result = engine
             .RecognizeAsync(&software_bitmap)
