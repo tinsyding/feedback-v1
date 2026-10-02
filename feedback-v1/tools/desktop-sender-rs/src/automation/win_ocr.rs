@@ -90,3 +90,104 @@ mod imp {
 }
 
 pub use imp::*;
+
+use crate::types::ContactCandidate;
+
+/// 从 OCR 识别出的文本行序列中，结构化还原联系人列表与描述关系（1:1 对齐企微下拉列表交互特征）
+pub fn parse_ocr_lines_to_contacts(lines: &[OcrLine], full_text: &str) -> Vec<ContactCandidate> {
+    let contact_headers = ["联系人", "外部联系人", "客户", "企业通讯录"];
+    let section_end_keywords = [
+        "群聊", "最常使用", "功能", "聊天记录", "文档",
+        "网络查找", "相关搜索", "查看全部", "进入全局搜索", "查找所有",
+    ];
+    let subtitle_keywords = [
+        "描述", "庙述", "猫述", "描术", "微信昵称", "昵称",
+        "手机号", "手机", "包含", "部门", "企业", "公司", "邮箱", "微信号", "备注", "含",
+    ];
+
+    let is_subtitle = |t: &str| -> bool {
+        subtitle_keywords.iter().any(|&kw| t.contains(kw)) || t.contains('：') || t.contains(':')
+    };
+
+    let has_contact_header = lines
+        .iter()
+        .any(|l| contact_headers.iter().any(|&h| l.text.contains(h)));
+    let has_empty_indicator = [
+        "进入全局搜索", "全局搜索", "查找所有", "网络查找", "没有找到", "无结果", "未找到", "暂无结果",
+    ]
+    .iter()
+    .any(|&k| full_text.contains(k));
+
+    if !has_contact_header && has_empty_indicator {
+        return Vec::new();
+    }
+
+    let mut contacts: Vec<ContactCandidate> = Vec::new();
+    let mut in_contacts = !has_contact_header;
+    let mut current_contact: Option<ContactCandidate> = None;
+
+    for line in lines {
+        let text = line.text.trim();
+        if text.is_empty() {
+            continue;
+        }
+
+        if contact_headers.iter().any(|&h| text.contains(h)) {
+            in_contacts = true;
+            continue;
+        }
+
+        if in_contacts && section_end_keywords.iter().any(|&h| text.contains(h)) {
+            if let Some(c) = current_contact.take() {
+                contacts.push(c);
+            }
+            break;
+        }
+
+        if in_contacts
+            && (text.contains("包含") || text.contains("包含:") || text.contains("包含："))
+        {
+            if let Some(c) = current_contact.take() {
+                contacts.push(c);
+            }
+            break;
+        }
+
+        if in_contacts {
+            if is_subtitle(text) {
+                if let Some(c) = current_contact.as_mut() {
+                    c.subtitles.push(text.to_string());
+                    if ["描述", "庙述", "猫述", "描术", "含"].iter().any(|&k| text.contains(k)) {
+                        c.has_desc = true;
+                    }
+                } else {
+                    let has_desc = ["描述", "庙述", "猫述", "描术", "含"].iter().any(|&k| text.contains(k));
+                    current_contact = Some(ContactCandidate {
+                        index: contacts.len() + 1,
+                        title: String::new(),
+                        subtitles: vec![text.to_string()],
+                        has_desc,
+                        is_group: false,
+                    });
+                }
+            } else {
+                if let Some(c) = current_contact.take() {
+                    contacts.push(c);
+                }
+                current_contact = Some(ContactCandidate {
+                    index: contacts.len() + 1,
+                    title: text.to_string(),
+                    subtitles: Vec::new(),
+                    has_desc: false,
+                    is_group: text.contains("群聊") || text.contains("人)"),
+                });
+            }
+        }
+    }
+
+    if let Some(c) = current_contact {
+        contacts.push(c);
+    }
+
+    contacts
+}

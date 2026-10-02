@@ -87,3 +87,25 @@ fn test_watermark_removal_and_scaling() {
     assert_eq!(processed.width(), 20);
     assert_eq!(processed.height(), 20);
 }
+
+#[test]
+fn test_parse_ocr_lines_to_contacts() {
+    use desktop_sender_rs::automation::{parse_ocr_lines_to_contacts, OcrLine};
+
+    let lines = vec![
+        OcrLine { text: "联系人".to_string() },
+        OcrLine { text: "王小明".to_string() },
+        OcrLine { text: "描述: 提到张三".to_string() },
+        OcrLine { text: "90001张三".to_string() },
+        OcrLine { text: "群聊".to_string() },
+        OcrLine { text: "极方教师教研群".to_string() },
+    ];
+    let full_text = "联系人 王小明 描述:提到张三 90001张三 群聊 极方教师教研群";
+
+    let contacts = parse_ocr_lines_to_contacts(&lines, full_text);
+    assert_eq!(contacts.len(), 2);
+    assert_eq!(contacts[0].title, "王小明");
+    assert!(contacts[0].has_desc);
+    assert_eq!(contacts[1].title, "90001张三");
+    assert!(!contacts[1].has_desc);
+}
