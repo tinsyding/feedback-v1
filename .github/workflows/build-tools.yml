@@ -118,6 +118,8 @@ jobs:
           echo "version=${VER}" >> $GITHUB_OUTPUT
 
       - name: Package as zip
+        env:
+          PYTHONIOENCODING: utf-8
         run: |
           VER="${{ steps.get_version.outputs.version }}"
           export VER
@@ -126,7 +128,9 @@ jobs:
           #   Windows 资源管理器解压中文名不会乱码；而 bash 管道 + 外部压缩工具
           #   在 Windows runner 上有编码不确定性（本仓库此前就踩过 Windows 编码坑）。
           python - <<'PY'
-          import os, shutil, zipfile
+          import os, shutil, zipfile, sys
+          if hasattr(sys.stdout, 'reconfigure'):
+              sys.stdout.reconfigure(encoding='utf-8')
 
           DIST = "feedback-v1/tools/desktop-sender/dist"
           VER  = os.environ["VER"]
@@ -156,10 +160,10 @@ jobs:
           ls -lh *.zip
           echo
           echo "=== onedir 内主程序体积（对比 onefile 时代 91.5MB）==="
-          ls -lh 极方每周反馈程序/*.exe
+          ls -lh "极方每周反馈程序"/*.exe
           echo
           echo "=== Rust Fluent 原生单文件 exe 体积 ==="
-          ls -lh 极方每周反馈程序-Fluent-x64.exe
+          ls -lh "极方每周反馈程序-Fluent-x64.exe"
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
