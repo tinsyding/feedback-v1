@@ -13,6 +13,7 @@ name: Build 反馈工具
 #      未配置证书时自动跳过，不阻断构建。
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - 'tools-*'
@@ -47,6 +48,18 @@ jobs:
           # 显式关掉 UPX：不依赖 PyInstaller 对本机是否装有 upx 的探测，
           # spec 中已设 upx=False，这里再加 --upx-exclude 全量排除做双重保险。
           python -m PyInstaller --noconfirm --clean --noupx send_feedback.spec
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build Rust Native (Fluent)
+        working-directory: feedback-v1/tools/desktop-sender-rs
+        run: |
+          cargo build --release --target x86_64-pc-windows-msvc
+          mkdir -p ../desktop-sender/dist
+          cp target/x86_64-pc-windows-msvc/release/desktop-sender-rs.exe ../desktop-sender/dist/极方每周反馈程序-Fluent-x64.exe
 
       # ---------------------------------------------------------------------
       # 可选代码签名步骤。
@@ -84,13 +97,25 @@ jobs:
             /n "$WIN_CERT_NAME" "$exe"
           "$SIGNTOOL" verify /pa "$exe"
 
+          exe_rs="feedback-v1/tools/desktop-sender/dist/极方每周反馈程序-Fluent-x64.exe"
+          if [ -f "$exe_rs" ]; then
+            "$SIGNTOOL" sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 \
+              /f "$RUNNER_TEMP/cert.pfx" /p "$WIN_CERT_PASSWORD" \
+              /n "$WIN_CERT_NAME" "$exe_rs"
+            "$SIGNTOOL" verify /pa "$exe_rs"
+          fi
+
           # 务必清除证书副本，避免泄漏到后续步骤或日志
           shred -u "$RUNNER_TEMP/cert.pfx" 2>/dev/null || rm -f "$RUNNER_TEMP/cert.pfx"
 
       - name: Extract version
         id: get_version
         run: |
-          VER="${GITHUB_REF_NAME#tools-}"
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VER="${GITHUB_REF_NAME#tools-}"
+          else
+            VER="v2.0"
+          fi
           echo "version=${VER}" >> $GITHUB_OUTPUT
 
       - name: Package as zip
@@ -133,6 +158,9 @@ jobs:
           echo
           echo "=== onedir 内主程序体积（对比 onefile 时代 91.5MB）==="
           ls -lh 极方每周反馈程序/*.exe
+          echo
+          echo "=== Rust Fluent 原生单文件 exe 体积 ==="
+          ls -lh 极方每周反馈程序-Fluent-x64.exe
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -145,23 +173,20 @@ jobs:
           body: |
             自动构建（${{ github.sha }}）。
 
-            ## 安装方式（本次起改为压缩包分发）
-            1. 下载下面的 zip
-            2. **完整解压**到任意文件夹（例如桌面建一个「反馈程序」文件夹）
-            3. 双击文件夹内的 `极方每周反馈程序.exe`
+            ## 📥 双版本下载指引
 
-            请勿在压缩包内直接双击运行，也请勿把 exe 单独拖出来 —— 程序依赖同目录下的
-            配套运行库文件，单独取走 exe 会启动失败。
+            本版本提供两套独立版本供教师选择使用：
 
-            ## 为什么这次改成分发 zip
-            本次重做了打包配置以解决「被杀毒软件误报」的问题：
+            ### 选项 A（强烈推荐）：🚀 极方每周反馈程序 Fluent 现代版 (Rust 原生重构版)
+            - **下载附件**：`极方每周反馈程序-Fluent-x64.exe`
+            - **体积与形态**：单文件绿色版、约 10MB、无需解压、双击直接运行。
+            - **现代交互**：Windows 11 Fluent 2.0 亚克力半透明视觉风格、侧边栏导航、专属错题本一键直达。
+            - **安全与防误发**：采用 Windows 10/11 内置原生免模型 OCR + 云端大模型视觉双保险，彻底杜绝杀软误报。
 
-            - 关闭了 UPX 二次加壳（加壳段头是杀软最典型的识别特征）
-            - 改为目录式分发，不再把程序自解压到临时目录、不再派生子进程
-            - 移除了全项目零引用的 opencv-python 及其传递依赖，体积从 91MB 降到 40MB 量级
-            - 写入了明确的中文厂商与产品信息（可在文件属性「详细信息」查看）
-            - 若误报仍然存在，请将程序**整个文件夹**（而非单个 exe）加入杀软白名单
-
-            后续版本将加入代码签名，签名后信誉度会进一步提升。
+            ### 选项 B：🛡 极方每周反馈程序 经典稳定版 (Python 目录式打包)
+            - **下载附件**：`极方每周反馈程序-${{ steps.get_version.outputs.version }}.zip`
+            - **体积与形态**：约 39MB 压缩包，**下载后必须完整解压到文件夹**后运行。
+            - **交互特点**：经典熟识单窗体、离线 Paddle/ONNX OCR 引擎作为兼容托底。
           files: |
-            极方每周反馈程序-*.zip
+            feedback-v1/tools/desktop-sender/dist/极方每周反馈程序-*.zip
+            feedback-v1/tools/desktop-sender/dist/极方每周反馈程序-Fluent-*.exe
