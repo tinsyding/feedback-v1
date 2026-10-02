@@ -45,9 +45,8 @@ jobs:
       - name: Build (Classic)
         working-directory: feedback-v1/tools/desktop-sender
         run: |
-          # 显式关掉 UPX：不依赖 PyInstaller 对本机是否装有 upx 的探测，
-          # spec 中已设 upx=False，这里再加 --upx-exclude 全量排除做双重保险。
-          python -m PyInstaller --noconfirm --clean --noupx send_feedback.spec
+          # spec 中已在 EXE 与 COLLECT 阶段均硬编码配置 upx=False，关闭加壳防杀软误报。
+          python -m PyInstaller --noconfirm --clean send_feedback.spec
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

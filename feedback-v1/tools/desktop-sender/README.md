@@ -237,7 +237,7 @@ git push origin tools-v2.0
 
 | # | 措施 | 解决的问题 |
 |---|---|---|
-| 1 | `upx=False` + `--noupx` | UPX 段头（UPX0/UPX1/UPX2）是杀软最典型的识别特征，加壳几乎必被静态引擎命中 |
+| 1 | spec 显式配置 `upx=False` | UPX 段头（UPX0/UPX1/UPX2）是杀软最典型的识别特征，加壳几乎必被静态引擎命中 |
 | 2 | onefile → **onedir + zip 分发** | onefile 启动时把 90MB 自解压到 `%TEMP%\_MEIxxxxx` 并派生子进程，这套行为是启发式引擎的重点监控对象 |
 | 3 | 移除 **opencv-python** | 曾锁定 `5.0.0.93`，但全项目 `grep cv2` **零命中**，纯无用负担，且其原生扩展是把产物撑到 91MB、熵值拉高的主因 |
 | 4 | spec `EXCLUDES` 清单 | 剔除 `scipy`/`sklearn`/`matplotlib`/`pandas` 等 OCR 传递依赖的非必要分支，避免打包出杀软高度警惕的原生扩展矩阵 |
@@ -270,7 +270,7 @@ git push origin tools-v2.0
 工作流 [`.github/workflows/build-tools.yml`](../../.github/workflows/build-tools.yml) 在 Windows runner 上：
 
 1. 安装 Python 3.14 与锁定依赖（`requirements.txt`，已移除 opencv-python 与 sv-ttk）。
-2. 执行 `pyinstaller --noupx send_feedback.spec`，产出经典稳定版目录式文件夹。
+2. 执行 `pyinstaller --noconfirm --clean send_feedback.spec`，产出经典稳定版目录式文件夹。
 3. （可选）Authenticode 签名并 `signtool verify` 校验。
 4. 用 Python `zipfile` 打包为 Release 附件（选用 `zipfile` 而非外部压缩工具，
    是为保证中文文件名正确置位 UTF-8 标志位，Windows 资源管理器解压不会乱码）：
