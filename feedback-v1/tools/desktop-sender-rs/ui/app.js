@@ -15,9 +15,13 @@
     activeStudentIndex: -1,
     currentFilter: 'all', // all | pending | success | failed
     searchQuery: '',
+    currentSourceName: '内置测试数据',
     engineState: 'Idle', // Idle | Running | Paused | Stopped | Completed
     isTauri: typeof window.__TAURI__ !== 'undefined',
     currentTheme: localStorage.getItem('jf_theme') || 'light',
+    historyFilterCycle: 'all',
+    historySearchQuery: '',
+    activeModalArchiveId: null,
   };
 
   // DOM 元素引用
@@ -39,6 +43,8 @@
     searchInput: document.getElementById('searchInput'),
     searchClearBtn: document.getElementById('searchClearBtn'),
     loadFileBtn: document.getElementById('loadFileBtn'),
+    loadedFileBadge: document.getElementById('loadedFileBadge'),
+    copyStudentBtn: document.getElementById('copyStudentBtn'),
     selectAllCheckbox: document.getElementById('selectAllCheckbox'),
     rosterList: document.getElementById('rosterList'),
     
@@ -47,12 +53,9 @@
     previewId: document.getElementById('previewId'),
     previewCycle: document.getElementById('previewCycle'),
     previewStatus: document.getElementById('previewStatus'),
-    retestCard: document.getElementById('retestCard'),
-    retestUrlText: document.getElementById('retestUrlText'),
-    copyRetestBtn: document.getElementById('copyRetestBtn'),
-    openRetestBtn: document.getElementById('openRetestBtn'),
     previewMessage: document.getElementById('previewMessage'),
     previewWordCount: document.getElementById('previewWordCount'),
+    copyMessageBtn: document.getElementById('copyMessageBtn'),
     
     // 进度与操作栏
     progressText: document.getElementById('progressText'),
@@ -62,6 +65,26 @@
     pauseBtn: document.getElementById('pauseBtn'),
     stopBtn: document.getElementById('stopBtn'),
     
+    // 历史档案页面
+    hMetricBatches: document.getElementById('hMetricBatches'),
+    hMetricStudents: document.getElementById('hMetricStudents'),
+    hMetricRate: document.getElementById('hMetricRate'),
+    historyCycleFilter: document.getElementById('historyCycleFilter'),
+    historySearchInput: document.getElementById('historySearchInput'),
+    historyTableBody: document.getElementById('historyTableBody'),
+    historyEmptyState: document.getElementById('historyEmptyState'),
+    clearAllHistoryBtn: document.getElementById('clearAllHistoryBtn'),
+
+    // 历史档案学生明细弹窗
+    historyDetailModal: document.getElementById('historyDetailModal'),
+    modalArchiveTitle: document.getElementById('modalArchiveTitle'),
+    modalArchiveSubtitle: document.getElementById('modalArchiveSubtitle'),
+    closeModalBtn: document.getElementById('closeModalBtn'),
+    modalMetaGrid: document.getElementById('modalMetaGrid'),
+    modalRosterList: document.getElementById('modalRosterList'),
+    exportArchiveCsvBtn: document.getElementById('exportArchiveCsvBtn'),
+    loadArchiveToWorkspaceBtn: document.getElementById('loadArchiveToWorkspaceBtn'),
+
     // 日志与控制台
     consoleBox: document.getElementById('consoleBox'),
     clearLogsBtn: document.getElementById('clearLogsBtn'),
@@ -70,7 +93,6 @@
     intervalInput: document.getElementById('intervalInput'),
     batchSizeInput: document.getElementById('batchSizeInput'),
     batchCooldownInput: document.getElementById('batchCooldownInput'),
-    cloudVisionToggle: document.getElementById('cloudVisionToggle'),
   };
 
   // ==========================================
@@ -81,11 +103,12 @@
     initNavigation();
     initMetricFilters();
     initSearch();
-    initPreviewActions();
+    initCopyActions();
     initControls();
     initLogs();
     initWecomDetection();
     initFileLoader();
+    initHistoryModule();
 
     // 默认载入演示数据 (测试.json 规格)
     loadMockData();
@@ -136,6 +159,10 @@
       const targetId = 'page' + pageName.charAt(0).toUpperCase() + pageName.slice(1);
       page.classList.toggle('active', page.id === targetId);
     });
+
+    if (pageName === 'history') {
+      HistoryManager.render();
+    }
   }
 
   // ==========================================
@@ -248,20 +275,21 @@
         </span>
         <span class="col-id">${escapeHtml(student.student_id || '-')}</span>
         <span class="col-name">${escapeHtml(student.clean_name || student.studentName)}</span>
-        <span class="col-cycle">${escapeHtml(student.cycle || '-')}</span>
+        <span class="col-cycle">${escapeHtml(student.cycle || '第1周')}</span>
         <span class="col-status">${statusBadge}</span>
       `;
 
-      // 单击行选择学生并更新预览卡片
+      // 点击整行切换选中预览
       row.addEventListener('click', (e) => {
-        if (e.target.type === 'checkbox') return; // 复选框事件单独捕获
+        if (e.target.classList.contains('student-checkbox')) return;
         selectStudent(originalIndex);
       });
 
-      // 复选框勾选事件
+      // 独立复选框勾选
       const cb = row.querySelector('.student-checkbox');
       cb.addEventListener('change', (e) => {
-        if (e.target.checked) {
+        const checked = e.target.checked;
+        if (checked) {
           state.selectedIndices.add(originalIndex);
         } else {
           state.selectedIndices.delete(originalIndex);
@@ -272,23 +300,23 @@
       dom.rosterList.appendChild(row);
     });
 
-    updateSelectAllState();
     updateMetrics();
+    updateSelectAllState();
   }
 
   function getStatusBadge(status) {
     switch (status) {
       case 'Success':
         return '<span class="status-pill success">已发送</span>';
+      case 'Sending':
+        return '<span class="status-pill pending">发送中...</span>';
       case 'Failed':
         return '<span class="status-pill failed">失败</span>';
       case 'Skipped':
         return '<span class="status-pill failed">跳过</span>';
-      case 'Sending':
-        return '<span class="status-pill pending">发送中...</span>';
       case 'Pending':
       default:
-        return '<span class="status-pill pending">待发送</span>';
+        return '<span class="status-pill">待发送</span>';
     }
   }
 
@@ -306,14 +334,14 @@
   }
 
   // ==========================================
-  // 6. 详情预览与错题本卡片
+  // 6. 详情预览与快捷复制 (学号姓名 / 评语文案)
   // ==========================================
   function selectStudent(index) {
     state.activeStudentIndex = index;
     const student = state.students[index];
     if (!student) return;
 
-    // 高亮行
+    // 高亮当前行
     document.querySelectorAll('.roster-row').forEach(row => {
       row.classList.toggle('selected', parseInt(row.dataset.index, 10) === index);
     });
@@ -324,46 +352,85 @@
     
     // 状态标识
     dom.previewStatus.textContent = student.status === 'Success' ? '已发送' :
-      (student.status === 'Failed' ? '发送失败' : '准备就绪');
+      (student.status === 'Failed' ? '发送失败' : (student.status === 'Sending' ? '发送中...' : '准备就绪'));
     dom.previewStatus.className = 'status-pill ' + 
       (student.status === 'Success' ? 'success' : (student.status === 'Failed' ? 'failed' : 'pending'));
 
     dom.previewMessage.value = student.message || '';
     dom.previewWordCount.textContent = `${(student.message || '').length} 字`;
+  }
 
-    // 检测专属错题本链接
-    const retestMatch = (student.message || '').match(/https:\/\/vip\.wxjifang\.cn\/retest\.html\S+/);
-    if (retestMatch) {
-      dom.retestCard.style.display = 'flex';
-      dom.retestUrlText.textContent = retestMatch[0];
-      dom.retestUrlText.dataset.url = retestMatch[0];
-    } else {
-      dom.retestCard.style.display = 'none';
+  function initCopyActions() {
+    // 1. 左侧：复制当前选中学生的学号加姓名（如 "12345，吴涛"）
+    if (dom.copyStudentBtn) {
+      dom.copyStudentBtn.addEventListener('click', () => {
+        if (state.activeStudentIndex < 0 || !state.students[state.activeStudentIndex]) {
+          alert('请先在左侧列表中点击选择学生！');
+          return;
+        }
+        const student = state.students[state.activeStudentIndex];
+        const studentName = student.clean_name || student.studentName || '';
+        const studentId = student.student_id ? String(student.student_id).trim() : '';
+        // 严格按照用户指定的中文逗号格式：例如 "12345，吴涛"
+        const copyText = studentId ? `${studentId}，${studentName}` : studentName;
+
+        safeCopyToClipboard(copyText, () => {
+          const originalText = dom.copyStudentBtn.textContent;
+          dom.copyStudentBtn.textContent = `✓ 已复制 (${copyText})!`;
+          dom.copyStudentBtn.classList.add('btn-copied');
+          setTimeout(() => {
+            dom.copyStudentBtn.textContent = originalText;
+            dom.copyStudentBtn.classList.remove('btn-copied');
+          }, 1500);
+        });
+      });
+    }
+
+    // 2. 右侧：复制整个反馈文案
+    if (dom.copyMessageBtn) {
+      dom.copyMessageBtn.addEventListener('click', () => {
+        const text = dom.previewMessage.value.trim();
+        if (!text) {
+          alert('当前选中的学生暂无反馈文案！');
+          return;
+        }
+        safeCopyToClipboard(text, () => {
+          const originalText = dom.copyMessageBtn.textContent;
+          dom.copyMessageBtn.textContent = '✓ 文案已复制!';
+          dom.copyMessageBtn.classList.add('btn-copied');
+          setTimeout(() => {
+            dom.copyMessageBtn.textContent = originalText;
+            dom.copyMessageBtn.classList.remove('btn-copied');
+          }, 1500);
+        });
+      });
     }
   }
 
-  function initPreviewActions() {
-    dom.copyRetestBtn.addEventListener('click', () => {
-      const url = dom.retestUrlText.dataset.url;
-      if (!url) return;
-      navigator.clipboard.writeText(url).then(() => {
-        const originalText = dom.copyRetestBtn.textContent;
-        dom.copyRetestBtn.textContent = '✅ 已复制!';
-        setTimeout(() => {
-          dom.copyRetestBtn.textContent = originalText;
-        }, 1500);
+  function safeCopyToClipboard(text, onSuccess) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(onSuccess).catch(() => {
+        fallbackCopy(text, onSuccess);
       });
-    });
+    } else {
+      fallbackCopy(text, onSuccess);
+    }
+  }
 
-    dom.openRetestBtn.addEventListener('click', () => {
-      const url = dom.retestUrlText.dataset.url;
-      if (!url) return;
-      if (state.isTauri && window.__TAURI__.shell) {
-        window.__TAURI__.shell.open(url);
-      } else {
-        window.open(url, '_blank');
-      }
-    });
+  function fallbackCopy(text, onSuccess) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand('copy');
+      if (onSuccess) onSuccess();
+    } catch (e) {
+      alert('写入系统剪贴板失败，请手动选择复制。');
+    }
+    document.body.removeChild(ta);
   }
 
   // ==========================================
@@ -428,7 +495,7 @@
         batch_size: parseInt(dom.batchSizeInput.value, 10) || 15,
         item_interval_ms: parseInt(dom.intervalInput.value, 10) || 1200,
         batch_cooldown_sec: parseInt(dom.batchCooldownInput.value, 10) || 10,
-        use_cloud_vision: dom.cloudVisionToggle.checked,
+        use_cloud_vision: true, // 强制默认启用 AI 视觉双保险体系
       };
       window.__TAURI__.core.invoke('start_send', { items: itemsToSend, config })
         .catch(err => {
@@ -481,6 +548,7 @@
       setEngineState('Completed');
       updateProgress(100);
       appendLog('SUCCESS', '所有勾选学生已全部发送完毕');
+      HistoryManager.archiveCurrentWorkspace();
       return;
     }
 
@@ -497,7 +565,7 @@
       if (state.engineState !== 'Running') return;
 
       student.status = 'Success';
-      appendLog('SUCCESS', `[发信成功] 已向 ${student.clean_name} 家长送达作业周反馈与错题本`);
+      appendLog('SUCCESS', `[发信成功] 已向 ${student.clean_name} 家长送达作业周反馈`);
       
       const totalSelected = state.selectedIndices.size;
       const finishedCount = Array.from(state.selectedIndices).filter(i => state.students[i].status === 'Success').length;
@@ -537,6 +605,9 @@
           }
         } else if (payload.type === 'StateChanged') {
           setEngineState(payload.state);
+          if (payload.state === 'Completed') {
+            HistoryManager.archiveCurrentWorkspace();
+          }
         }
       });
     }
@@ -555,7 +626,6 @@
   // 9. 企微窗口状态自检
   // ==========================================
   function initWecomDetection() {
-    const statusDot = dom.wecomStatus.querySelector('.status-dot');
     const statusLabel = dom.wecomStatus.querySelector('.status-label');
 
     if (state.isTauri) {
@@ -580,7 +650,6 @@
   // 10. 数据载入与文件解析 (JSON / HTML)
   // ==========================================
   function initFileLoader() {
-    // 创建隐藏的 input[type=file] 以便在无原生对话框时直接使用浏览器文件选择
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
     fileInput.accept = '.json,.html,.htm';
@@ -598,7 +667,6 @@
             const data = JSON.parse(text);
             loadParsedData(data, file.name);
           } else {
-            // HTML 格式解析
             const data = parseHtmlFeedback(text);
             loadParsedData(data, file.name);
           }
@@ -631,6 +699,8 @@
       return;
     }
 
+    state.currentSourceName = sourceName || '未命名数据';
+
     state.students = rawItems.map((item, idx) => {
       // 提取学号与姓名
       const rawName = item.studentName || item.student_name || `未知_${idx}`;
@@ -656,12 +726,18 @@
     state.students.forEach((_, i) => state.selectedIndices.add(i));
     state.activeStudentIndex = 0;
 
+    // 更新标题栏徽章
+    if (dom.loadedFileBadge) {
+      const shortName = sourceName.split(/[/\\]/).pop();
+      dom.loadedFileBadge.textContent = `${shortName} (${state.students.length}人)`;
+      dom.loadedFileBadge.title = sourceName;
+    }
+
     renderRoster();
     selectStudent(0);
     appendLog('INFO', `成功载入 [${sourceName}]：包含 ${state.students.length} 位学生数据`);
   }
 
-  // 简易前端 HTML 解析器 (与 Rust parser.rs 的 parse_html 逻辑完全对齐)
   function parseHtmlFeedback(html) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
@@ -683,7 +759,341 @@
   }
 
   // ==========================================
-  // 11. 演示数据加载
+  // 11. 历史发送档案管理中心 (HistoryManager)
+  // ==========================================
+  const HistoryManager = {
+    STORAGE_KEY: 'jf_history_archives',
+
+    getAllArchives() {
+      try {
+        const raw = localStorage.getItem(this.STORAGE_KEY);
+        if (!raw) return this.getInitialMockArchives();
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : this.getInitialMockArchives();
+      } catch (e) {
+        return this.getInitialMockArchives();
+      }
+    },
+
+    saveArchives(list) {
+      try {
+        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(list));
+      } catch (e) {
+        console.error('保存历史记录失败:', e);
+      }
+    },
+
+    getInitialMockArchives() {
+      const defaults = [
+        {
+          id: 'arch_sample_01',
+          name: '初二数学培优班 (测试数据)',
+          cycle: '第3周',
+          timestamp: '2026-10-02 23:25',
+          students: [
+            {
+              student_id: '90001',
+              clean_name: '张三',
+              studentName: '90001张三',
+              cycle: '第3周',
+              status: 'Success',
+              message: "张三家长您好，以下是小张数学作业情况反馈：第3周课前预习作业得分1分..."
+            },
+            {
+              student_id: '80001',
+              clean_name: '李四',
+              studentName: '80001李四',
+              cycle: '第3周',
+              status: 'Success',
+              message: "李四家长您好，以下是小李数学作业情况反馈：第3周课前预习作业得分4分..."
+            },
+            {
+              student_id: '70001',
+              clean_name: '王五',
+              studentName: '70001王五',
+              cycle: '第3周',
+              status: 'Success',
+              message: "王五家长您好，以下是小王数学作业情况反馈：第3周课前预习作业未提交..."
+            }
+          ]
+        },
+        {
+          id: 'arch_sample_02',
+          name: '周六8MA+43班级反馈',
+          cycle: '第2周',
+          timestamp: '2026-09-26 18:30',
+          students: [
+            {
+              student_id: '828601',
+              clean_name: '赵六',
+              studentName: '828601赵六',
+              cycle: '第2周',
+              status: 'Success',
+              message: "赵六家长您好，第2周课后巩固作业完成优秀！"
+            },
+            {
+              student_id: '828602',
+              clean_name: '钱七',
+              studentName: '828602钱七',
+              cycle: '第2周',
+              status: 'Success',
+              message: "钱七家长您好，第2周课后巩固作业完成优秀！"
+            }
+          ]
+        }
+      ];
+      this.saveArchives(defaults);
+      return defaults;
+    },
+
+    archiveCurrentWorkspace() {
+      if (!state.students || state.students.length === 0) return;
+      const archives = this.getAllArchives();
+      const firstCycle = state.students[0].cycle || '第1周';
+      const shortName = state.currentSourceName.split(/[/\\]/).pop().replace(/\.[^/.]+$/, '');
+      const nowStr = new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-');
+      
+      const newArchive = {
+        id: 'arch_' + Date.now(),
+        name: shortName || '批量发送档案',
+        cycle: firstCycle,
+        timestamp: nowStr,
+        students: JSON.parse(JSON.stringify(state.students)),
+      };
+
+      // 插入到首部
+      archives.unshift(newArchive);
+      this.saveArchives(archives);
+      this.render();
+      appendLog('INFO', `历史台账已更新归档：${newArchive.name} [${newArchive.cycle}]`);
+    },
+
+    deleteArchive(id) {
+      if (!confirm('确定要删除这条历史发送档案吗？')) return;
+      let archives = this.getAllArchives();
+      archives = archives.filter(a => a.id !== id);
+      this.saveArchives(archives);
+      this.render();
+    },
+
+    clearAll() {
+      if (!confirm('确定要清空所有历史发送档案吗？此操作无法恢复！')) return;
+      this.saveArchives([]);
+      this.render();
+    },
+
+    render() {
+      const archives = this.getAllArchives();
+
+      // 1. 更新顶部指标
+      let totalBatches = archives.length;
+      let totalSent = 0;
+      let totalCount = 0;
+
+      archives.forEach(arch => {
+        const students = arch.students || [];
+        totalCount += students.length;
+        totalSent += students.filter(s => s.status === 'Success').length;
+      });
+
+      const rate = totalCount > 0 ? Math.round((totalSent / totalCount) * 100) : 100;
+      dom.hMetricBatches.textContent = totalBatches;
+      dom.hMetricStudents.textContent = `${totalSent} 人`;
+      dom.hMetricRate.textContent = `${rate}%`;
+
+      // 2. 更新周次下拉筛选器
+      const cycles = Array.from(new Set(archives.map(a => a.cycle || '第1周'))).sort();
+      const currentVal = dom.historyCycleFilter.value || 'all';
+      dom.historyCycleFilter.innerHTML = '<option value="all">全部周次</option>';
+      cycles.forEach(cyc => {
+        const opt = document.createElement('option');
+        opt.value = cyc;
+        opt.textContent = cyc;
+        dom.historyCycleFilter.appendChild(opt);
+      });
+      dom.historyCycleFilter.value = cycles.includes(currentVal) ? currentVal : 'all';
+
+      // 3. 过滤并渲染表格
+      const selectedCycle = dom.historyCycleFilter.value;
+      const searchKeyword = (dom.historySearchInput.value || '').trim().toLowerCase();
+
+      const filtered = archives.filter(arch => {
+        if (selectedCycle !== 'all' && (arch.cycle || '第1周') !== selectedCycle) return false;
+        if (searchKeyword) {
+          const matchName = (arch.name || '').toLowerCase().includes(searchKeyword);
+          const matchCycle = (arch.cycle || '').toLowerCase().includes(searchKeyword);
+          if (!matchName && !matchCycle) return false;
+        }
+        return true;
+      });
+
+      dom.historyTableBody.innerHTML = '';
+      if (filtered.length === 0) {
+        dom.historyEmptyState.style.display = 'flex';
+        return;
+      }
+      dom.historyEmptyState.style.display = 'none';
+
+      filtered.forEach(arch => {
+        const students = arch.students || [];
+        const total = students.length;
+        const success = students.filter(s => s.status === 'Success').length;
+        const pct = total > 0 ? Math.round((success / total) * 100) : 0;
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><strong>${escapeHtml(arch.name)}</strong></td>
+          <td><span class="badge-cycle">${escapeHtml(arch.cycle || '第1周')}</span></td>
+          <td>
+            <div class="table-progress">
+              <span>${success}/${total} 人</span>
+              <div class="table-progress-bar">
+                <div class="table-progress-fill" style="width: ${pct}%;"></div>
+              </div>
+            </div>
+          </td>
+          <td><span class="${pct === 100 ? 'text-success' : 'text-warning'} font-weight-bold">${pct}%</span></td>
+          <td><span style="color: var(--text-muted); font-size: 12px;">${escapeHtml(arch.timestamp)}</span></td>
+          <td style="text-align: right;">
+            <div style="display: inline-flex; gap: 6px;">
+              <button class="btn btn-sm btn-secondary btn-detail" data-id="${arch.id}">👁️ 明细</button>
+              <button class="btn btn-sm btn-primary btn-load" data-id="${arch.id}">🚀 载入</button>
+              <button class="btn btn-sm btn-danger btn-del" data-id="${arch.id}">🗑️</button>
+            </div>
+          </td>
+        `;
+
+        tr.querySelector('.btn-detail').addEventListener('click', () => {
+          this.openDetailModal(arch.id);
+        });
+        tr.querySelector('.btn-load').addEventListener('click', () => {
+          this.loadArchiveToWorkspace(arch.id);
+        });
+        tr.querySelector('.btn-del').addEventListener('click', () => {
+          this.deleteArchive(arch.id);
+        });
+
+        dom.historyTableBody.appendChild(tr);
+      });
+    },
+
+    openDetailModal(archiveId) {
+      const archives = this.getAllArchives();
+      const arch = archives.find(a => a.id === archiveId);
+      if (!arch) return;
+
+      state.activeModalArchiveId = archiveId;
+      dom.modalArchiveTitle.textContent = arch.name;
+      dom.modalArchiveSubtitle.textContent = `归档时间: ${arch.timestamp} | 周期: ${arch.cycle || '第1周'}`;
+
+      const students = arch.students || [];
+      const total = students.length;
+      const successCount = students.filter(s => s.status === 'Success').length;
+      const failedCount = total - successCount;
+
+      dom.modalMetaGrid.innerHTML = `
+        <div>总人数: <strong>${total} 人</strong></div>
+        <div class="text-success">已成功送达: <strong>${successCount} 人</strong></div>
+        <div class="${failedCount > 0 ? 'text-danger' : 'text-muted'}">未发送/异常: <strong>${failedCount} 人</strong></div>
+      `;
+
+      dom.modalRosterList.innerHTML = '';
+      students.forEach(st => {
+        const row = document.createElement('div');
+        row.className = 'modal-student-row';
+        const stName = escapeHtml(st.clean_name || st.studentName);
+        const stId = escapeHtml(st.student_id || '-');
+        const stStatus = getStatusBadge(st.status);
+        const msgPreview = escapeHtml((st.message || '').replace(/\n/g, ' ').slice(0, 35)) + '...';
+
+        row.innerHTML = `
+          <div class="modal-student-main">
+            <span style="font-weight: 600; min-width: 60px;">${stName}</span>
+            <span class="id-badge">${stId}</span>
+            <span style="font-size: 11.5px; color: var(--text-muted);">${msgPreview}</span>
+          </div>
+          <div>${stStatus}</div>
+        `;
+        dom.modalRosterList.appendChild(row);
+      });
+
+      dom.historyDetailModal.style.display = 'flex';
+    },
+
+    closeDetailModal() {
+      dom.historyDetailModal.style.display = 'none';
+      state.activeModalArchiveId = null;
+    },
+
+    loadArchiveToWorkspace(archiveId) {
+      const archives = this.getAllArchives();
+      const arch = archives.find(a => a.id === archiveId);
+      if (!arch || !arch.students || arch.students.length === 0) {
+        alert('该档案中无可用学生记录！');
+        return;
+      }
+
+      loadParsedData(arch.students, `[历史归档] ${arch.name}`);
+      this.closeDetailModal();
+      switchPage('workspace');
+    },
+
+    exportArchiveToCsv(archiveId) {
+      const archives = this.getAllArchives();
+      const arch = archives.find(a => a.id === archiveId);
+      if (!arch) return;
+
+      const students = arch.students || [];
+      let csvContent = '\uFEFF学号,姓名,周次,状态,最后归档时间,反馈评语\n';
+      students.forEach(s => {
+        const id = `"${(s.student_id || '').replace(/"/g, '""')}"`;
+        const name = `"${(s.clean_name || s.studentName || '').replace(/"/g, '""')}"`;
+        const cycle = `"${(s.cycle || arch.cycle || '').replace(/"/g, '""')}"`;
+        const status = s.status === 'Success' ? '已发送' : '未发送/异常';
+        const time = `"${arch.timestamp}"`;
+        const msg = `"${(s.message || '').replace(/"/g, '""')}"`;
+        csvContent += `${id},${name},${cycle},${status},${time},${msg}\n`;
+      });
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `${arch.name}_${arch.cycle}_发送记录.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
+
+  function initHistoryModule() {
+    dom.historyCycleFilter.addEventListener('change', () => HistoryManager.render());
+    dom.historySearchInput.addEventListener('input', () => HistoryManager.render());
+    dom.clearAllHistoryBtn.addEventListener('click', () => HistoryManager.clearAll());
+
+    // 弹窗事件
+    dom.closeModalBtn.addEventListener('click', () => HistoryManager.closeDetailModal());
+    dom.historyDetailModal.addEventListener('click', (e) => {
+      if (e.target === dom.historyDetailModal) {
+        HistoryManager.closeDetailModal();
+      }
+    });
+
+    dom.loadArchiveToWorkspaceBtn.addEventListener('click', () => {
+      if (state.activeModalArchiveId) {
+        HistoryManager.loadArchiveToWorkspace(state.activeModalArchiveId);
+      }
+    });
+
+    dom.exportArchiveCsvBtn.addEventListener('click', () => {
+      if (state.activeModalArchiveId) {
+        HistoryManager.exportArchiveToCsv(state.activeModalArchiveId);
+      }
+    });
+  }
+
+  // ==========================================
+  // 12. 演示数据加载
   // ==========================================
   window.loadMockData = function () {
     const mockList = [
