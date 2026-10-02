@@ -7,5 +7,8 @@ pyperclip==1.11.0
 pywin32==312
 rapidocr-onnxruntime==1.2.3
 numpy==2.5.3
-opencv-python==5.0.0.93
 sv-ttk==2.6.1
+# 反误报瘦身：opencv-python 已移除。
+# 历史上在此锁定过 5.0.0.93，但全项目 `grep cv2` 零命中，属纯粹的无用负担，
+# 且其原生扩展正是把产物撑到 91MB、熵值拉高到触发杀软启发式的主因。
+# 两个 spec 文件的 EXCLUDES 中已同步加入 'cv2' 兜底，防止被间接依赖重新拖进来。

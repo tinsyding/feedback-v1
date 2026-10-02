@@ -228,17 +228,62 @@ flowchart LR
 ### 1. 触发构建
 在本地打标签并推送：
 ```bash
-git tag tools-v1.6
-git push origin tools-v1.6
+git tag tools-v2.0
+git push origin tools-v2.0
 ```
 
-### 2. 云端流水线
-工作流 [`.github/workflows/build-tools.yml`](../../.github/workflows/build-tools.yml) 将在 Windows Server 环境中自动执行：
-1. 安装 Python 与锁定依赖（含 `sv-ttk==2.6.1`）。
-2. 同时使用 PyInstaller 依次编译经典版（[`send_feedback.spec`](send_feedback.spec)）与 Fluent 现代版（[`send_feedback_fluent.spec`](send_feedback_fluent.spec)）。
-3. 自动发布至 GitHub Releases，同时挂载两个独立附件：
-   - `极方每周反馈程序-${VER}.exe`（经典稳定版）
-   - `极方每周反馈程序-Fluent版-${VER}.exe`（Fluent 现代版全新交互客户端）
+### 2. 反误报打包策略（重要）
+
+桌面端曾长期被杀毒软件误报。排查后确认：**问题不在 Python 语言，而在打包方式与产物体征**。
+已于 v2.0 起完成下列整改（改动集中在两个 `.spec` 与 `build-tools.yml`，**业务代码零改动**）：
+
+| # | 措施 | 解决的问题 |
+|---|---|---|
+| 1 | `upx=False` + `--noupx` | UPX 段头（UPX0/UPX1/UPX2）是杀软最典型的识别特征，加壳几乎必被静态引擎命中 |
+| 2 | onefile → **onedir + zip 分发** | onefile 启动时把 90MB 自解压到 `%TEMP%\_MEIxxxxx` 并派生子进程，这套行为是启发式引擎的重点监控对象 |
+| 3 | 移除 **opencv-python** | 曾锁定 `5.0.0.93`，但全项目 `grep cv2` **零命中**，纯无用负担，且其原生扩展是把产物撑到 91MB、熵值拉高的主因 |
+| 4 | spec `EXCLUDES` 清单 | 剔除 `scipy`/`sklearn`/`matplotlib`/`pandas` 等 OCR 传递依赖的非必要分支，避免打包出杀软高度警惕的原生扩展矩阵 |
+| 5 | `version_info.txt` 版本资源块 | 写入明确的中文厂商/产品/版本信息（资源管理器「属性→详细信息」可见），避免因「未知来源 + 无版本信息」落入通用规则 |
+| 6 | 补打包 `favicon.ico` | 此前打包态下图标资源缺失，`get_resource_path()` 找不到后退回系统默认图标（异常被 `except: pass` 静默吞掉），现已修复 |
+| 7 | **可选代码签名** | 见下方第 3 节 |
+
+整改后预期产物：**91.5 MB → 约 40 MB 量级**，且不再具备自解压 / 加壳 / 无标识三大特征。
+
+> **仍需注意**：程序本身包含截屏、键鼠注入、剪贴板读写、向服务端上传截图切片等行为，
+> 这些特征与语言无关，任何语言实现都会命中行为型引擎。若仍被拦截，
+> 请将**整个解压后的文件夹**（而非单个 exe）加入白名单，并优先配置代码签名。
+
+### 3. 代码签名（可选，压制误报最彻底的一招）
+
+无签名程序的信誉分从发布第一天就是 0，因此签名收益最大。**启用无需改动工作流文件**，
+在 GitHub 仓库配置即可：
+
+- `Settings` → `Secrets and variables` → `Actions`
+  - **Variables** 标签页：新增 `WIN_CERT_NAME` = 证书主体名（如 `极方教育`）
+  - **Secrets** 标签页：新增
+    - `WIN_CERT_PFX` = **base64 编码**后的 `.pfx` 证书（注意是 base64 文本，不是二进制文件）
+    - `WIN_CERT_PASSWORD` = pfx 解锁口令
+
+未设置 `WIN_CERT_NAME` 时签名步骤自动跳过，不影响构建。签名后 exe 的发布者信誉会随
+下载量与使用时长累积，误报率随之显著下降。
+
+### 4. 产物与安装方式
+
+工作流 [`.github/workflows/build-tools.yml`](../../.github/workflows/build-tools.yml) 在 Windows runner 上：
+
+1. 安装 Python 3.14 与锁定依赖（`requirements.txt`，已移除 opencv-python）。
+2. 依次执行 `pyinstaller --noupx send_feedback.spec` 与 `send_feedback_fluent.spec`，产出两个目录式文件夹。
+3. （可选）Authenticode 签名并 `signtool verify` 校验。
+4. 用 Python `zipfile` 打包为 Release 附件（选用 `zipfile` 而非外部压缩工具，
+   是为保证中文文件名正确置位 UTF-8 标志位，Windows 资源管理器解压不会乱码）：
+
+   - `极方每周反馈程序-${VER}.zip`（经典稳定版）
+   - `极方每周反馈程序-Fluent版-${VER}.zip`（Fluent 现代版）
+
+**教师端安装**：下载 zip → **完整解压**到任意文件夹 → 双击文件夹内的同名 exe。
+
+> 请勿在压缩包内直接运行，也请勿把 exe 单独拖出来。onedir 产物依赖同目录的配套运行库，
+> 单独取走 exe 会启动失败。
 
 ---
 

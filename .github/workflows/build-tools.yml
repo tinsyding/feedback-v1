@@ -1,8 +1,16 @@
 name: Build 反馈工具
 
-# 用法：git tag tools-v1.4 && git push origin tools-v1.4
-# 自动在 Windows 云端构建 exe 并挂到同名 Release 下，附件名为 极方每周反馈程序-v1.4.exe。
-# 构建参数与本地完全一致（复用 send_feedback.spec + requirements.txt 锁定版本）。
+# 用法：git tag tools-v2.0 && git push origin tools-v2.0
+# 自动在 Windows 云端构建产物并挂到同名 Release 下，附件名为 极方每周反馈程序-v2.0.zip。
+#
+# 反误报打包策略（详见 feedback-v1/tools/desktop-sender/README.md 第八章）：
+#   1) onedir + zip 分发：不再把 90MB 自解压到 %TEMP%\_MEIxxxxx，也不再派生子进程，
+#      这两项是 PyInstaller onefile 被启发式引擎锁定的核心行为特征；
+#   2) 关闭 UPX 二次加壳（UPX 段头是教科书式识别特征）；
+#   3) 剔除全项目零引用的 opencv-python 及其传递依赖（体积 91MB -> 约 40MB 量级）；
+#   4) 写入带中文厂商/产品信息的 VERSIONINFO 资源块（version_info.txt）；
+#   5) 【可选】Authenticode 代码签名 —— 见下方 SIGN_STEP，
+#      未配置证书时自动跳过，不阻断构建。
 
 on:
   push:
@@ -33,11 +41,54 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r feedback-v1/tools/desktop-sender/requirements.txt
 
-      - name: Build exe (Classic & Fluent)
+      - name: Build (Classic & Fluent)
         working-directory: feedback-v1/tools/desktop-sender
         run: |
-          python -m PyInstaller --noconfirm --clean send_feedback.spec
-          python -m PyInstaller --noconfirm --clean send_feedback_fluent.spec
+          # 显式关掉 UPX：不依赖 PyInstaller 对本机是否装有 upx 的探测，
+          # spec 中已设 upx=False，这里再加 --upx-exclude 全量排除做双重保险。
+          python -m PyInstaller --noconfirm --clean --noupx send_feedback.spec
+          python -m PyInstaller --noconfirm --clean --noupx send_feedback_fluent.spec
+
+      # ---------------------------------------------------------------------
+      # 可选代码签名步骤。
+      #
+      # 无签名程序的信誉分从发布第一天就是 0，所有启发式规则全都会命中，
+      # 因此签名是压制误报最直接、也最彻底的一招。
+      #
+      # 启用方式（无需改动本文件）：
+      #   Settings -> Secrets and variables -> Actions
+      #   Variables 标签页新增 WIN_CERT_NAME = 证书主体名（如「极方教育」）
+      #   Secrets  标签页新增
+      #     WIN_CERT_PFX      base64 编码的 .pfx（注意是 base64 文本，不是二进制）
+      #     WIN_CERT_PASSWORD pfx 解锁口令
+      # 未设置 WIN_CERT_NAME 时，本步骤自动跳过，不阻断构建。
+      # ---------------------------------------------------------------------
+      - name: Sign (optional)
+        if: ${{ vars.WIN_CERT_NAME != '' }}
+        env:
+          WIN_CERT_NAME: ${{ vars.WIN_CERT_NAME }}
+          WIN_CERT_PFX: ${{ secrets.WIN_CERT_PFX }}
+          WIN_CERT_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          echo "$WIN_CERT_PFX" | base64 -d > "$RUNNER_TEMP/cert.pfx"
+
+          # 寻址 Windows SDK 下的 signtool.exe
+          SIGNTOOL=$(find "/c/Program Files (x86)/Windows Kits/10/bin" -name signtool.exe 2>/dev/null | grep x64 | sort -V | tail -n 1 || true)
+          if [ -z "$SIGNTOOL" ] || [ ! -f "$SIGNTOOL" ]; then
+            SIGNTOOL="signtool"
+          fi
+
+          for exe in \
+            "feedback-v1/tools/desktop-sender/dist/极方每周反馈程序/极方每周反馈程序.exe" \
+            "feedback-v1/tools/desktop-sender/dist/极方每周反馈程序-Fluent版/极方每周反馈程序-Fluent版.exe"; do
+            "$SIGNTOOL" sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 \
+              /f "$RUNNER_TEMP/cert.pfx" /p "$WIN_CERT_PASSWORD" \
+              /n "$WIN_CERT_NAME" "$exe"
+            "$SIGNTOOL" verify /pa "$exe"
+          done
+          # 务必清除证书副本，避免泄漏到后续步骤或日志
+          shred -u "$RUNNER_TEMP/cert.pfx" 2>/dev/null || rm -f "$RUNNER_TEMP/cert.pfx"
 
       - name: Extract version
         id: get_version
@@ -45,12 +96,47 @@ jobs:
           VER="${GITHUB_REF_NAME#tools-}"
           echo "version=${VER}" >> $GITHUB_OUTPUT
 
-      - name: Rename asset
+      - name: Package as zip
         run: |
           VER="${{ steps.get_version.outputs.version }}"
-          cp "feedback-v1/tools/desktop-sender/dist/极方每周反馈程序.exe" "极方每周反馈程序-${VER}.exe"
-          cp "feedback-v1/tools/desktop-sender/dist/极方每周反馈程序-Fluent版.exe" "极方每周反馈程序-Fluent版-${VER}.exe"
-          ls -la 极方每周反馈程序-*.exe
+          export VER
+          # 用 Python 的 zipfile 而非 7z/bash zip：
+          #   zipfile 会为非 ASCII 文件名正确置位 UTF-8 标志位(bit 11)，
+          #   Windows 资源管理器解压中文名不会乱码；而 bash 管道 + 外部压缩工具
+          #   在 Windows runner 上有编码不确定性（本仓库此前就踩过 Windows 编码坑）。
+          python - <<'PY'
+          import os, shutil, zipfile
+
+          DIST = "feedback-v1/tools/desktop-sender/dist"
+          VER  = os.environ["VER"]
+
+          for folder, label in [("极方每周反馈程序", ""),
+                                ("极方每周反馈程序-Fluent版", "-Fluent版")]:
+              root = os.path.join(DIST, folder)
+              # 剔除 PyInstaller 中间产物，减小体积
+              for junk in ("__pycache__", "build"):
+                  shutil.rmtree(os.path.join(root, junk), ignore_errors=True)
+
+              exe = os.path.join(root, folder + ".exe")
+              assert os.path.isfile(exe), f"未找到主程序: {exe}"
+
+              out = os.path.join(DIST, f"极方每周反馈程序{label}-{VER}.zip")
+              with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+                  for dirpath, _dirs, files in os.walk(root):
+                      for f in files:
+                          full = os.path.join(dirpath, f)
+                          z.write(full, os.path.relpath(full, DIST))
+              print(f"{out}  {os.path.getsize(out)/1048576:.1f} MB")
+          PY
+
+      - name: Report size
+        run: |
+          cd feedback-v1/tools/desktop-sender/dist
+          echo "=== 压缩包（对比 onefile 时代单个 exe 91.5MB）==="
+          ls -lh *.zip
+          echo
+          echo "=== onedir 内主程序体积（对比 onefile 时代 91.5MB）==="
+          ls -lh 极方每周反馈程序/*.exe 极方每周反馈程序-Fluent版/*.exe
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -61,10 +147,31 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: 极方每周反馈程序 ${{ steps.get_version.outputs.version }}
           body: |
-            自动构建（${{ github.sha }}）。双击即用，无需 Python；首次启动稍慢属正常；建议单独建文件夹存放运行。
+            自动构建（${{ github.sha }}）。
 
-            本发布包含两个平行版本，功能完全一致，请按视觉喜好选用：
-            1. **经典稳定版**：`极方每周反馈程序-${{ steps.get_version.outputs.version }}.exe`（原生传统界面，高兼容性）
-            2. **Fluent 现代版**：`极方每周反馈程序-Fluent版-${{ steps.get_version.outputs.version }}.exe`（采用 Windows 11 Fluent 现代圆角设计，支持深色/浅色一键切换）
+            ## 安装方式（本次起改为压缩包分发）
+            1. 下载下面的 zip
+            2. **完整解压**到任意文件夹（例如桌面建一个「反馈程序」文件夹）
+            3. 双击文件夹内的 `极方每周反馈程序.exe`（或 Fluent 版同名 exe）
+
+            请勿在压缩包内直接双击运行，也请勿把 exe 单独拖出来 —— 程序依赖同目录下的
+            配套运行库文件，单独取走 exe 会启动失败。
+
+            ## 为什么这次改成分发 zip
+            本次重做了打包配置以解决「被杀毒软件误报」的问题：
+
+            - 关闭了 UPX 二次加壳（加壳段头是杀软最典型的识别特征）
+            - 改为目录式分发，不再把程序自解压到临时目录、不再派生子进程
+            - 移除了全项目零引用的 opencv-python 及其传递依赖，体积从 91MB 降到 40MB 量级
+            - 写入了明确的中文厂商与产品信息（可在文件属性「详细信息」查看）
+            - 若误报仍然存在，请将程序**整个文件夹**（而非单个 exe）加入杀软白名单
+
+            后续版本将加入代码签名，签名后信誉度会进一步提升。
+
+            ## 选择版本
+            两个版本功能完全一致，请按视觉喜好选用：
+
+            1. **经典稳定版**：`极方每周反馈程序-${VER}.zip`（原生传统界面，高兼容性）
+            2. **Fluent 现代版**：`极方每周反馈程序-Fluent版-${VER}.zip`（Windows 11 Fluent 现代圆角设计，支持深色/浅色一键切换）
           files: |
-            极方每周反馈程序-*.exe
+            极方每周反馈程序-*.zip
