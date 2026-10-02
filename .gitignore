@@ -64,9 +64,10 @@ Thumbs.db
 *.swp
 *.swo
 
-# Node / Frontend dependencies & build outputs
+# Node / Frontend / Rust dependencies & build outputs
 node_modules/
 dist/
+target/
 .turbo/
 .cache/
 
