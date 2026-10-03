@@ -639,14 +639,17 @@
     const statusLabel = dom.wecomStatus.querySelector('.status-label');
 
     if (state.isTauri) {
-      setInterval(() => {
+      const check = () => {
         window.__TAURI__.core.invoke('check_wecom_status')
           .then(online => {
             dom.wecomStatus.className = 'wecom-status ' + (online ? 'online' : 'offline');
             statusLabel.textContent = online ? '企微已就绪' : '企微未启动';
           })
           .catch(() => {});
-      }, 3000);
+      };
+      // 启动时立即自检一次，避免等待初始延迟
+      check();
+      setInterval(check, 2500);
     } else {
       // 演示模式默认就绪
       setTimeout(() => {

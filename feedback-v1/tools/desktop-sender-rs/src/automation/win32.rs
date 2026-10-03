@@ -45,22 +45,51 @@ mod imp {
 
         unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
             let found_ptr = lparam.0 as *mut Option<HWND>;
+
+            if !IsWindow(hwnd).as_bool() {
+                return BOOL(1);
+            }
+
             let mut class_buf = [0u16; 256];
             let mut title_buf = [0u16; 256];
-            let _ = GetClassNameW(hwnd, &mut class_buf);
-            let _ = GetWindowTextW(hwnd, &mut title_buf);
+            let len_cls = GetClassNameW(hwnd, &mut class_buf);
+            let len_title = GetWindowTextW(hwnd, &mut title_buf);
 
-            let class_name = String::from_utf16_lossy(&class_buf);
-            let title = String::from_utf16_lossy(&title_buf);
+            let class_name = if len_cls > 0 {
+                String::from_utf16_lossy(&class_buf[..len_cls as usize])
+            } else {
+                String::new()
+            };
+            let title = if len_title > 0 {
+                String::from_utf16_lossy(&title_buf[..len_title as usize])
+            } else {
+                String::new()
+            };
 
-            // 企微典型主窗口特征类名及标题
-            if (class_name.contains("WeChatMainWndForPC") || class_name.contains("WXWork_Frame"))
+            // 企微典型主窗口特征类名及标题：
+            // 1. 类名包含 WeWorkWindow (企微标准主窗体类名) 或 WXWork
+            // 2. 标题包含 "企业微信"
+            // 3. 排除 Wedoc (腾讯文档内嵌页) 和登录界面 ("登录" / "Login")
+            let is_wecom = (class_name.contains("WeWorkWindow")
+                || class_name.contains("WXWork")
+                || title.contains("企业微信"))
+                && !class_name.contains("Wedoc")
                 && !title.contains("登录")
-            {
-                unsafe {
-                    *found_ptr = Some(hwnd);
+                && !title.contains("Login");
+
+            if is_wecom {
+                // 主窗口尺寸必须大于 300x300，过滤托盘小图标/阴影/悬浮条/隐藏窗口
+                let mut rect = RECT::default();
+                if GetWindowRect(hwnd, &mut rect).is_ok() {
+                    let w = rect.right - rect.left;
+                    let h = rect.bottom - rect.top;
+                    if w > 300 && h > 300 {
+                        unsafe {
+                            *found_ptr = Some(hwnd);
+                        }
+                        return BOOL(0); // 找到主窗口，立即终止枚举
+                    }
                 }
-                return BOOL(0); // 终止枚举
             }
             BOOL(1)
         }
@@ -86,14 +115,50 @@ mod imp {
             } else {
                 let _ = ShowWindow(hwnd, SW_SHOW);
             }
-            SetForegroundWindow(hwnd).as_bool()
+            // 模拟 Alt 键绕过 Windows SetForegroundWindow 跨进程焦点保护限制
+            keybd_event(0x12, 0, KEYBD_EVENT_FLAGS(0), 0); // Alt down
+            let ok = SetForegroundWindow(hwnd).as_bool();
+            keybd_event(0x12, 0, KEYEVENTF_KEYUP, 0); // Alt up
+            ok
         }
     }
 
     pub fn is_foreground(hwnd_val: isize) -> bool {
         unsafe {
             let fg = GetForegroundWindow();
-            (fg.0 as isize) == hwnd_val
+            if fg.0.is_null() {
+                return false;
+            }
+            if (fg.0 as isize) == hwnd_val {
+                return true;
+            }
+
+            // 考虑企微内部子窗体、搜索框、下拉浮层获焦的情况：
+            // 只要当前前台窗口符合企微特征，均判定为处于企微前台
+            let mut class_buf = [0u16; 256];
+            let mut title_buf = [0u16; 256];
+            let len_cls = GetClassNameW(fg, &mut class_buf);
+            let len_title = GetWindowTextW(fg, &mut title_buf);
+
+            let class_name = if len_cls > 0 {
+                String::from_utf16_lossy(&class_buf[..len_cls as usize])
+            } else {
+                String::new()
+            };
+            let title = if len_title > 0 {
+                String::from_utf16_lossy(&title_buf[..len_title as usize])
+            } else {
+                String::new()
+            };
+
+            if class_name.contains("WeWorkWindow")
+                || class_name.contains("WXWork")
+                || title.contains("企业微信")
+            {
+                return true;
+            }
+
+            false
         }
     }
 
