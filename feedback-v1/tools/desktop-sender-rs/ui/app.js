@@ -492,12 +492,18 @@
 
     if (state.isTauri) {
       // Tauri 原生后端调用
+      // 注意：只发送 snake_case 主键，避免同时携带 original_index + originalIndex
+      // 触发 serde "duplicate field original_index"（Tauri 会把 JSON 同时映射到同一 Rust 字段）。
       const itemsToSend = Array.from(state.selectedIndices).map(idx => {
-        const student = state.students[idx];
+        const s = state.students[idx];
         return {
-          ...student,
+          studentName: s.studentName,
+          message: s.message,
+          student_id: s.student_id,
+          clean_name: s.clean_name,
+          cycle: s.cycle,
+          status: s.status,
           original_index: idx,
-          originalIndex: idx,
         };
       });
       const config = {
