@@ -1,6 +1,6 @@
 use crate::cloud::CloudClient;
 use crate::parser::evaluate_contact_candidates;
-use crate::types::{ContactCandidate, FeedbackItem, SendStatus};
+use crate::types::{ContactCandidate, DropdownCapture, FeedbackItem, SendStatus};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, watch};
@@ -91,6 +91,15 @@ pub trait AutomationDriver: Send + Sync {
     async fn is_wecom_foreground(&self, hwnd: isize) -> bool;
     async fn search_contact(&self, hwnd: isize, query: &str) -> Result<(), String>;
     async fn capture_dropdown_candidates(&self, hwnd: isize) -> Result<Vec<ContactCandidate>, String>;
+    /// 抓取下拉候选并附带原始 OCR 文本/DPI（用于详细日志）。默认降级到候选列表。
+    async fn capture_dropdown(&self, hwnd: isize) -> Result<DropdownCapture, String> {
+        let candidates = self.capture_dropdown_candidates(hwnd).await?;
+        Ok(DropdownCapture {
+            candidates,
+            raw_text: String::new(),
+            dpi_scale: 1.0,
+        })
+    }
     async fn select_candidate(&self, hwnd: isize, choice: usize) -> Result<(), String>;
     async fn send_message_text(&self, hwnd: isize, message: &str) -> Result<(), String>;
     async fn dismiss_search(&self, hwnd: isize) -> Result<(), String>;
@@ -246,7 +255,7 @@ impl<D: AutomationDriver> SenderEngine<D> {
 
             // 4. 抓取候选人并智能决策
             tokio::time::sleep(Duration::from_millis(300)).await;
-            let candidates = match self.driver.capture_dropdown_candidates(hwnd).await {
+            let capture = match self.driver.capture_dropdown(hwnd).await {
                 Ok(c) => c,
                 Err(e) => {
                     item.status = SendStatus::Failed;
@@ -262,13 +271,25 @@ impl<D: AutomationDriver> SenderEngine<D> {
                     continue;
                 }
             };
+            let candidates = &capture.candidates;
 
             let decision = evaluate_contact_candidates(
-                &candidates,
+                candidates,
                 &item.student_id,
                 &item.clean_name,
                 "Engine",
             );
+
+            // 原始 OCR 全文进日志：出现多按向下时可据此还原到底识别到了什么
+            let _ = event_tx
+                .send(EngineEvent::log(
+                    "INFO",
+                    format!(
+                        "[OCR原文] DPI缩放={:.2} 全文=\"{}\"",
+                        capture.dpi_scale, capture.raw_text
+                    ),
+                ))
+                .await;
 
             // 判定明细进日志（与经典版“智能纠偏”日志对齐）：首项即本人 / 纠正至第N项一目了然
             {

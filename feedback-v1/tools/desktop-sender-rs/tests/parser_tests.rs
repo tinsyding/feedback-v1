@@ -148,12 +148,12 @@ fn test_parse_ocr_lines_to_contacts() {
     use desktop_sender_rs::automation::{parse_ocr_lines_to_contacts, OcrLine};
 
     let lines = vec![
-        OcrLine { text: "联系人".to_string() },
-        OcrLine { text: "王小明".to_string() },
-        OcrLine { text: "描述: 提到张三".to_string() },
-        OcrLine { text: "90001张三".to_string() },
-        OcrLine { text: "群聊".to_string() },
-        OcrLine { text: "极方教师教研群".to_string() },
+        OcrLine { text: "联系人".to_string(), ..Default::default() },
+        OcrLine { text: "王小明".to_string(), ..Default::default() },
+        OcrLine { text: "描述: 提到张三".to_string(), ..Default::default() },
+        OcrLine { text: "90001张三".to_string(), ..Default::default() },
+        OcrLine { text: "群聊".to_string(), ..Default::default() },
+        OcrLine { text: "极方教师教研群".to_string(), ..Default::default() },
     ];
     let full_text = "联系人 王小明 描述:提到张三 90001张三 群聊 极方教师教研群";
 
@@ -172,12 +172,12 @@ fn test_ocr_phantoms_do_not_shift_target_position() {
     // 现场还原：搜索框占位“搜索” + 描述行跑到标题前 + 尾部“查看全部”按钮。
     // 这些行都不能建成候选占位，否则真实目标被挤后、多按向下键。
     let lines = vec![
-        OcrLine { text: "联系人".to_string() },
-        OcrLine { text: "搜索".to_string() },
-        OcrLine { text: "描述: 90001张三的备注".to_string() },
-        OcrLine { text: "90001张三".to_string() },
-        OcrLine { text: "查看全部".to_string() },
-        OcrLine { text: "80002李四".to_string() },
+        OcrLine { text: "联系人".to_string(), ..Default::default() },
+        OcrLine { text: "搜索".to_string(), ..Default::default() },
+        OcrLine { text: "描述: 90001张三的备注".to_string(), ..Default::default() },
+        OcrLine { text: "90001张三".to_string(), ..Default::default() },
+        OcrLine { text: "查看全部".to_string(), ..Default::default() },
+        OcrLine { text: "80002李四".to_string(), ..Default::default() },
     ];
     let full_text = "联系人 搜索 描述:90001张三的备注 90001张三 查看全部 80002李四";
 
@@ -192,4 +192,23 @@ fn test_ocr_phantoms_do_not_shift_target_position() {
     let decision =
         evaluate_contact_candidates(&contacts, "90001", "张三", "TestEngine");
     assert_eq!(decision.choice, 1, "首项即本人时必须直接回车，不得按向下");
+}
+
+#[test]
+fn test_ocr_geometry_filter_drops_watermark_lines() {
+    use desktop_sender_rs::automation::{
+        parse_ocr_lines_to_contacts_at_scale, OcrLine,
+    };
+
+    // 正常文字列 x≈60；右侧水印列 x≈900（100% 基准下 >360 应被剔除）
+    let lines = vec![
+        OcrLine { text: "联系人".to_string(), x_min: 60.0, y_center: 10.0 },
+        OcrLine { text: "90001张三".to_string(), x_min: 60.0, y_center: 40.0 },
+        OcrLine { text: "极方教育防泄密水印".to_string(), x_min: 900.0, y_center: 40.0 },
+    ];
+    let full = "联系人90001张三极方教育防泄密水印";
+    let contacts = parse_ocr_lines_to_contacts_at_scale(&lines, full, 1.0);
+    assert_eq!(contacts.len(), 1);
+    assert_eq!(contacts[0].title, "90001张三");
+    assert_eq!(contacts[0].index, 1);
 }

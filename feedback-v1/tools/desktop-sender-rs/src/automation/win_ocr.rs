@@ -3,6 +3,10 @@ use image::DynamicImage;
 #[derive(Debug, Clone, Default)]
 pub struct OcrLine {
     pub text: String,
+    /// 词框左边界（与识别输入图像的像素坐标一致）
+    pub x_min: f32,
+    /// 词框垂直中心（与识别输入图像的像素坐标一致）
+    pub y_center: f32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -73,8 +77,30 @@ mod imp {
         for line in lines_view {
             if let Ok(text) = line.Text() {
                 let line_str = text.to_string();
+                // 提取词框几何，供解析阶段按 X/Y 过滤搜索框水印与杂质行
+                let mut x_min = f32::MAX;
+                let mut y_sum = 0.0f32;
+                let mut y_n = 0u32;
+                if let Ok(words) = line.Words() {
+                    for word in words {
+                        if let Ok(rect) = word.BoundingRect() {
+                            x_min = x_min.min(rect.X as f32);
+                            y_sum += rect.Y as f32 + rect.Height as f32 / 2.0;
+                            y_n += 1;
+                        }
+                    }
+                }
+                let (x_min, y_center) = if y_n > 0 {
+                    (x_min, y_sum / y_n as f32)
+                } else {
+                    (0.0, 0.0)
+                };
                 full_text.push_str(&line_str);
-                lines.push(OcrLine { text: line_str });
+                lines.push(OcrLine {
+                    text: line_str,
+                    x_min,
+                    y_center,
+                });
             }
         }
 
@@ -101,6 +127,44 @@ use crate::types::ContactCandidate;
 
 /// 从 OCR 识别出的文本行序列中，结构化还原联系人列表与描述关系（1:1 对齐企微下拉列表交互特征）
 pub fn parse_ocr_lines_to_contacts(lines: &[OcrLine], full_text: &str) -> Vec<ContactCandidate> {
+    parse_ocr_lines_to_contacts_at_scale(lines, full_text, 1.0)
+}
+
+/// 在标准解析前，按显示器 DPI 缩放过滤掉搜索框残留文字与右侧水印等杂质行。
+/// 传入坐标系的原始图像已被 `preprocess_dropdown_image` 放大 2 倍，故乘以 2 换算。
+pub fn parse_ocr_lines_to_contacts_at_scale(
+    lines: &[OcrLine],
+    full_text: &str,
+    scale: f32,
+) -> Vec<ContactCandidate> {
+    let enlarged = 2.0f32;
+    // 100% 基准下文字列约在 x∈[25, 360] 之间
+    let min_x = 25.0 * scale * enlarged;
+    let max_x = 360.0 * scale * enlarged;
+    let has_geom = lines.iter().any(|l| l.y_center > 0.0 || l.x_min > 0.0);
+    let filtered: Vec<OcrLine> = if has_geom {
+        lines
+            .iter()
+            .filter(|l| {
+                let t = l.text.trim();
+                if t.is_empty() {
+                    return false;
+                }
+                // 几何过滤仅在不误伤正文时启用：x 越界的多半是右侧水印/无关文字
+                if l.x_min > 0.0 && (l.x_min < min_x || l.x_min > max_x) {
+                    return false;
+                }
+                true
+            })
+            .cloned()
+            .collect()
+    } else {
+        lines.to_vec()
+    };
+    parse_ocr_lines_core(&filtered, full_text)
+}
+
+fn parse_ocr_lines_core(lines: &[OcrLine], full_text: &str) -> Vec<ContactCandidate> {
     let contact_headers = ["联系人", "外部联系人", "客户", "企业通讯录"];
     let section_end_keywords = [
         "群聊", "最常使用", "功能", "聊天记录", "文档",

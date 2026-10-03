@@ -116,6 +116,16 @@ pub struct ContactCandidate {
     pub is_group: bool,
 }
 
+/// 下拉框单次抓取结果（含原始 OCR 文本与 DPI 信息，便于日志复盘）
+#[derive(Debug, Clone, Default)]
+pub struct DropdownCapture {
+    pub candidates: Vec<ContactCandidate>,
+    /// OCR 未结构化的原始全文（空格已去除）
+    pub raw_text: String,
+    /// 截取时所用显示器 DPI 缩放系数
+    pub dpi_scale: f32,
+}
+
 /// 智能联系人安全决策结果
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DecisionResult {

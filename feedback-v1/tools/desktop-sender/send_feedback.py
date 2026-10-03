@@ -165,6 +165,36 @@ def clean_class_name_from_path(file_path: str) -> str:
     clean = re.sub(r"([_\-](反馈快照|反馈|快照|错题|评语))+$", "", base_name, flags=re.I).strip()
     return clean or base_name
 
+
+def detect_cycle_from_data(raw_data: list, file_path: str = "") -> str:
+    """
+    自动根据文件内容倒推周次/周期：
+      1. 优先扫描学生反馈文案（message / 评语正文）中出现的「第X周/讲」等标记，取众数；
+      2. 文案中无标记时，回退到文件名；
+      3. 仍无则返回空字符串，由调用方决定默认值（第 1 周）。
+    返回标准化字符串，如 '第 3 周'。
+    """
+    votes = {}
+    if isinstance(raw_data, list):
+        for item in raw_data:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("message") or item.get("评语") or item.get("content") or "")
+            cyc = detect_cycle_from_string(text)
+            if cyc:
+                votes[cyc] = votes.get(cyc, 0) + 1
+    if votes:
+        # 取出现次数最多的周期（并列时取数字更大者）
+        def _num(c):
+            m = re.search(r"(\d+)", c)
+            return int(m.group(1)) if m else 0
+        return max(votes.items(), key=lambda kv: (kv[1], _num(kv[0])))[0]
+
+    cyc = detect_cycle_from_string(file_path)
+    if cyc:
+        return cyc
+    return ""
+
 # 基础默认延时配置 (秒)
 SEARCH_DELAY = 1.5
 CLICK_DELAY = 0.5
@@ -2919,6 +2949,17 @@ class FeedbackSender:
         stem = os.path.splitext(os.path.basename(file_path))[0]
         return stem if len(stem) <= 12 else (stem[:12] + "…")
 
+    def _read_file_with_cycle(self, file_path):
+        """读取单文件并返回 (raw_data, 推断周次)。格式错误抛异常。"""
+        raw_data = load_feedback_data_from_file(file_path)
+
+        if not isinstance(raw_data, list) or len(raw_data) == 0:
+            raise ValueError("未能从该文件中提取到有效的学生反馈记录！")
+
+        # 自动根据文件内容倒推周次（优先正文，其次文件名）
+        detected_cyc = detect_cycle_from_data(raw_data, file_path)
+        return raw_data, detected_cyc
+
     def _load_one_file(self, file_path):
         """载入单个文件并追加到发送队列。返回新增条数；已载入过返回 0；格式错误抛异常。
         每条数据打上 _src_file（全路径）与 _src_label（展示用短标签）。"""
@@ -2932,19 +2973,11 @@ class FeedbackSender:
         if any(os.path.basename(f["path"]) == base for f in self.loaded_files):
             raise ValueError(f"队列中已有同名文件「{base}」，不同目录的同名文件会共用发送记录导致串档。请先将其中一个重命名后再载入。")
 
-        raw_data = load_feedback_data_from_file(file_path)
+        raw_data, detected_cyc = self._read_file_with_cycle(file_path)
 
-        if not isinstance(raw_data, list) or len(raw_data) == 0:
-            raise ValueError("未能从该文件中提取到有效的学生反馈记录！")
-
-        # 尝试自动从文件名提取周次并就位
-        detected_cyc = detect_cycle_from_string(base)
-        if detected_cyc:
-            self.current_cycle = detected_cyc
-            self.cycle_var.set(detected_cyc)
-
-        # 先按当前周次同步历史档案，再取班级短标签
-        self.history_mgr.sync_file_loaded(file_path, raw_data, cycle=self.current_cycle)
+        # 自动倒推的周次优先用于归档；仅当冲突检测通过后才真正切换全局周次
+        sync_cycle = detected_cyc or self.current_cycle
+        self.history_mgr.sync_file_loaded(file_path, raw_data, cycle=sync_cycle)
         label = self._short_file_label(file_path)
         for item in raw_data:
             if isinstance(item, dict):
@@ -2956,6 +2989,7 @@ class FeedbackSender:
             "name": os.path.basename(file_path),
             "label": label,
             "count": len(raw_data),
+            "cycle": detected_cyc,
         })
         # 首个文件兼容旧的 current_file_path 用法
         if not self.current_file_path:
@@ -2998,25 +3032,49 @@ class FeedbackSender:
         self._append_files(list(paths))
 
     def _append_files(self, paths):
-        """批量追加文件，逐个容错，汇总提示（含跨文件重名预警）"""
+        """批量追加文件，逐个容错，汇总提示（含跨文件重名 / 周次冲突拦截）"""
         added = 0
         skipped = 0
         failed = []
+        added_paths = []
         for p in paths:
             try:
                 n = self._load_one_file(p)
                 if n > 0:
                     added += n
+                    added_paths.append(p)
                 else:
                     skipped += 1
             except Exception as e:
                 failed.append(f"{os.path.basename(p)}：{e}")
         if failed:
             messagebox.showerror("读取错误", "以下文件读取失败：\n" + "\n".join(failed))
+
+        # 跨文件周次冲突检测：多个文件自动倒推出的周次不一致时，弹提示并回滚本次新增，不进入下一步
+        conflict = self._detect_cycle_conflict()
+        if conflict:
+            self._rollback_conflict_load(added_paths)
+            messagebox.showerror(
+                "周次冲突",
+                "检测到多个文件的周次不一致，已取消本次载入，请确认后再试：\n\n"
+                + conflict["detail"]
+                + "\n\n💡 请核对各文件名或反馈正文中的周次标记，确认它们属于同一发送周期。",
+            )
+            self.refresh_queue_ui()
+            return
+
         self.refresh_queue_ui()
         if added > 0:
+            # 队列周次就位：优先采用自动倒推出的周次
+            inferred = self._infer_queue_cycle()
+            if inferred:
+                self.current_cycle = inferred
+                self.cycle_var.set(inferred)
+                self.load_preview()
             dup_names = self._find_cross_file_duplicates()
             tip = f"✓ 已载入 {len(self.loaded_files)} 个文件，共 {len(self.data)} 条反馈数据。"
+            if inferred:
+                tip += f"（自动识别周次：{inferred}）"
             if dup_names:
                 shown = "、".join(dup_names[:5])
                 more = f"等{len(dup_names)}人" if len(dup_names) > 5 else ""
@@ -3032,6 +3090,55 @@ class FeedbackSender:
                     pass
         elif skipped > 0 and not failed:
             self.flash_status("所选文件均已在队列中，未重复载入", "#909399")
+
+    def _detect_cycle_conflict(self):
+        """
+        扫描全队列文件，若不同文件自动倒推出的周次存在两个及以上不同值，判定为冲突。
+        返回 {'cycles': [...], 'paths': [...], 'detail': '...'} 或 None。
+        """
+        cycle_to_files = {}
+        conflict_paths = []
+        for f in self.loaded_files:
+            cyc = (f.get("cycle") or "").strip()
+            if not cyc:
+                continue
+            cycle_to_files.setdefault(cyc, []).append(f.get("name") or f.get("path"))
+        if len(cycle_to_files) <= 1:
+            return None
+
+        lines = []
+        for cyc in sorted(cycle_to_files.keys(), key=lambda c: (len(c), c)):
+            names = cycle_to_files[cyc]
+            lines.append(f"• 【{cyc}】: " + "、".join(names))
+            conflict_paths.extend(
+                f.get("path") for f in self.loaded_files if (f.get("cycle") or "").strip() == cyc
+            )
+        return {
+            "cycles": sorted(cycle_to_files.keys()),
+            "paths": conflict_paths,
+            "detail": "\n".join(lines),
+        }
+
+    def _rollback_conflict_load(self, paths):
+        """周次冲突时回滚：移除本次新增的文件及其数据，恢复原队列。"""
+        norm_paths = {os.path.abspath(p) for p in paths if p}
+        self.loaded_files = [
+            f for f in self.loaded_files if os.path.abspath(f["path"]) not in norm_paths
+        ]
+        self.data = [
+            it for it in self.data
+            if not (isinstance(it, dict) and os.path.abspath(it.get("_src_file", "\0")) in norm_paths)
+        ]
+        if self.current_file_path and os.path.abspath(self.current_file_path) in norm_paths:
+            self.current_file_path = self.loaded_files[0]["path"] if self.loaded_files else ""
+
+    def _infer_queue_cycle(self):
+        """从队列中所有文件推断统一周次；若有且仅有一个非空周次则返回它。"""
+        cycles = {(f.get("cycle") or "").strip() for f in self.loaded_files}
+        cycles.discard("")
+        if len(cycles) == 1:
+            return cycles.pop()
+        return ""
 
     def _find_cross_file_duplicates(self):
         """找出出现在多个文件中的学生姓名（按纯姓名比对，用于提醒）"""

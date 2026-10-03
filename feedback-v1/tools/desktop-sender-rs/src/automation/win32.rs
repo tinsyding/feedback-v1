@@ -1,7 +1,7 @@
 #[cfg(windows)]
 use crate::image_proc::preprocess_dropdown_image;
 use crate::sender_engine::AutomationDriver;
-use crate::types::ContactCandidate;
+use crate::types::{ContactCandidate, DropdownCapture};
 use image::DynamicImage;
 use std::time::Duration;
 
@@ -188,6 +188,19 @@ mod imp {
         }
     }
 
+    /// 窗口所在显示器的 DPI 缩放系数（1.0 = 100%）。
+    /// 下拉框裁剪偏移量以 100% 为设计基准，必须按此系数缩放，
+    /// 否则 125%/150%/200% 缩放下会截错区域，OCR 产生幽灵候选导致多按向下键。
+    pub fn get_dpi_scale(hwnd_val: isize) -> f32 {
+        use windows::Win32::UI::HiDpi::GetDpiForWindow;
+        let hwnd = HWND(hwnd_val as *mut _);
+        let dpi = unsafe { GetDpiForWindow(hwnd) };
+        if dpi == 0 {
+            return 1.0;
+        }
+        (dpi as f32 / 96.0).clamp(0.5, 4.0)
+    }
+
     pub fn capture_window_rect(rect: WindowRect) -> Option<DynamicImage> {
         unsafe {
             let width = rect.width();
@@ -295,6 +308,9 @@ mod imp {
     pub fn get_rect(_hwnd_val: isize) -> Option<WindowRect> {
         None
     }
+    pub fn get_dpi_scale(_hwnd_val: isize) -> f32 {
+        1.0
+    }
     pub fn capture_window_rect(_rect: WindowRect) -> Option<DynamicImage> {
         None
     }
@@ -350,15 +366,25 @@ impl AutomationDriver for WinAutomationDriver {
     }
 
     async fn capture_dropdown_candidates(&self, hwnd: isize) -> Result<Vec<ContactCandidate>, String> {
+        self.capture_dropdown(hwnd).await.map(|c| c.candidates)
+    }
+
+    async fn capture_dropdown(&self, hwnd: isize) -> Result<DropdownCapture, String> {
         #[cfg(windows)]
         {
             let rect = get_rect(hwnd).ok_or_else(|| "无法获取企微窗口坐标".to_string())?;
-            // 与经典版 capture_dropdown_crop 对齐：跳过左侧头像列（+38），覆盖完整下拉列表（约 380x460）
+            // 关键修复：与经典版一致按显示器 DPI 缩放裁剪偏移，否则高缩放屏会截错区域
+            let scale = get_dpi_scale(hwnd);
+            let off_x = (38.0 * scale).round() as i32;
+            let off_y = (46.0 * scale).round() as i32;
+            let base_w = (380.0 * scale).round() as i32;
+            let base_h = (460.0 * scale).round() as i32;
+
             let mut search_rect = WindowRect {
-                left: rect.left + 38,
-                top: rect.top + 46,
-                right: (rect.left + 38 + 380).min(rect.right),
-                bottom: (rect.top + 46 + 460).min(rect.bottom),
+                left: rect.left + off_x,
+                top: rect.top + off_y,
+                right: (rect.left + off_x + base_w).min(rect.right),
+                bottom: (rect.top + off_y + base_h).min(rect.bottom),
             };
             // 窗口过小时保底，避免空区域截图
             search_rect.right = search_rect.right.max(search_rect.left + 50);
@@ -367,13 +393,22 @@ impl AutomationDriver for WinAutomationDriver {
             let img = capture_window_rect(search_rect).ok_or_else(|| "截取下拉框图像失败".to_string())?;
             let preprocessed = preprocess_dropdown_image(&img);
             let ocr_res = crate::automation::win_ocr::recognize_native_ocr(&preprocessed)?;
-            let candidates = crate::automation::win_ocr::parse_ocr_lines_to_contacts(&ocr_res.lines, &ocr_res.full_text);
-            Ok(candidates)
+            // 传入 DPI 缩放，让解析阶段按物理像素过滤搜索框残留文字与右侧水印
+            let candidates = crate::automation::win_ocr::parse_ocr_lines_to_contacts_at_scale(
+                &ocr_res.lines,
+                &ocr_res.full_text,
+                scale,
+            );
+            Ok(DropdownCapture {
+                candidates,
+                raw_text: ocr_res.full_text,
+                dpi_scale: scale,
+            })
         }
         #[cfg(not(windows))]
         {
             let _ = hwnd;
-            Ok(Vec::new())
+            Ok(DropdownCapture::default())
         }
     }
 

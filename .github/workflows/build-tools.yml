@@ -115,7 +115,7 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             VER="${GITHUB_REF_NAME#tools-}"
           else
-            VER="v2.4.4"
+            VER="v2.4.5"
           fi
           echo "version=${VER}" >> $GITHUB_OUTPUT
 

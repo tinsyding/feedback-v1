@@ -1,6 +1,6 @@
 [package]
 name = "desktop-sender-rs"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2021"
 authors = ["极方教育"]
 description = "极方每周作业反馈企业微信自动化发送工具 (Rust 原生重构版)"
