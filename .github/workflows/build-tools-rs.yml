@@ -12,7 +12,7 @@ jobs:
     name: Build Windows x64 Native Exe
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -32,7 +32,7 @@ jobs:
           Get-Item feedback-v1/tools/desktop-sender-rs/target/x86_64-pc-windows-msvc/release/desktop-sender-rs.exe | Select-Object Name, Length
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: desktop-sender-rs-windows-x64
           path: feedback-v1/tools/desktop-sender-rs/target/x86_64-pc-windows-msvc/release/desktop-sender-rs.exe

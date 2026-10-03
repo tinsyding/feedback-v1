@@ -29,7 +29,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions/setup-python@v5
         with:
@@ -115,7 +115,7 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             VER="${GITHUB_REF_NAME#tools-}"
           else
-            VER="v2.4.1"
+            VER="v2.4.2"
           fi
           echo "version=${VER}" >> $GITHUB_OUTPUT
 
