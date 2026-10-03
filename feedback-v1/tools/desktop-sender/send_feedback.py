@@ -110,7 +110,7 @@ def preprocess_dropdown_image(pil_img: Image.Image) -> Image.Image:
         return pil_img
 
 # 客户端应用版本号
-APP_VERSION = "v2.3"
+APP_VERSION = "v2.4"
 
 
 def detect_cycle_from_string(text: str) -> str:
@@ -669,21 +669,13 @@ def evaluate_contact_candidates(contacts: list, target_id: str, target_name: str
         # 排除全局搜索等按钮项
         if any(k in title for k in ["全局", "查找", "搜索", "网络"]):
             return False
-        # 1. 标题包含数字学号 (如 '90001', '90001张三')
-        if target_id and target_id in title:
-            return True
-        # 2. 标题包含目标学生纯姓名 (如 '张三', '张三妈妈')
-        if target_name and target_name in title:
-            return True
-        # 3. 复合验证：学号 + 姓名首字
-        if target_id and target_name and len(target_name) >= 2:
-            if target_id in title and target_name[0] in title:
-                return True
-        # 4. 姓名多字模糊容错 (如 3 字中 2 字，防止 OCR 或字体漏字符)
-        if not target_id and target_name and len(target_name) >= 3:
-            hits = sum(1 for ch in target_name if ch in title)
-            if hits >= len(target_name) - 1:
-                return True
+        # 核心安全准则升级：必须完全同时匹配学号与姓名！
+        if target_id and target_name:
+            return (target_id in title) and (target_name in title)
+        elif target_id:
+            return target_id in title
+        elif target_name:
+            return target_name in title
         return False
 
     for c in contacts:
@@ -1058,9 +1050,17 @@ def verify_chat_header_title_via_ocr(wecom_rect: tuple, target_id: str, target_n
 
             if header_text:
                 last_detected = header_text
-                # 1. 匹配目标学号或姓名 (直接放行)
-                if (target_id and target_id in header_text) or (target_name and target_name in header_text):
-                    log(f"[标题检查点 ✓ 放行] 标题命中目标: '{header_text}' (预期: id='{target_id}', name='{target_name}')", "INFO")
+                # 1. 匹配目标学号加姓名 (必须完全同时匹配放行)
+                is_full_match = False
+                if target_id and target_name:
+                    is_full_match = (target_id in header_text) and (target_name in header_text)
+                elif target_id:
+                    is_full_match = target_id in header_text
+                elif target_name:
+                    is_full_match = target_name in header_text
+
+                if is_full_match:
+                    log(f"[标题检查点 ✓ 放行] 标题完全命中目标: '{header_text}' (预期: id='{target_id}', name='{target_name}')", "INFO")
                     return "MATCH", header_text
 
                 # 2. 误选判据 A：包含明确的其他数字学号（4-6位数字）且不含目标
@@ -1082,7 +1082,15 @@ def verify_chat_header_title_via_ocr(wecom_rect: tuple, target_id: str, target_n
         time.sleep(0.08)
 
     if last_detected:
-        if (target_id and target_id in last_detected) or (target_name and target_name in last_detected):
+        is_full_match = False
+        if target_id and target_name:
+            is_full_match = (target_id in last_detected) and (target_name in last_detected)
+        elif target_id:
+            is_full_match = target_id in last_detected
+        elif target_name:
+            is_full_match = target_name in last_detected
+
+        if is_full_match:
             return "MATCH", last_detected
         else:
             return "MISMATCH", last_detected
@@ -1326,13 +1334,18 @@ def detect_dropdown_target_via_vlm(crop_img, target_id: str, target_name: str) -
         elif "不存在" in reason or "未找到" in reason:
             choice = 0
 
-    # 逻辑防御层 3：如果 choice == 1，但 matched_title 既不包含 target_id 也不包含 target_name
-    # 比如模型把【老板（企微）】作为第1项输出 choice: 1，这属于幻觉/模板惯性，坚决纠偏拦截
-    if choice == 1:
-        has_id = bool(target_id and target_id in matched_title)
-        has_name = bool(target_name and target_name in matched_title)
-        if not has_id and not has_name:
-            log(f"[大模型决策纠偏] 警告：模型返回 choice=1 但标题 '{matched_title}' 既不含学号 '{target_id}' 也不含姓名 '{target_name}'，修正为安全拦截 (choice=-2)", "WARN")
+    # 逻辑防御层 3：如果 choice >= 1，但 matched_title 未完全匹配学号与姓名
+    # 核心安全升级：必须完全同时匹配学号与姓名！
+    if choice >= 1:
+        if target_id and target_name:
+            if not (target_id in matched_title and target_name in matched_title):
+                log(f"[大模型决策纠偏] 警告：模型返回 choice={choice} 但标题 '{matched_title}' 未同时包含学号 '{target_id}' 与姓名 '{target_name}'，修正为安全拦截 (choice=-2)", "WARN")
+                choice = -2
+        elif target_id and target_id not in matched_title:
+            log(f"[大模型决策纠偏] 警告：模型返回 choice={choice} 但标题 '{matched_title}' 不含学号 '{target_id}'，修正为安全拦截 (choice=-2)", "WARN")
+            choice = -2
+        elif target_name and target_name not in matched_title:
+            log(f"[大模型决策纠偏] 警告：模型返回 choice={choice} 但标题 '{matched_title}' 不含姓名 '{target_name}'，修正为安全拦截 (choice=-2)", "WARN")
             choice = -2
 
     log(f"[大模型选人决策] choice={choice}, title='{matched_title}', reason='{reason}'", "INFO")
@@ -1352,6 +1365,17 @@ def verify_chat_header_title_via_vlm(crop_img, target_id: str, target_name: str)
     reason = res.get("reason", "")
     log(f"[大模型标题核验] matched={matched}, title='{detected_title}', reason='{reason}'", "INFO")
     if matched:
+        # 双重防御：标题必须完全同时包含学号与姓名
+        if target_id and target_name:
+            if not (target_id in detected_title and target_name in detected_title):
+                log(f"[大模型标题核验纠偏] 警告：模型返回 matched=True 但标题 '{detected_title}' 未同时包含学号 '{target_id}' 与姓名 '{target_name}'，修正为 MISMATCH", "WARN")
+                return "MISMATCH", f"{detected_title}"
+        elif target_id and target_id not in detected_title:
+            log(f"[大模型标题核验纠偏] 警告：模型返回 matched=True 但标题 '{detected_title}' 不含学号 '{target_id}'，修正为 MISMATCH", "WARN")
+            return "MISMATCH", f"{detected_title}"
+        elif target_name and target_name not in detected_title:
+            log(f"[大模型标题核验纠偏] 警告：模型返回 matched=True 但标题 '{detected_title}' 不含姓名 '{target_name}'，修正为 MISMATCH", "WARN")
+            return "MISMATCH", f"{detected_title}"
         return "MATCH", f"{detected_title}"
     else:
         return "MISMATCH", f"{detected_title}"

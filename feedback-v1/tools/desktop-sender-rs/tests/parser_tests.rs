@@ -83,6 +83,37 @@ fn test_contact_decision_allows_target_with_own_description() {
 }
 
 #[test]
+fn test_contact_decision_requires_both_id_and_name() {
+    let candidates = vec![
+        ContactCandidate {
+            index: 1,
+            title: "90001李四@微信".to_string(), // 仅学号对，姓名不对
+            subtitles: vec![],
+            has_desc: false,
+            is_group: false,
+        },
+        ContactCandidate {
+            index: 2,
+            title: "张三@微信".to_string(), // 仅姓名对，学号不对
+            subtitles: vec![],
+            has_desc: false,
+            is_group: false,
+        },
+        ContactCandidate {
+            index: 3,
+            title: "90001张三@微信".to_string(), // 完全同时匹配学号+姓名！
+            subtitles: vec![],
+            has_desc: false,
+            is_group: false,
+        },
+    ];
+
+    let decision = evaluate_contact_candidates(&candidates, "90001", "张三", "TestEngine");
+    assert_eq!(decision.choice, 3);
+    assert!(decision.reason.contains("第3项为目标本人"));
+}
+
+#[test]
 fn test_contact_decision_rejects_group() {
     let candidates = vec![ContactCandidate {
         index: 1,

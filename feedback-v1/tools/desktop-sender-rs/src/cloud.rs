@@ -78,7 +78,7 @@ impl CloudClient {
         let url = format!("{}/api/desktop.php?action=upload_logs", self.base_url);
         let payload = serde_json::json!({
             "client": self.client_tag,
-            "version": "v2.0-rust",
+            "version": "v2.4-rust",
             "entries": lines
         });
         let _ = self.client.post(&url).json(&payload).send().await;

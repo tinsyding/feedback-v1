@@ -46,8 +46,9 @@ if %errorlevel% neq 0 (
 )
 
 REM 4. 验证构建产物
-set EXE_PATH=dist\极方每周反馈程序.exe
+set EXE_PATH=dist\JiFang-Feedback-Classic-win-x64.exe
 if exist "%EXE_PATH%" (
+    copy /y "%EXE_PATH%" "dist\极方每周反馈程序.exe" >nul 2>nul
     echo.
     echo =======================================================
     echo    🎉 本地编译成功！

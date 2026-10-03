@@ -52,7 +52,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='极方每周反馈程序',
+    name='JiFang-Feedback-Classic-win-x64',
     icon=APP_ICON,
     version=os.path.join(SPECPATH, 'version_info.txt'),
     debug=False,

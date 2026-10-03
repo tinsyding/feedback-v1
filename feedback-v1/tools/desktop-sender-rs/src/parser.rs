@@ -126,15 +126,16 @@ pub fn evaluate_contact_candidates(
         if ["全局", "查找", "搜索", "网络"].iter().any(|&k| title.contains(k)) {
             return false;
         }
-        // 1. 标题包含数字学号 (如 '90001', '90001张三')
-        if !target_id.is_empty() && title.contains(target_id) {
-            return true;
+        // 核心安全准则升级：必须完全同时匹配学号与姓名！
+        if !target_id.is_empty() && !target_name.is_empty() {
+            title.contains(target_id) && title.contains(target_name)
+        } else if !target_id.is_empty() {
+            title.contains(target_id)
+        } else if !target_name.is_empty() {
+            title.contains(target_name)
+        } else {
+            false
         }
-        // 2. 标题包含目标学生纯姓名 (如 '张三', '张三妈妈')
-        if !target_name.is_empty() && title.contains(target_name) {
-            return true;
-        }
-        false
     };
 
     let target_pos = contacts.iter().position(match_contact).map(|idx| idx + 1);

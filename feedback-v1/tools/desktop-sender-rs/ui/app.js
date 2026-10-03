@@ -110,8 +110,8 @@
     initFileLoader();
     initHistoryModule();
 
-    // 默认载入演示数据 (测试.json 规格)
-    loadMockData();
+    // 默认空状态初始化，等待用户载入数据
+    renderRoster();
   }
 
   // ==========================================
@@ -820,11 +820,11 @@
     getAllArchives() {
       try {
         const raw = localStorage.getItem(this.STORAGE_KEY);
-        if (!raw) return this.getInitialMockArchives();
+        if (!raw) return [];
         const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : this.getInitialMockArchives();
+        return Array.isArray(parsed) ? parsed : [];
       } catch (e) {
-        return this.getInitialMockArchives();
+        return [];
       }
     },
 
@@ -834,69 +834,6 @@
       } catch (e) {
         console.error('保存历史记录失败:', e);
       }
-    },
-
-    getInitialMockArchives() {
-      const defaults = [
-        {
-          id: 'arch_sample_01',
-          name: '初二数学培优班 (测试数据)',
-          cycle: '第3周',
-          timestamp: '2026-10-02 23:25',
-          students: [
-            {
-              student_id: '90001',
-              clean_name: '张三',
-              studentName: '90001张三',
-              cycle: '第3周',
-              status: 'Success',
-              message: "张三家长您好，以下是小张数学作业情况反馈：第3周课前预习作业得分1分..."
-            },
-            {
-              student_id: '80001',
-              clean_name: '李四',
-              studentName: '80001李四',
-              cycle: '第3周',
-              status: 'Success',
-              message: "李四家长您好，以下是小李数学作业情况反馈：第3周课前预习作业得分4分..."
-            },
-            {
-              student_id: '70001',
-              clean_name: '王五',
-              studentName: '70001王五',
-              cycle: '第3周',
-              status: 'Success',
-              message: "王五家长您好，以下是小王数学作业情况反馈：第3周课前预习作业未提交..."
-            }
-          ]
-        },
-        {
-          id: 'arch_sample_02',
-          name: '周六8MA+43班级反馈',
-          cycle: '第2周',
-          timestamp: '2026-09-26 18:30',
-          students: [
-            {
-              student_id: '828601',
-              clean_name: '赵六',
-              studentName: '828601赵六',
-              cycle: '第2周',
-              status: 'Success',
-              message: "赵六家长您好，第2周课后巩固作业完成优秀！"
-            },
-            {
-              student_id: '828602',
-              clean_name: '钱七',
-              studentName: '828602钱七',
-              cycle: '第2周',
-              status: 'Success',
-              message: "钱七家长您好，第2周课后巩固作业完成优秀！"
-            }
-          ]
-        }
-      ];
-      this.saveArchives(defaults);
-      return defaults;
     },
 
     archiveCurrentWorkspace() {
@@ -1144,28 +1081,6 @@
       }
     });
   }
-
-  // ==========================================
-  // 12. 演示数据加载
-  // ==========================================
-  window.loadMockData = function () {
-    const mockList = [
-      {
-        studentName: "90001张三",
-        message: "张三家长您好，\n以下是小张数学作业情况反馈：\n-------------------------\n第3周课前预习作业得分为1，\n最高4，平均3，排名2/2。\n首字母一定要大写！！！！\n-------------------------\n第2周课后巩固作业得分为92，\n最高92，平均82，排名1/3。\n度数一定要记得带单位!!!!!\n\n【个人薄弱点】：②翻折与等腰、④角平分线辅助线\n【错题本】：点击链接查看本专题的错题\nhttps://vip.wxjifang.cn/retest.html?token=45zmH8hWgW"
-      },
-      {
-        studentName: "80001李四",
-        message: "李四家长您好，\n以下是小李数学作业情况反馈：\n-------------------------\n第3周课前预习作业得分为4，\n最高4，平均3，排名1/2。\n-------------------------\n第2周课后巩固作业得分为72，\n最高92，平均82，排名3/3。\n度数一定要记得带单位!!!!!\n\n【错题本】：点击链接查看本专题的错题\nhttps://vip.wxjifang.cn/retest.html?token=hizSN8xvgu"
-      },
-      {
-        studentName: "70001王五",
-        message: "王五家长您好，\n以下是小王数学作业情况反馈：\n-------------------------\n第3周课前预习作业未提交。\n-------------------------\n第2周课后巩固作业得分为82，\n最高92，平均82，排名2/3。\n度数一定要记得带单位!!!!!\n\n【个人薄弱点】：⑥等腰角度问题、⑧等腰三角形双分割问题\n【错题本】：点击链接查看本专题的错题\nhttps://vip.wxjifang.cn/retest.html?token=YZoGGwmZwA"
-      }
-    ];
-
-    loadParsedData(mockList, "内置示范数据集 (测试.json)");
-  };
 
   // 工具函数: 转义 HTML 防止 XSS
   function escapeHtml(str) {

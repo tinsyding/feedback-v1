@@ -58,7 +58,7 @@ jobs:
         run: |
           cargo build --release --target x86_64-pc-windows-msvc
           mkdir -p ../desktop-sender/dist
-          cp target/x86_64-pc-windows-msvc/release/desktop-sender-rs.exe ../desktop-sender/dist/极方每周反馈程序-Fluent-x64.exe
+          cp target/x86_64-pc-windows-msvc/release/desktop-sender-rs.exe ../desktop-sender/dist/JiFang-Feedback-Fluent-win-x64.exe
 
       # ---------------------------------------------------------------------
       # 可选代码签名步骤。
@@ -90,7 +90,7 @@ jobs:
             SIGNTOOL="signtool"
           fi
 
-          exe="feedback-v1/tools/desktop-sender/dist/极方每周反馈程序.exe"
+          exe="feedback-v1/tools/desktop-sender/dist/JiFang-Feedback-Classic-win-x64.exe"
           if [ -f "$exe" ]; then
             "$SIGNTOOL" sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 \
               /f "$RUNNER_TEMP/cert.pfx" /p "$WIN_CERT_PASSWORD" \
@@ -98,7 +98,7 @@ jobs:
             "$SIGNTOOL" verify /pa "$exe"
           fi
 
-          exe_rs="feedback-v1/tools/desktop-sender/dist/极方每周反馈程序-Fluent-x64.exe"
+          exe_rs="feedback-v1/tools/desktop-sender/dist/JiFang-Feedback-Fluent-win-x64.exe"
           if [ -f "$exe_rs" ]; then
             "$SIGNTOOL" sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 \
               /f "$RUNNER_TEMP/cert.pfx" /p "$WIN_CERT_PASSWORD" \
@@ -115,24 +115,15 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             VER="${GITHUB_REF_NAME#tools-}"
           else
-            VER="v2.2"
+            VER="v2.4"
           fi
           echo "version=${VER}" >> $GITHUB_OUTPUT
-
-      - name: Rename Python single exe
-        run: |
-          VER="${{ steps.get_version.outputs.version }}"
-          cp "feedback-v1/tools/desktop-sender/dist/极方每周反馈程序.exe" "feedback-v1/tools/desktop-sender/dist/极方每周反馈程序-${VER}.exe"
-          ls -la feedback-v1/tools/desktop-sender/dist/*.exe
 
       - name: Report size
         run: |
           cd feedback-v1/tools/desktop-sender/dist
-          echo "=== Python 经典稳定版单文件 exe 体积 ==="
-          ls -lh 极方每周反馈程序-*.exe
-          echo
-          echo "=== Rust Fluent 原生单文件 exe 体积 ==="
-          ls -lh 极方每周反馈程序-Fluent-*.exe
+          echo "=== Windows x64 Executable Sizes ==="
+          ls -lh JiFang-Feedback-*.exe
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -141,26 +132,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.ref_name }}
-          name: 极方每周反馈程序 ${{ steps.get_version.outputs.version }}
-          body: |
-            自动构建（${{ github.sha }}）。
-
-            ## 📥 双单文件版本下载指引 (无需解压，双击直接运行)
-
-            本版本提供两套独立且均为单文件绿色版的可执行程序，下载后直接双击即可运行，无需解压：
-
-            ### 选项 A（强烈推荐）：🚀 极方每周反馈程序 Fluent 现代版 (Rust 原生单文件版)
-            - **下载附件**：`极方每周反馈程序-Fluent-x64.exe`
-            - **体积与形态**：单文件绿色版、约 10MB、无需解压、双击直接运行。
-            - **全新交互**：Windows 11 Fluent 2.0 现代圆角视觉风格、侧边栏导航、☀️/🌙 深浅色一键切换。
-            - **效率升级**：左侧一键快捷复制当前学生学号与姓名（如：12345，吴涛）、右侧一键复制完整反馈评语文案。
-            - **历史台账**：全新历史发送档案中心，支持周次联动筛选、班级实时搜索、学生发送明细弹窗与 CSV 导出。
-            - **安全与防误发**：采用 Windows 10/11 内置原生免模型 OCR + 云端大模型视觉双保险，彻底杜绝杀软误报。
-
-            ### 选项 B：🛡 极方每周反馈程序 经典稳定版 (Python 原生单文件版)
-            - **下载附件**：`极方每周反馈程序-${{ steps.get_version.outputs.version }}.exe`
-            - **体积与形态**：单文件绿色版、约 42MB、无需解压、双击直接运行。
-            - **交互特点**：经典熟识单窗体、离线 Paddle/ONNX OCR 引擎作为兼容托底。
+          name: JiFang Feedback Tools ${{ steps.get_version.outputs.version }}
+          body: "Automated release of JiFang Feedback Desktop Tools for Windows (x64)."
           files: |
-            feedback-v1/tools/desktop-sender/dist/极方每周反馈程序-*.exe
-            feedback-v1/tools/desktop-sender/dist/极方每周反馈程序-Fluent-*.exe
+            feedback-v1/tools/desktop-sender/dist/JiFang-Feedback-Fluent-win-x64.exe
+            feedback-v1/tools/desktop-sender/dist/JiFang-Feedback-Classic-win-x64.exe
