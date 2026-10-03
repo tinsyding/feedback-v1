@@ -322,4 +322,17 @@ impl AutomationDriver for WinAutomationDriver {
         tokio::time::sleep(Duration::from_millis(500)).await;
         Ok(())
     }
+
+    async fn dismiss_search(&self, _hwnd: isize) -> Result<(), String> {
+        hotkey_ctrl(0x46); // Ctrl+F 激活搜索框
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        hotkey_ctrl(0x41); // Ctrl+A 全选
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        send_key(0x08);    // Backspace 清空文字
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        send_key(0x1B);    // VK_ESCAPE 关闭下拉
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        send_key(0x1B);    // VK_ESCAPE 退出搜索焦点
+        Ok(())
+    }
 }

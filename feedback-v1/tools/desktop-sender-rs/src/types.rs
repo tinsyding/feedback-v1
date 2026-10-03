@@ -3,17 +3,19 @@ use serde::{Deserialize, Serialize};
 /// 原始与标准化的学生反馈条目
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FeedbackItem {
-    #[serde(rename = "studentName")]
+    #[serde(rename = "studentName", alias = "student_name")]
     pub student_name: String,
     pub message: String,
-    #[serde(default)]
+    #[serde(default, alias = "studentId")]
     pub student_id: String,
-    #[serde(default)]
+    #[serde(default, alias = "cleanName")]
     pub clean_name: String,
     #[serde(default)]
     pub cycle: String,
     #[serde(default)]
     pub status: SendStatus,
+    #[serde(default, alias = "originalIndex", alias = "index")]
+    pub original_index: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]

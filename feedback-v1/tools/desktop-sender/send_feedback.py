@@ -1508,13 +1508,16 @@ class HistoryManager:
         """根据文件名或路径及周次，解析或匹配档案的主键"""
         if not file_path_or_name:
             return ""
-        # 1. 直接命中现有 key
+        cyc = (cycle or "").strip()
+
+        # 1. 直接命中现有 key (若指定了 cycle，则必须匹配该 entry 的 cycle)
         if file_path_or_name in self._data["classes"]:
-            return file_path_or_name
+            entry = self._data["classes"][file_path_or_name]
+            if not cyc or entry.get("cycle") == cyc:
+                return file_path_or_name
 
         c_name = clean_class_name_from_path(file_path_or_name)
         f_name = os.path.basename(file_path_or_name)
-        cyc = (cycle or "").strip()
         if not cyc:
             cyc = detect_cycle_from_string(f_name) or "第 1 周"
 
@@ -2738,11 +2741,14 @@ class FeedbackSender:
             messagebox.showinfo("提示", "当前行未包含有效的学员标识。")
             return
 
-        if safe_copy(student_name):
+        sid, sname = parse_student_identifier(student_name)
+        copy_text = f"{sid}，{sname}" if sid and sname else (sname or student_name)
+
+        if safe_copy(copy_text):
             orig_text = self.copy_student_btn.cget("text")
-            self.copy_student_btn.config(text="✓ 已复制!")
+            self.copy_student_btn.config(text=f"✓ 已复制 ({copy_text})!")
             self.root.after(1500, lambda: self.copy_student_btn.config(text=orig_text))
-            self.status_label.config(text=f"✓ 已复制学员标识: {student_name}", fg="#67C23A")
+            self.status_label.config(text=f"✓ 已复制学员标识: {copy_text}", fg="#67C23A")
         else:
             messagebox.showerror("复制失败", "写入系统剪贴板失败，请重试。")
 
@@ -3431,6 +3437,10 @@ class FeedbackSender:
 
         total_items = len(self.data)
         consecutive_sent = 0
+        try:
+            initial_completed = int(self.progress["value"])
+        except Exception:
+            initial_completed = 0
         log(f"=== 批量发送任务启动 === 待发学生数: {len(to_send_indices)}, 延时范围: [{min_delay}, {max_delay}]秒, 批次防风控: 每{batch_size}人休息{batch_delay}秒", "INFO")
 
         for current_loop_idx, i in enumerate(to_send_indices):
@@ -3533,8 +3543,8 @@ class FeedbackSender:
                     {"index": i + 1, "name": student_name, "status": "失败", "time": now_str, "msg_len": len(message), "file": item.get("_src_label", "")}
                 )
 
-            # 更新进度条
-            completed_count = sum(1 for child in self.tree.get_children() if "✓" in self.tree.item(child, "values")[3])
+            # 更新进度条 (采用工作线程计数，杜绝子线程直接跨线程遍历访问 UI 树控件)
+            completed_count = initial_completed + success_count
             self.root.after(
                 0,
                 lambda cur=completed_count, tot=total_items: (

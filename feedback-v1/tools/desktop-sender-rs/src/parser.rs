@@ -37,7 +37,7 @@ pub fn detect_cycle_from_string(text: &str) -> String {
 /// 从标准 JSON 文本中解析反馈名单
 pub fn parse_json(content: &str) -> Result<Vec<FeedbackItem>, serde_json::Error> {
     let mut items: Vec<FeedbackItem> = serde_json::from_str(content)?;
-    for item in &mut items {
+    for (idx, item) in items.iter_mut().enumerate() {
         let (id, name) = parse_student_identifier(&item.student_name);
         item.student_id = id;
         item.clean_name = if name.is_empty() {
@@ -47,6 +47,9 @@ pub fn parse_json(content: &str) -> Result<Vec<FeedbackItem>, serde_json::Error>
         };
         if item.cycle.is_empty() {
             item.cycle = detect_cycle_from_string(&item.message);
+        }
+        if item.original_index.is_none() {
+            item.original_index = Some(idx);
         }
     }
     Ok(items)
@@ -79,6 +82,7 @@ pub fn parse_html(html: &str) -> Result<Vec<FeedbackItem>, String> {
         let msg = msg_re.captures(card_html).and_then(|c| c.get(1)).map_or("", |m| m.as_str()).trim();
         if !name.is_empty() && !msg.is_empty() {
             let (id, clean_name) = parse_student_identifier(name);
+            let idx = items.len();
             items.push(FeedbackItem {
                 student_name: name.to_string(),
                 message: msg.to_string(),
@@ -86,6 +90,7 @@ pub fn parse_html(html: &str) -> Result<Vec<FeedbackItem>, String> {
                 clean_name: if clean_name.is_empty() { name.to_string() } else { clean_name },
                 cycle: detect_cycle_from_string(msg),
                 status: Default::default(),
+                original_index: Some(idx),
             });
         }
     }
@@ -119,10 +124,6 @@ pub fn evaluate_contact_candidates(
         }
         // 排除全局搜索等按钮项
         if ["全局", "查找", "搜索", "网络"].iter().any(|&k| title.contains(k)) {
-            return false;
-        }
-        // 如果该项明确带描述 (如「描述: 包含90001」)，而标题并非目标本人，则不作为目标候选
-        if c.has_desc {
             return false;
         }
         // 1. 标题包含数字学号 (如 '90001', '90001张三')

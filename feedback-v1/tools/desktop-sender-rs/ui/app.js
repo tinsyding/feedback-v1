@@ -258,6 +258,8 @@
           <div class="empty-icon">🔍</div>
           <div class="empty-text">未找到符合条件的学生记录</div>
         </div>`;
+      updateMetrics();
+      updateSelectAllState();
       return;
     }
 
@@ -490,7 +492,14 @@
 
     if (state.isTauri) {
       // Tauri 原生后端调用
-      const itemsToSend = Array.from(state.selectedIndices).map(idx => state.students[idx]);
+      const itemsToSend = Array.from(state.selectedIndices).map(idx => {
+        const student = state.students[idx];
+        return {
+          ...student,
+          original_index: idx,
+          originalIndex: idx,
+        };
+      });
       const config = {
         batch_size: parseInt(dom.batchSizeInput.value, 10) || 15,
         item_interval_ms: parseInt(dom.intervalInput.value, 10) || 1200,
@@ -599,8 +608,9 @@
           const pct = Math.round((payload.current / payload.total) * 100);
           updateProgress(pct);
         } else if (payload.type === 'ItemUpdated') {
-          if (state.students[payload.index]) {
-            state.students[payload.index].status = payload.status;
+          const targetIndex = (payload.index !== undefined && payload.index !== null) ? payload.index : payload.original_index;
+          if (targetIndex !== undefined && state.students[targetIndex]) {
+            state.students[targetIndex].status = payload.status;
             renderRoster();
           }
         } else if (payload.type === 'StateChanged') {
@@ -701,16 +711,45 @@
 
     state.currentSourceName = sourceName || '未命名数据';
 
+    // 匹配同班级/来源且同周期的历史已发送档案
+    const archives = HistoryManager.getAllArchives();
+    const historySentMap = new Map();
+    archives.forEach(arch => {
+      (arch.students || []).forEach(s => {
+        if (s.status === 'Success') {
+          const cyc = (s.cycle || arch.cycle || '').trim();
+          if (s.student_id) historySentMap.set(`${s.student_id}_${cyc}`, true);
+          if (s.clean_name) historySentMap.set(`${s.clean_name}_${cyc}`, true);
+          if (s.studentName) historySentMap.set(`${s.studentName}_${cyc}`, true);
+        }
+      });
+    });
+
+    state.selectedIndices.clear();
+
     state.students = rawItems.map((item, idx) => {
       // 提取学号与姓名
       const rawName = item.studentName || item.student_name || `未知_${idx}`;
       const match = rawName.match(/^(\d{4,9})?\s*([^\d\s()（）]+)/);
-      const studentId = item.student_id || (match ? match[1] || '' : '');
+      const studentId = item.student_id ? String(item.student_id).trim() : (match ? match[1] || '' : '');
       const cleanName = item.clean_name || (match ? match[2] || rawName : rawName);
 
       // 提取周次
       const cycleMatch = (item.message || '').match(/第\s*(\d+)\s*周/);
       const cycle = item.cycle || (cycleMatch ? `第${cycleMatch[1]}周` : '第1周');
+
+      // 联动历史档案：如果当前周次已送达，自动标记为已发送并不予默认勾选
+      let isAlreadySent = false;
+      if (studentId && historySentMap.has(`${studentId}_${cycle}`)) {
+        isAlreadySent = true;
+      } else if (historySentMap.has(`${cleanName}_${cycle}`) || historySentMap.has(`${rawName}_${cycle}`)) {
+        isAlreadySent = true;
+      }
+
+      const initialStatus = isAlreadySent ? 'Success' : (item.status || 'Pending');
+      if (initialStatus !== 'Success') {
+        state.selectedIndices.add(idx);
+      }
 
       return {
         studentName: rawName,
@@ -718,12 +757,11 @@
         clean_name: cleanName,
         cycle: cycle,
         message: item.message || '',
-        status: item.status || 'Pending',
+        status: initialStatus,
+        original_index: idx,
       };
     });
 
-    state.selectedIndices.clear();
-    state.students.forEach((_, i) => state.selectedIndices.add(i));
     state.activeStudentIndex = 0;
 
     // 更新标题栏徽章
@@ -741,6 +779,21 @@
   function parseHtmlFeedback(html) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
+
+    // 1. 优先提取高保真内嵌 JSON 数据 (<script id="feedback-data">)
+    const scriptEl = doc.getElementById('feedback-data');
+    if (scriptEl && scriptEl.textContent) {
+      try {
+        const parsed = JSON.parse(scriptEl.textContent.trim());
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      } catch (e) {
+        console.warn('解析 HTML 内嵌 feedback-data JSON 异常，降级至 DOM 卡片解析:', e);
+      }
+    }
+
+    // 2. DOM 卡片备用解析
     const cards = doc.querySelectorAll('.feedback-card, .student-card');
     const results = [];
 

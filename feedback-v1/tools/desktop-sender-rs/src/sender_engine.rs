@@ -93,6 +93,7 @@ pub trait AutomationDriver: Send + Sync {
     async fn capture_dropdown_candidates(&self, hwnd: isize) -> Result<Vec<ContactCandidate>, String>;
     async fn select_candidate(&self, hwnd: isize, choice: usize) -> Result<(), String>;
     async fn send_message_text(&self, hwnd: isize, message: &str) -> Result<(), String>;
+    async fn dismiss_search(&self, hwnd: isize) -> Result<(), String>;
 }
 
 /// 批量发信调度引擎
@@ -152,6 +153,7 @@ impl<D: AutomationDriver> SenderEngine<D> {
         for i in 0..total {
             // 1. 检查外部控制指令
             if self.handle_control_commands(&mut cmd_rx, &event_tx).await == EngineCommand::Stop {
+                let _ = self.driver.dismiss_search(hwnd).await;
                 let _ = event_tx
                     .send(EngineEvent::log("WARN", "收到停止指令，任务提前终止"))
                     .await;
@@ -176,7 +178,10 @@ impl<D: AutomationDriver> SenderEngine<D> {
             }
 
             let item = &mut items[i];
-            let search_key = if !item.student_id.is_empty() {
+            let item_index = item.original_index.unwrap_or(i);
+            let search_key = if !item.student_name.is_empty() {
+                item.student_name.clone()
+            } else if !item.student_id.is_empty() {
                 item.student_id.clone()
             } else {
                 item.clean_name.clone()
@@ -199,9 +204,10 @@ impl<D: AutomationDriver> SenderEngine<D> {
             if let Err(e) = self.driver.search_contact(hwnd, &search_key).await {
                 item.status = SendStatus::Failed;
                 failed += 1;
+                let _ = self.driver.dismiss_search(hwnd).await;
                 let _ = event_tx
                     .send(EngineEvent::ItemUpdated {
-                        index: i,
+                        index: item_index,
                         status: SendStatus::Failed,
                         reason: format!("搜索异常: {e}"),
                     })
@@ -216,9 +222,10 @@ impl<D: AutomationDriver> SenderEngine<D> {
                 Err(e) => {
                     item.status = SendStatus::Failed;
                     failed += 1;
+                    let _ = self.driver.dismiss_search(hwnd).await;
                     let _ = event_tx
                         .send(EngineEvent::ItemUpdated {
-                            index: i,
+                            index: item_index,
                             status: SendStatus::Failed,
                             reason: format!("识别候选人失败: {e}"),
                         })
@@ -238,11 +245,13 @@ impl<D: AutomationDriver> SenderEngine<D> {
                 item.status = SendStatus::Skipped;
                 let _ = event_tx
                     .send(EngineEvent::ItemUpdated {
-                        index: i,
+                        index: item_index,
                         status: SendStatus::Skipped,
                         reason: decision.reason,
                     })
                     .await;
+                // 核心安全清理：退出下拉浮层并清空搜索框
+                let _ = self.driver.dismiss_search(hwnd).await;
                 continue;
             }
 
@@ -254,9 +263,10 @@ impl<D: AutomationDriver> SenderEngine<D> {
             {
                 item.status = SendStatus::Failed;
                 failed += 1;
+                let _ = self.driver.dismiss_search(hwnd).await;
                 let _ = event_tx
                     .send(EngineEvent::ItemUpdated {
-                        index: i,
+                        index: item_index,
                         status: SendStatus::Failed,
                         reason: format!("选择候选人失败: {e}"),
                     })
@@ -268,9 +278,10 @@ impl<D: AutomationDriver> SenderEngine<D> {
             if let Err(e) = self.driver.send_message_text(hwnd, &item.message).await {
                 item.status = SendStatus::Failed;
                 failed += 1;
+                let _ = self.driver.dismiss_search(hwnd).await;
                 let _ = event_tx
                     .send(EngineEvent::ItemUpdated {
-                        index: i,
+                        index: item_index,
                         status: SendStatus::Failed,
                         reason: format!("发送消息失败: {e}"),
                     })
@@ -282,7 +293,7 @@ impl<D: AutomationDriver> SenderEngine<D> {
             success += 1;
             let _ = event_tx
                 .send(EngineEvent::ItemUpdated {
-                    index: i,
+                    index: item_index,
                     status: SendStatus::Success,
                     reason: "发送成功".to_string(),
                 })

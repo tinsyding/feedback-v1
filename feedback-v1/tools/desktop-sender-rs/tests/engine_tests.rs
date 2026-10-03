@@ -55,6 +55,10 @@ impl AutomationDriver for MockDriver {
         self.send_count.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
+
+    async fn dismiss_search(&self, _hwnd: isize) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 #[tokio::test]
@@ -80,6 +84,7 @@ async fn test_sender_engine_full_loop() {
         cycle: "第1周".to_string(),
         message: "作业优秀".to_string(),
         status: SendStatus::Pending,
+        original_index: Some(0),
     }];
 
     let (event_tx, mut event_rx) = mpsc::channel(32);
