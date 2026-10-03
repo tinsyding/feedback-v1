@@ -444,6 +444,13 @@
     dom.startBtn.addEventListener('click', onStartClick);
     dom.pauseBtn.addEventListener('click', onPauseClick);
     dom.stopBtn.addEventListener('click', onStopClick);
+    // 工具窗口获焦时的 ESC 急停；焦点在企微时由原生层全局 ESC 监听兜底
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && (state.engineState === 'Running' || state.engineState === 'Paused')) {
+        appendLog('WARN', '用户按 ESC，强制终止发信');
+        onStopClick();
+      }
+    });
     dom.clearLogsBtn.addEventListener('click', () => {
       dom.consoleBox.innerHTML = '';
       appendLog('INFO', '控制台日志已清空');

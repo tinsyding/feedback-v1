@@ -164,3 +164,32 @@ fn test_parse_ocr_lines_to_contacts() {
     assert_eq!(contacts[1].title, "90001张三");
     assert!(!contacts[1].has_desc);
 }
+
+#[test]
+fn test_ocr_phantoms_do_not_shift_target_position() {
+    use desktop_sender_rs::automation::{parse_ocr_lines_to_contacts, OcrLine};
+
+    // 现场还原：搜索框占位“搜索” + 描述行跑到标题前 + 尾部“查看全部”按钮。
+    // 这些行都不能建成候选占位，否则真实目标被挤后、多按向下键。
+    let lines = vec![
+        OcrLine { text: "联系人".to_string() },
+        OcrLine { text: "搜索".to_string() },
+        OcrLine { text: "描述: 90001张三的备注".to_string() },
+        OcrLine { text: "90001张三".to_string() },
+        OcrLine { text: "查看全部".to_string() },
+        OcrLine { text: "80002李四".to_string() },
+    ];
+    let full_text = "联系人 搜索 描述:90001张三的备注 90001张三 查看全部 80002李四";
+
+    let contacts = parse_ocr_lines_to_contacts(&lines, full_text);
+    assert_eq!(contacts.len(), 1, "只应剩真实目标，铬屑与空标题不得占位");
+    assert_eq!(contacts[0].title, "90001张三");
+    assert_eq!(contacts[0].index, 1);
+    // 前置描述行应合并挂靠到目标名下
+    assert!(contacts[0].has_desc);
+    assert_eq!(contacts[0].subtitles.len(), 1);
+
+    let decision =
+        evaluate_contact_candidates(&contacts, "90001", "张三", "TestEngine");
+    assert_eq!(decision.choice, 1, "首项即本人时必须直接回车，不得按向下");
+}

@@ -131,6 +131,17 @@ pub fn parse_ocr_lines_to_contacts(lines: &[OcrLine], full_text: &str) -> Vec<Co
     let mut contacts: Vec<ContactCandidate> = Vec::new();
     let mut in_contacts = !has_contact_header;
     let mut current_contact: Option<ContactCandidate> = None;
+    // 暂存出现在任何标题之前的描述行，待下一个真实标题出现时合并挂靠；
+    // 若直至末尾都没有标题则直接丢弃，避免产生空标题幽灵占位把目标挤后。
+    let mut pending_subtitles: Vec<String> = Vec::new();
+    let mut pending_has_desc = false;
+
+    // 搜索框占位文字 / 全局搜索按钮等 UI 铬屑：永不匹配目标，
+    // 若建成候选会占据槽位，把真实目标挤到后面，导致多按向下键。
+    let chrome_keywords = [
+        "全局", "查找", "搜索", "网络", "查看全部", "进入全局",
+        "暂无", "没有找到", "无结果", "未找到", "暂无结果", "搜一搜",
+    ];
 
     for line in lines {
         let text = line.text.trim();
@@ -167,24 +178,27 @@ pub fn parse_ocr_lines_to_contacts(lines: &[OcrLine], full_text: &str) -> Vec<Co
                         c.has_desc = true;
                     }
                 } else {
+                    // 尚无标题：暂存，待下一个真实标题出现时合并，不建空标题候选占位
                     let has_desc = ["描述", "庙述", "猫述", "描术", "含"].iter().any(|&k| text.contains(k));
-                    current_contact = Some(ContactCandidate {
-                        index: contacts.len() + 1,
-                        title: String::new(),
-                        subtitles: vec![text.to_string()],
-                        has_desc,
-                        is_group: false,
-                    });
+                    pending_subtitles.push(text.to_string());
+                    pending_has_desc = pending_has_desc || has_desc;
                 }
+            } else if chrome_keywords.iter().any(|&k| text.contains(k)) {
+                // UI 铬屑行：直接丢弃，不占候选槽位
+                continue;
             } else {
                 if let Some(c) = current_contact.take() {
                     contacts.push(c);
                 }
+                let mut subtitles = Vec::new();
+                std::mem::swap(&mut subtitles, &mut pending_subtitles);
+                let has_desc = pending_has_desc;
+                pending_has_desc = false;
                 current_contact = Some(ContactCandidate {
                     index: contacts.len() + 1,
                     title: text.to_string(),
-                    subtitles: Vec::new(),
-                    has_desc: false,
+                    subtitles,
+                    has_desc,
                     is_group: text.contains("群聊") || text.contains("人)"),
                 });
             }
@@ -193,6 +207,11 @@ pub fn parse_ocr_lines_to_contacts(lines: &[OcrLine], full_text: &str) -> Vec<Co
 
     if let Some(c) = current_contact {
         contacts.push(c);
+    }
+    // 兜底：剔除残留空标题，序号重排，保证序号与用户可见顺序 1:1 对齐
+    contacts.retain(|c| !c.title.trim().is_empty());
+    for (i, c) in contacts.iter_mut().enumerate() {
+        c.index = i + 1;
     }
 
     contacts

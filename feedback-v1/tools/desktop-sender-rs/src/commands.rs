@@ -40,6 +40,39 @@ pub mod tauri_bridge {
         find_wecom_window().is_some()
     }
 
+    /// 后台线程以 80ms 粒度轮询物理 ESC 键（0x1B），上升沿触发 Stop。
+    /// 任务结束（cmd 通道关闭）后线程自行退出，不残留。
+    fn spawn_esc_stop_watcher(
+        cmd_tx: watch::Sender<EngineCommand>,
+        event_tx: mpsc::Sender<EngineEvent>,
+    ) {
+        use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+        std::thread::spawn(move || {
+            let mut was_down = false;
+            let mut last_fire =
+                std::time::Instant::now() - std::time::Duration::from_secs(3600);
+            loop {
+                if cmd_tx.is_closed() {
+                    break;
+                }
+                let down = unsafe { (GetAsyncKeyState(0x1B) as u16) & 0x8000 != 0 };
+                if down
+                    && !was_down
+                    && last_fire.elapsed() > std::time::Duration::from_millis(600)
+                {
+                    last_fire = std::time::Instant::now();
+                    let _ = cmd_tx.send(EngineCommand::Stop);
+                    let _ = event_tx.try_send(EngineEvent::log(
+                        "WARN",
+                        "检测到 ESC 按键，已强制终止发信任务",
+                    ));
+                }
+                was_down = down;
+                std::thread::sleep(std::time::Duration::from_millis(80));
+            }
+        });
+    }
+
     #[tauri::command]
     pub fn load_data_file(path: String) -> Result<Vec<FeedbackItem>, String> {
         handle_load_data_file(&path)
@@ -53,12 +86,15 @@ pub mod tauri_bridge {
         config: EngineConfig,
     ) -> Result<(), String> {
         let (cmd_tx, cmd_rx) = watch::channel(EngineCommand::Start);
+        let (event_tx, mut event_rx) = mpsc::channel::<EngineEvent>(100);
+        // 全局 ESC 急停监听（对应经典版 safe_sleep 的 GetAsyncKeyState 轮询）：
+        // 发信期间焦点在企微窗口，前端收不到键盘事件，必须原生层监听。
+        spawn_esc_stop_watcher(cmd_tx.clone(), event_tx.clone());
         {
             let mut guard = state.cmd_tx.lock().map_err(|e| e.to_string())?;
             *guard = Some(cmd_tx);
         }
 
-        let (event_tx, mut event_rx) = mpsc::channel::<EngineEvent>(100);
         let driver = Arc::new(WinAutomationDriver::new());
         let engine = SenderEngine::new(config, driver, None);
 

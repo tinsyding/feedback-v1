@@ -619,6 +619,14 @@ def find_and_activate_wecom() -> bool:
             else:
                 win32gui.ShowWindow(wecom_hwnd, win32con.SW_SHOW)
 
+            # 从托盘恢复的 GPU 合成窗口可能保持黑屏：强制整窗立即重绘
+            try:
+                RDW = 0x0001 | 0x0004 | 0x0080 | 0x0100 | 0x0400  # INVALIDATE|ERASE|ALLCHILDREN|UPDATENOW|FRAME
+                ctypes.windll.user32.RedrawWindow(wecom_hwnd, None, None, RDW)
+                ctypes.windll.user32.UpdateWindow(wecom_hwnd)
+            except Exception:
+                pass
+
             # 模拟 Alt 键绕过 Windows SetForegroundWindow 权限限制
             ctypes.windll.user32.keybd_event(0x12, 0, 0, 0)  # Alt key down
             win32gui.SetForegroundWindow(wecom_hwnd)

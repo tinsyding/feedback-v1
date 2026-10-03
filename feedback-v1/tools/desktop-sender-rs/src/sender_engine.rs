@@ -113,6 +113,25 @@ impl<D: AutomationDriver> SenderEngine<D> {
         }
     }
 
+    /// 可被 Stop 指令打断的休眠（50ms 粒度轮询），返回 false 表示中途被终止。
+    /// 对应经典版 safe_sleep 的 ESC 轮询语义。
+    async fn sleep_or_stop(
+        cmd_rx: &watch::Receiver<EngineCommand>,
+        dur: Duration,
+    ) -> bool {
+        let mut remaining = dur;
+        let step = Duration::from_millis(50);
+        while !remaining.is_zero() {
+            if *cmd_rx.borrow() == EngineCommand::Stop {
+                return false;
+            }
+            let chunk = remaining.min(step);
+            tokio::time::sleep(chunk).await;
+            remaining = remaining.saturating_sub(chunk);
+        }
+        *cmd_rx.borrow() != EngineCommand::Stop
+    }
+
     /// 启动发信任务循环
     pub async fn run(
         &self,
@@ -163,8 +182,18 @@ impl<D: AutomationDriver> SenderEngine<D> {
                 return;
             }
 
-            // 2. 前台失焦守护
+            // 2. 前台失焦守护（等待期间同样响应停止指令，避免卡死到重获焦点）
             while !self.driver.is_wecom_foreground(hwnd).await {
+                if *cmd_rx.borrow() == EngineCommand::Stop {
+                    let _ = self.driver.dismiss_search(hwnd).await;
+                    let _ = event_tx
+                        .send(EngineEvent::log("WARN", "收到停止指令，任务提前终止"))
+                        .await;
+                    let _ = event_tx
+                        .send(EngineEvent::state_changed(EngineState::Stopped))
+                        .await;
+                    return;
+                }
                 let _ = event_tx
                     .send(EngineEvent::state_changed(EngineState::FocusLost))
                     .await;
@@ -241,6 +270,33 @@ impl<D: AutomationDriver> SenderEngine<D> {
                 "Engine",
             );
 
+            // 判定明细进日志（与经典版“智能纠偏”日志对齐）：首项即本人 / 纠正至第N项一目了然
+            {
+                let titles: Vec<String> = candidates
+                    .iter()
+                    .map(|c| {
+                        if c.title.trim().is_empty() {
+                            "(空)".to_string()
+                        } else {
+                            c.title.clone()
+                        }
+                    })
+                    .collect();
+                let _ = event_tx
+                    .send(EngineEvent::log(
+                        if decision.choice >= 2 { "WARN" } else { "INFO" },
+                        format!(
+                            "[智能判定] 目标 {} {} => choice={}（{}），候选=[{}]",
+                            item.student_id,
+                            item.clean_name,
+                            decision.choice,
+                            decision.reason,
+                            titles.join(" | ")
+                        ),
+                    ))
+                    .await;
+            }
+
             if decision.choice <= 0 {
                 item.status = SendStatus::Skipped;
                 let _ = event_tx
@@ -308,8 +364,8 @@ impl<D: AutomationDriver> SenderEngine<D> {
                 })
                 .await;
 
-            // 6. 批次休眠与间隔冷却
-            if (i + 1) % self.config.batch_size == 0 && (i + 1) < total {
+            // 6. 批次休眠与间隔冷却（可被停止指令打断，对应经典版 safe_sleep）
+            let interrupted = if (i + 1) % self.config.batch_size == 0 && (i + 1) < total {
                 let _ = event_tx
                     .send(EngineEvent::log(
                         "INFO",
@@ -319,9 +375,19 @@ impl<D: AutomationDriver> SenderEngine<D> {
                         ),
                     ))
                     .await;
-                tokio::time::sleep(Duration::from_secs(self.config.batch_cooldown_sec)).await;
+                Self::sleep_or_stop(&cmd_rx, Duration::from_secs(self.config.batch_cooldown_sec)).await
             } else {
-                tokio::time::sleep(Duration::from_millis(self.config.item_interval_ms)).await;
+                Self::sleep_or_stop(&cmd_rx, Duration::from_millis(self.config.item_interval_ms)).await
+            };
+            if !interrupted {
+                let _ = self.driver.dismiss_search(hwnd).await;
+                let _ = event_tx
+                    .send(EngineEvent::log("WARN", "收到停止指令，任务提前终止"))
+                    .await;
+                let _ = event_tx
+                    .send(EngineEvent::state_changed(EngineState::Stopped))
+                    .await;
+                return;
             }
         }
 

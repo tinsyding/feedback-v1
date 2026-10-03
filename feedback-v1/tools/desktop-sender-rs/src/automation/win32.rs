@@ -29,7 +29,8 @@ mod imp {
     use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
     use windows::Win32::Graphics::Gdi::{
         BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
-        GetDIBits, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+        GetDIBits, RedrawWindow, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
+        DIB_RGB_COLORS, RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE, RDW_UPDATENOW,
         SRCCOPY,
     };
     use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -37,7 +38,7 @@ mod imp {
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowTextW,
-        IsIconic, IsWindow, SetForegroundWindow, ShowWindow, SW_RESTORE, SW_SHOW,
+        IsIconic, IsWindow, SetForegroundWindow, ShowWindow, UpdateWindow, SW_RESTORE, SW_SHOW,
     };
 
     pub fn find_wecom_window() -> Option<isize> {
@@ -115,6 +116,14 @@ mod imp {
             } else {
                 let _ = ShowWindow(hwnd, SW_SHOW);
             }
+            // 从托盘恢复的 GPU 合成窗口可能保持黑屏：强制整窗立即重绘
+            let _ = RedrawWindow(
+                hwnd,
+                None,
+                None,
+                RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME | RDW_UPDATENOW,
+            );
+            let _ = UpdateWindow(hwnd);
             // 模拟 Alt 键绕过 Windows SetForegroundWindow 跨进程焦点保护限制
             keybd_event(0x12, 0, KEYBD_EVENT_FLAGS(0), 0); // Alt down
             let ok = SetForegroundWindow(hwnd).as_bool();
@@ -344,12 +353,16 @@ impl AutomationDriver for WinAutomationDriver {
         #[cfg(windows)]
         {
             let rect = get_rect(hwnd).ok_or_else(|| "无法获取企微窗口坐标".to_string())?;
-            let search_rect = WindowRect {
-                left: rect.left,
-                top: rect.top + 50,
-                right: (rect.left + 360).min(rect.right),
-                bottom: (rect.top + 450).min(rect.bottom),
+            // 与经典版 capture_dropdown_crop 对齐：跳过左侧头像列（+38），覆盖完整下拉列表（约 380x460）
+            let mut search_rect = WindowRect {
+                left: rect.left + 38,
+                top: rect.top + 46,
+                right: (rect.left + 38 + 380).min(rect.right),
+                bottom: (rect.top + 46 + 460).min(rect.bottom),
             };
+            // 窗口过小时保底，避免空区域截图
+            search_rect.right = search_rect.right.max(search_rect.left + 50);
+            search_rect.bottom = search_rect.bottom.max(search_rect.top + 50);
 
             let img = capture_window_rect(search_rect).ok_or_else(|| "截取下拉框图像失败".to_string())?;
             let preprocessed = preprocess_dropdown_image(&img);
