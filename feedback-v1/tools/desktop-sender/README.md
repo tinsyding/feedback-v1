@@ -269,15 +269,11 @@ git push origin tools-v2.0
 
 工作流 [`.github/workflows/build-tools.yml`](../../.github/workflows/build-tools.yml) 在 Windows runner 上：
 
-1. 安装 Python 3.14 与锁定依赖（`requirements.txt`，已移除 opencv-python 与 sv-ttk）。
-2. 执行 `pyinstaller --noconfirm --clean send_feedback.spec`，产出经典稳定版目录式文件夹。
+1. 安装 Python 3.14 与锁定依赖（`requirements.txt`）。
+2. 执行 `pyinstaller --noconfirm --clean send_feedback.spec`，产出原生单文件 `极方每周反馈程序.exe`（onefile 模式，内置 Python 运行时与离线 OCR 模型，约 42MB）。
 3. （可选）Authenticode 签名并 `signtool verify` 校验。
-4. 用 Python `zipfile` 打包为 Release 附件（选用 `zipfile` 而非外部压缩工具，
-   是为保证中文文件名正确置位 UTF-8 标志位，Windows 资源管理器解压不会乱码）：
+4. 作为 Release 附件直接发布：
 
-   - `极方每周反馈程序-${VER}.zip`（经典稳定版）
+   - `极方每周反馈程序-${VER}.exe`（经典稳定单文件版）
 
-**教师端安装**：下载 zip → **完整解压**到任意文件夹 → 双击文件夹内的同名 exe。
-
-> 请勿在压缩包内直接运行，也请勿把 exe 单独拖出来。onedir 产物依赖同目录的配套运行库，
-> 单独取走 exe 会启动失败。
+**教师端安装与使用**：直接下载 `极方每周反馈程序-${VER}.exe` 到桌面或任意文件夹，**双击直接运行，无需解压任何压缩包**！全部发送历史与日志安全持久化于用户的 `文档/JFFeedback/` 目录下。

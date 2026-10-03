@@ -46,16 +46,16 @@ if %errorlevel% neq 0 (
 )
 
 REM 4. 验证构建产物
-set EXE_PATH=dist\极方每周反馈程序\极方每周反馈程序.exe
+set EXE_PATH=dist\极方每周反馈程序.exe
 if exist "%EXE_PATH%" (
     echo.
     echo =======================================================
     echo    🎉 本地编译成功！
-    echo    产物位置: %EXE_PATH%
+    echo    单文件 EXE 产物: %EXE_PATH%
     echo =======================================================
     echo.
-    echo 正在自动为您打开输出文件夹...
-    explorer dist\极方每周反馈程序
+    echo 正在自动为您打开输出文件夹并定位文件...
+    explorer /select,"%EXE_PATH%"
 ) else (
     echo [警告] 未在期望路径找到生成产物: %EXE_PATH%
 )

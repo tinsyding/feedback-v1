@@ -49,8 +49,9 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.datas,
     [],
-    exclude_binaries=True,
     name='极方每周反馈程序',
     icon=APP_ICON,
     version=os.path.join(SPECPATH, 'version_info.txt'),
@@ -68,14 +69,4 @@ exe = EXE(
     # 如需代码签名，在此填入证书名（如 "极方教育"），并配合 build-tools.yml 的签名步骤。
     codesign_identity=None,
     entitlements_file=None,
-)
-
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=False,
-    upx_exclude=[],
-    name='极方每周反馈程序',
 )

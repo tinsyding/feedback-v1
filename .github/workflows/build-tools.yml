@@ -90,11 +90,13 @@ jobs:
             SIGNTOOL="signtool"
           fi
 
-          exe="feedback-v1/tools/desktop-sender/dist/极方每周反馈程序/极方每周反馈程序.exe"
-          "$SIGNTOOL" sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 \
-            /f "$RUNNER_TEMP/cert.pfx" /p "$WIN_CERT_PASSWORD" \
-            /n "$WIN_CERT_NAME" "$exe"
-          "$SIGNTOOL" verify /pa "$exe"
+          exe="feedback-v1/tools/desktop-sender/dist/极方每周反馈程序.exe"
+          if [ -f "$exe" ]; then
+            "$SIGNTOOL" sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 \
+              /f "$RUNNER_TEMP/cert.pfx" /p "$WIN_CERT_PASSWORD" \
+              /n "$WIN_CERT_NAME" "$exe"
+            "$SIGNTOOL" verify /pa "$exe"
+          fi
 
           exe_rs="feedback-v1/tools/desktop-sender/dist/极方每周反馈程序-Fluent-x64.exe"
           if [ -f "$exe_rs" ]; then
@@ -113,57 +115,24 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             VER="${GITHUB_REF_NAME#tools-}"
           else
-            VER="v2.0"
+            VER="v2.2"
           fi
           echo "version=${VER}" >> $GITHUB_OUTPUT
 
-      - name: Package as zip
-        env:
-          PYTHONIOENCODING: utf-8
+      - name: Rename Python single exe
         run: |
           VER="${{ steps.get_version.outputs.version }}"
-          export VER
-          # 用 Python 的 zipfile 而非 7z/bash zip：
-          #   zipfile 会为非 ASCII 文件名正确置位 UTF-8 标志位(bit 11)，
-          #   Windows 资源管理器解压中文名不会乱码；而 bash 管道 + 外部压缩工具
-          #   在 Windows runner 上有编码不确定性（本仓库此前就踩过 Windows 编码坑）。
-          python - <<'PY'
-          import os, shutil, zipfile, sys
-          if hasattr(sys.stdout, 'reconfigure'):
-              sys.stdout.reconfigure(encoding='utf-8')
-
-          DIST = "feedback-v1/tools/desktop-sender/dist"
-          VER  = os.environ["VER"]
-
-          folder = "极方每周反馈程序"
-          root = os.path.join(DIST, folder)
-          # 剔除 PyInstaller 中间产物，减小体积
-          for junk in ("__pycache__", "build"):
-              shutil.rmtree(os.path.join(root, junk), ignore_errors=True)
-
-          exe = os.path.join(root, folder + ".exe")
-          assert os.path.isfile(exe), f"未找到主程序: {exe}"
-
-          out = os.path.join(DIST, f"极方每周反馈程序-{VER}.zip")
-          with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
-              for dirpath, _dirs, files in os.walk(root):
-                  for f in files:
-                      full = os.path.join(dirpath, f)
-                      z.write(full, os.path.relpath(full, DIST))
-          print(f"{out}  {os.path.getsize(out)/1048576:.1f} MB")
-          PY
+          cp "feedback-v1/tools/desktop-sender/dist/极方每周反馈程序.exe" "feedback-v1/tools/desktop-sender/dist/极方每周反馈程序-${VER}.exe"
+          ls -la feedback-v1/tools/desktop-sender/dist/*.exe
 
       - name: Report size
         run: |
           cd feedback-v1/tools/desktop-sender/dist
-          echo "=== 压缩包（对比 onefile 时代单个 exe 91.5MB）==="
-          ls -lh *.zip
-          echo
-          echo "=== onedir 内主程序体积（对比 onefile 时代 91.5MB）==="
-          ls -lh "极方每周反馈程序"/*.exe
+          echo "=== Python 经典稳定版单文件 exe 体积 ==="
+          ls -lh 极方每周反馈程序-*.exe
           echo
           echo "=== Rust Fluent 原生单文件 exe 体积 ==="
-          ls -lh "极方每周反馈程序-Fluent-x64.exe"
+          ls -lh 极方每周反馈程序-Fluent-*.exe
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -176,11 +145,11 @@ jobs:
           body: |
             自动构建（${{ github.sha }}）。
 
-            ## 📥 双版本下载指引
+            ## 📥 双单文件版本下载指引 (无需解压，双击直接运行)
 
-            本版本提供两套独立版本供教师选择使用：
+            本版本提供两套独立且均为单文件绿色版的可执行程序，下载后直接双击即可运行，无需解压：
 
-            ### 选项 A（强烈推荐）：🚀 极方每周反馈程序 Fluent 现代版 (Rust 原生重构版)
+            ### 选项 A（强烈推荐）：🚀 极方每周反馈程序 Fluent 现代版 (Rust 原生单文件版)
             - **下载附件**：`极方每周反馈程序-Fluent-x64.exe`
             - **体积与形态**：单文件绿色版、约 10MB、无需解压、双击直接运行。
             - **全新交互**：Windows 11 Fluent 2.0 现代圆角视觉风格、侧边栏导航、☀️/🌙 深浅色一键切换。
@@ -188,10 +157,10 @@ jobs:
             - **历史台账**：全新历史发送档案中心，支持周次联动筛选、班级实时搜索、学生发送明细弹窗与 CSV 导出。
             - **安全与防误发**：采用 Windows 10/11 内置原生免模型 OCR + 云端大模型视觉双保险，彻底杜绝杀软误报。
 
-            ### 选项 B：🛡 极方每周反馈程序 经典稳定版 (Python 目录式打包)
-            - **下载附件**：`极方每周反馈程序-${{ steps.get_version.outputs.version }}.zip`
-            - **体积与形态**：约 39MB 压缩包，**下载后必须完整解压到文件夹**后运行。
+            ### 选项 B：🛡 极方每周反馈程序 经典稳定版 (Python 原生单文件版)
+            - **下载附件**：`极方每周反馈程序-${{ steps.get_version.outputs.version }}.exe`
+            - **体积与形态**：单文件绿色版、约 42MB、无需解压、双击直接运行。
             - **交互特点**：经典熟识单窗体、离线 Paddle/ONNX OCR 引擎作为兼容托底。
           files: |
-            feedback-v1/tools/desktop-sender/dist/极方每周反馈程序-*.zip
+            feedback-v1/tools/desktop-sender/dist/极方每周反馈程序-*.exe
             feedback-v1/tools/desktop-sender/dist/极方每周反馈程序-Fluent-*.exe
