@@ -87,6 +87,7 @@
 
     // 日志与控制台
     consoleBox: document.getElementById('consoleBox'),
+    copyLogsBtn: document.getElementById('copyLogsBtn'),
     clearLogsBtn: document.getElementById('clearLogsBtn'),
     
     // 设置项
@@ -111,6 +112,7 @@
     initHistoryModule();
 
     // 默认空状态初始化，等待用户载入数据
+    appendLog('INFO', `控制台就绪（${state.isTauri ? 'Tauri 原生模式' : '浏览器演示模式'}），等待载入数据`);
     renderRoster();
   }
 
@@ -444,6 +446,16 @@
     dom.startBtn.addEventListener('click', onStartClick);
     dom.pauseBtn.addEventListener('click', onPauseClick);
     dom.stopBtn.addEventListener('click', onStopClick);
+    dom.copyLogsBtn.addEventListener('click', () => {
+      const text = dom.consoleBox.innerText || '';
+      if (!text.trim()) {
+        alert('控制台暂无日志可复制');
+        return;
+      }
+      safeCopyToClipboard(text, () => {
+        appendLog('SUCCESS', `已复制控制台全部日志（${text.length} 字）`);
+      });
+    });
     // 工具窗口获焦时的 ESC 急停；焦点在企微时由原生层全局 ESC 监听兜底
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && (state.engineState === 'Running' || state.engineState === 'Paused')) {
@@ -519,6 +531,7 @@
         batch_cooldown_sec: parseInt(dom.batchCooldownInput.value, 10) || 10,
         use_cloud_vision: true, // 强制默认启用 AI 视觉双保险体系
       };
+      appendLog('INFO', `调用 start_send：${itemsToSend.length} 条，配置=${JSON.stringify(config)}`);
       window.__TAURI__.core.invoke('start_send', { items: itemsToSend, config })
         .catch(err => {
           appendLog('ERROR', `调用底层引擎失败: ${err}`);
@@ -620,13 +633,27 @@
         } else if (payload.type === 'Progress') {
           const pct = Math.round((payload.current / payload.total) * 100);
           updateProgress(pct);
+          appendLog('INFO', `进度 ${payload.current}/${payload.total}（成功 ${payload.success}，失败/跳过 ${payload.failed}）`);
         } else if (payload.type === 'ItemUpdated') {
           const targetIndex = (payload.index !== undefined && payload.index !== null) ? payload.index : payload.original_index;
-          if (targetIndex !== undefined && state.students[targetIndex]) {
-            state.students[targetIndex].status = payload.status;
+          const st = (targetIndex !== undefined && targetIndex !== null) ? state.students[targetIndex] : null;
+          const who = st ? `${st.clean_name || st.studentName}${st.student_id ? `(${st.student_id})` : ''}` : `#${targetIndex}`;
+          const reason = payload.reason ? `：${payload.reason}` : '';
+          if (payload.status === 'Success') {
+            appendLog('SUCCESS', `[发信成功] ${who}${reason || '：已送达'}`);
+          } else if (payload.status === 'Failed') {
+            appendLog('ERROR', `[发信失败] ${who}${reason}`);
+          } else if (payload.status === 'Skipped') {
+            appendLog('WARN', `[安全跳过] ${who}${reason}`);
+          } else {
+            appendLog('INFO', `[状态更新] ${who} -> ${payload.status}${reason}`);
+          }
+          if (st) {
+            st.status = payload.status;
             renderRoster();
           }
         } else if (payload.type === 'StateChanged') {
+          appendLog('INFO', `引擎状态：${state.engineState} -> ${payload.state}`);
           setEngineState(payload.state);
           if (payload.state === 'Completed') {
             HistoryManager.archiveCurrentWorkspace();
@@ -641,8 +668,16 @@
     const timeStr = new Date().toTimeString().split(' ')[0];
     line.className = `log-line log-${level.toLowerCase()}`;
     line.textContent = `[${timeStr} ${level}] ${message}`;
+    // 仅当用户已在底部时才自动跟随，避免打断手动选中复制
+    const nearBottom = (dom.consoleBox.scrollHeight - dom.consoleBox.scrollTop - dom.consoleBox.clientHeight) < 60;
     dom.consoleBox.appendChild(line);
-    dom.consoleBox.scrollTop = dom.consoleBox.scrollHeight;
+    // 控制台上限 2000 行，防止长时间运行内存膨胀
+    while (dom.consoleBox.children.length > 2000) {
+      dom.consoleBox.removeChild(dom.consoleBox.firstChild);
+    }
+    if (nearBottom) {
+      dom.consoleBox.scrollTop = dom.consoleBox.scrollHeight;
+    }
   }
 
   // ==========================================
@@ -655,8 +690,13 @@
       const check = () => {
         window.__TAURI__.core.invoke('check_wecom_status')
           .then(online => {
+            const wasOnline = dom.wecomStatus.classList.contains('online');
             dom.wecomStatus.className = 'wecom-status ' + (online ? 'online' : 'offline');
             statusLabel.textContent = online ? '企微已就绪' : '企微未启动';
+            // 只在状态翻转时记一笔，避免每 2.5s 刷屏
+            if (online !== wasOnline) {
+              appendLog(online ? 'SUCCESS' : 'WARN', `企微窗口探测：${online ? '已就绪' : '未启动（请先打开并登录企业微信）'}`);
+            }
           })
           .catch(() => {});
       };
@@ -789,7 +829,9 @@
 
     renderRoster();
     selectStudent(0);
-    appendLog('INFO', `成功载入 [${sourceName}]：包含 ${state.students.length} 位学生数据`);
+    const pendingCount = state.students.filter(s => s.status !== 'Success').length;
+    const sentCount = state.students.length - pendingCount;
+    appendLog('INFO', `成功载入 [${sourceName}]：${state.students.length} 人（待发送 ${pendingCount}，历史已发送 ${sentCount}，默认勾选待发送）`);
   }
 
   function parseHtmlFeedback(html) {

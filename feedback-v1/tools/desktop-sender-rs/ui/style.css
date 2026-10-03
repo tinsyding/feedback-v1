@@ -603,9 +603,13 @@ body {
   padding: 16px;
   border-radius: var(--radius-lg);
   overflow-y: auto;
+  /* 覆盖全局 user-select:none，日志必须可选中、可复制 */
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
 }
 
-.log-line { margin-bottom: 4px; word-break: break-all; }
+.log-line { margin-bottom: 4px; word-break: break-all; user-select: text; -webkit-user-select: text; }
 .log-info { color: #88ccff; }
 .log-warn { color: #ffbb44; }
 .log-error { color: #ff5555; }
