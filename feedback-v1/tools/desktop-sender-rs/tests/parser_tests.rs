@@ -53,7 +53,7 @@ fn test_contact_decision_avoids_mention() {
         },
     ];
 
-    let decision = evaluate_contact_candidates(&candidates, "90001", "张三", "TestEngine");
+    let decision = evaluate_contact_candidates(&candidates, "90001", "张三", "TestEngine", "");
     assert_eq!(decision.choice, 2);
     assert!(decision.reason.contains("第2项为目标本人"));
 }
@@ -77,7 +77,7 @@ fn test_contact_decision_allows_target_with_own_description() {
         },
     ];
 
-    let decision = evaluate_contact_candidates(&candidates, "90001", "张三", "TestEngine");
+    let decision = evaluate_contact_candidates(&candidates, "90001", "张三", "TestEngine", "");
     assert_eq!(decision.choice, 1);
     assert!(decision.reason.contains("第1项即为目标本人"));
 }
@@ -108,7 +108,7 @@ fn test_contact_decision_requires_both_id_and_name() {
         },
     ];
 
-    let decision = evaluate_contact_candidates(&candidates, "90001", "张三", "TestEngine");
+    let decision = evaluate_contact_candidates(&candidates, "90001", "张三", "TestEngine", "");
     assert_eq!(decision.choice, 3);
     assert!(decision.reason.contains("第3项为目标本人"));
 }
@@ -123,9 +123,62 @@ fn test_contact_decision_rejects_group() {
         is_group: true,
     }];
 
-    let decision = evaluate_contact_candidates(&candidates, "90001", "张三", "TestEngine");
-    assert_eq!(decision.choice, 0);
-    assert!(decision.reason.contains("未找到该联系人"));
+    // 只有群聊候选、且下拉文本里没有任何「查无此人」的证据：
+    // 这是「我没找到」，不是「通讯录里没这个人」→ 必须 -1，绝不能 0。
+    // choice=0 会把学生记为「无此联系人」并跳过，那正是要修的误判。
+    let decision = evaluate_contact_candidates(&candidates, "90001", "张三", "TestEngine", "群聊 2026极方数学名师答疑群聊（18人）");
+    assert_eq!(
+        decision.choice, -1,
+        "无查无此人证据时不得断言查无此人"
+    );
+    assert!(decision.reason.contains("按识别失败处理"));
+}
+
+#[test]
+fn test_contact_decision_not_found_requires_positive_evidence() {
+    // 同一个候选集：只有带上企微真实空态文案，才允许判「查无此人」。
+    let group_only = vec![ContactCandidate {
+        index: 1,
+        title: "2026极方数学名师答疑群聊（18人）".to_string(),
+        subtitles: vec![],
+        has_desc: false,
+        is_group: true,
+    }];
+
+    let d = evaluate_contact_candidates(
+        &group_only,
+        "90001",
+        "张三",
+        "TestEngine",
+        "群聊 2026极方数学名师答疑群聊（18人）进入全局搜索查找所有聊天、邮件、文档、微盘等",
+    );
+    assert_eq!(d.choice, 0, "有正向证据时才可判查无此人");
+    assert!(d.reason.contains("显示全局搜索"));
+}
+
+#[test]
+fn test_contact_decision_empty_candidates_without_text_is_recognition_failure() {
+    // 现场事故：RapidOCR 引擎起不来，下拉文本为空。旧实现直接判 0
+    // 「未找到该联系人」，把引擎故障说成了通讯录里没这个人。
+    let d = evaluate_contact_candidates(&[], "26006", "陈锦曦", "LocalOCR", "");
+    assert_eq!(d.choice, -1, "引擎故障绝不可谎报为查无此人");
+    assert!(d.reason.contains("按识别失败处理"));
+}
+
+#[test]
+fn test_chat_preview_saying_not_found_is_not_evidence() {
+    // 「未找到 / 无结果 / 暂无结果」这类泛化否定词会出现在聊天预览、
+    // 文档名、群公告里。若把它们当证据，真实存在的学生会被误判为查无此人
+    // 并跳过 —— 比漏发更隐蔽，故刻意不收。
+    for text in [
+        "老板（企微）未找到该文件",
+        "同事 无结果 2026秋",
+        "群里 暂无结果 报名",
+        "没有找到 相关聊天记录",
+    ] {
+        let d = evaluate_contact_candidates(&[], "26006", "陈锦曦", "LocalOCR", text);
+        assert_eq!(d.choice, -1, "聊天预览里的否定词不该被当成查无此人证据: {text}");
+    }
 }
 
 #[test]
@@ -190,7 +243,7 @@ fn test_ocr_phantoms_do_not_shift_target_position() {
     assert_eq!(contacts[0].subtitles.len(), 1);
 
     let decision =
-        evaluate_contact_candidates(&contacts, "90001", "张三", "TestEngine");
+        evaluate_contact_candidates(&contacts, "90001", "张三", "TestEngine", "");
     assert_eq!(decision.choice, 1, "首项即本人时必须直接回车，不得按向下");
 }
 

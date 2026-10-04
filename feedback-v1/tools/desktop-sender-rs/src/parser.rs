@@ -6,6 +6,19 @@ static ID_REGEX: OnceLock<Regex> = OnceLock::new();
 static CYCLE_REGEX: OnceLock<Regex> = OnceLock::new();
 static HTML_JSON_REGEX: OnceLock<Regex> = OnceLock::new();
 
+/// 「下拉框里确实没有目标联系人」的正向证据。
+///
+/// 判定 `choice == 0`（通讯录中无此联系人 —— 唯一会把学生标记为「无此联系人」
+/// 并跳过的结论）**只能**靠它，刻意不收「未找到 / 无结果 / 暂无结果 / 没有找到」
+/// 这类泛化否定词：聊天预览、文档名、群公告里出现这些字的概率并不低，误命中就会
+/// 把一个真实存在的学生判成查无此人并跳过 —— 比漏发更隐蔽的错。
+pub const NO_CONTACT_EVIDENCE: [&str; 3] = ["进入全局搜索", "查找所有", "网络查找"];
+
+/// 下拉文本里是否存在「查无此人」的正向证据
+pub fn has_no_contact_evidence(full_text: &str) -> bool {
+    NO_CONTACT_EVIDENCE.iter().any(|&k| full_text.contains(k))
+}
+
 /// 从字符串中拆分纯数字学号与纯学生姓名（例如从 '90001张三' 拆为 ('90001', '张三')）
 pub fn parse_student_identifier(raw: &str) -> (String, String) {
     let raw = raw.trim();
@@ -103,17 +116,33 @@ pub fn parse_html(html: &str) -> Result<Vec<FeedbackItem>, String> {
 }
 
 /// 通用联系人下拉候选安全决策中枢 (与 Python 算法 1:1 对齐)
+///
+/// ⚠️ `choice == 0` 是会写进历史、把学生标记为「无此联系人」并跳过的结论，
+/// 因此**必须**有 [`NO_CONTACT_EVIDENCE`] 正向证据支撑。仅仅「没解析出候选人」
+/// 绝不等于「查无此人」：OCR 引擎起不来、坐标过滤把行丢光，都会走到这里，
+/// 把故障谎报成业务结论。此时返回 `-1`（识别失败），交由会话标题检查点裁决。
 pub fn evaluate_contact_candidates(
     contacts: &[ContactCandidate],
     target_id: &str,
     target_name: &str,
     engine: &str,
+    full_text: &str,
 ) -> DecisionResult {
     if contacts.is_empty() {
-        return DecisionResult {
-            choice: 0,
-            reason: format!("未找到该联系人 [{engine}]"),
-            engine: engine.to_string(),
+        return if has_no_contact_evidence(full_text) {
+            DecisionResult {
+                choice: 0,
+                reason: format!("未找到该联系人(显示全局搜索) [{engine}]"),
+                engine: engine.to_string(),
+            }
+        } else {
+            // 既没解析出候选人，下拉文本里也没有任何「查无此人」的迹象：
+            // 这是「我没看清」，不是「通讯录里没这个人」。
+            DecisionResult {
+                choice: -1,
+                reason: format!("未取得可用候选人(无查无此人证据, 按识别失败处理) [{engine}]"),
+                engine: engine.to_string(),
+            }
         };
     }
 
@@ -160,10 +189,22 @@ pub fn evaluate_contact_candidates(
             reason: format!("全部为他人描述，无本人备注 [{engine}]"),
             engine: engine.to_string(),
         },
-        None => DecisionResult {
-            choice: 0,
-            reason: format!("未找到该联系人 [{engine}]"),
-            engine: engine.to_string(),
-        },
+        // 解析出了候选、但没有一个是目标：若下拉文本带「进入全局搜索」等
+        // 证据，才算确凿的「查无此人」；否则同样只是「我没看清」。
+        None => {
+            if has_no_contact_evidence(full_text) {
+                DecisionResult {
+                    choice: 0,
+                    reason: format!("未找到该联系人(显示全局搜索) [{engine}]"),
+                    engine: engine.to_string(),
+                }
+            } else {
+                DecisionResult {
+                    choice: -1,
+                    reason: format!("候选中无目标且无查无此人证据, 按识别失败处理 [{engine}]"),
+                    engine: engine.to_string(),
+                }
+            }
+        }
     }
 }

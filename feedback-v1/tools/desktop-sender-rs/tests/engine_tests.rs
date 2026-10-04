@@ -270,9 +270,13 @@ async fn test_vision_mode_off_allows_send_when_header_matches() {
 
 #[tokio::test]
 async fn test_undecided_dropdown_probes_first_candidate_then_header_arbiter() {
-    // 下拉无任何候选 -> evaluate_contact_candidates 返回 choice=0 -> 无此联系人，跳过
+    // 下拉无任何候选、也无「查无此人」证据 -> choice=-1（识别失败，非查无此人）
+    // -> 试探性进入第 1 项 -> 由会话标题检查点裁决。
+    //
+    // 旧实现在这里直接判 choice=0 跳过，把「我没看清」说成「通讯录里没这个人」。
+    // 现在标题确实是本人，就该正常发出去，而不是白跑一轮。
     let driver = Arc::new(EmptyDropdownDriver {
-        inner: MockDriver::new().with_header_text("90001张三"),
+        inner: Arc::new(MockDriver::new().with_header_text("90001张三")),
     });
     let engine = SenderEngine::new(local_config(), driver, None);
     let mut items = vec![sample_item()];
@@ -288,14 +292,49 @@ async fn test_undecided_dropdown_probes_first_candidate_then_header_arbiter() {
 
     assert_eq!(
         result[0].status,
-        SendStatus::Skipped,
-        "通讯录无此联系人应安全跳过，不应发送"
+        SendStatus::Success,
+        "识别未明确时应交由标题检查点裁决；标题确为本人就该发出，不得误判为无此联系人"
+    );
+}
+
+#[tokio::test]
+async fn test_undecided_dropdown_with_wrong_header_still_blocked() {
+    // 与上一条同一前提（无候选、无证据），但标题核验为他人：
+    // 必须 fail-closed 拦截，绝不发送。证明放宽 choice=0 没有削弱防误发。
+    let inner = Arc::new(MockDriver::new().with_header_text("80001李四"));
+    let engine = SenderEngine::new(
+        local_config(),
+        Arc::new(EmptyDropdownDriver {
+            inner: inner.clone(),
+        }),
+        None,
+    );
+    let mut items = vec![sample_item()];
+    let (event_tx, mut event_rx) = mpsc::channel(64);
+    let (_cmd_tx, cmd_rx) = watch::channel(EngineCommand::Start);
+
+    let handle = tokio::spawn(async move {
+        engine.run(&mut items, event_tx.into(), cmd_rx).await;
+        items
+    });
+    while event_rx.recv().await.is_some() {}
+    let result = handle.await.unwrap();
+
+    assert_eq!(
+        result[0].status,
+        SendStatus::Failed,
+        "标题为他人时必须拦截防误发"
+    );
+    assert_eq!(
+        inner.send_count.load(Ordering::SeqCst),
+        0,
+        "被拦截时绝不能真的发出消息"
     );
 }
 
 /// 下拉框返回空候选的驱动（模拟企微通讯录里查无此人）
 struct EmptyDropdownDriver {
-    inner: MockDriver,
+    inner: Arc<MockDriver>,
 }
 
 impl AutomationDriver for EmptyDropdownDriver {

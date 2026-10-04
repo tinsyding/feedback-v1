@@ -84,7 +84,7 @@ fn run_cli_diagnostics() -> Result<(), Box<dyn std::error::Error>> {
             is_group: false,
         },
     ];
-    let decision = evaluate_contact_candidates(&mock_candidates, "90001", "张三", "SelfTest");
+    let decision = evaluate_contact_candidates(&mock_candidates, "90001", "张三", "SelfTest", "");
     println!("决策结果: {:?}", decision);
     assert_eq!(decision.choice, 2, "应自动避开第1项他人描述，选中第2项本人");
 

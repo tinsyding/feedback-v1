@@ -1,3 +1,4 @@
+use crate::parser::has_no_contact_evidence;
 use image::DynamicImage;
 
 #[derive(Debug, Clone, Default)]
@@ -182,11 +183,7 @@ fn parse_ocr_lines_core(lines: &[OcrLine], full_text: &str) -> Vec<ContactCandid
     let has_contact_header = lines
         .iter()
         .any(|l| contact_headers.iter().any(|&h| l.text.contains(h)));
-    let has_empty_indicator = [
-        "进入全局搜索", "全局搜索", "查找所有", "网络查找", "没有找到", "无结果", "未找到", "暂无结果",
-    ]
-    .iter()
-    .any(|&k| full_text.contains(k));
+    let has_empty_indicator = has_no_contact_evidence(full_text);
 
     if !has_contact_header && has_empty_indicator {
         return Vec::new();

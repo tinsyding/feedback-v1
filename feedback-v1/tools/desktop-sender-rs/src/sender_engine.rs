@@ -428,7 +428,15 @@ impl<D: AutomationDriver> SenderEngine<D> {
         target_name: &str,
         event_tx: &EventSink,
     ) -> DecisionResult {
-        let local = || evaluate_contact_candidates(&capture.candidates, target_id, target_name, "LocalOCR");
+        let local = || {
+            evaluate_contact_candidates(
+                &capture.candidates,
+                target_id,
+                target_name,
+                "LocalOCR",
+                &capture.raw_text,
+            )
+        };
 
         if self.config.vision_mode == VisionMode::Off {
             // 对齐经典版：未开启视觉智能核验时走「传统两次回车」进入第 1 项，
