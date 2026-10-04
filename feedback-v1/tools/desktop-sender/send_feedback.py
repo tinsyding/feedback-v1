@@ -74,6 +74,14 @@ HAS_OCR = HAS_RAPIDOCR or HAS_WINOCR
 HAS_SMART_CHECK = True  # 视觉智能核验综合可用状态 (模式 A 大模型 + 模式 B 本地 OCR)
 _RAPID_OCR_INSTANCE = None
 
+# 「下拉框里确实没有目标联系人」的正向证据。判定 choice=0（查无此人，唯一会
+# 把学生记为「无此联系人」并跳过的结论）**只能**靠它。
+#
+# 这里刻意只收企微真实 UI 文案，**不收**「未找到 / 无结果 / 暂无结果 / 没有找到」
+# 这类泛化否定词：聊天预览、文档名、群公告里出现这些字的概率并不低，
+# 误命中就会把一个真实存在的学生判成查无此人并跳过 —— 比漏发更隐蔽的错。
+NO_CONTACT_EVIDENCE = ["进入全局搜索", "查找所有", "网络查找"]
+
 
 def get_rapid_ocr():
     """获取 RapidOCR 全局单例，避免多轮发送反复加载模型的计算与内存开销"""
@@ -84,6 +92,16 @@ def get_rapid_ocr():
             log("RapidOCR (PaddleOCR ONNX) 引擎单例初始化成功", "INFO")
         except Exception as e:
             log(f"RapidOCR 初始化异常: {e}", "ERROR")
+            # 引擎起不来时，模式 B 等于没有。而 HAS_RAPIDOCR 只测 import 成功，
+            # 启动自检会照样报「RapidOCR可用: True」，把人引向错误结论
+            #（实测冻结版就踩过：import 成功但 _MEI 临时目录缺 config.yaml）。
+            # 这里把后果显式说出来，避免下一次又对着「查无此人」排查半天。
+            log(
+                "⚠️ 本地 OCR 引擎不可用！模式 B（本地离线识别）已失效，"
+                "云端大模型识别也将失去兜底。若批量发送出现大量「未取得可用候选人」，"
+                "请先修复 RapidOCR 打包（模型与 config.yaml 未随包释放）。",
+                "ERROR",
+            )
     return _RAPID_OCR_INSTANCE
 
 
@@ -692,13 +710,20 @@ def evaluate_contact_candidates(contacts: list, target_id: str, target_name: str
     - choice == 1: 第 1 项即为本人
     - choice >= 2: 第 1 项为他人描述，第 choice 项为本人 (自动按向下键纠正)
     - choice == -2: 全部为他人描述，无本人备注 (安全拦截)
-    - choice == 0: 未找到该联系人 / 显示全局搜索提示 (安全跳过)
+    - choice == 0: 确认通讯录中无此联系人 (须有「进入全局搜索」等正向证据，安全跳过)
+    - choice == -1: 没能判定 (识别故障/看不清)，交由会话标题检查点裁决
+
+    ⚠️ choice == 0 是会写进历史、把学生标记为「无此联系人」的结论，
+    因此**必须**有正向证据支撑。仅仅「没解析出候选人」绝不等于「查无此人」：
+    引擎起不来、文本全被坐标过滤器丢弃，都会走到这里，把故障谎报成业务结论。
     """
     if not contacts:
-        empty_keywords = ["进入全局搜索", "全局搜索", "查找所有", "网络查找", "没有找到", "无结果", "未找到", "暂无结果"]
-        if any(k in full_text_summary for k in empty_keywords):
+        if any(k in full_text_summary for k in NO_CONTACT_EVIDENCE):
             return 0, f"未找到该联系人(显示全局搜索) [{engine}]"
-        return 0, f"未找到该联系人 [{engine}]"
+        # 走到这里说明：既没解析出候选人，下拉文本里也没有任何「查无此人」的迹象。
+        # 这是「我没看清」，不是「通讯录里没这个人」。返回 0 会让学生被记为
+        # 「无此联系人」白跑一轮，而实际原因只是引擎故障或裁剪偏移。
+        return -1, f"未取得可用候选人(无查无此人证据, 按识别失败处理) [{engine}]"
 
     def match_contact(c):
         title = c.get('title', '').strip()
@@ -849,6 +874,44 @@ def detect_dropdown_target_via_ocr(wecom_rect: tuple, target_id: str, target_nam
                 continue
             valid_lines.append((y, x, text))
 
+        # 候选行明细留证：坐标过滤一旦与当前窗口/DPI 不匹配就会整片丢弃，
+        # 届时只有这份明细能说明到底丢了什么、为什么丢。
+        log(
+            f"[{engine_used}候选行] {len(valid_lines)}/{len(lines_with_pos)} 行通过坐标过滤 "
+            f"(x 窗口=[{min_text_x},{max_text_x}], 水印阈值={watermark_x_threshold}, scale={scale:.2f}): "
+            f"{[(round(x), t) for _, x, t in valid_lines]}",
+            "DEBUG",
+        )
+
+        # ── 防谎报「查无此人」闸门 ──────────────────────────────────────
+        # 下面两条把「我没看清」和「查无此人」彻底分开。
+        # 历史教训：引擎起不来 / 坐标过滤整片丢行 时，contacts 必为空，
+        # 若继续走完流程，会被折叠成 choice=0「未找到该联系人」，
+        # 于是学生被记为「⚠️ 无此联系人」白跑一轮，而真实原因只是故障。
+        # 这两种情况一律返回 -1（识别失败）：上层会试探性进入第 1 项，
+        # 再由会话标题检查点这道 fail-closed 闸门裁决 —— 那才是该做裁决的地方。
+
+        # 闸门一：引擎没吐出任何文本，无从判断下拉框里有没有目标。
+        if not dropdown_full_text.strip():
+            log(
+                f"[{engine_used}] 未能取得任何下拉文本(引擎={engine_used})，"
+                f"判定为识别失败而非查无此人",
+                "ERROR",
+            )
+            return -1, f"下拉识别失败(未取得任何文本, engine={engine_used})"
+
+        # 闸门二：有文本却一行都没通过坐标过滤 —— 裁剪区域与坐标阈值
+        # 和当前窗口不匹配。真实发生过：文本里明明含「26006陈锦曦@微信」，
+        # 解析结果却是 0。说明是「我没看清」，不是「查无此人」。
+        if not valid_lines:
+            log(
+                f"[{engine_used}] 识别到 {len(lines_with_pos)} 行文本但全部被坐标过滤器丢弃 "
+                f"(x 窗口=[{min_text_x},{max_text_x}], 水印阈值={watermark_x_threshold}, scale={scale:.2f})，"
+                f"判定为识别失败而非查无此人",
+                "ERROR",
+            )
+            return -1, f"下拉识别失败(坐标过滤后无有效行, engine={engine_used})"
+
         contact_headers = ["联系人", "外部联系人", "客户", "企业通讯录"]
         section_end_keywords = [
             "群聊", "最常使用", "功能", "聊天记录", "文档",
@@ -863,7 +926,7 @@ def detect_dropdown_target_via_ocr(wecom_rect: tuple, target_id: str, target_nam
             return any(kw in t for kw in subtitle_keywords) or ("：" in t) or (":" in t)
 
         has_contact_header = any(any(h in item[2] for h in contact_headers) for item in valid_lines)
-        has_empty_indicator = any(k in dropdown_full_text for k in ["进入全局搜索", "全局搜索", "查找所有", "网络查找", "没有找到", "无结果", "未找到", "暂无结果"])
+        has_empty_indicator = any(k in dropdown_full_text for k in NO_CONTACT_EVIDENCE)
 
         # 核心防误点：若下拉框中明确提示“进入全局搜索”，且上方没有任何“联系人”分组标题，直接判定为无此联系人，严禁盲点进入！
         if not has_contact_header and has_empty_indicator:
