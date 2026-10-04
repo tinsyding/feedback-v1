@@ -86,6 +86,9 @@ git checkout -- Cargo.toml Cargo.lock
 此方法已实际查出过 `spawn_esc_stop_watcher` 的实参类型不匹配（`EventSink` vs
 `mpsc::Sender`）—— 该缺陷在 Linux 上永远不会被 `cargo test` 发现。
 
+> 有条件时优先依赖 CI（见下节第 3 条）：它在真 Windows 上跑全量测试，
+> 比这里的临时交叉检查更权威。
+
 ### 防误发核验体系（与 Python 经典版对齐）
 
 发信流程中共有两道核验，**两道都是 fail-closed（核验不通过一律拦截，绝不发送）**：
@@ -135,3 +138,13 @@ git checkout -- Cargo.toml Cargo.lock
 cargo build --release
 ```
 编译产物位于 `target/release/desktop-sender-rs.exe`，无需任何外部依赖或配套 DLL。
+
+### 3. Windows 原生代码由 CI 自动验证
+
+`push` 到 `main` 且改动命中本目录时，`.github/workflows/build-tools-rs.yml`
+会在 `windows-latest` 上跑完整的 `cargo test` + `cargo build --release
+--target x86_64-pc-windows-msvc`，并把 exe 作为 artifact 上传。
+
+这意味着 `cfg(windows)` 分支**每次改动都会被真机编译与测试覆盖**，不依赖
+开发者本机有 MSVC 环境。若本地改动了 `win32.rs` / `commands.rs`，本地
+Linux 上跑再多测试也发现不了那部分的问题 —— 请以 CI 结果为准。
