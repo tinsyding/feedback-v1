@@ -40,6 +40,10 @@ function updateVisionConfigUI() {
         }
     }
 
+    // 唯一放行闸门（v2.6.0 主流程）
+    const promptViewText = document.getElementById('vision-prompt-chatview');
+    if (promptViewText) promptViewText.value = currentVisionConfig.prompt_chatview || '';
+
     const promptDropText = document.getElementById('vision-prompt-dropdown');
     if (promptDropText) promptDropText.value = currentVisionConfig.prompt_dropdown || '';
 
@@ -98,17 +102,29 @@ function toggleVisionApiKeyVisibility() {
 }
 
 function resetVisionPrompt(task) {
-    if (task === 'dropdown') {
+    if (task === 'chatview') {
+        const viewEl = document.getElementById('vision-prompt-chatview');
+        if (viewEl && currentVisionConfig.default_prompt_chatview) {
+            viewEl.value = currentVisionConfig.default_prompt_chatview;
+            showToast('已重置为唯一放行闸门（整窗会话判定）官方默认提示词', 'info');
+        } else {
+            showToast('未取到官方默认提示词，请检查服务端配置读取', 'error');
+        }
+    } else if (task === 'dropdown') {
         const dropEl = document.getElementById('vision-prompt-dropdown');
         if (dropEl && currentVisionConfig.default_prompt_dropdown) {
             dropEl.value = currentVisionConfig.default_prompt_dropdown;
-            showToast('已重置为第一道防线（下拉选人）官方默认提示词', 'info');
+            showToast('已重置为下拉选人官方默认提示词（仅旧客户端使用）', 'info');
+        } else {
+            showToast('未取到官方默认提示词，请检查服务端配置读取', 'error');
         }
     } else if (task === 'header') {
         const headEl = document.getElementById('vision-prompt-header');
         if (headEl && currentVisionConfig.default_prompt_header) {
             headEl.value = currentVisionConfig.default_prompt_header;
-            showToast('已重置为第二道防线（会话标题）官方默认提示词', 'info');
+            showToast('已重置为会话标题核验官方默认提示词（仅旧客户端使用）', 'info');
+        } else {
+            showToast('未取到官方默认提示词，请检查服务端配置读取', 'error');
         }
     }
 }
@@ -117,6 +133,7 @@ async function saveVisionConfig() {
     const baseUrl = document.getElementById('vision-base-url')?.value.trim() || '';
     const model = document.getElementById('vision-model')?.value.trim() || '';
     const apiKey = document.getElementById('vision-api-key')?.value.trim() || '';
+    const promptView = document.getElementById('vision-prompt-chatview')?.value.trim() || '';
     const promptDrop = document.getElementById('vision-prompt-dropdown')?.value.trim() || '';
     const promptHead = document.getElementById('vision-prompt-header')?.value.trim() || '';
     const statusEl = document.getElementById('vision-save-status');
@@ -130,9 +147,14 @@ async function saveVisionConfig() {
         return;
     }
 
+    // 唯一放行闸门被清空时给出明确警告：服务端对空提示词是「静默忽略」，
+    // 实际生效的仍是旧值，管理员若以为已清空会产生误判。
+    const chatviewCleared = !promptView;
+
     const payload = {
         base_url: baseUrl,
         model: model,
+        prompt_chatview: promptView,
         prompt_dropdown: promptDrop,
         prompt_header: promptHead
     };
@@ -155,7 +177,11 @@ async function saveVisionConfig() {
         if (result.success) {
             currentVisionConfig = Object.assign(currentVisionConfig, result.data);
             updateVisionConfigUI();
-            showToast('视觉大模型与提示词配置已成功保存！', 'success');
+            if (chatviewCleared) {
+                showToast('已保存，但「唯一放行闸门」提示词被留空 —— 服务端忽略了空值，仍在沿用旧提示词', 'error');
+            } else {
+                showToast('视觉大模型与提示词配置已成功保存！', 'success');
+            }
             if (statusEl) {
                 statusEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><polyline points="20 6 9 17 4 12"></polyline></svg> 保存成功';
                 statusEl.className = 'save-status success show';
