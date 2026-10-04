@@ -15,6 +15,19 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('onnxruntime')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
+# windows-capture：WGC 抓帧用的 Rust 编译扩展。
+#   wheel 名 cp39-abi3-win_amd64（abi3，Python 3.9+ 通用），内容只有
+#   __init__.py + windows_capture.pyd（534KB，无随包 DLL）。
+#   pyd 的导入表已实证只有 python3.dll / VCRUNTIME140.dll / d3d11.dll /
+#   user32.dll / api-ms-win-core-winrt-l1-1-0.dll —— WinRT 由系统自带，
+#   不需要 collect_dynamic_libs，collect_all 足够。
+#   不加 try/except：构建期缺包必须立刻炸，绝不能产出一个静默没有 WGC 的 exe
+#   （那等于让老师以为在用 WGC，实际回退了会截不全的 PyAutoGUI）。
+#   注意：它的 METADATA 谎报 requires_dist 含 opencv-python，实测 pyd 内
+#   0 处 cv2/opencv 引用，因此 EXCLUDES 里的 'cv2' 保持不变是安全的。
+tmp_ret = collect_all('windows_capture')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+
 # 打包态缺失时静默退回系统默认图标，这里补上，保证属性页与运行期一致
 datas.append((APP_ICON, '.'))
 

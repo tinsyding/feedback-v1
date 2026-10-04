@@ -147,13 +147,54 @@ function callDashScopeVision(string $apiKey, string $task, string $targetId, str
         throw new RuntimeException("服务端未配置视觉模型 API 密钥 (DASHSCOPE_API_KEY 或后台设置)");
     }
 
-    if ($task === 'dropdown') {
+    if ($task === 'chatview') {
+        // v2.6.0 起主流程唯一的视觉任务：一次调用同时裁决
+        //   身份（fail-closed）/ 是否群聊 / 是否有待回消息（fail-open）
+        $template = $runtimeCfg['prompt_chatview'] ?? '';
+        if (empty($template)) {
+            $template = "你是一个企业微信会话核验专家。请观察这张企业微信整窗截图，完成两件事：核实当前打开的会话是不是目标学生本人（或其家长），以及判断家长最后一条消息是否需要老师回复。\n\n" .
+                        "【目标学生信息】：\n" .
+                        "- 目标学号：{target_id}\n" .
+                        "- 目标姓名：{target_name}\n\n" .
+                        "【截图说明】：收到的是企业微信主窗口的整窗截图（Windows Graphics Capture 直接抓窗口表面，不受遮挡或窗口出屏影响）。布局自上而下为：顶部标题栏（会话名 + 群成员数/头像拼图）、中间聊天记录区（按时间正序，最新的一条在最下方）、底部消息输入框。左侧是会话列表导航栏，与本次判定无关。\n\n" .
+                        "【第一部分：会话身份（判定错误会导致把反馈发错人，请极其谨慎）】\n" .
+                        "1. 【detected_title 的取值范围 —— 极其重要】：只输出**顶部标题栏里显示的会话名原文**，最多十几个字。绝对禁止把聊天记录里的任何文字（消息气泡、系统提示、对方昵称、引用内容）写进 detected_title！如果你无法在标题栏位置读到会话名，就把 detected_title 留空、title_in_header 填 false。\n" .
+                        "2. 【title_in_header】：detected_title 是否确实是从顶部标题栏读到的。为 true 表示你确实在标题栏位置看到了会话名；为 false 表示你没能读到标题栏（例如画面还没渲染完、当前不是聊天界面、或只看到会话列表）。\n" .
+                        "3. 【matched】：会话名必须**完全同时**包含目标学号 \"{target_id}\" 与目标姓名 \"{target_name}\"（允许带「家长」「妈妈」等后缀、表情符号、\"@微信\"），二者缺一不可才可填 true。若会话名是其他人、或只含学号无姓名、或只含姓名无学号，一律填 false。\n" .
+                        "4. 【is_group —— 群聊红线】：若当前是群聊（标题栏右侧显示成员数量或成员头像拼图、或聊天区内可见系统提示如「XX 邀请 YY 加入群聊」），is_group 填 true。这类会话即使标题里恰好含有目标学号和姓名（例如 \"{target_id}{target_name}家长群\"）也**绝对不是**目标本人，必须 matched 填 false。\n\n" .
+                        "【第二部分：是否有待回消息】\n" .
+                        "5. 【last_sender】：看**聊天记录区最下方那一条消息**的发送方。若在输入框右侧/左侧、位于自己发出的消息那一列（即自己发的），填 \"me\"；若是对方发的，填 \"parent\"；看不清或聊天区为空，填 \"unknown\"。\n" .
+                        "6. 【last_message_text】：把最下方那一条消息的原文抄下来（最多 100 字）。若最下方那条是系统提示（例如「以上是打招呼的内容」或群公告），则继续往上找最近一条**对方发的真实消息**。\n" .
+                        "7. 【needs_reply 判定规则】：\n" .
+                        "   - last_sender 为 \"parent\" 且该消息**不是**下列客套/无需回复的内容时，填 true：\n" .
+                        "     · 纯确认与客套：「收到」「好的」「好」「嗯」「嗯嗯」「ok」「OK」「明白了」「辛苦了」「谢谢」「谢谢老师」「谢谢x老师」「THX」等；\n" .
+                        "     · 纯表情符号、纯 emoji、纯符号（👍🙏🌹🌸❤️ 等），或「好的👌」这类客套加表情；\n" .
+                        "     · 只是重复你（老师）上一条消息里已经说过的内容、没有提出任何新问题。\n" .
+                        "   - 家长提出了问题、请求、需要确认的事项、表达不满或催促，或只是陈述一件需要你处理的事（如「明天能请假吗」「成绩什么时候出」「老师说下周家长会」），填 true。\n" .
+                        "   - last_sender 为 \"me\"（最后一条是你自己发的，说明你已经回过了），填 false。\n" .
+                        "   - 聊天区为空、或看不清最后一条消息，填 null（表示无法判断）。\n" .
+                        "8. 【判错是可以接受的】：你只需要尽力按上述规则判断；判断需要回复时哪怕偶尔判断错一两个，程序也只做记录、不会自动回消息，老师会自己核对。但如果实在看不出来，请老实填 null，不要猜。\n\n" .
+                        "请输出严格 JSON 格式（不要输出任何额外文字、不要用 Markdown 代码块包裹）：\n" .
+                        "{\n" .
+                        "  \"matched\": true,\n" .
+                        "  \"title_in_header\": true,\n" .
+                        "  \"is_group\": false,\n" .
+                        "  \"detected_title\": \"90001张三（家长）\",\n" .
+                        "  \"last_sender\": \"parent\",\n" .
+                        "  \"last_message_text\": \"老师收到成绩了，太感谢\",\n" .
+                        "  \"needs_reply\": false,\n" .
+                        "  \"reason\": \"简述判定理由\"\n" .
+                        "}";
+        }
+        $prompt = str_replace(['{target_id}', '{target_name}'], [$targetId, $targetName], $template);
+    } elseif ($task === 'dropdown') {
         $template = $runtimeCfg['prompt_dropdown'] ?? '';
         if (empty($template)) {
             $template = "你是一个企业微信搜索下拉结果决策专家。请仔细观察这张企业微信搜索下拉候选人列表的截屏，找出目标学生本人或其家长，并判定其排在候选列表的第几项。\n\n" .
                         "【目标学生信息】：\n" .
                         "- 目标学号：{target_id}\n" .
                         "- 目标姓名：{target_name}\n\n" .
+                        "【截图说明】：收到的是企业微信主窗口的整窗截图，不是只截搜索框。搜索框位于窗口左侧导航栏顶部，展开的下拉候选列表紧贴其下方浮出。请先在整图中定位左侧的搜索框与下拉候选列表，再据其内容判定。\n\n" .
                         "【核心判定准则与红线禁令】：\n" .
                         "1. 【红线：严禁选择群聊与聊天记录！】：目标必须且只能是“联系人”分类下的独立个人微信/企微联系人！“群聊”分类下的任何群聊（班级群、教研群等）以及“聊天记录”分类下的任何条目（如包含该学生学号/姓名的图片或聊天文本），绝对不可作为候选目标！若“联系人”分类下没有目标本人的独立条目，一律判定为未找到本人！\n" .
                         "2. 【本人条目判定】：观察“联系人”分类下的条目。条目的主标题（大字加粗标题）必须完全同时包含目标学号（\"{target_id}\"）与目标姓名（例如 \"{target_name}\"、\"{target_name}家长\"、\"{target_name}妈妈\"），二者缺一不可！仅有学号无姓名或仅有姓名无学号均不符合本人条目判定。其下方浅灰色小字即使显示其他微信昵称（如 \"微信昵称: 花开富贵\"），只要主标题完全匹配学号与姓名，即为本人条目！\n" .
@@ -214,7 +255,8 @@ function callDashScopeVision(string $apiKey, string $task, string $targetId, str
             ]
         ],
         'response_format' => ['type' => 'json_object'],
-        'max_tokens' => 300
+        // chatview 需要额外抄录 last_message_text（最多 100 字），300 tokens 不够用
+        'max_tokens' => $task === 'chatview' ? 800 : 300
     ];
 
     $ch = curl_init($baseUrl);
@@ -355,8 +397,10 @@ switch ($action) {
 
     case 'vision_detect': {
         $task = trim((string)($input['task'] ?? ''));
-        if ($task !== 'dropdown' && $task !== 'header') {
-            sendResponse(false, null, '无效的视觉任务类型（仅支持 dropdown 或 header）', 400);
+        // chatview 是 v2.6.0 起主流程唯一使用的任务；dropdown/header 为 v2.5.x 遗留，
+        // 保留以兼容仍在跑的旧版客户端。
+        if ($task !== 'chatview' && $task !== 'dropdown' && $task !== 'header') {
+            sendResponse(false, null, '无效的视觉任务类型（仅支持 chatview / dropdown / header）', 400);
         }
         $targetId = trim((string)($input['target_id'] ?? ''));
         $targetName = trim((string)($input['target_name'] ?? ''));

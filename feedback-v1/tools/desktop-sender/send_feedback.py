@@ -4,13 +4,16 @@
 功能：
 1. 读取反馈 JSON 文件及网站导出的 HTML 网页快照文件，严格按学生信息逐个发送反馈
 2. 发送周次分类管理：支持按周次/周期独立归档，不同周期自动清空已发状态，支持周期筛选与导出
-3. AI 视觉智能防误发双保险：云端 AI + 本地离线引擎自动识别企微下拉框，智能区分本人与他人描述，自动【↓】纠偏；会话顶部标题二次核验防线
+3. AI 视觉智能防误发：候选按第 1/2/3 项顺序逐个试探，用 WGC 抓「画面已稳定」的企微整窗，
+   一次云端视觉调用同时裁决会话身份、是否群聊、以及家长是否有待回消息（群聊一律拦截）
 4. 实时消息预览：点击名单任意学生即可在右侧查看完整反馈文案
 5. 智能断点续发与重试：自动跳过当前周期已发送记录，支持一键重试失败与拦截项
 6. 前台窗口守护与防失焦：自动寻找企微窗口，检测到焦点被抢夺立即自动暂停，防止误发
 7. 剪贴板安全核验：防止剪贴板延迟导致发错上一个学生的内容
 8. 批次防风控休息：支持每发送 N 人自动休眠，模拟真人节奏
 9. 导出发送记录：一键导出 CSV 报表留档
+10. 待回消息名单：打开会话本身就会清掉家长未读角标，本工具逐条留痕并在 app 内展示/导出，
+    补回这个被我们自己消费掉的信号
 """
 
 import os
@@ -24,9 +27,10 @@ import random
 import ctypes
 import asyncio
 import datetime
+import tempfile
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-from threading import Thread
+from threading import Thread, Event
 
 from PIL import Image, ImageEnhance
 import pyautogui
@@ -74,61 +78,8 @@ HAS_OCR = HAS_RAPIDOCR or HAS_WINOCR
 HAS_SMART_CHECK = True  # 视觉智能核验综合可用状态 (模式 A 大模型 + 模式 B 本地 OCR)
 _RAPID_OCR_INSTANCE = None
 
-# 「下拉框里确实没有目标联系人」的正向证据。判定 choice=0（查无此人，唯一会
-# 把学生记为「无此联系人」并跳过的结论）**只能**靠它。
-#
-# 这里刻意只收企微真实 UI 文案，**不收**「未找到 / 无结果 / 暂无结果 / 没有找到」
-# 这类泛化否定词：聊天预览、文档名、群公告里出现这些字的概率并不低，
-# 误命中就会把一个真实存在的学生判成查无此人并跳过 —— 比漏发更隐蔽的错。
-NO_CONTACT_EVIDENCE = ["进入全局搜索", "查找所有", "网络查找"]
-
-
-def get_rapid_ocr():
-    """获取 RapidOCR 全局单例，避免多轮发送反复加载模型的计算与内存开销"""
-    global _RAPID_OCR_INSTANCE
-    if _RAPID_OCR_INSTANCE is None and HAS_RAPIDOCR:
-        try:
-            _RAPID_OCR_INSTANCE = RapidOCR()
-            log("RapidOCR (PaddleOCR ONNX) 引擎单例初始化成功", "INFO")
-        except Exception as e:
-            log(f"RapidOCR 初始化异常: {e}", "ERROR")
-            # 引擎起不来时，模式 B 等于没有。而 HAS_RAPIDOCR 只测 import 成功，
-            # 启动自检会照样报「RapidOCR可用: True」，把人引向错误结论
-            #（实测冻结版就踩过：import 成功但 _MEI 临时目录缺 config.yaml）。
-            # 这里把后果显式说出来，避免下一次又对着「查无此人」排查半天。
-            log(
-                "⚠️ 本地 OCR 引擎不可用！模式 B（本地离线识别）已失效，"
-                "云端大模型识别也将失去兜底。若批量发送出现大量「未取得可用候选人」，"
-                "请先修复 RapidOCR 打包（模型与 config.yaml 未随包释放）。",
-                "ERROR",
-            )
-    return _RAPID_OCR_INSTANCE
-
-
-def preprocess_dropdown_image(pil_img: Image.Image) -> Image.Image:
-    """
-    图像前置预处理管线：
-    1. 转灰度图消除 ClearType 边缘彩斑杂色
-    2. 水印擦除：将企微背景微弱倾斜防泄密水印（亮度通常 > 205）归一化为纯白底色（255），保留核心文字
-    3. 双三次插值（BICUBIC）放大 2 倍，强化 12px~14px 小字笔画特征
-    """
-    try:
-        gray = pil_img.convert("L")
-        if HAS_RAPIDOCR:
-            import numpy as np
-            arr = np.array(gray)
-            arr[arr > 205] = 255
-            cleaned = Image.fromarray(arr)
-        else:
-            cleaned = gray
-        w, h = cleaned.size
-        return cleaned.resize((w * 2, h * 2), Image.Resampling.BICUBIC)
-    except Exception as e:
-        log(f"图像预处理异常，降级使用原图: {e}", "WARN")
-        return pil_img
-
 # 客户端应用版本号
-APP_VERSION = "v2.5.0"
+APP_VERSION = "v2.6.0"
 
 
 def detect_cycle_from_string(text: str) -> str:
@@ -222,6 +173,16 @@ DEFAULT_MIN_DELAY = 2.0
 DEFAULT_MAX_DELAY = 5.0
 DEFAULT_BATCH_SIZE = 10
 DEFAULT_BATCH_DELAY = 8.0
+
+# ---- Windows Graphics Capture (WGC) 抓帧 ----
+# WGC_SETTLE_INTERVAL: 连拍两帧的间隔，要大于一帧的渲染时间
+# WGC_SETTLE_TIMEOUT: 最多等多久画面才静止；超时就用最后一帧
+# WGC_FRAME_TIMEOUT: 单次建会话抓一帧的硬超时（capture.start() 是阻塞调用，
+#   不设上限会在「窗口最小化 / 无新帧」时把整个发送线程挂死）
+WGC_SETTLE_INTERVAL = 0.3
+WGC_SETTLE_TIMEOUT = 1.5
+WGC_FRAME_TIMEOUT = 6.0
+WGC_RETRIES = 2
 
 
 def get_resource_path(relative_path: str) -> str:
@@ -556,9 +517,14 @@ def safe_copy(text: str, retries: int = 5) -> bool:
 def parse_student_identifier(raw_name: str) -> tuple:
     """
     从学生字符串中拆分学号与纯姓名（例如从 '90001张三' 拆为 ('90001', '张三')）
+
+    分隔符必须覆盖中英文逗号：源数据里出现 '90001，张三' 时，旧正则的
+    r"[\s\-_.、]" 不含逗号，会把姓名切成 '，张三'，导致后续
+    `target_name in detected_title` 必然失败 —— 该学生被静默拦截，日志却显示
+    「会话标题与目标不符」，会被误诊成模型判错。
     """
     raw = raw_name.strip()
-    match = re.match(r"^(\d+)[\s\-_\.、]*(.*)$", raw)
+    match = re.match(r"^(\d+)[\s\-_.、，,;；:：]*(.*)$", raw)
     if match:
         return match.group(1), match.group(2).strip()
     return "", raw
@@ -653,6 +619,70 @@ def get_virtual_screen_bounds() -> tuple:
     return vx, vy, vw, vh
 
 
+def _redraw_wecom(hwnd):
+    """强制整窗立即重绘——从托盘恢复/最大化后的 GPU 合成窗口可能保持黑屏"""
+    try:
+        RDW = 0x0001 | 0x0004 | 0x0080 | 0x0100 | 0x0400  # INVALIDATE|ERASE|ALLCHILDREN|UPDATENOW|FRAME
+        ctypes.windll.user32.RedrawWindow(hwnd, None, None, RDW)
+        ctypes.windll.user32.UpdateWindow(hwnd)
+    except Exception:
+        pass
+
+
+def _is_zoomed(hwnd) -> bool:
+    """判断窗口是否已最大化。
+
+    不要用 win32gui.IsZoomed：pywin32 312 并未导出该属性，真机上抛
+    AttributeError。ensure_wecom_maximized 的 try/except 会把它吞成一条 WARN，
+    使「自动最大化」静默失效 —— 探针在真机上实测到了这个坑。直接走 user32。
+    """
+    try:
+        return bool(ctypes.windll.user32.IsZoomed(hwnd))
+    except Exception:
+        return False
+
+
+def ensure_wecom_maximized(timeout: float = 2.0) -> bool:
+    """确保企业微信主窗口处于最大化状态且矩形已稳定。返回是否就绪。
+
+    动机：历史上的下拉裁剪宽度上限是 `min(380*scale, ww * 0.45)`，标题条是
+    `min(400*scale, ww - 260*scale)`——都带「相对窗口宽度」的封顶，窗口一窄
+    就把条目尾部切掉，模型读不全 -> 误判为「查无此人」。最大化后窗口宽度足够，
+    这类封顶不再生效；下拉判定已进一步改为整窗截图（capture_wecom_full），
+    彻底不再有宽度上限。标题条仍按窗口宽度封顶在 400*scale，故本步骤对它
+    依旧是必需的。
+
+    幂等：已最大化时只做一次 IsZoomed 查询即返回，用户中途手动还原也能拉回。
+    """
+    if not HAS_WIN32:
+        return False
+    hwnd = get_wecom_hwnd()
+    if not hwnd:
+        return False
+    try:
+        if _is_zoomed(hwnd):
+            return True
+        log("企微窗口未最大化，自动最大化以避免下拉框被裁剪...", "INFO")
+        win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+        _redraw_wecom(hwnd)
+        # 轮询直到 GetWindowRect 连续两次相同，确认最大化动画结束、坐标已稳定。
+        # 拿未稳定的 rect 去截图会整块偏位。
+        last = None
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            time.sleep(0.12)
+            rect = win32gui.GetWindowRect(hwnd)
+            if rect == last:
+                log(f"企微窗口已最大化并稳定: {rect}", "DEBUG")
+                return True
+            last = rect
+        log("等待企微窗口最大化完成超时，仍按当前矩形继续", "WARN")
+        return True
+    except Exception as e:
+        log(f"企微窗口最大化异常: {e}", "WARN")
+        return False
+
+
 def find_and_activate_wecom() -> bool:
     """查找并自动激活企业微信主窗口（支持最小化恢复与Windows前台锁绕过）"""
     if not HAS_WIN32:
@@ -668,12 +698,7 @@ def find_and_activate_wecom() -> bool:
                 win32gui.ShowWindow(wecom_hwnd, win32con.SW_SHOW)
 
             # 从托盘恢复的 GPU 合成窗口可能保持黑屏：强制整窗立即重绘
-            try:
-                RDW = 0x0001 | 0x0004 | 0x0080 | 0x0100 | 0x0400  # INVALIDATE|ERASE|ALLCHILDREN|UPDATENOW|FRAME
-                ctypes.windll.user32.RedrawWindow(wecom_hwnd, None, None, RDW)
-                ctypes.windll.user32.UpdateWindow(wecom_hwnd)
-            except Exception:
-                pass
+            _redraw_wecom(wecom_hwnd)
 
             # 模拟 Alt 键绕过 Windows SetForegroundWindow 权限限制
             ctypes.windll.user32.keybd_event(0x12, 0, 0, 0)  # Alt key down
@@ -703,321 +728,6 @@ def is_foreground_wecom() -> bool:
         return True
 
 
-def evaluate_contact_candidates(contacts: list, target_id: str, target_name: str, full_text_summary: str = "", engine: str = "OCR") -> tuple:
-    """
-    通用联系人列表决策中枢：
-    输入有序的联系人列表（从上到下），统一做出智能决策：
-    - choice == 1: 第 1 项即为本人
-    - choice >= 2: 第 1 项为他人描述，第 choice 项为本人 (自动按向下键纠正)
-    - choice == -2: 全部为他人描述，无本人备注 (安全拦截)
-    - choice == 0: 确认通讯录中无此联系人 (须有「进入全局搜索」等正向证据，安全跳过)
-    - choice == -1: 没能判定 (识别故障/看不清)，交由会话标题检查点裁决
-
-    ⚠️ choice == 0 是会写进历史、把学生标记为「无此联系人」的结论，
-    因此**必须**有正向证据支撑。仅仅「没解析出候选人」绝不等于「查无此人」：
-    引擎起不来、文本全被坐标过滤器丢弃，都会走到这里，把故障谎报成业务结论。
-    """
-    if not contacts:
-        if any(k in full_text_summary for k in NO_CONTACT_EVIDENCE):
-            return 0, f"未找到该联系人(显示全局搜索) [{engine}]"
-        # 走到这里说明：既没解析出候选人，下拉文本里也没有任何「查无此人」的迹象。
-        # 这是「我没看清」，不是「通讯录里没这个人」。返回 0 会让学生被记为
-        # 「无此联系人」白跑一轮，而实际原因只是引擎故障或裁剪偏移。
-        return -1, f"未取得可用候选人(无查无此人证据, 按识别失败处理) [{engine}]"
-
-    def match_contact(c):
-        title = c.get('title', '').strip()
-        if not title:
-            return False
-        # 排除全局搜索等按钮项
-        if any(k in title for k in ["全局", "查找", "搜索", "网络"]):
-            return False
-        # 核心安全准则升级：必须完全同时匹配学号与姓名！
-        if target_id and target_name:
-            return (target_id in title) and (target_name in title)
-        elif target_id:
-            return target_id in title
-        elif target_name:
-            return target_name in title
-        return False
-
-    for c in contacts:
-        c['is_target'] = match_contact(c)
-
-    target_pos = None
-    for idx, c in enumerate(contacts):
-        if c['is_target']:
-            target_pos = idx + 1
-            break
-
-    has_any_desc = any(c.get('has_desc', False) for c in contacts)
-
-    if target_pos == 1:
-        choice = 1
-        reason = f"第1项即为目标本人 ({contacts[0].get('title', '')}) [{engine}]"
-    elif target_pos is not None and target_pos >= 2:
-        choice = target_pos
-        reason = f"第1项为他人描述，第{target_pos}项为目标本人 ({contacts[target_pos-1].get('title', '')}) [{engine}]"
-    elif has_any_desc and target_pos is None:
-        choice = -2
-        reason = f"全部为他人描述，无本人备注 [{engine}]"
-    else:
-        choice = 0
-        reason = f"未找到该联系人 [{engine}]"
-
-    return choice, reason
-
-
-def detect_dropdown_target_via_ocr(wecom_rect: tuple, target_id: str, target_name: str) -> tuple:
-    """
-    【模式 B 核心决策：自适应 RapidOCR / WinOCR 视觉智能识别】
-    自动根据当前显示器 DPI 缩放比例 (100%~200%+) 动态换算物理裁剪坐标，
-    精准避开顶部搜索框自身文字，截取下拉候选框并做结构化分析。
-    """
-    if not HAS_OCR or not wecom_rect:
-        log(f"模式 B OCR 视觉决策跳过: HAS_OCR={HAS_OCR}, wecom_rect={wecom_rect}", "WARN")
-        return -1, ""
-
-    crop_img = None
-    try:
-        wx, wy, ww, wh = wecom_rect
-        wecom_hwnd = get_wecom_hwnd()
-        scale = get_display_scale(wecom_hwnd)
-        vx, vy, vw, vh = get_virtual_screen_bounds()
-
-        # 动态缩放设计基准 (以 100% 缩放 96 DPI 为基准):
-        # 1. 搜索框自身高度基准约 46px (在 100% 屏为 46px，在 125% 屏为 58px，在 150% 屏为 69px，在 200% 屏为 92px)
-        offset_y = int(46 * scale)
-        offset_x = int(38 * scale)
-
-        # 2. 下拉框裁剪宽度与高度基准
-        base_w = int(350 * scale)
-        base_h = int(360 * scale)
-
-        crop_x = max(vx, wx + offset_x)
-        crop_y = max(vy, wy + offset_y)
-        crop_w = max(int(200 * scale), min(base_w, int(ww * 0.45)))
-        crop_h = max(int(100 * scale), min(base_h, wh - offset_y - 10))
-
-        # 确保裁剪区域不超出虚拟桌面总边界
-        if crop_x + crop_w > vx + vw:
-            crop_w = max(50, (vx + vw) - crop_x)
-        if crop_y + crop_h > vy + vh:
-            crop_h = max(50, (vy + vh) - crop_y)
-
-        crop_img = pyautogui.screenshot(region=(crop_x, crop_y, crop_w, crop_h))
-
-        lines_with_pos = []
-        dropdown_full_text = ""
-        engine_used = "none"
-
-        # 优先使用 RapidOCR (PaddleOCR ONNX 极速离线高精度引擎)
-        rapid_engine = get_rapid_ocr()
-        if rapid_engine is not None:
-            try:
-                import numpy as np
-                res, _ = rapid_engine(np.array(crop_img.convert("RGB")))
-                if res:
-                    engine_used = "RapidOCR"
-                    dropdown_full_text = "".join(item[1].replace(" ", "") for item in res)
-                    for box, text, score in res:
-                        xs = [pt[0] for pt in box]
-                        ys = [pt[1] for pt in box]
-                        min_x = min(xs)
-                        avg_y = (min(ys) + max(ys)) / 2.0
-                        cleaned_text = text.replace(" ", "")
-                        if cleaned_text:
-                            lines_with_pos.append((avg_y, min_x, cleaned_text))
-            except Exception as rapid_err:
-                log(f"RapidOCR 执行异常，尝试降级至 WinOCR: {rapid_err}", "WARN")
-
-        # 降级备用: WinOCR
-        if not lines_with_pos and HAS_WINOCR:
-            try:
-                proc_win_img = preprocess_dropdown_image(crop_img)
-                res_win = asyncio.run(winocr.recognize_pil(proc_win_img, lang="zh-Hans-CN"))
-                engine_used = "WinOCR"
-                dropdown_full_text = "".join(l.text.replace(" ", "") for l in res_win.lines)
-                for l in res_win.lines:
-                    if not l.words:
-                        continue
-                    min_x = min(w.bounding_rect.x for w in l.words) / 2.0
-                    avg_y = (sum(w.bounding_rect.y for w in l.words) / len(l.words)) / 2.0
-                    text = "".join(w.text for w in l.words).replace(" ", "")
-                    if text:
-                        lines_with_pos.append((avg_y, min_x, text))
-            except Exception as we:
-                log(f"WinOCR 降级执行异常: {we}", "WARN")
-
-        log(f"[{engine_used}识别] 目标: 学号='{target_id}', 姓名='{target_name}', 下拉文本: {dropdown_full_text}", "DEBUG")
-
-        # 按 Y 轴垂直坐标升序排序
-        lines_with_pos.sort(key=lambda item: item[0])
-
-        # 过滤杂质行与右侧浮动水印 (自适应当前 DPI 缩放)
-        min_text_x = int(25 * scale)
-        max_text_x = int(360 * scale)
-        watermark_x_threshold = int(120 * scale)
-
-        valid_lines = []
-        for y, x, text in lines_with_pos:
-            if x < min_text_x or x > max_text_x:
-                continue
-            if text.isdigit() and len(text) <= 4:
-                continue
-            # 排除全局搜索、微盘等非联系人按钮文本
-            if any(k in text for k in ["全局搜索", "查找所有", "微盘等", "网络查找", "相关搜索"]):
-                continue
-            # 水印与右侧浮动杂质过滤：真实联系人标题及副标题均紧贴左侧头像
-            # 若 x 超过阈值且不包含联系人关键字段（如描述/手机/包含/昵称），则属于屏幕防泄密倾斜水印或右侧标签，坚决过滤
-            if x > watermark_x_threshold and not any(kw in text for kw in ["描述", "手机", "包含", "昵称", "微信", "外部"]):
-                continue
-            valid_lines.append((y, x, text))
-
-        # 候选行明细留证：坐标过滤一旦与当前窗口/DPI 不匹配就会整片丢弃，
-        # 届时只有这份明细能说明到底丢了什么、为什么丢。
-        log(
-            f"[{engine_used}候选行] {len(valid_lines)}/{len(lines_with_pos)} 行通过坐标过滤 "
-            f"(x 窗口=[{min_text_x},{max_text_x}], 水印阈值={watermark_x_threshold}, scale={scale:.2f}): "
-            f"{[(round(x), t) for _, x, t in valid_lines]}",
-            "DEBUG",
-        )
-
-        # ── 防谎报「查无此人」闸门 ──────────────────────────────────────
-        # 下面两条把「我没看清」和「查无此人」彻底分开。
-        # 历史教训：引擎起不来 / 坐标过滤整片丢行 时，contacts 必为空，
-        # 若继续走完流程，会被折叠成 choice=0「未找到该联系人」，
-        # 于是学生被记为「⚠️ 无此联系人」白跑一轮，而真实原因只是故障。
-        # 这两种情况一律返回 -1（识别失败）：上层会试探性进入第 1 项，
-        # 再由会话标题检查点这道 fail-closed 闸门裁决 —— 那才是该做裁决的地方。
-
-        # 闸门一：引擎没吐出任何文本，无从判断下拉框里有没有目标。
-        if not dropdown_full_text.strip():
-            log(
-                f"[{engine_used}] 未能取得任何下拉文本(引擎={engine_used})，"
-                f"判定为识别失败而非查无此人",
-                "ERROR",
-            )
-            return -1, f"下拉识别失败(未取得任何文本, engine={engine_used})"
-
-        # 闸门二：有文本却一行都没通过坐标过滤 —— 裁剪区域与坐标阈值
-        # 和当前窗口不匹配。真实发生过：文本里明明含「26006陈锦曦@微信」，
-        # 解析结果却是 0。说明是「我没看清」，不是「查无此人」。
-        if not valid_lines:
-            log(
-                f"[{engine_used}] 识别到 {len(lines_with_pos)} 行文本但全部被坐标过滤器丢弃 "
-                f"(x 窗口=[{min_text_x},{max_text_x}], 水印阈值={watermark_x_threshold}, scale={scale:.2f})，"
-                f"判定为识别失败而非查无此人",
-                "ERROR",
-            )
-            return -1, f"下拉识别失败(坐标过滤后无有效行, engine={engine_used})"
-
-        contact_headers = ["联系人", "外部联系人", "客户", "企业通讯录"]
-        section_end_keywords = [
-            "群聊", "最常使用", "功能", "聊天记录", "文档",
-            "网络查找", "相关搜索", "查看全部", "进入全局搜索", "查找所有"
-        ]
-        subtitle_keywords = [
-            "描述", "庙述", "猫述", "描术", "微信昵称", "昵称",
-            "手机号", "手机", "包含", "部门", "企业", "公司", "邮箱", "微信号", "备注", "含"
-        ]
-
-        def is_subtitle(t):
-            return any(kw in t for kw in subtitle_keywords) or ("：" in t) or (":" in t)
-
-        has_contact_header = any(any(h in item[2] for h in contact_headers) for item in valid_lines)
-        has_empty_indicator = any(k in dropdown_full_text for k in NO_CONTACT_EVIDENCE)
-
-        # 核心防误点：若下拉框中明确提示“进入全局搜索”，且上方没有任何“联系人”分组标题，直接判定为无此联系人，严禁盲点进入！
-        if not has_contact_header and has_empty_indicator:
-            log(f"[OCR识别] 下拉框无联系人分组且显示全局搜索提示，确凿判定通讯录中无此联系人", "INFO")
-            _save_dropdown_debug_shot(crop_img, target_id, target_name, 0, tag="not_found")
-            return 0, f"通讯录中无此联系人(显示全局搜索) [{engine_used}]"
-
-        contacts = []
-        current_contact = None
-        in_contacts_section = not has_contact_header
-
-        for y, x, text in valid_lines:
-            if any(h in text for h in contact_headers):
-                in_contacts_section = True
-                continue
-
-            # 遇到群聊或下一分类，联系人分组正常结束
-            if in_contacts_section and any(h in text for h in section_end_keywords):
-                if current_contact:
-                    contacts.append(current_contact)
-                    current_contact = None
-                in_contacts_section = False
-                break
-
-            # 遇到“包含”（通常是群聊名称匹配或聊天记录包含），也代表进入了群聊分组
-            if in_contacts_section and ("包含" in text or "包含:" in text or "包含：" in text):
-                current_contact = None
-                in_contacts_section = False
-                break
-
-            if in_contacts_section:
-                if is_subtitle(text):
-                    if current_contact:
-                        current_contact['subtitles'].append(text)
-                        if any(k in text for k in ["描述", "庙述", "猫述", "描术", "含"]):
-                            current_contact['has_desc'] = True
-                            current_contact['desc_text'] = text
-                    else:
-                        current_contact = {
-                            'title': '',
-                            'subtitles': [text],
-                            'has_desc': True,
-                            'desc_text': text,
-                            'y': y
-                        }
-                else:
-                    if current_contact:
-                        contacts.append(current_contact)
-                    current_contact = {
-                        'title': text,
-                        'subtitles': [],
-                        'has_desc': False,
-                        'desc_text': '',
-                        'y': y
-                    }
-
-        if current_contact:
-            contacts.append(current_contact)
-
-        log(f"[OCR解析联系人] 数量={len(contacts)}: {[c['title'] + (' [含描述]' if c['has_desc'] else '') for c in contacts]}", "DEBUG")
-
-        choice, reason = evaluate_contact_candidates(contacts, target_id, target_name, dropdown_full_text, engine=engine_used)
-        log(f"[OCR决策({engine_used})] 目标: id={target_id}, name={target_name} => choice={choice}, reason={reason}", "INFO" if choice > 0 else "WARN")
-
-        # 现场调试截图归档 (全量留存每个学生的识别现场以供审查)
-        _save_dropdown_debug_shot(crop_img, target_id, target_name, choice)
-
-        return choice, reason
-
-    except Exception as e:
-        log(f"模式 B 下拉框 OCR 分析异常: {e}", "ERROR")
-        _save_dropdown_debug_shot(crop_img, target_id, target_name, -1, tag="exception")
-        return -1, ""
-
-
-def _save_dropdown_debug_shot(crop_img, target_id: str, target_name: str, choice: int, tag: str = ""):
-    """保存下拉框判定现场快照留证 (全量存档以供审查复盘)"""
-    if not crop_img:
-        return
-    try:
-        os.makedirs(DEBUG_IMG_DIR, exist_ok=True)
-        safe_name = re.sub(r'[\\/:*?"<>|\s]', '_', f"{target_id}_{target_name}").strip('_') or "unknown"
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-        suffix = f"_{tag}" if tag else ""
-        shot_path = os.path.join(DEBUG_IMG_DIR, f"{ts}_{safe_name}_choice{choice}{suffix}.png")
-        crop_img.save(shot_path)
-        log(f"[现场调试快照] 已归档至: {shot_path}", "DEBUG")
-    except Exception as se:
-        log(f"[现场调试快照保存失败]: {se}", "WARN")
-
-
 def dismiss_and_clear_search():
     """安全退出搜索下拉浮层并彻底清空搜索输入框，杜绝残留文字或焦点干扰后续操作"""
     try:
@@ -1032,49 +742,6 @@ def dismiss_and_clear_search():
         pyautogui.press("esc")
     except Exception as e:
         log(f"清空搜索框异常: {e}", "DEBUG")
-
-
-def detect_dropdown_target(wecom_rect: tuple, target_id: str, target_name: str, mode: str = "A", auto_fallback: bool = True) -> tuple:
-    """
-    【下拉候选框视觉智能决策总控】
-    模式 A: 通义千问 Qwen3.8-Flash 大模型视觉感知 (语义推断、关系消歧) —— 默认路径
-    模式 B: 本地 RapidOCR / WinOCR 视觉引擎 —— 暂时停用，仅在界面显式选择 B 时才走。
-            默认路径**不再由模式 A 降级到 B**：模式 A 故障时返回 -1，由调用方按
-            「试探第 1 项 → 标题检查点裁决」处理。这比降级到一个可能压根没装好的
-            本地引擎更可靠，也不会把一次接口故障伪装成业务结论。
-
-    auto_fallback 参数为兼容旧调用保留，当前 A→B 降级链路已停用。
-
-    返回: (choice, reason)
-      choice >= 1: 目标本人所在的候选项序号（1 起）
-      choice == 0:  未找到本人独立条目（调用方按第 1 项试探处理）
-      choice == -1: 接口/截图失败（同上，按第 1 项试探处理）
-    """
-    if not wecom_rect:
-        log("未获取到企业微信窗口坐标，跳过下拉框视觉核验（按第 1 项试探）", "WARN")
-        return -1, ""
-
-    if mode == "A":
-        crop_img = capture_dropdown_crop(wecom_rect)
-        if crop_img:
-            choice, reason = detect_dropdown_target_via_vlm(crop_img, target_id, target_name)
-            if choice >= 0:
-                _save_dropdown_debug_shot(crop_img, target_id, target_name, choice, tag="vlm")
-                return choice, reason
-            # choice == -1 表示 VLM 调用出错或网络异常
-            log(f"云端 AI 视觉识别失败 ({reason})，将按第 1 项试探并交由会话标题检查点裁决", "WARN")
-            return -1, reason
-        log("截取下拉框区域失败，将按第 1 项试探并交由会话标题检查点裁决", "WARN")
-        return -1, "截屏失败"
-
-    elif mode == "B":
-        # 分支保留供将来恢复本地 OCR 方案，当前默认路径不进入。
-        if HAS_OCR:
-            return detect_dropdown_target_via_ocr(wecom_rect, target_id, target_name)
-        log("本地视觉核验跳过: 未安装可用本地 OCR 引擎（将按第 1 项试探）", "WARN")
-        return -1, ""
-
-    return -1, "智能核验已关闭"
 
 
 def _save_debug_header_shot(crop_img, target_id: str, target_name: str, header_text: str, tag: str):
@@ -1319,12 +986,24 @@ def image_to_base64_jpeg(pil_img: Image.Image, quality: int = 85) -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
-def call_cloud_vision(task: str, crop_img: Image.Image, target_id: str, target_name: str, timeout: float = 10.0) -> dict:
+# 各视觉任务的独立超时（秒）。dropdown 送的是整窗原图，payload 远大于 header
+# 的窄标题条，沿用 10s 会频繁超时并静默降级成「按第 1 项试探」，白白浪费一轮。
+VISION_TIMEOUT = {"dropdown": 30.0, "header": 10.0, "chatview": 30.0}
+DEFAULT_VISION_TIMEOUT = 10.0
+
+
+def call_cloud_vision(task: str, crop_img: Image.Image, target_id: str, target_name: str, timeout: float = 0.0) -> dict:
     """
     向服务端 api/desktop.php?action=vision_detect 发起大模型视觉分析请求。
-    task: 'dropdown' | 'header'
-    返回: dict (包含 choice/matched, reason, duration_ms 等)
+    task: 'chatview'（当前主流程唯一使用：一次调用同时取身份/is_group/needs_reply）
+          'header'（旧版窄标题条路径，仅保留给历史日志排查与模式 B 回退对照）
+          'dropdown'（v2.5.x 的下拉选人，v2.6.0 起已从主流程删除）
+    timeout<=0 时取 VISION_TIMEOUT[task]。
+    返回: dict (含 matched/detected_title/title_in_header/is_group/last_sender/
+                last_message_text/needs_reply/reason/duration_ms)
     """
+    if timeout <= 0:
+        timeout = VISION_TIMEOUT.get(task, DEFAULT_VISION_TIMEOUT)
     if not crop_img:
         return {"success": False, "error": "截屏图像为空"}
     try:
@@ -1346,35 +1025,259 @@ def call_cloud_vision(task: str, crop_img: Image.Image, target_id: str, target_n
         return {"success": False, "error": str(e)}
 
 
-def capture_dropdown_crop(wecom_rect: tuple):
-    """动态 DPI 自适应截取企微搜索下拉列表区域 (约 380x460 物理像素)"""
+# ============================================================
+# 窗口抓帧层：Windows Graphics Capture (WGC)
+# ------------------------------------------------------------
+# 选 WGC 的实证依据（probe_wgc.py 真机取证，见 probe_out/）：
+#   - wgc-visible：1240x1015、mean=226.92、380ms、非黑 → 可用
+#   - wgc-minimized 与 wgc-visible 的 md5 **完全相同**，耗时 5104ms
+#     → WGC 在拿不到新表面时会返回**缓存旧帧而不报错**，故必须自己判新鲜度
+#   - PyAutoGUI 在窗口出屏时会截出纯黑条（见 _capture_wecom_full_via_screen 注释）
+#
+# windows-capture 的两个硬约束（务必记住）：
+#   1. Python 接口只接受 window_name（窗口标题），**不接受 hwnd** → 按标题匹配
+#      可能抓错同名窗口，故标题从 hwnd 实时取，取不到才退回硬编码的「企业微信」。
+#   2. 是**事件回调式**（@capture.event + capture.start() 阻塞），没有同步单张
+#      接口；且真机上「紧接上一个会话后建新会话」会抛 `Failed to initialize
+#      WinRT`，故必须退避重试。
+# ============================================================
+
+_WGC_CLASS = None    # windows_capture.WindowsCapture；None = 不可用
+_WGC_PROBED = False  # 惰性探测只做一次，失败后不再重复 import
+
+
+def _load_wgc_class():
+    """惰性导入 windows_capture 并缓存结果（失败只警告一次，不刷屏）。"""
+    global _WGC_CLASS, _WGC_PROBED
+    if _WGC_PROBED:
+        return _WGC_CLASS
+    _WGC_PROBED = True
+    try:
+        from windows_capture import WindowsCapture
+        _WGC_CLASS = WindowsCapture
+        log("已启用 Windows Graphics Capture (WGC) 抓帧：整窗截图不再受出屏/遮挡影响", "INFO")
+    except Exception as e:
+        _WGC_CLASS = None
+        log(f"未安装 windows-capture，整窗抓帧回退 PyAutoGUI（窗口出屏或被遮挡时会截不全）: {e}", "WARN")
+    return _WGC_CLASS
+
+
+def get_wecom_window_title() -> str:
+    """取企微主窗口标题。windows_capture 只认标题不认 hwnd，这里从 hwnd 实时取，
+    取不到才退回硬编码值——硬编码只在拿不到 hwnd 时用。"""
+    if HAS_WIN32:
+        try:
+            import win32gui
+            hwnd = get_wecom_hwnd()
+            if hwnd:
+                title = (win32gui.GetWindowText(hwnd) or "").strip()
+                if title:
+                    return title
+        except Exception:
+            pass
+    return "企业微信"
+
+
+def _grab_via_wgc_once(window_title: str, png_path: str) -> str:
+    """建一次 WGC 会话抓一帧存到 png_path。返回 "" 表示成功，否则返回错误描述。"""
+    cls = _load_wgc_class()
+    if cls is None:
+        return "windows-capture 不可用"
+
+    done = Event()
+    errors = []
+
+    def on_frame(frame, control):
+        try:
+            frame.save_as_image(png_path)
+        except Exception as e:
+            errors.append(f"save_as_image: {e}")
+        finally:
+            try:
+                control.stop()
+            except Exception:
+                pass
+            done.set()
+
+    def on_closed():
+        done.set()
+
+    try:
+        capture = cls(
+            cursor_capture=None,
+            draw_border=None,
+            monitor_index=None,
+            window_name=window_title,
+        )
+    except Exception as e:
+        return f"建会话对象失败: {e}"
+
+    try:
+        capture.event(on_frame)
+        capture.event(on_closed)
+    except Exception as e:
+        return f"注册回调失败: {e}"
+
+    def run():
+        try:
+            capture.start()   # 阻塞，直到 on_frame 里 control.stop()
+        except Exception as e:
+            errors.append(str(e))
+            done.set()
+
+    th = Thread(target=run, daemon=True)
+    th.start()
+    # start() 是阻塞的：窗口最小化 / 无新帧 / 标题匹配不到窗口时它可能永不返回。
+    # 这里必须有硬超时，否则整条发送线程会被永久挂死。
+    if not done.wait(WGC_FRAME_TIMEOUT):
+        return f"等待首帧超过 {WGC_FRAME_TIMEOUT}s（窗口可能被最小化，或标题 {window_title!r} 未匹配到窗口）"
+
+    if errors:
+        return str(errors[0])
+    return ""
+
+
+def grab_wecom_via_wgc(retries: int = WGC_RETRIES):
+    """用 WGC 抓企微整窗。成功返回 PIL Image，失败返回 None（调用方走 PyAutoGUI 兜底）。
+
+    退避重试的理由：真机上「紧接上一个 WGC 会话结束后立刻建新会话」会抛
+    `Failed to initialize WinRT`，间隔 0.8s/1.6s 后成功率显著提高。
+    """
+    if _load_wgc_class() is None:
+        return None
+
+    title = get_wecom_window_title()
+    fd, png_path = tempfile.mkstemp(prefix="wgc_", suffix=".png")
+    os.close(fd)
+    last_err = "未知原因"
+    try:
+        for attempt in range(retries + 1):
+            if attempt:
+                time.sleep(0.8 * attempt)
+
+            err = _grab_via_wgc_once(title, png_path)
+            if err:
+                last_err = err
+                log(f"[WGC] 第 {attempt + 1}/{retries + 1} 次抓帧失败: {err}", "WARN")
+                continue
+
+            # save_as_image 的落盘与 start() 返回之间没有显式完成保证，0 字节时稍等
+            for _ in range(10):
+                if os.path.exists(png_path) and os.path.getsize(png_path) > 0:
+                    break
+                time.sleep(0.1)
+
+            if not os.path.exists(png_path) or os.path.getsize(png_path) == 0:
+                last_err = "回调已触发但 PNG 为 0 字节"
+                continue
+
+            try:
+                img = Image.open(png_path)
+                img.load()   # 必须在 remove 之前把像素读进来
+                return img
+            except Exception as e:
+                last_err = f"读取 PNG 失败: {e}"
+                continue
+
+        log(f"[WGC] 抓帧彻底失败（已尝试 {retries + 1} 次，回退 PyAutoGUI）: {last_err}", "WARN")
+        return None
+    finally:
+        try:
+            os.remove(png_path)
+        except Exception:
+            pass
+
+
+def capture_wecom_full(wecom_rect: tuple):
+    """截取企业微信主窗口**整窗**区域（会话身份 + 待回消息判定共用一张图）。
+
+    抓帧优先级：Windows Graphics Capture (WGC) → PyAutoGUI 屏幕像素。
+
+    为什么必须走 WGC：PyAutoGUI 截的是屏幕像素，真机已抓到实证——
+      1. 【出屏】企微窗口摆在 y=1212、约 77% 悬在屏幕下边缘外时，截图第 7~29 行
+         纯黑（亮度 0），模型看到的是「半个窗口」；
+      2. 【遮挡】任何置顶窗口（含本工具自己的 Tk 主窗口、告警条）压住企微时，
+         截到的是别人的画面。
+    WGC 直接向合成器要窗口表面，与屏幕位置、被谁遮挡完全无关。
+
+    仍保留 PyAutoGUI 兜底（未装 windows-capture / WGC 建会话失败时），
+    此时行为退化为旧版，但至少不会因为没有 WGC 就完全不可用。
+
+    注意：会话核验的放行判据是 `target_id in detected_title and
+    target_name in detected_title`，模型一旦把聊天区正文也转录进 detected_title，
+    别人会话里出现过目标学号+姓名就会造成误判 MATCH。因此 detected_title 侧有
+    两道本地防线（judge_chat_identity）：长度封顶 + title_in_header 标记。
+    """
+    img = grab_wecom_via_wgc()
+    if img is not None:
+        return img
+    return _capture_wecom_full_via_screen(wecom_rect)
+
+
+def _capture_wecom_full_via_screen(wecom_rect: tuple):
+    """PyAutoGUI 兜底整窗截图：按虚拟屏幕边界裁剪，窗口出屏时只取可见部分。"""
     if not wecom_rect:
         return None
     try:
         wx, wy, ww, wh = wecom_rect
-        wecom_hwnd = get_wecom_hwnd()
-        scale = get_display_scale(wecom_hwnd)
         vx, vy, vw, vh = get_virtual_screen_bounds()
-
-        offset_y = int(46 * scale)
-        offset_x = int(38 * scale)
-        base_w = int(380 * scale)
-        base_h = int(460 * scale)
-
-        crop_x = max(vx, wx + offset_x)
-        crop_y = max(vy, wy + offset_y)
-        crop_w = max(int(200 * scale), min(base_w, int(ww * 0.45)))
-        crop_h = max(int(120 * scale), min(base_h, wh - offset_y - 10))
-
-        if crop_x + crop_w > vx + vw:
-            crop_w = max(50, (vx + vw) - crop_x)
-        if crop_y + crop_h > vy + vh:
-            crop_h = max(50, (vy + vh) - crop_y)
-
+        crop_x, crop_y = max(vx, wx), max(vy, wy)
+        crop_w = min(ww, vx + vw - crop_x)
+        crop_h = min(wh, vy + vh - crop_y)
+        if crop_w < 200 or crop_h < 200:
+            log(f"企微窗口尺寸异常({crop_w}x{crop_h})，放弃整窗截图", "WARN")
+            return None
         return pyautogui.screenshot(region=(crop_x, crop_y, crop_w, crop_h))
     except Exception as e:
-        log(f"截取下拉框区域异常: {e}", "WARN")
+        log(f"截取企微整窗异常: {e}", "WARN")
         return None
+
+
+def _frames_identical(a, b) -> bool:
+    """逐像素比较两张图是否完全一致（用于「等画面渲染稳定」）。"""
+    if a is None or b is None:
+        return False
+    try:
+        if a.size != b.size:
+            return False
+        return a.convert("RGB").tobytes() == b.convert("RGB").tobytes()
+    except Exception:
+        return False
+
+
+def capture_chat_view_stable(wecom_rect: tuple, settle_interval: float = WGC_SETTLE_INTERVAL,
+                             settle_timeout: float = WGC_SETTLE_TIMEOUT):
+    """抓一张「画面已经稳定」的企微整窗图。
+
+    为什么必须等稳定：按回车后企微是渐进渲染的（标题栏先出、消息气泡后出），
+    立刻截图会拍到半张画面；而 WGC 在最小化等场景下已被实证会**返回缓存旧帧而
+    不报错**（probe_out 里 wgc-minimized.png 与 wgc-visible.png md5 完全相同）。
+    所以这里连拍两帧比对：一致 = 画面已静止，可以采信；不一致就继续等，直到
+    settle_timeout 仍然拿不到稳定帧，才退回最后一帧。
+
+    注意：这只挡住「正在渲染」和「尺寸还在变」，**挡不住**内容完全静止的陈旧
+    缓存帧。真机若证明 WGC 会回旧帧，唯一可靠的补救是让判定 fail-closed
+    （judge_chat_identity 对读不到标题栏一律 UNCERTAIN），而不是放宽判据。
+    """
+    prev = capture_wecom_full(wecom_rect)
+    if prev is None:
+        return None
+
+    deadline = time.monotonic() + settle_timeout
+    shots = 1
+    while time.monotonic() < deadline:
+        time.sleep(settle_interval)
+        cur = capture_wecom_full(wecom_rect)
+        shots += 1
+        if cur is None:
+            continue
+        if _frames_identical(prev, cur):
+            log(f"[抓帧] 连拍 {shots} 帧一致，判定画面已稳定（{prev.size[0]}x{prev.size[1]}）", "DEBUG")
+            return cur
+        prev = cur
+
+    log(f"[抓帧] {settle_timeout}s 内未取得稳定帧（已拍 {shots} 帧），退回最后一帧", "WARN")
+    return prev
 
 
 def capture_header_crop(wecom_rect: tuple):
@@ -1408,44 +1311,158 @@ def capture_header_crop(wecom_rect: tuple):
         return None
 
 
-def detect_dropdown_target_via_vlm(crop_img, target_id: str, target_name: str) -> tuple:
-    """
-    通过云端大模型 API 分析搜索下拉候选列表。
 
-    机器只取一个整数：目标本人排在候选列表的第几项。模型返回的 target_found /
-    matched_title / reason 一律【不参与任何判定】，仅原样打进日志供管理员事后审计——
-    身份认定权全部交给「会话标题检查点」（它验的是屏幕上真实打开的会话，比模型
-    自称的 matched_title 证据更硬）。
+# 会话标题长度上限（物理字符）。企微的会话名都很短（「90001张三（家长）」这类），
+# 模型若把聊天区正文也当成标题塞进 detected_title，长度必然远超这个量级。
+# 这是「模型误把聊天记录当标题」的最后一道本地拦截，替代旧版「靠窄裁剪保证图里
+# 只有标题」的结构性保证 —— 整窗图里还有聊天区，必须补这道长度防线。
+CHAT_TITLE_MAX_LEN = 15
 
-    返回: (choice, reason)
-      - choice >= 1: 目标本人所在的候选项序号（1 起）
-      - choice == 0:  未找到本人独立条目（含「仅他人描述」「列表为空」等），
-                      调用方一律按 0 处理 → 试探第 1 项 → 交标题检查点裁决
-      - choice == -1: 接口调用失败/超时，同样按 0 处理
+
+def _empty_chat_res(error: str = "") -> dict:
+    """抓帧失败 / 接口故障时的空判定结果。status 直接给 ERROR → fail-closed 拦截。"""
+    return {
+        "status": "ERROR",
+        "error": error,
+        "detected_title": "",
+        "title_in_header": False,
+        "is_group": False,
+        "model_matched": False,
+        "last_sender": "unknown",
+        "last_message_text": "",
+        "needs_reply": None,
+        "reason": "",
+    }
+
+
+def inspect_chat_view_via_vlm(crop_img, target_id: str, target_name: str) -> dict:
+    """一次云端视觉调用，同时取回「会话身份」与「是否有待回消息」。
+
+    旧流程是两张图两次调用（下拉选人 + 窄标题条核验）。现在下拉选人已删除、
+    标题条必须换整窗（否则看不见聊天内容），两者合并为一次整窗调用：
+
+      身份（fail-closed，判不出=拦截）：detected_title / title_in_header / is_group
+      待回（fail-open，判不出=照发）：last_sender / last_message_text / needs_reply
+
+    两个方向**相反**，务必别写反：
+      身份闸门判不出来 → 绝不发（少发一条反馈可以补，误发一条是事故）；
+      待回名单判不出来 → 标「待人工确认」照发（宁可让老师多回一条消息）。
     """
-    res = call_cloud_vision("dropdown", crop_img, target_id, target_name)
+    res = call_cloud_vision("chatview", crop_img, target_id, target_name)
     if not res.get("success"):
-        return -1, res.get("error", "VLM 接口调用失败")
+        return _empty_chat_res(res.get("error", "VLM 接口调用失败"))
 
-    raw_choice = int(res.get("choice", 0) or 0)
-    matched_title = res.get("matched_title", "")
-    reason = res.get("reason", "")
+    detected_title = str(res.get("detected_title", "") or "").strip()
+    model_matched = bool(res.get("matched", False))
+    title_in_header = res.get("title_in_header")
+    is_group = bool(res.get("is_group", False))
 
-    # 输入归一化：负数（-1 未确立 / -2 仅他人描述）与 0 同义，都表示「没找到本人独立条目」。
-    # 不封顶：模型若指出目标排在第 3 项或更后，仍按其项序号精确定位。
-    choice = raw_choice if raw_choice > 0 else 0
+    # 模型没给 title_in_header 时不许默认 True：那等于放弃这道防线。
+    # 缺字段一律按「没能从标题栏读到标题」处理 → UNCERTAIN → fail-closed。
+    if title_in_header is None:
+        title_in_header = False
 
+    last_sender = str(res.get("last_sender", "unknown") or "unknown").strip().lower()
+    if last_sender not in ("parent", "me", "unknown"):
+        last_sender = "unknown"
+
+    needs_reply = res.get("needs_reply", None)
+    if isinstance(needs_reply, bool):
+        pass
+    elif isinstance(needs_reply, (int, float)) and needs_reply in (0, 1):
+        needs_reply = bool(needs_reply)
+    elif isinstance(needs_reply, str):
+        _s = needs_reply.strip().lower()
+        if _s in ("true", "yes", "1", "是", "需要", "需回", "需要回复", "要回"):
+            needs_reply = True
+        elif _s in ("false", "no", "0", "否", "不需要", "无需", "不用回"):
+            needs_reply = False
+        else:
+            needs_reply = None      # 模型给的不是可识别结论 → 判不出，按「待人工确认」处理
+
+    out = {
+        "status": None,
+        "error": "",
+        "detected_title": detected_title,
+        "title_in_header": bool(title_in_header),
+        "is_group": is_group,
+        "model_matched": model_matched,
+        "last_sender": last_sender,
+        "last_message_text": str(res.get("last_message_text", "") or "").strip(),
+        "needs_reply": needs_reply,
+        "reason": str(res.get("reason", "") or ""),
+    }
+    out["status"] = judge_chat_identity(out, target_id, target_name)
     log(
-        f"[大模型选人决策] 归一化 choice={choice}（模型原始 choice={raw_choice}）, "
-        f"title='{matched_title}', reason='{reason}'",
+        f"[大模型会话判定] status={out['status']}, title='{detected_title}', "
+        f"title_in_header={out['title_in_header']}, is_group={is_group}, "
+        f"last_sender={last_sender}, needs_reply={needs_reply}, reason='{out['reason']}'",
         "INFO",
     )
-    return choice, f"{reason}"
+    return out
+
+
+def judge_chat_identity(res: dict, target_id: str, target_name: str) -> str:
+    """【唯一放行闸门】从模型返回值里裁决会话身份。fail-closed：判不出即不放行。
+
+    返回 "MATCH" | "MISMATCH" | "UNCERTAIN"
+      - MISMATCH:  有确凿反证（是群 / 标题明确是别人 / 标题被聊天正文污染）
+      - UNCERTAIN: 读不出可信标题（缺 title_in_header、标题为空、模型报错），
+                   与 MISMATCH 一样**不放行**，但日志与状态文案区分开，
+                   便于老师分辨「进错了」和「没看清」。
+    """
+    if res.get("is_group"):
+        # 群聊拦截：整窗图里能看到群成员数与头像拼图，这是图像证据，不是靠
+        # 「群名不会恰好同时含学号和姓名」这种假设（旧版 TODO 的根治路径）。
+        return "MISMATCH"
+
+    detected_title = (res.get("detected_title") or "").strip()
+    if not detected_title:
+        return "UNCERTAIN"
+    if not res.get("title_in_header"):
+        return "UNCERTAIN"
+    if len(detected_title) > CHAT_TITLE_MAX_LEN:
+        log(
+            f"[身份判定纠偏] 标题 '{detected_title}' 长度 {len(detected_title)} 超过上限 "
+            f"{CHAT_TITLE_MAX_LEN}，判定为模型把聊天正文当成了标题，拒绝放行",
+            "WARN",
+        )
+        return "MISMATCH"
+
+    if target_id and target_name:
+        if not (target_id in detected_title and target_name in detected_title):
+            log(
+                f"[身份判定纠偏] 标题 '{detected_title}' 未同时包含学号 '{target_id}' 与姓名 "
+                f"'{target_name}'，拒绝放行（模型 matched={res.get('model_matched')}）",
+                "WARN",
+            )
+            return "MISMATCH"
+    elif target_id and target_id not in detected_title:
+        log(f"[身份判定纠偏] 标题 '{detected_title}' 不含学号 '{target_id}'，拒绝放行", "WARN")
+        return "MISMATCH"
+    elif target_name and target_name not in detected_title:
+        log(f"[身份判定纠偏] 标题 '{detected_title}' 不含姓名 '{target_name}'，拒绝放行", "WARN")
+        return "MISMATCH"
+
+    return "MATCH"
+
+
+def reply_note_verdict(note: dict) -> str:
+    """把一次会话的待回信息归成三档，供 app 名单展示（纯展示，不参与放行）。"""
+    need = note.get("needs_reply")
+    if need is True:
+        return "需回"
+    if need is False:
+        return "无需回"
+    return "待人工确认"
 
 
 def verify_chat_header_title_via_vlm(crop_img, target_id: str, target_name: str) -> tuple:
     """
-    通过云端大模型 API 核验会话顶部标题栏
+    旧版「窄标题条 + 云端视觉」核验路径。v2.6.0 起主流程改用
+    inspect_chat_view_via_vlm（整窗、一次调用同时取身份与待回信息），本函数仅保留：
+      - 供历史日志/旧版截图复现时对照排查；
+      - verify_chat_header_title(mode="A") 分支的入口（该分支当前主流程不再走）。
     返回: (status, detected_title)
     """
     res = call_cloud_vision("header", crop_img, target_id, target_name)
@@ -1457,10 +1474,6 @@ def verify_chat_header_title_via_vlm(crop_img, target_id: str, target_name: str)
     log(f"[大模型标题核验] matched={matched}, title='{detected_title}', reason='{reason}'", "INFO")
     if matched:
         # 双重防御：标题必须完全同时包含学号与姓名
-        # TODO(已知风险, 待真机验证后处理)：群聊标题若恰好同时含学号与姓名
-        #   （如「26006陈锦曦家长群」），会被本处判为 MATCH 并把反馈发进群。
-        #   本地判据为纯字符串比对，无法区分联系人与群；根治需模型额外报 is_group，
-        #   或本地加「(N)」/「群」等群名特征拦截。当前按产品决策暂不处理。
         if target_id and target_name:
             if not (target_id in detected_title and target_name in detected_title):
                 log(f"[大模型标题核验纠偏] 警告：模型返回 matched=True 但标题 '{detected_title}' 未同时包含学号 '{target_id}' 与姓名 '{target_name}'，修正为 MISMATCH", "WARN")
@@ -2366,6 +2379,10 @@ class FeedbackSender:
         self.is_running = False
         self.current_file_path = ""
         self.send_logs = []
+        # 待回名单：每进入过一个候选会话就留一条（哪怕身份没通过），
+        # 因为打开会话本身就会清掉家长的未读角标，这是不留就永久丢失的信息。
+        self.reply_notes = []
+        self.reply_btn = None
         self.history_mgr = HistoryManager()
         self.current_cycle = "第 1 周"
         self.cycle_var = tk.StringVar(value="第 1 周")
@@ -2861,7 +2878,9 @@ class FeedbackSender:
             return
 
         sid, sname = parse_student_identifier(student_name)
-        copy_text = f"{sid}，{sname}" if sid and sname else (sname or student_name)
+        # 不要加任何分隔符：复制出来的文本要能直接粘进企微搜索框，
+        # 夹一个全角逗号会让 '90001，张三' 匹配不到目标会话。
+        copy_text = f"{sid}{sname}" if sid and sname else (sname or student_name)
 
         if safe_copy(copy_text):
             orig_text = self.copy_student_btn.cget("text")
@@ -2962,6 +2981,16 @@ class FeedbackSender:
             width=12,
         )
         self.history_btn.pack(side="left", padx=8)
+
+        # 待回消息名单：打开会话会清掉家长未读角标，这份名单是补回该信号的唯一途径
+        self.reply_btn = ttk.Button(
+            btn_frame,
+            text="📨 待回名单 (0)",
+            command=self.show_reply_notes_dialog,
+            style="Warning.TButton",
+            width=15,
+        )
+        self.reply_btn.pack(side="left", padx=8)
 
         self.log_btn = ttk.Button(
             btn_frame,
@@ -3241,6 +3270,8 @@ class FeedbackSender:
         self.loaded_files = []
         self.current_file_path = ""
         self.send_logs = []
+        self.reply_notes = []
+        self._refresh_reply_btn()
 
     def refresh_queue_ui(self):
         """刷新文件条、汇总标签、预览表与按钮状态"""
@@ -3277,6 +3308,7 @@ class FeedbackSender:
         self.retry_failed_btn.config(state="disabled")
         self.export_btn.config(state="disabled" if not self.send_logs else "normal")
         self.send_logs = [] if not has_data else self.send_logs
+        self._refresh_reply_btn()
 
         if has_data:
             self.status_label.config(text=f"✓ 已就绪，共 {total} 条反馈数据。请核对名单后点击开始。", fg="#67C23A")
@@ -3524,7 +3556,38 @@ class FeedbackSender:
         if has_retryable:
             self.retry_failed_btn.config(state="normal")
 
-    # ================= 发送控制与执行 =================
+    # ================= 截图前自遮挡防护 =================
+
+    # 视觉判定抓的是屏幕像素，本程序自己的 Tk 主窗口压在企微上方就会截到控件。
+    # 收起用 withdraw 而非 iconify：withdraw 后窗口完全不参与屏幕合成，且
+    # root.after 事件循环照常运行（后台线程的状态回填依赖它）。
+
+    def _hide_self_for_capture(self):
+        """发送开始前收起本程序主窗口，避免遮挡企微截图"""
+        try:
+            already_withdrawn = self.root.state() == "withdrawn"
+            # 只有「本程序主动收起」的才负责恢复。若用户本来就自己收起了窗口，
+            # 发送结束后不得把它强行弹出来。
+            self._withdrawn_by_us = not already_withdrawn
+            if not already_withdrawn:
+                self.root.withdraw()
+                self.root.update_idletasks()
+                log("已收起本程序主窗口，避免遮挡企业微信截图", "DEBUG")
+        except Exception as e:
+            log(f"收起主窗口失败(继续发送): {e}", "WARN")
+            self._withdrawn_by_us = False
+
+    def _restore_self_after_capture(self):
+        """发送结束后恢复本程序主窗口（仅当是本程序主动收起的）"""
+        try:
+            if not getattr(self, "_withdrawn_by_us", False):
+                return
+            self.root.deiconify()
+            self.root.lift()
+            self._withdrawn_by_us = False
+            log("已恢复本程序主窗口", "DEBUG")
+        except Exception as e:
+            log(f"恢复主窗口失败: {e}", "WARN")
 
     def start_sending(self):
         """开始或继续发送"""
@@ -3558,11 +3621,17 @@ class FeedbackSender:
             return
 
         wecom_found = find_and_activate_wecom()
+        zoomed = ensure_wecom_maximized() if wecom_found else False
         file_count = len(getattr(self, "loaded_files", []))
         tip_msg = f"即将发送 {len(to_send_indices)} 条反馈消息"
         tip_msg += f"（来自 {file_count} 个文件）。\n\n" if file_count > 1 else "。\n\n"
         if wecom_found:
             tip_msg += "✓ 已自动检测并激活企业微信主窗口。\n"
+            tip_msg += (
+                "✓ 已自动最大化，避免窄窗口裁掉下拉候选条目。\n"
+                if zoomed
+                else "⚠️ 未能自动最大化企微窗口，窄窗口下下拉候选尾部可能被裁掉。\n"
+            )
         else:
             tip_msg += "⚠️ 未自动探测到企业微信，请确保企业微信已在电脑上登录并打开！\n"
 
@@ -3583,9 +3652,15 @@ class FeedbackSender:
         self.stop_btn.config(state="normal")
         self.retry_failed_btn.config(state="disabled")
 
-        self.show_floating_window("⚠️ 自动发送即将启动，请勿动鼠标键盘！按 ESC 停止")
-
         self.status_label.config(text="⏳ 3 秒后开始发送，请将目光移至企业微信...", fg="#E6A23C")
+        # 主窗口仍需收起，但理由已经变窄：
+        #   v2.6.0 主判定走 WGC（抓窗口表面），**对本程序自己遮挡免疫**；
+        #   真正还依赖屏幕像素的只剩两条兜底路径 ——
+        #     1. capture_wecom_full 回退到 PyAutoGUI 时（未装/装失败的 windows-capture）；
+        #     2. 模式 B 的 capture_header_crop 窄标题条 OCR。
+        #   只要这两条还在，本程序自己的 Tk 主窗口（1120x840）压在企微上方就会截到控件，
+        #   所以保留收起。置顶告警条是 Toplevel，收起主窗口不受影响。
+        self._hide_self_for_capture()
         self.root.update()
         time.sleep(3)
 
@@ -3594,6 +3669,7 @@ class FeedbackSender:
                 self._run_sending_thread(to_send_indices)
             finally:
                 self.is_running = False
+                self._restore_self_after_capture()
                 self.root.after(0, self.hide_floating_window)
                 self.root.after(0, lambda: self.start_btn.config(state="normal"))
                 self.root.after(0, lambda: self.stop_btn.config(state="disabled"))
@@ -3695,6 +3771,9 @@ class FeedbackSender:
             except Exception as e:
                 log(f"发送异常 [{student_name}]: {e}", "ERROR")
                 send_result = "FAILED"
+
+            # 待回名单可能新增了条目（含身份未通过的候选会话），刷新按钮计数
+            self.root.after(0, self._refresh_reply_btn)
 
             now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -3840,16 +3919,24 @@ class FeedbackSender:
     def send_single_feedback(self, search_name: str, message: str) -> str:
         """
         发送单条反馈核心动作序列：
-        1. Ctrl+F 激活搜索框，全选删除清空后粘贴「学号+姓名」，等待下拉框展开
-        2. 【第一道核验】云端视觉模型给出候选起始项序号 choice
-           （>=1 为目标本人所在项号；0 = 未找到本人独立条目，一律按第 1 项试探）
-        3. 按 (choice-1) 次【↓】定位后回车一次，进入该候选会话
-        4. 【第二道核验·唯一放行闸门】会话标题必须同时含目标学号与目标姓名
-        5. 标题不符/存疑 → 换另一个候选重走 1~4，最多共 2 次；仍不符则拦截，绝不发
-        6. 安全写入剪贴板并粘贴完整反馈，回车发送
+        1. 确保企微前台且已最大化（窗口尺寸变化会让已算好的裁剪坐标失效）
+        2. Ctrl+F 激活搜索框，全选删除清空后粘贴「学号+姓名」，等待下拉框展开
+        3. 按 (choice-1) 次【↓】定位后回车，进入第 choice 项候选会话
+           —— **不再询问模型选人**：v2.6.0 起下拉截图整步删除，候选按 1→2→3 顺序试
+        4. 消除切换残影 + 连拍两帧等画面稳定 → WGC 抓企微整窗
+        5. 【唯一放行闸门】一次云端视觉调用同时裁决：会话身份（fail-closed）、
+           是否群聊、是否有待回消息（fail-open，只记录）
+        6. 身份不符 → 换下一个候选重走 2~5，最多共 3 个；仍不符则拦截，绝不发
+        7. 安全写入剪贴板并粘贴完整反馈，回车发送
 
-        判定权分配：模式 A 只负责「指一个起始项」，会话标题检查点负责「拍板放行」。
-        模型返回的 reason / matched_title 仅留日志供管理员审计，不参与任何判定。
+        为什么把下拉选人整步删掉：
+          下拉截图唯一的产出是 choice（指一个起始项），而身份认定权本来就在标题
+          闸门。删掉后常见情况（输全「学号+姓名」，目标通常就在第 1 项）从
+          2 次 API 调用降到 1 次。
+          代价是目标不在第 1 项时必须按 3 次回车、进 3 个会话。而**进会话这一步
+          本身就会清掉该家长会话的未读角标**（不是发消息那一步），所以第 6 步对
+          **每一个进入过的候选**都记录待回信息，哪怕身份没通过——否则老师事后
+          完全无从知道哪位家长找过我们。
 
         返回: "SUCCESS" | "HEADER_MISMATCH" | "UNCERTAIN_INTERCEPT" | "ABORTED" | "FAILED"
         """
@@ -3859,27 +3946,35 @@ class FeedbackSender:
         wecom_rect = get_wecom_rect()
         smart_mode = self.smart_mode_var.get()
         auto_fallback = self.auto_fallback_var.get()
-        # 未开启智能核验 / 取不到窗口坐标 → 退化为「进第 1 项」，且无标题闸门（等同旧版直发路径）
+        # 未开启智能核验 / 取不到窗口坐标 → 退化为「进第 1 项」，且无身份闸门（等同旧版直发路径）
         use_smart = smart_mode != "OFF" and HAS_SMART_CHECK and bool(wecom_rect)
 
-        MAX_ATTEMPTS = 2  # 共 2 次尝试：模式 A 指哪就试哪，再试另一个；都不符则拦截
-        target_choice = 0  # 本轮要尝试的候选项序号，0 = 尚未探测，按第 1 项试探
-        first_choice = 0   # 首轮实际选中的候选项，决定第二轮换去哪一项
+        if use_smart and smart_mode == "B":
+            # 模式 B（本地 OCR）只在云端异常时作为兜底接管**身份**闸门；它只截窄标题条，
+            # 看不见聊天内容，因此拿不到 needs_reply —— 选 B 会让待回名单整体失效。
+            log(
+                "[{0}] 当前为模式 B（本地 OCR）：它只读窄标题条、看不到聊天内容，"
+                "本次运行的【待回消息名单】将无法生成。需该功能请切回模式 A。".format(search_name),
+                "WARN",
+            )
+
+        MAX_ATTEMPTS = 3  # 候选按第 1、2、3 项顺序试；三个都不符则拦截，绝不发
 
         for attempt in range(1, MAX_ATTEMPTS + 1):
+            choice = attempt  # 机械顺序 1→2→3，不再询问模型
             if attempt == 1:
                 if not self.safe_sleep(0.1):
                     log(f"[{search_name}] 中断退出", "WARN")
                     return "ABORTED"
             else:
                 log(
-                    f"[{search_name}] ↩ 换候选重试（第 {attempt}/{MAX_ATTEMPTS} 次）：改选第 {target_choice} 项",
+                    f"[{search_name}] ↩ 换候选重试（第 {attempt}/{MAX_ATTEMPTS} 次）：改选第 {choice} 项",
                     "INFO",
                 )
                 self.root.after(
                     0,
-                    lambda n=search_name, c=target_choice: self.status_label.config(
-                        text=f"🔄 换候选重试 [{n}]：上一候选标题不符，改选第{c}项重新核验",
+                    lambda n=search_name, c=choice: self.status_label.config(
+                        text=f"🔄 换候选重试 [{n}]：上一候选身份不符，改选第{c}项重新核验",
                         fg="#E6A23C",
                     ),
                 )
@@ -3887,6 +3982,13 @@ class FeedbackSender:
                 dismiss_and_clear_search()
                 if not self.safe_sleep(0.4):
                     return "ABORTED"
+
+            # ---------- 0. 确保企微前台且已最大化 ----------
+            # 必须在按 Ctrl+F 之前完成：窗口尺寸变化会让已算好的裁剪坐标失效，
+            # 而搜索后再最大化会把已经展开的下拉框冲掉。
+            if HAS_WIN32:
+                ensure_wecom_maximized()
+                wecom_rect = get_wecom_rect()  # 最大化后必须重取，旧 rect 已失效
 
             # ---------- 1. 激活搜索框 ----------
             pyautogui.hotkey("ctrl", "f")
@@ -3908,37 +4010,16 @@ class FeedbackSender:
             if not self.safe_sleep(SEARCH_DELAY):
                 return "ABORTED"
 
-            # ---------- 4. 第一道核验：候选起始项 ----------
-            if attempt == 1:
-                # 首轮才问模型。重试轮绝不再问——模型对同一张下拉框大概率给出与首轮
-                # 相同的建议，再问一次会让「换候选」退化成原地重复，白白浪费一次会话。
-                if use_smart:
-                    raw_choice, reason = detect_dropdown_target(
-                        wecom_rect, target_id, target_name, mode=smart_mode, auto_fallback=auto_fallback
-                    )
-                    # choice <= 0（含 0「未找到本人」与 -1「接口故障」）统一按「进第 1 项试探」处理，
-                    # 身份认定完全交给第 6 步的会话标题检查点。
-                    choice = raw_choice if raw_choice > 0 else 1
-                    log(f"[{search_name}] 选人决策 choice={choice}（模型原始: {reason}）", "INFO")
-                else:
-                    # 未开启智能核验（或取不到窗口坐标）：直接进第 1 项
-                    choice = 1
-                    log(f"[{search_name}] 未开启视觉智能核验，直接进入第 1 项", "INFO")
-                first_choice = choice
-            else:
-                choice = target_choice
-                log(f"[{search_name}] 重试轮不再询问模型，直接改选第 {choice} 项", "INFO")
-
             if choice > 1:
                 self.root.after(
                     0,
                     lambda n=search_name, c=choice: self.status_label.config(
-                        text=f"🎯 智能纠偏 [{n}]：已按【向下键】定位至第{c}项",
+                        text=f"🎯 [{n}]：已按【向下键】定位至第{c}项",
                         fg="#E6A23C",
                     ),
                 )
 
-            # ---------- 5. 按【↓】定位到目标候选项并回车进入 ----------
+            # ---------- 4. 按【↓】定位到候选项并回车进入 ----------
             for _ in range(choice - 1):
                 pyautogui.press("down")
                 time.sleep(0.12)
@@ -3949,28 +4030,52 @@ class FeedbackSender:
                 return "ABORTED"
 
             if not use_smart:
-                break  # 无标题闸门，直接进入发送阶段
+                break  # 无身份闸门，直接进入发送阶段
 
-            # ---------- 6. 第二道核验：会话标题检查点（唯一放行闸门） ----------
-            header_status, header_title = verify_chat_header_title(
-                wecom_rect, target_id, target_name, timeout=1.2, mode=smart_mode, auto_fallback=auto_fallback
-            )
+            # ---------- 5. 会话视觉判定（唯一放行闸门） ----------
+            # 5.1 消除企微会话切换动画的残影（旧版窄标题条路径的 0.35s，保留）
+            time.sleep(0.35)
+            # 5.2 连拍两帧等画面稳定后抓整窗（WGC；未装则回退 PyAutoGUI）
+            chat_img = capture_chat_view_stable(wecom_rect)
+            if chat_img is None:
+                log(f"[{search_name}] 企微整窗抓帧失败", "ERROR")
+                chat_res = _empty_chat_res("抓帧失败")
+                status, title = chat_res["status"], chat_res["detected_title"]
+            else:
+                chat_res = inspect_chat_view_via_vlm(chat_img, target_id, target_name)
+                status, title = chat_res["status"], chat_res["detected_title"]
 
-            if header_status == "MATCH":
-                log(f"[{search_name}] ✓ 会话标题核验通过: '{header_title}'", "INFO")
+            # 云端异常/存疑时无缝切到本地 OCR 备用引擎（模式 B）
+            if status in ("UNCERTAIN", "ERROR") and auto_fallback and HAS_OCR and smart_mode == "A":
+                log(f"[{search_name}] 云端会话判定异常/存疑（{status}），自动切换至本地备用引擎...", "WARN")
+                status, title = verify_chat_header_title(
+                    wecom_rect, target_id, target_name, timeout=1.2, mode="B"
+                )
+                # 必须把模式 B 读到的标题回填进 chat_res：否则待回名单里会出现
+                # 「✅已确认」配「(标题读取失败)」这种自相矛盾的组合 —— 云端当时是
+                # 失败的，chat_res.detected_title 还是空的，但身份已被模式 B 判定通过了。
+                # 只回填标题，不动 needs_reply：模式 B 看不见聊天内容，云端那份仍然更可信。
+                if status == "MATCH" and title:
+                    chat_res["detected_title"] = title
+                    chat_res["title_in_header"] = True
+
+            # ---------- 6. 待回信息：每一个进入过的候选都要留痕 ----------
+            # 进会话已经清掉了家长的未读角标，身份没过也必须记录，
+            # 否则老师事后无从知道这位家长找过我们。
+            self._record_reply_note(search_name, choice, status, title, chat_res)
+
+            if status == "MATCH":
+                log(f"[{search_name}] ✓ 第 {choice} 项会话身份核验通过: '{title}'", "INFO")
                 break
 
             log(
-                f"[{search_name}] ⛔ 会话标题核验未通过（{header_status}），"
-                f"当前会话为【{header_title or '无法读取'}】，与目标学生不符",
+                f"[{search_name}] ⛔ 第 {choice} 项身份核验未通过（{status}），"
+                f"当前会话为【{title or '无法读取'}】",
                 "WARN",
             )
 
-            # 换候选：首轮选的是第 1 项 → 改选第 2 项；首轮选的本来就是第 2 项及以后 → 改选第 1 项
-            target_choice = 2 if first_choice <= 1 else 1
-
             if attempt == MAX_ATTEMPTS:
-                if header_status in ("UNCERTAIN", "ERROR"):
+                if status in ("UNCERTAIN", "ERROR"):
                     log(f"[{search_name}] 已尝试 {MAX_ATTEMPTS} 个候选仍无法核准身份，触发安全拦截防盲发！", "ERROR")
                     self.root.after(
                         0,
@@ -3985,7 +4090,7 @@ class FeedbackSender:
                 log(f"[{search_name}] 已尝试 {MAX_ATTEMPTS} 个候选均与目标不符，触发安全拦截防误发！", "ERROR")
                 self.root.after(
                     0,
-                    lambda n=search_name, m=MAX_ATTEMPTS, t=header_title: self.status_label.config(
+                    lambda n=search_name, m=MAX_ATTEMPTS, t=title: self.status_label.config(
                         text=f"⛔ 标题不符已拦截 [{n}]：{m} 个候选均不符（当前为【{t or '无法读取'}】），已拦截！",
                         fg="#F56C6C",
                     ),
@@ -4014,6 +4119,147 @@ class FeedbackSender:
         log(f"[{search_name}] 单条反馈发送成功 ✓", "INFO")
         return "SUCCESS"
 
+
+    # ================= 待回消息名单 =================
+
+    def _record_reply_note(self, student_name, candidate_index, status, title, chat_res):
+        """把一次进入过的候选会话的待回信息记进名单。
+
+        **对每一个进入过的候选都调用**（身份没通过也要记）：企微在打开会话的瞬间
+        就清掉该会话的未读角标，所以「进入」这个动作本身是不可逆的信息销毁。
+        老师事后是靠未读角标发现家长找过我们的，我们把角标消费掉了，就得用这份
+        名单把信号补回来。
+
+        这个字段是 fail-open 的：needs_reply 为 None（模型判不出）时记「待人工确认」，
+        **绝不能**因此拦住发送。
+        """
+        need = chat_res.get("needs_reply")
+        text = (chat_res.get("last_message_text") or "").strip()
+        sender = chat_res.get("last_sender", "unknown")
+        # 三者全空（抓帧失败 / 模型什么都没返回）才跳过：连会话标题都没读到时
+        # 记一条纯噪声，老师无从处理。
+        if need is None and not text and not title:
+            return
+
+        note = {
+            "student": student_name,
+            "candidate": candidate_index,
+            "chat_title": title or "(标题读取失败)",
+            "identity": "✅已确认" if status == "MATCH" else "❌未确认",
+            "last_sender": {"parent": "家长", "me": "我"}.get(sender, "未知"),
+            "last_message": text,
+            "needs_reply": need,
+            "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        note["verdict"] = reply_note_verdict(note)
+
+        # 同一学生 + 同一会话标题只保留最新一条（重跑/重试时不重复堆叠）
+        for i, old in enumerate(self.reply_notes):
+            if old["student"] == note["student"] and old["chat_title"] == note["chat_title"]:
+                self.reply_notes[i] = note
+                break
+        else:
+            self.reply_notes.append(note)
+
+        log(
+            f"[待回名单] {note['student']} 第{note['candidate']}项 | 会话【{note['chat_title']}】"
+            f" | 身份{note['identity']} | 最后一条({note['last_sender']}): {text[:50]} | → {note['verdict']}",
+            "INFO",
+        )
+
+    def reply_actionable(self) -> list:
+        """待回名单里真正需要老师去回的条目：排除明确判为「无需回」的。"""
+        return [n for n in self.reply_notes if n.get("needs_reply") is not False]
+
+    def _refresh_reply_btn(self):
+        """刷新按钮上的待回数量。必须在 Tk 主线程调用。"""
+        if not self.reply_btn:
+            return
+        n = len(self.reply_actionable())
+        try:
+            self.reply_btn.config(text=f"📨 待回名单 ({n})")
+        except Exception:
+            pass
+
+    def show_reply_notes_dialog(self):
+        """展示待回消息名单（老师据此逐个给家长回消息）。"""
+        rows = self.reply_actionable()
+        win = tk.Toplevel(self.root)
+        win.title("待回消息名单（进入会话会清掉未读角标，此表用于补回该信号）")
+        win.geometry("1080x560")
+        win.configure(bg="#F5F7FA")
+
+        tk.Label(
+            win,
+            text=(
+                f"共 {len(self.reply_actionable())} 条需要老师处理"
+                f"（本次运行共进入 {len(self.reply_notes)} 个会话）。\n"
+                "「❌未确认」= 身份核验未通过，但该会话里检测到家长有消息；请人工打开核对。\n"
+                "「待人工确认」= 模型没给出明确结论，请自行判断是否需要回复。"
+            ),
+            font=("Microsoft YaHei", 9),
+            fg="#606266",
+            bg="#F5F7FA",
+            justify="left",
+        ).pack(anchor="w", padx=10, pady=(10, 6))
+
+        cols = ("student", "chat", "identity", "sender", "message", "verdict", "time")
+        tree = ttk.Treeview(win, columns=cols, show="headings", height=20)
+        heads = {
+            "student": "学员（本次搜索目标）", "chat": "会话标题", "identity": "身份",
+            "sender": "最后一条发送方", "message": "最后一条内容", "verdict": "判定", "time": "记录时间",
+        }
+        widths = {"student": 130, "chat": 170, "identity": 80, "sender": 90, "message": 330, "verdict": 90, "time": 140}
+        for c in cols:
+            tree.heading(c, text=heads[c])
+            tree.column(c, width=widths[c], stretch=(c == "message"))
+        vsb = ttk.Scrollbar(win, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.pack(side="top", fill="both", expand=True, padx=10)
+        vsb.pack(side="right", fill="y")
+
+        for n in rows:
+            tree.insert(
+                "", "end",
+                values=(
+                    n["student"], n["chat_title"], n["identity"], n["last_sender"],
+                    (n["last_message"] or "(空)")[:120], n["verdict"], n["time"],
+                ),
+            )
+        tree.tag_configure("need", foreground="#F56C6C")
+        tree.tag_configure("unknown", foreground="#E6A23C")
+        for i, n in enumerate(rows):
+            tree.item(i, tags=("need",) if n["needs_reply"] is True else ("unknown",))
+
+        bar = tk.Frame(win, bg="#F5F7FA")
+        bar.pack(side="bottom", fill="x", pady=8)
+
+        def do_export():
+            if not rows:
+                messagebox.showinfo("提示", "名单为空，无需导出。", parent=win)
+                return
+            path = filedialog.asksaveasfilename(
+                title="导出待回消息名单",
+                defaultextension=".csv",
+                filetypes=[("CSV 表格 (Excel 兼容)", "*.csv")],
+                initialfile=f"待回名单_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                parent=win,
+            )
+            if not path:
+                return
+            try:
+                with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                    w = csv.writer(f)
+                    w.writerow(["学员（本次搜索目标）", "会话标题", "身份", "最后一条发送方", "最后一条内容", "判定", "记录时间"])
+                    for n in rows:
+                        w.writerow([n["student"], n["chat_title"], n["identity"], n["last_sender"],
+                                    n["last_message"], n["verdict"], n["time"]])
+                messagebox.showinfo("导出成功", f"待回名单已导出至：\n{path}", parent=win)
+            except Exception as e:
+                messagebox.showerror("导出失败", f"保存 CSV 失败：\n{e}", parent=win)
+
+        ttk.Button(bar, text="📤 导出 CSV", command=do_export, width=16).pack(side="left", padx=(0, 8))
+        ttk.Button(bar, text="关闭", command=win.destroy, width=12).pack(side="right")
 
     # ================= 导出记录与悬浮条 =================
 
