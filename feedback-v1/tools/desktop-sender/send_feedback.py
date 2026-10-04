@@ -128,7 +128,7 @@ def preprocess_dropdown_image(pil_img: Image.Image) -> Image.Image:
         return pil_img
 
 # 客户端应用版本号
-APP_VERSION = "v2.4.1"
+APP_VERSION = "v2.5.0"
 
 
 def detect_cycle_from_string(text: str) -> str:
@@ -214,7 +214,7 @@ def detect_cycle_from_data(raw_data: list, file_path: str = "") -> str:
     return ""
 
 # 基础默认延时配置 (秒)
-SEARCH_DELAY = 1.5
+SEARCH_DELAY = 0.5
 CLICK_DELAY = 0.5
 TYPE_DELAY = 0.3
 SEND_DELAY = 1.0
@@ -1037,42 +1037,41 @@ def dismiss_and_clear_search():
 def detect_dropdown_target(wecom_rect: tuple, target_id: str, target_name: str, mode: str = "A", auto_fallback: bool = True) -> tuple:
     """
     【下拉候选框视觉智能决策总控】
-    模式 A: 通义千问 Qwen3.8-Flash 大模型视觉感知 (语义推断、关系消歧)
-    模式 B: 本地 RapidOCR / WinOCR 视觉引擎 (离线、本地)
-    auto_fallback: 模式 A 发生网络或服务端异常时，自动平滑降级至模式 B
+    模式 A: 通义千问 Qwen3.8-Flash 大模型视觉感知 (语义推断、关系消歧) —— 默认路径
+    模式 B: 本地 RapidOCR / WinOCR 视觉引擎 —— 暂时停用，仅在界面显式选择 B 时才走。
+            默认路径**不再由模式 A 降级到 B**：模式 A 故障时返回 -1，由调用方按
+            「试探第 1 项 → 标题检查点裁决」处理。这比降级到一个可能压根没装好的
+            本地引擎更可靠，也不会把一次接口故障伪装成业务结论。
+
+    auto_fallback 参数为兼容旧调用保留，当前 A→B 降级链路已停用。
+
     返回: (choice, reason)
-      choice >= 1: 命中项序号
-      choice == 0: 通讯录中无此联系人 (全局搜索)
-      choice == -2: 仅他人描述 (无本人独立条目)
-      choice == -1: 未确立或出错
+      choice >= 1: 目标本人所在的候选项序号（1 起）
+      choice == 0:  未找到本人独立条目（调用方按第 1 项试探处理）
+      choice == -1: 接口/截图失败（同上，按第 1 项试探处理）
     """
     if not wecom_rect:
-        log("未获取到企业微信窗口坐标，跳过下拉框视觉核验", "WARN")
+        log("未获取到企业微信窗口坐标，跳过下拉框视觉核验（按第 1 项试探）", "WARN")
         return -1, ""
 
     if mode == "A":
         crop_img = capture_dropdown_crop(wecom_rect)
         if crop_img:
             choice, reason = detect_dropdown_target_via_vlm(crop_img, target_id, target_name)
-            if choice != -1:
+            if choice >= 0:
                 _save_dropdown_debug_shot(crop_img, target_id, target_name, choice, tag="vlm")
                 return choice, reason
-
             # choice == -1 表示 VLM 调用出错或网络异常
-            if auto_fallback and HAS_OCR:
-                log(f"云端 AI 视觉识别异常 ({reason})，自动无缝切换为本地备用引擎...", "WARN")
-                return detect_dropdown_target_via_ocr(wecom_rect, target_id, target_name)
-            return choice, reason
-        else:
-            if auto_fallback and HAS_OCR:
-                log("截取下拉框区域失败，自动切换至本地备用引擎...", "WARN")
-                return detect_dropdown_target_via_ocr(wecom_rect, target_id, target_name)
-            return -1, "截屏失败"
+            log(f"云端 AI 视觉识别失败 ({reason})，将按第 1 项试探并交由会话标题检查点裁决", "WARN")
+            return -1, reason
+        log("截取下拉框区域失败，将按第 1 项试探并交由会话标题检查点裁决", "WARN")
+        return -1, "截屏失败"
 
     elif mode == "B":
+        # 分支保留供将来恢复本地 OCR 方案，当前默认路径不进入。
         if HAS_OCR:
             return detect_dropdown_target_via_ocr(wecom_rect, target_id, target_name)
-        log("本地视觉核验跳过: 未安装可用本地 OCR 引擎", "WARN")
+        log("本地视觉核验跳过: 未安装可用本地 OCR 引擎（将按第 1 项试探）", "WARN")
         return -1, ""
 
     return -1, "智能核验已关闭"
@@ -1411,45 +1410,36 @@ def capture_header_crop(wecom_rect: tuple):
 
 def detect_dropdown_target_via_vlm(crop_img, target_id: str, target_name: str) -> tuple:
     """
-    通过云端大模型 API 分析搜索下拉候选列表
+    通过云端大模型 API 分析搜索下拉候选列表。
+
+    机器只取一个整数：目标本人排在候选列表的第几项。模型返回的 target_found /
+    matched_title / reason 一律【不参与任何判定】，仅原样打进日志供管理员事后审计——
+    身份认定权全部交给「会话标题检查点」（它验的是屏幕上真实打开的会话，比模型
+    自称的 matched_title 证据更硬）。
+
     返回: (choice, reason)
+      - choice >= 1: 目标本人所在的候选项序号（1 起）
+      - choice == 0:  未找到本人独立条目（含「仅他人描述」「列表为空」等），
+                      调用方一律按 0 处理 → 试探第 1 项 → 交标题检查点裁决
+      - choice == -1: 接口调用失败/超时，同样按 0 处理
     """
     res = call_cloud_vision("dropdown", crop_img, target_id, target_name)
     if not res.get("success"):
         return -1, res.get("error", "VLM 接口调用失败")
-    choice = int(res.get("choice", -1))
+
+    raw_choice = int(res.get("choice", 0) or 0)
     matched_title = res.get("matched_title", "")
     reason = res.get("reason", "")
-    target_found = res.get("target_found", True)
 
-    # 逻辑防御层 1：如果大模型在 target_found 中标记为 False，坚决不允许 choice > 0
-    if target_found is False:
-        if choice > 0:
-            choice = -2 if ("描述" in reason or "聊天记录" in reason or "群聊" in reason) else 0
+    # 输入归一化：负数（-1 未确立 / -2 仅他人描述）与 0 同义，都表示「没找到本人独立条目」。
+    # 不封顶：模型若指出目标排在第 3 项或更后，仍按其项序号精确定位。
+    choice = raw_choice if raw_choice > 0 else 0
 
-    # 逻辑防御层 2：如果 reason 明确指出“不存在”、“拦截”、“非独立联系人”、“仅在他人描述”或“聊天记录”
-    intercept_keywords = ["不存在", "拦截", "他人描述", "聊天记录", "群聊", "未找到", "无独立联系人", "并非本人", "非本人"]
-    if any(kw in reason for kw in intercept_keywords):
-        if "仅在他人描述" in reason or "聊天记录" in reason or "群聊" in reason or "他人备注" in reason:
-            choice = -2
-        elif "不存在" in reason or "未找到" in reason:
-            choice = 0
-
-    # 逻辑防御层 3：如果 choice >= 1，但 matched_title 未完全匹配学号与姓名
-    # 核心安全升级：必须完全同时匹配学号与姓名！
-    if choice >= 1:
-        if target_id and target_name:
-            if not (target_id in matched_title and target_name in matched_title):
-                log(f"[大模型决策纠偏] 警告：模型返回 choice={choice} 但标题 '{matched_title}' 未同时包含学号 '{target_id}' 与姓名 '{target_name}'，修正为安全拦截 (choice=-2)", "WARN")
-                choice = -2
-        elif target_id and target_id not in matched_title:
-            log(f"[大模型决策纠偏] 警告：模型返回 choice={choice} 但标题 '{matched_title}' 不含学号 '{target_id}'，修正为安全拦截 (choice=-2)", "WARN")
-            choice = -2
-        elif target_name and target_name not in matched_title:
-            log(f"[大模型决策纠偏] 警告：模型返回 choice={choice} 但标题 '{matched_title}' 不含姓名 '{target_name}'，修正为安全拦截 (choice=-2)", "WARN")
-            choice = -2
-
-    log(f"[大模型选人决策] choice={choice}, title='{matched_title}', reason='{reason}'", "INFO")
+    log(
+        f"[大模型选人决策] 归一化 choice={choice}（模型原始 choice={raw_choice}）, "
+        f"title='{matched_title}', reason='{reason}'",
+        "INFO",
+    )
     return choice, f"{reason}"
 
 
@@ -1467,6 +1457,10 @@ def verify_chat_header_title_via_vlm(crop_img, target_id: str, target_name: str)
     log(f"[大模型标题核验] matched={matched}, title='{detected_title}', reason='{reason}'", "INFO")
     if matched:
         # 双重防御：标题必须完全同时包含学号与姓名
+        # TODO(已知风险, 待真机验证后处理)：群聊标题若恰好同时含学号与姓名
+        #   （如「26006陈锦曦家长群」），会被本处判为 MATCH 并把反馈发进群。
+        #   本地判据为纯字符串比对，无法区分联系人与群；根治需模型额外报 is_group，
+        #   或本地加「(N)」/「群」等群名特征拦截。当前按产品决策暂不处理。
         if target_id and target_name:
             if not (target_id in detected_title and target_name in detected_title):
                 log(f"[大模型标题核验纠偏] 警告：模型返回 matched=True 但标题 '{detected_title}' 未同时包含学号 '{target_id}' 与姓名 '{target_name}'，修正为 MISMATCH", "WARN")
@@ -3713,6 +3707,8 @@ class FeedbackSender:
                     {"index": i + 1, "name": student_name, "status": "成功", "time": now_str, "msg_len": len(message), "file": item.get("_src_label", "")}
                 )
             elif send_result == "NOT_FOUND":
+                # 兼容旧版返回值：v2.5.0 起程序不再下「查无此人」的结论（无正向证据不写死），
+                # send_single_feedback 不再返回该值，此分支仅作防御保留。
                 not_found_count += 1
                 self.root.after(0, lambda idx=i: self.update_status(idx, "⚠️ 无此联系人"))
                 self.history_mgr.update_student_status(item.get("_src_file") or self.current_file_path, student_name, "⚠️ 无此联系人", now_str, cycle=self.current_cycle)
@@ -3720,6 +3716,7 @@ class FeedbackSender:
                     {"index": i + 1, "name": student_name, "status": "无此联系人", "time": now_str, "msg_len": len(message), "file": item.get("_src_label", "")}
                 )
             elif send_result == "DESC_ONLY":
+                # 同上：v2.5.0 起 choice=-2 语义已取消，程序不再直接返回该值，仅作防御保留。
                 desc_only_count += 1
                 self.root.after(0, lambda idx=i: self.update_status(idx, "⚠️ 仅他人描述(拦截)"))
                 self.history_mgr.update_student_status(item.get("_src_file") or self.current_file_path, student_name, "⚠️ 仅他人描述(拦截)", now_str, cycle=self.current_cycle)
@@ -3843,162 +3840,161 @@ class FeedbackSender:
     def send_single_feedback(self, search_name: str, message: str) -> str:
         """
         发送单条反馈核心动作序列：
-        1. Ctrl+F 激活搜索框
-        2. 清空并粘贴学号/姓名
-        3. 等待下拉框展开
-        4. 【模式 B 智能核验】：OCR 秒级识别下拉框，若第 1 项为他人描述则自动按【↓】选中第 2 项，若全是他人描述则安全拦截
-        5. 回车进入会话
-        6. 安全写入剪贴板并粘贴完整反馈
-        7. 回车发送
-        返回: "SUCCESS" | "NOT_FOUND" | "DESC_ONLY" | "ABORTED" | "FAILED"
+        1. Ctrl+F 激活搜索框，全选删除清空后粘贴「学号+姓名」，等待下拉框展开
+        2. 【第一道核验】云端视觉模型给出候选起始项序号 choice
+           （>=1 为目标本人所在项号；0 = 未找到本人独立条目，一律按第 1 项试探）
+        3. 按 (choice-1) 次【↓】定位后回车一次，进入该候选会话
+        4. 【第二道核验·唯一放行闸门】会话标题必须同时含目标学号与目标姓名
+        5. 标题不符/存疑 → 换另一个候选重走 1~4，最多共 2 次；仍不符则拦截，绝不发
+        6. 安全写入剪贴板并粘贴完整反馈，回车发送
+
+        判定权分配：模式 A 只负责「指一个起始项」，会话标题检查点负责「拍板放行」。
+        模型返回的 reason / matched_title 仅留日志供管理员审计，不参与任何判定。
+
+        返回: "SUCCESS" | "HEADER_MISMATCH" | "UNCERTAIN_INTERCEPT" | "ABORTED" | "FAILED"
         """
         log(f">>> 开始发送单条: '{search_name}', 文案字数={len(message)}", "INFO")
-        if not self.safe_sleep(0.1):
-            log(f"[{search_name}] 中断退出", "WARN")
-            return "ABORTED"
 
-        # 1. 激活搜索框
-        pyautogui.hotkey("ctrl", "f")
-        if not self.safe_sleep(CLICK_DELAY):
-            return "ABORTED"
-
-        # 2. 全选并删除清空搜索框，杜绝残留文字累加
-        pyautogui.hotkey("ctrl", "a")
-        time.sleep(0.04)
-        pyautogui.press("backspace")
-        if not self.safe_sleep(0.05):
-            return "ABORTED"
-
-        # 3. 复制学生学号/姓名并粘贴搜索
-        if not safe_copy(search_name):
-            log(f"[{search_name}] 学号/姓名写入剪贴板失败", "ERROR")
-            return "FAILED"
-        pyautogui.hotkey("ctrl", "v")
-        if not self.safe_sleep(SEARCH_DELAY):
-            return "ABORTED"
-
-        # 4. 【视觉智能核验与初选 (模式 A 大模型 / 模式 B 本地 OCR)】
-        choice = -1
-        matched_title = ""
         target_id, target_name = parse_student_identifier(search_name)
         wecom_rect = get_wecom_rect()
         smart_mode = self.smart_mode_var.get()
         auto_fallback = self.auto_fallback_var.get()
+        # 未开启智能核验 / 取不到窗口坐标 → 退化为「进第 1 项」，且无标题闸门（等同旧版直发路径）
+        use_smart = smart_mode != "OFF" and HAS_SMART_CHECK and bool(wecom_rect)
 
-        if smart_mode != "OFF" and HAS_SMART_CHECK:
-            if wecom_rect:
-                choice, matched_title = detect_dropdown_target(
-                    wecom_rect, target_id, target_name, mode=smart_mode, auto_fallback=auto_fallback
+        MAX_ATTEMPTS = 2  # 共 2 次尝试：模式 A 指哪就试哪，再试另一个；都不符则拦截
+        target_choice = 0  # 本轮要尝试的候选项序号，0 = 尚未探测，按第 1 项试探
+        first_choice = 0   # 首轮实际选中的候选项，决定第二轮换去哪一项
+
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            if attempt == 1:
+                if not self.safe_sleep(0.1):
+                    log(f"[{search_name}] 中断退出", "WARN")
+                    return "ABORTED"
+            else:
+                log(
+                    f"[{search_name}] ↩ 换候选重试（第 {attempt}/{MAX_ATTEMPTS} 次）：改选第 {target_choice} 项",
+                    "INFO",
+                )
+                self.root.after(
+                    0,
+                    lambda n=search_name, c=target_choice: self.status_label.config(
+                        text=f"🔄 换候选重试 [{n}]：上一候选标题不符，改选第{c}项重新核验",
+                        fg="#E6A23C",
+                    ),
+                )
+                # 先安全退出上一个会话并彻底清空搜索框，杜绝盲按【↓】误入智能搜索
+                dismiss_and_clear_search()
+                if not self.safe_sleep(0.4):
+                    return "ABORTED"
+
+            # ---------- 1. 激活搜索框 ----------
+            pyautogui.hotkey("ctrl", "f")
+            if not self.safe_sleep(CLICK_DELAY):
+                return "ABORTED"
+
+            # ---------- 2. 全选并删除清空搜索框，杜绝残留文字累加 ----------
+            pyautogui.hotkey("ctrl", "a")
+            time.sleep(0.04)
+            pyautogui.press("backspace")
+            if not self.safe_sleep(0.05):
+                return "ABORTED"
+
+            # ---------- 3. 复制学生学号/姓名并粘贴搜索 ----------
+            if not safe_copy(search_name):
+                log(f"[{search_name}] 学号/姓名写入剪贴板失败", "ERROR")
+                return "FAILED"
+            pyautogui.hotkey("ctrl", "v")
+            if not self.safe_sleep(SEARCH_DELAY):
+                return "ABORTED"
+
+            # ---------- 4. 第一道核验：候选起始项 ----------
+            if attempt == 1:
+                # 首轮才问模型。重试轮绝不再问——模型对同一张下拉框大概率给出与首轮
+                # 相同的建议，再问一次会让「换候选」退化成原地重复，白白浪费一次会话。
+                if use_smart:
+                    raw_choice, reason = detect_dropdown_target(
+                        wecom_rect, target_id, target_name, mode=smart_mode, auto_fallback=auto_fallback
+                    )
+                    # choice <= 0（含 0「未找到本人」与 -1「接口故障」）统一按「进第 1 项试探」处理，
+                    # 身份认定完全交给第 6 步的会话标题检查点。
+                    choice = raw_choice if raw_choice > 0 else 1
+                    log(f"[{search_name}] 选人决策 choice={choice}（模型原始: {reason}）", "INFO")
+                else:
+                    # 未开启智能核验（或取不到窗口坐标）：直接进第 1 项
+                    choice = 1
+                    log(f"[{search_name}] 未开启视觉智能核验，直接进入第 1 项", "INFO")
+                first_choice = choice
+            else:
+                choice = target_choice
+                log(f"[{search_name}] 重试轮不再询问模型，直接改选第 {choice} 项", "INFO")
+
+            if choice > 1:
+                self.root.after(
+                    0,
+                    lambda n=search_name, c=choice: self.status_label.config(
+                        text=f"🎯 智能纠偏 [{n}]：已按【向下键】定位至第{c}项",
+                        fg="#E6A23C",
+                    ),
                 )
 
-                if choice == 0:
-                    # 细分状态 1：无此联系人 / 显示全局搜索
-                    log(f"[{search_name}] 通讯录中无此联系人(或全局搜索)，安全跳过", "WARN")
-                    self.root.after(
-                        0,
-                        lambda n=search_name: self.status_label.config(
-                            text=f"⚠️ 自动跳过 [{n}]：企微通讯录中无此联系人，已安全跳过",
-                            fg="#F56C6C",
-                        ),
-                    )
-                    # 安全退出浮层并清空搜索框
-                    dismiss_and_clear_search()
-                    return "NOT_FOUND"
-
-                elif choice == -2:
-                    # 细分状态 2：仅他人描述匹配，无本人备注
-                    log(f"[{search_name}] 仅他人描述命中，无本人备注，安全拦截", "WARN")
-                    self.root.after(
-                        0,
-                        lambda n=search_name: self.status_label.config(
-                            text=f"⚠️ 智能拦截 [{n}]：搜索结果仅为他人描述，无本人备注，已拦截防误发",
-                            fg="#E6A23C",
-                        ),
-                    )
-                    # 安全退出浮层并清空搜索框
-                    dismiss_and_clear_search()
-                    return "DESC_ONLY"
-
-                elif choice >= 2:
-                    # 发现第 1 项是他人描述，第 2 项（或更后）才是本人！自动按向下键【↓】纠正
-                    log(f"[{search_name}] 智能纠偏：前项为他人描述，已自动按向下键纠正至第{choice}项 ({matched_title})", "INFO")
-                    self.root.after(
-                        0,
-                        lambda n=search_name, t=matched_title, c=choice: self.status_label.config(
-                            text=f"🎯 智能纠偏 [{n}]：前项为他人描述，已自动按【向下键】纠正至第{c}项 ({t})",
-                            fg="#E6A23C",
-                        ),
-                    )
-                    for _ in range(choice - 1):
-                        pyautogui.press("down")
-                        time.sleep(0.12)
-                    time.sleep(0.15)
-                    pyautogui.press("enter")
-                    time.sleep(0.2)
-                    pyautogui.press("enter")
-                elif choice == 1:
-                    log(f"[{search_name}] 下拉初选第1项即为本人 ({matched_title})，回车进入会话", "INFO")
-                    pyautogui.press("enter")
-                    time.sleep(0.2)
-                    pyautogui.press("enter")
-                else:
-                    # choice == -1: 识别未确立，试探性回车进入会话，绝不直接发送，交由下一步标题检查点裁决
-                    log(f"[{search_name}] 下拉识别未明确，试探性进入第1项等待会话标题检查点核准...", "WARN")
-                    pyautogui.press("enter")
-                    time.sleep(0.2)
-                    pyautogui.press("enter")
-            else:
-                log(f"[{search_name}] 未能获取企微窗口坐标，试探性回车并等待核验", "WARN")
-                pyautogui.press("enter")
-                time.sleep(0.2)
-                pyautogui.press("enter")
-        else:
-            # 未开启智能模式，走传统两次回车
-            log(f"[{search_name}] 未开启视觉智能核验，走传统回车进入第1项", "INFO")
+            # ---------- 5. 按【↓】定位到目标候选项并回车进入 ----------
+            for _ in range(choice - 1):
+                pyautogui.press("down")
+                time.sleep(0.12)
+            if choice > 1:
+                time.sleep(0.15)
             pyautogui.press("enter")
-            time.sleep(0.2)
-            pyautogui.press("enter")
+            if not self.safe_sleep(0.2):
+                return "ABORTED"
 
-        if not self.safe_sleep(CLICK_DELAY):
-            return "ABORTED"
+            if not use_smart:
+                break  # 无标题闸门，直接进入发送阶段
 
-        # 5. 【会话标题安全检查点 (Check Point) 与自愈回滚】
-        if smart_mode != "OFF" and wecom_rect:
+            # ---------- 6. 第二道核验：会话标题检查点（唯一放行闸门） ----------
             header_status, header_title = verify_chat_header_title(
                 wecom_rect, target_id, target_name, timeout=1.2, mode=smart_mode, auto_fallback=auto_fallback
             )
 
-            # 异常感知：检测到会话标题为他人（如进入了其他会话，而非目标学生）
-            if header_status == "MISMATCH":
-                log(f"[{search_name}] ⛔ 会话标题安全检查点拦截！当前处于【{header_title}】，与目标学生不符，立即清空退出以防误发！", "ERROR")
+            if header_status == "MATCH":
+                log(f"[{search_name}] ✓ 会话标题核验通过: '{header_title}'", "INFO")
+                break
+
+            log(
+                f"[{search_name}] ⛔ 会话标题核验未通过（{header_status}），"
+                f"当前会话为【{header_title or '无法读取'}】，与目标学生不符",
+                "WARN",
+            )
+
+            # 换候选：首轮选的是第 1 项 → 改选第 2 项；首轮选的本来就是第 2 项及以后 → 改选第 1 项
+            target_choice = 2 if first_choice <= 1 else 1
+
+            if attempt == MAX_ATTEMPTS:
+                if header_status in ("UNCERTAIN", "ERROR"):
+                    log(f"[{search_name}] 已尝试 {MAX_ATTEMPTS} 个候选仍无法核准身份，触发安全拦截防盲发！", "ERROR")
+                    self.root.after(
+                        0,
+                        lambda n=search_name, m=MAX_ATTEMPTS: self.status_label.config(
+                            text=f"⛔ 身份存疑已拦截 [{n}]：{m} 个候选均无法核准，已拦截！",
+                            fg="#F56C6C",
+                        ),
+                    )
+                    dismiss_and_clear_search()
+                    return "UNCERTAIN_INTERCEPT"
+
+                log(f"[{search_name}] 已尝试 {MAX_ATTEMPTS} 个候选均与目标不符，触发安全拦截防误发！", "ERROR")
                 self.root.after(
                     0,
-                    lambda n=search_name, t=header_title: self.status_label.config(
-                        text=f"⛔ 标题不符已拦截 [{n}]：当前会话为【{t}】，已立即清空退出！",
+                    lambda n=search_name, m=MAX_ATTEMPTS, t=header_title: self.status_label.config(
+                        text=f"⛔ 标题不符已拦截 [{n}]：{m} 个候选均不符（当前为【{t or '无法读取'}】），已拦截！",
                         fg="#F56C6C",
                     ),
                 )
-                # 立即安全退出会话并彻底清空搜索输入框，杜绝盲目按向下键误入智能搜索
+                # 立即安全退出会话并彻底清空搜索输入框
                 dismiss_and_clear_search()
                 return "HEADER_MISMATCH"
 
-            elif header_status == "UNCERTAIN":
-                # 会话标题未能核准（存疑），坚决触发安全拦截防盲发
-                log(f"[{search_name}] ⛔ 安全拦截：会话标题无法确切核准（存疑状态），触发安全拦截防盲发！", "ERROR")
-                self.root.after(
-                    0,
-                    lambda n=search_name: self.status_label.config(
-                        text=f"⛔ 身份存疑已拦截 [{n}]：无法核准会话身份，已拦截！",
-                        fg="#F56C6C",
-                    ),
-                )
-                dismiss_and_clear_search()
-                return "UNCERTAIN_INTERCEPT"
-
-            elif header_status == "MATCH":
-                log(f"[{search_name}] ✓ 会话标题安全检查点完全通过: '{header_title}'", "INFO")
-
-        # 6. 安全写入剪贴板并粘贴完整反馈文案
+        # ---------- 7. 安全写入剪贴板并粘贴完整反馈文案 ----------
         if not safe_copy(message):
             log(f"[{search_name}] 反馈文案写入系统剪贴板失败", "ERROR")
             return "FAILED"
@@ -4010,7 +4006,7 @@ class FeedbackSender:
             pyautogui.press("backspace")
             return "ABORTED"
 
-        # 7. 发送消息 (Enter)
+        # ---------- 8. 发送消息 (Enter) ----------
         pyautogui.press("enter")
         if not self.safe_sleep(SEND_DELAY):
             return "ABORTED"
