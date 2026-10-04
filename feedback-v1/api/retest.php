@@ -1095,18 +1095,18 @@ if ($action === 'decrypt') {
         $adminTs = intval($_GET['admin_ts'] ?? 0);
         $isAdminAuthorized = false;
         if (!empty($adminSig)) {
-            // 优先校验带时间戳的签名（24小时有效期：86400秒）
+            // 仅接受带时间戳的签名（24小时有效期：86400秒）。
+            // 安全基线：不带 admin_ts 的旧版签名已彻底移除。保留该分支等于留下
+            // 一个永久有效的免密后门——任何历史签发的链接都无法再被作废。
             if ($adminTs > 0 && abs(time() - $adminTs) <= 86400) {
                 $expectedSigWithTs = hash_hmac('sha256', "{$rawToken}_{$adminTs}", $secretKey);
                 if (hash_equals($expectedSigWithTs, $adminSig)) {
                     $isAdminAuthorized = true;
                 }
             }
-            // 兼容旧版不带时间戳的签名（过渡支持）
-            if (!$isAdminAuthorized && hash_equals(hash_hmac('sha256', $rawToken, $secretKey), $adminSig)) {
-                $isAdminAuthorized = true;
-            }
-        } elseif (isset($_SESSION['admin_logged_in']) && $_SESSION['admin_logged_in'] === true) {
+        }
+        // 独立判断：管理员会话豁免不应受 admin_sig 是否存在或其是否合法的影响
+        if (!$isAdminAuthorized && isset($_SESSION['admin_logged_in']) && $_SESSION['admin_logged_in'] === true) {
             $isAdminAuthorized = true;
         }
 

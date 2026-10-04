@@ -119,7 +119,7 @@ switch ($action) {
 
             // 3. 策略二：若数据库未检索到或离线，回退检索文件映射 `data/history/token_map.json`
             if (empty($results)) {
-                $tokenMapFile = __DIR__ . '/../data/history/token_map.json';
+                $tokenMapFile = dirname(__DIR__, 2) . '/data/history/token_map.json';
                 if (file_exists($tokenMapFile)) {
                     $tokenMap = json_decode(file_get_contents($tokenMapFile), true) ?: [];
                     $mapEntry = null;
@@ -150,7 +150,7 @@ switch ($action) {
 
                         // 尝试从历史错题档案获取题号
                         $errList = [];
-                        $histFile = __DIR__ . '/../data/history/' . rawurlencode($sub) . '_' . rawurlencode($grd) . '_' . rawurlencode($tier) . '.json';
+                        $histFile = dirname(__DIR__, 2) . '/data/history/' . rawurlencode($sub) . '_' . rawurlencode($grd) . '_' . rawurlencode($tier) . '.json';
                         if (file_exists($histFile)) {
                             $histData = json_decode(file_get_contents($histFile), true) ?: [];
                             if (isset($histData[$sKey][(string)$wk])) {

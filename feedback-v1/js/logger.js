@@ -275,6 +275,7 @@ const Logger = (() => {
     return {
         init,
         setContext,
+        getClientInfo,
         flush,
         error: (event, details) => log('error', event, details),
         warn: (event, details) => log('warn', event, details),
