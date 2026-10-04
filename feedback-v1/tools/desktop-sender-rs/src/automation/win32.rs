@@ -271,8 +271,10 @@ mod imp {
             );
 
             SelectObject(hdc_mem, old_obj);
-            DeleteObject(hbm);
-            DeleteDC(hdc_mem);
+            // GDI 资源释放失败（句柄已失效等）无需中断截图流程，
+            // 但必须显式忽略返回值，否则编译器会因 must_use 报警告
+            let _ = DeleteObject(hbm);
+            let _ = DeleteDC(hdc_mem);
             ReleaseDC(HWND(std::ptr::null_mut()), hdc_screen);
 
             if lines == 0 {
@@ -485,6 +487,7 @@ impl AutomationDriver for WinAutomationDriver {
                 candidates,
                 raw_text: ocr_res.full_text,
                 dpi_scale: scale,
+                image: img,
             })
         }
         #[cfg(not(windows))]

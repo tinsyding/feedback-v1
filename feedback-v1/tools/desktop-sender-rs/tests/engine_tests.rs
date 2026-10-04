@@ -2,7 +2,7 @@ use desktop_sender_rs::header_verify::HeaderVerdict;
 use desktop_sender_rs::sender_engine::{
     AutomationDriver, EngineCommand, EngineConfig, EngineEvent, EngineState, SenderEngine, VisionMode,
 };
-use desktop_sender_rs::types::{ContactCandidate, FeedbackItem, HeaderCapture, SendStatus};
+use desktop_sender_rs::types::{ContactCandidate, DropdownCapture, FeedbackItem, HeaderCapture, SendStatus};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
@@ -133,7 +133,7 @@ async fn run_engine(driver: Arc<MockDriver>, config: EngineConfig) -> (Vec<Feedb
     let (_cmd_tx, cmd_rx) = watch::channel(EngineCommand::Start);
 
     let handle = tokio::spawn(async move {
-        engine.run(&mut items, event_tx, cmd_rx).await;
+        engine.run(&mut items, event_tx.into(), cmd_rx).await;
         items
     });
 
@@ -280,7 +280,7 @@ async fn test_undecided_dropdown_probes_first_candidate_then_header_arbiter() {
     let (_cmd_tx, cmd_rx) = watch::channel(EngineCommand::Start);
 
     let handle = tokio::spawn(async move {
-        engine.run(&mut items, event_tx, cmd_rx).await;
+        engine.run(&mut items, event_tx.into(), cmd_rx).await;
         items
     });
     while event_rx.recv().await.is_some() {}
@@ -403,4 +403,144 @@ fn test_unknown_vision_mode_rejected_rather_than_silently_downgrading() {
     // 未知取值必须报错，不能悄悄退回默认模式而让人以为云端核验在跑
     let err = serde_json::from_str::<EngineConfig>(&ui_payload("turbo", true));
     assert!(err.is_err(), "未知 vision_mode 应解析失败而非静默降级");
+}
+// ========== 现场截图归档不得影响发信判定 ==========
+
+/// 提供「真实尺寸」截图的驱动
+///
+/// 默认驱动返回 1x1 占位图（会被归档守卫拒绝）。这里给出真实尺寸，
+/// 用来验证归档动作本身对发信结果**零影响**。
+struct RealShotDriver {
+    inner: MockDriver,
+    shot: image::DynamicImage,
+}
+
+impl RealShotDriver {
+    fn new(header_text: &str) -> Self {
+        Self {
+            inner: MockDriver::new().with_header_text(header_text),
+            // 下拉与标题各给一张尺寸正常的灰图
+            shot: image::DynamicImage::ImageLuma8(
+                image::GrayImage::from_raw(400, 60, vec![128; 400 * 60]).unwrap(),
+            ),
+        }
+    }
+}
+
+impl AutomationDriver for RealShotDriver {
+    async fn find_wecom(&self) -> Option<isize> {
+        self.inner.find_wecom().await
+    }
+    async fn is_wecom_foreground(&self, hwnd: isize) -> bool {
+        self.inner.is_wecom_foreground(hwnd).await
+    }
+    async fn search_contact(&self, hwnd: isize, q: &str) -> Result<(), String> {
+        self.inner.search_contact(hwnd, q).await
+    }
+    async fn capture_dropdown_candidates(
+        &self,
+        hwnd: isize,
+    ) -> Result<Vec<ContactCandidate>, String> {
+        self.inner.capture_dropdown_candidates(hwnd).await
+    }
+    async fn capture_dropdown(&self, hwnd: isize) -> Result<DropdownCapture, String> {
+        Ok(DropdownCapture {
+            candidates: self.inner.capture_dropdown_candidates(hwnd).await?,
+            raw_text: "90001张三 其他家长".to_string(),
+            dpi_scale: 1.0,
+            image: self.shot.clone(),
+        })
+    }
+    async fn select_candidate(&self, hwnd: isize, c: usize) -> Result<(), String> {
+        self.inner.select_candidate(hwnd, c).await
+    }
+    async fn send_message_text(&self, hwnd: isize, m: &str) -> Result<(), String> {
+        self.inner.send_message_text(hwnd, m).await
+    }
+    async fn dismiss_search(&self, hwnd: isize) -> Result<(), String> {
+        self.inner.dismiss_search(hwnd).await
+    }
+    async fn capture_chat_header(&self, _hwnd: isize) -> Result<HeaderCapture, String> {
+        Ok(HeaderCapture {
+            image: self.shot.clone(),
+            text: self.inner.header_text.clone().unwrap_or_default(),
+            dpi_scale: 1.0,
+        })
+    }
+}
+
+/// 与 `run_engine` 同流程，但驱动类型具体化
+///
+/// 不能写成泛型：`AutomationDriver` 用 `async_fn_in_trait`，其 future 不保证
+/// `Send`，泛型 helper 无法通过 `tokio::spawn` 的跨线程约束。
+async fn run_real_shot_engine(
+    driver: Arc<RealShotDriver>,
+) -> (Vec<FeedbackItem>, bool) {
+    let engine = SenderEngine::new(local_config(), driver, None);
+    let mut items = vec![sample_item()];
+    let (event_tx, mut event_rx) = mpsc::channel(64);
+    let (_cmd_tx, cmd_rx) = watch::channel(EngineCommand::Start);
+
+    let handle = tokio::spawn(async move {
+        engine.run(&mut items, event_tx.into(), cmd_rx).await;
+        items
+    });
+    let mut finished = false;
+    while let Some(event) = event_rx.recv().await {
+        if let EngineEvent::StateChanged {
+            state: EngineState::Completed,
+        } = event
+        {
+            finished = true;
+        }
+    }
+    let items = handle.await.unwrap();
+    (items, finished)
+}
+
+#[tokio::test]
+async fn test_audit_shot_with_real_images_does_not_change_send_outcome() {
+    // 归档会真实落盘，但它只是诊断旁路：判定与发送结果必须与无归档时一致
+    let driver = Arc::new(RealShotDriver::new("90001张三"));
+    let (items, finished) = run_real_shot_engine(driver.clone()).await;
+
+    assert!(finished);
+    assert_eq!(items[0].status, SendStatus::Success);
+    assert_eq!(driver.inner.send_count.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn test_audit_shot_with_real_images_still_blocks_on_mismatch() {
+    // 反向验证：归档存在时，误选拦截必须照样生效 ——
+    // 不能因为「已经留了证」就放宽判定
+    let driver = Arc::new(RealShotDriver::new("90002李四"));
+    let (items, _) = run_real_shot_engine(driver.clone()).await;
+
+    assert_eq!(items[0].status, SendStatus::Failed);
+    assert_eq!(
+        driver.inner.send_count.load(Ordering::SeqCst),
+        0,
+        "标题为他人时绝不允许发送"
+    );
+}
+
+#[tokio::test]
+async fn test_missing_screenshot_never_blocks_sending() {
+    // 守住「诊断旁路故障绝不能升级成发信故障」：驱动拿不到真实图像时
+    // （默认实现返回 1x1 占位图），归档必然失败，发信必须照常完成。
+    //
+    // 这里刻意用默认 MockDriver 而非改环境变量去制造不可写目录：
+    // data_dir() 依赖进程级环境变量，单测并行改它会与其它用例互相串扰，
+    // 反而让这条断言变得不确定。写盘失败的分支由
+    // debug_shot_tests::test_returns_specific_error_instead_of_silent_none 覆盖。
+    let driver = Arc::new(MockDriver::new().with_header_text("90001张三"));
+    let (items, finished) = run_engine(driver.clone(), local_config()).await;
+
+    assert!(finished);
+    assert_eq!(
+        items[0].status,
+        SendStatus::Success,
+        "无截图可用绝不能导致发信被跳过或判失败"
+    );
+    assert_eq!(driver.send_count.load(Ordering::SeqCst), 1);
 }

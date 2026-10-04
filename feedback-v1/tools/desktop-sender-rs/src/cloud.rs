@@ -1,10 +1,14 @@
 use crate::image_proc::image_to_base64_jpeg;
+use crate::log_file::{LogEntry, UPLOAD_CHUNK};
 use crate::types::{CloudVisionData, CloudVisionPayload, CloudVisionResponse, DecisionResult};
 use image::DynamicImage;
 use std::time::Duration;
 
 /// 云端诊断服务器，对齐 Python 经典版 `DEFAULT_CLOUD_SERVER`（send_feedback.py:1190）
 pub const DEFAULT_CLOUD_SERVER: &str = "https://feedback.wxjifang.cn";
+
+/// 上报用的客户端版本号，与界面展示版本保持一致
+pub const CLIENT_VERSION: &str = "v2.5.0-rust";
 
 /// 本机指纹（服务端匿名上报的身份标识），对齐 `machine_tag()`（send_feedback.py:1203）
 ///
@@ -157,14 +161,113 @@ impl CloudClient {
     }
 
     /// 异步脱敏日志上报 (action=upload_logs)
-    pub async fn upload_logs(&self, lines: &[String]) -> Result<(), String> {
+    ///
+    /// 对齐经典版 `cloud_upload_async()`（send_feedback.py:1462）：
+    /// 按 [`crate::log_file::UPLOAD_CHUNK`] 分片，服务端逐片确认已保存条数。
+    ///
+    /// 任一片失败即**中止后续分片并返回已保存数**（经典版同策略）：
+    /// 网络已经出问题时继续打剩余分片只会雪上加霜，且会撞服务端 30 次/分钟限频。
+    ///
+    /// 返回值是 `(已保存条数, 是否有失败)`，调用方据此记日志。
+    pub async fn upload_logs(&self, entries: &[LogEntry]) -> Result<usize, String> {
+        if entries.is_empty() {
+            return Ok(0);
+        }
         let url = format!("{}/api/desktop.php?action=upload_logs", self.base_url);
+        let mut saved_total = 0usize;
+
+        for (idx, chunk) in entries.chunks(UPLOAD_CHUNK).enumerate() {
+            let payload = serde_json::json!({
+                "client": self.client_tag,
+                "version": CLIENT_VERSION,
+                "entries": chunk,
+            });
+            let resp = self
+                .client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .json(&payload)
+                .send()
+                .await
+                .map_err(|e| format!("第 {} 片网络失败: {e}", idx + 1))?;
+
+            let status = resp.status();
+            let body: serde_json::Value = resp
+                .json()
+                .await
+                .map_err(|e| format!("第 {} 片响应解析失败: {e}", idx + 1))?;
+
+            if body.get("success").and_then(|v| v.as_bool()) != Some(true) {
+                let msg = body
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("未知错误");
+                return Err(format!("第 {} 片被服务端拒绝 (HTTP {}): {msg}", idx + 1, status.as_u16()));
+            }
+            saved_total += body
+                .get("data")
+                .and_then(|d| d.get("saved"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
+        }
+        Ok(saved_total)
+    }
+
+    /// 上报本机发送历史 (action=upload_history)，对齐经典版 `read_history_payload()` + 上报
+    ///
+    /// 服务端按 `client_info` 去重覆盖同一台机器的记录（`ON DUPLICATE KEY UPDATE`），
+    /// 所以重复上报是幂等的。
+    pub async fn upload_history(&self, history: &serde_json::Value) -> Result<usize, String> {
+        let empty = match history {
+            serde_json::Value::Object(o) => o.is_empty(),
+            serde_json::Value::Array(a) => a.is_empty(),
+            serde_json::Value::Null => true,
+            _ => false,
+        };
+        if empty {
+            return Err("本机暂无发送历史记录".to_string());
+        }
+        let url = format!("{}/api/desktop.php?action=upload_history", self.base_url);
         let payload = serde_json::json!({
             "client": self.client_tag,
-            "version": "v2.5.0-rust",
-            "entries": lines
+            "version": CLIENT_VERSION,
+            "history": history,
         });
-        let _ = self.client.post(&url).json(&payload).send().await;
-        Ok(())
+        let resp = self
+            .client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| format!("网络请求失败: {e}"))?;
+
+        let status = resp.status();
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("响应解析失败: {e}"))?;
+        if body.get("success").and_then(|v| v.as_bool()) != Some(true) {
+            let msg = body
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("未知错误");
+            return Err(format!("服务端拒绝 (HTTP {}): {msg}", status.as_u16()));
+        }
+        Ok(body
+            .get("data")
+            .and_then(|d| d.get("bytes"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize)
+    }
+
+    /// 上报本机诊断日志（读本地日志尾部并分片上传）
+    ///
+    /// 这是经典版「每次批次结束后后台自动上报」的对齐实现：
+    /// 服务端管理员无需让老师手动导出日志即可看到现场轨迹。
+    /// 失败只记本地 DEBUG，绝不打扰正在发信的用户。
+    pub async fn upload_diagnostic_logs(&self, limit: usize) -> Result<usize, String> {
+        let entries = crate::log_file::read_entries(limit, true);
+        self.upload_logs(&entries).await
     }
 }

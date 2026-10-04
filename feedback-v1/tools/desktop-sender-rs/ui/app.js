@@ -89,6 +89,8 @@
     consoleBox: document.getElementById('consoleBox'),
     copyLogsBtn: document.getElementById('copyLogsBtn'),
     clearLogsBtn: document.getElementById('clearLogsBtn'),
+    refreshLogsBtn: document.getElementById('refreshLogsBtn'),
+    uploadLogsBtn: document.getElementById('uploadLogsBtn'),
     
     // 设置项
     intervalInput: document.getElementById('intervalInput'),
@@ -470,6 +472,66 @@
       dom.consoleBox.innerHTML = '';
       appendLog('INFO', '控制台日志已清空');
     });
+
+    // 从持久化日志重新载入：进程重启或崩溃后，界面内存里的日志已随进程消失，
+    // 但落盘那份还在 —— 误发事故复盘恰恰要看的是「出事那一次」的记录。
+    dom.refreshLogsBtn.addEventListener('click', async () => {
+      if (!state.isTauri || !window.__TAURI__?.core) {
+        appendLog('WARN', '非桌面端环境没有本地日志文件');
+        return;
+      }
+      dom.refreshLogsBtn.disabled = true;
+      try {
+        const lines = await window.__TAURI__.core.invoke('read_local_log', { limit: 2000 });
+        if (!Array.isArray(lines) || lines.length === 0) {
+          appendLog('WARN', '本地暂无日志文件（可能尚未运行过发信任务）');
+          return;
+        }
+        // 先清空再按时间顺序回放：旧记录在前，本次运行追加在后
+        dom.consoleBox.innerHTML = '';
+        lines.forEach(appendRawLogLine);
+        appendLog('INFO', `已从磁盘载入 ${lines.length} 行本地日志`);
+        dom.consoleBox.scrollTop = dom.consoleBox.scrollHeight;
+      } catch (err) {
+        appendLog('ERROR', `载入本地日志失败: ${err}`);
+      } finally {
+        dom.refreshLogsBtn.disabled = false;
+      }
+    });
+
+    dom.uploadLogsBtn.addEventListener('click', async () => {
+      if (!state.isTauri || !window.__TAURI__?.core) {
+        appendLog('WARN', '非桌面端环境无法上传日志');
+        return;
+      }
+      dom.uploadLogsBtn.disabled = true;
+      try {
+        const saved = await window.__TAURI__.core.invoke('upload_diagnostic_logs');
+        appendLog('SUCCESS', `诊断日志已上报云端，共保存 ${saved} 条`);
+      } catch (err) {
+        // 上报失败不影响发信，但必须让用户知道「管理员那边看不到」
+        appendLog('ERROR', `诊断日志上报失败: ${err}`);
+      } finally {
+        dom.uploadLogsBtn.disabled = false;
+      }
+    });
+  }
+
+  /// 渲染一行「磁盘日志原文」
+  ///
+  /// 与 `appendLog` 分开：磁盘行本身已带完整时间戳与等级，
+  /// 再走 appendLog 会拼出两个时间、丢掉原始时刻。
+  function appendRawLogLine(raw) {
+    const line = document.createElement('div');
+    // 从原文里抠出等级用于着色：`[2026-10-04 15:30:45.123] [ERROR] ...`
+    const m = /^\[[^\]]*\]\s*\[([A-Za-z]+)\]/.exec(raw);
+    const level = (m && m[1]) || 'INFO';
+    line.className = `log-line log-${level.toLowerCase()}`;
+    line.textContent = raw;
+    dom.consoleBox.appendChild(line);
+    while (dom.consoleBox.children.length > 2000) {
+      dom.consoleBox.removeChild(dom.consoleBox.firstChild);
+    }
   }
 
   function setEngineState(newState) {

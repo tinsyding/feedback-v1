@@ -124,6 +124,12 @@ pub struct DropdownCapture {
     pub raw_text: String,
     /// 截取时所用显示器 DPI 缩放系数
     pub dpi_scale: f32,
+    /// 下拉框原始裁剪图（预处理前的干净图）
+    ///
+    /// 保留它有两个用途：一是云端大模型核验（对齐经典版 `capture_dropdown_crop`），
+    /// 二是判定留证 —— 选错联系人时，这是唯一能说明「当时屏幕上到底
+    /// 看到了什么候选列表」的证据（对齐经典版 `_save_dropdown_debug_shot`）。
+    pub image: image::DynamicImage,
 }
 
 /// 会话标题条单次抓取结果

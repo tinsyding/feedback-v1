@@ -1,6 +1,7 @@
 pub mod automation;
 pub mod cloud;
 pub mod debug_shot;
+pub mod log_file;
 pub mod header_verify;
 pub mod image_proc;
 pub mod commands;

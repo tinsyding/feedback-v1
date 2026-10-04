@@ -1,5 +1,5 @@
 use crate::cloud::CloudClient;
-use crate::debug_shot::save_debug_shot;
+use crate::debug_shot::{save_debug_shot, DebugShotError};
 use crate::header_verify::{
     apply_vlm_double_check, judge_header_text, HeaderCheck, HeaderVerdict,
 };
@@ -156,6 +156,9 @@ pub trait AutomationDriver: Send + Sync {
             candidates,
             raw_text: String::new(),
             dpi_scale: 1.0,
+            // 驱动未提供图像时留空图：归档截图会退化为空白，
+            // 但绝不能因此让发信流程失败
+            image: image::DynamicImage::new_rgba8(1, 1),
         })
     }
     async fn select_candidate(&self, hwnd: isize, choice: usize) -> Result<(), String>;
@@ -179,11 +182,92 @@ pub trait AutomationDriver: Send + Sync {
     }
 }
 
+/// 事件外发的分流器：把 `Log` 事件**同时**写到本地持久化日志
+///
+/// 为什么不直接改 22 处 `event_tx.send(...)` 调用点：
+/// 那样的做法既冗长又容易漏改——漏掉一处就意味着该条日志查不到。
+/// 这里让 `EventSink` 具备与 `mpsc::Sender<EngineEvent>` **同名同签**的
+/// `send`/`try_send` 方法，于是所有既有调用点一行都不用动，
+/// 且新增的日志类型也自动落盘。
+///
+/// 文件写入失败会被静默忽略（见 `log_file::write_line`）：
+/// 日志是诊断旁路，绝不能因磁盘满 / 杀毒锁文件而中断发信。
+#[derive(Clone)]
+pub struct EventSink {
+    tx: mpsc::Sender<EngineEvent>,
+}
+
+impl EventSink {
+    pub fn new(tx: mpsc::Sender<EngineEvent>) -> Self {
+        Self { tx }
+    }
+
+    /// 取回底层 sender（如需直接 `reserve` 或跨线程转发时使用）
+    pub fn inner(&self) -> &mpsc::Sender<EngineEvent> {
+        &self.tx
+    }
+
+    fn persist(ev: &EngineEvent) {
+        if let EngineEvent::Log { level, message } = ev {
+            crate::log_file::write_line(level, message);
+        }
+    }
+
+    pub async fn send(&self, ev: EngineEvent) -> Result<(), mpsc::error::SendError<EngineEvent>> {
+        Self::persist(&ev);
+        self.tx.send(ev).await
+    }
+
+    pub fn try_send(
+        &self,
+        ev: EngineEvent,
+    ) -> Result<(), mpsc::error::TrySendError<EngineEvent>> {
+        Self::persist(&ev);
+        self.tx.try_send(ev)
+    }
+}
+
+impl From<mpsc::Sender<EngineEvent>> for EventSink {
+    fn from(tx: mpsc::Sender<EngineEvent>) -> Self {
+        Self::new(tx)
+    }
+}
+
+/// 归档一张现场截图，失败时向事件流告警（**绝不**中断发信）
+///
+/// 两类失败要区别对待：
+/// * `NotCaptured` —— 驱动没给真实图像（测试驱动、或某些降级路径）。
+///   这是**常态**，不告警，否则每次拦截都刷一条无意义的 WARN。
+/// * `CreateDir` / `Encode` —— 真的存不下来。这才是需要被告警的情况：
+///   截图是误发事故的唯一物证，存不下来意味着以后无从复盘。
+///
+/// 无论哪类，返回值都只用于诊断；**任何情况下都不得影响发信判定**。
+async fn archive_shot(
+    event_tx: &EventSink,
+    img: &image::DynamicImage,
+    kind: &str,
+    tag: &str,
+    target_id: &str,
+    target_name: &str,
+) {
+    if let Err(e) = save_debug_shot(img, kind, tag, target_id, target_name) {
+        if !matches!(e, DebugShotError::NotCaptured { .. }) {
+            let _ = event_tx
+                .send(EngineEvent::log(
+                    "WARN",
+                    format!("[现场调试快照保存失败]: {e}"),
+                ))
+                .await;
+        }
+    }
+}
+
 /// 批量发信调度引擎
 pub struct SenderEngine<D: AutomationDriver> {
     config: EngineConfig,
     driver: Arc<D>,
-    #[allow(dead_code)]
+    /// 云端诊断客户端。为 `None` 时视觉核验整体降级到本地 OCR，
+    /// 下拉与标题两条核验**依然执行**（只是不走大模型）。
     cloud_client: Option<Arc<CloudClient>>,
 }
 
@@ -194,6 +278,11 @@ impl<D: AutomationDriver> SenderEngine<D> {
             driver,
             cloud_client,
         }
+    }
+
+    /// 取云端诊断客户端（批次收尾时用于上报本地日志）
+    pub fn cloud_client(&self) -> Option<Arc<CloudClient>> {
+        self.cloud_client.clone()
     }
 
     /// 可被 Stop 指令打断的休眠（50ms 粒度轮询），返回 false 表示中途被终止。
@@ -228,7 +317,7 @@ impl<D: AutomationDriver> SenderEngine<D> {
         hwnd: isize,
         target_id: &str,
         target_name: &str,
-        event_tx: &mpsc::Sender<EngineEvent>,
+        event_tx: &EventSink,
     ) -> HeaderCheck {
         if !self.config.header_verify {
             let _ = event_tx
@@ -274,13 +363,15 @@ impl<D: AutomationDriver> SenderEngine<D> {
                                 || check.verdict == HeaderVerdict::Mismatch
                             {
                                 if !check.allows_send() {
-                                    save_debug_shot(
+                                    archive_shot(
+                                        event_tx,
                                         &cap.image,
                                         "header",
                                         "vlm_mismatch",
                                         target_id,
                                         target_name,
-                                    );
+                                    )
+                                    .await;
                                 }
                                 return check;
                             }
@@ -316,7 +407,8 @@ impl<D: AutomationDriver> SenderEngine<D> {
                     } else {
                         "uncertain"
                     };
-                    save_debug_shot(&cap.image, "header", tag, target_id, target_name);
+                    archive_shot(event_tx, &cap.image, "header", tag, target_id, target_name)
+                        .await;
                 }
                 check
             }
@@ -334,7 +426,7 @@ impl<D: AutomationDriver> SenderEngine<D> {
         capture: &DropdownCapture,
         target_id: &str,
         target_name: &str,
-        event_tx: &mpsc::Sender<EngineEvent>,
+        event_tx: &EventSink,
     ) -> DecisionResult {
         let local = || evaluate_contact_candidates(&capture.candidates, target_id, target_name, "LocalOCR");
 
@@ -397,7 +489,7 @@ impl<D: AutomationDriver> SenderEngine<D> {
     pub async fn run(
         &self,
         items: &mut [FeedbackItem],
-        event_tx: mpsc::Sender<EngineEvent>,
+        event_tx: EventSink,
         mut cmd_rx: watch::Receiver<EngineCommand>,
     ) {
         let total = items.len();
@@ -529,6 +621,21 @@ impl<D: AutomationDriver> SenderEngine<D> {
             let decision = self
                 .detect_dropdown_target(hwnd, &capture, &item.student_id, &item.clean_name, &event_tx)
                 .await;
+
+            // 判定留证：选错联系人时，这是唯一能说明「当时屏幕上的候选列表
+            // 长什么样」的证据（对齐经典版 _save_dropdown_debug_shot）。
+            //
+            // 与标题截图不同，这里**全量存档**而非只存拦截 —— 下拉选错未必
+            // 立刻被拦截，若侥幸被标题检查点救回，仍需能复盘究竟是谁选错的。
+            archive_shot(
+                &event_tx,
+                &capture.image,
+                "dropdown",
+                &format!("choice{}_{}", decision.choice, decision.engine),
+                &item.student_id,
+                &item.clean_name,
+            )
+            .await;
 
             // 原始 OCR 全文进日志：出现多按向下时可据此还原到底识别到了什么
             let _ = event_tx
@@ -743,7 +850,7 @@ impl<D: AutomationDriver> SenderEngine<D> {
     async fn handle_control_commands(
         &self,
         rx: &mut watch::Receiver<EngineCommand>,
-        event_tx: &mpsc::Sender<EngineEvent>,
+        event_tx: &EventSink,
     ) -> EngineCommand {
         let mut cmd = *rx.borrow();
         if cmd == EngineCommand::Pause {

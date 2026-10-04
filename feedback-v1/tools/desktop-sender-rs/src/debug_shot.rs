@@ -18,6 +18,13 @@ const DATA_DIRNAME: &str = "JFFeedback";
 /// 现场截图子目录名，与经典版一致
 const DEBUG_IMG_SUBDIR: &str = "debug_screenshots";
 
+/// 判定「截图是否有效」的最小宽高
+///
+/// 驱动未提供真实图像时会退化成 1x1 占位图；归档它只会污染截图目录，
+/// 让真正的现场图淹没在噪声里。下限取得很宽松，只挡明显占位图。
+const MIN_SHOT_WIDTH: u32 = 16;
+const MIN_SHOT_HEIGHT: u32 = 8;
+
 /// 获取持久化数据目录（文档 → LOCALAPPDATA 兜底）
 pub fn data_dir() -> PathBuf {
     if let Some(docs) = user_documents_dir() {
@@ -61,7 +68,10 @@ fn user_documents_dir() -> Option<PathBuf> {
 }
 
 /// 把文件名里的路径分隔符与空白等非法字符替换为 `_`
-fn sanitize(name: &str) -> String {
+///
+/// 对齐经典版 `re.sub(r'[\\/:*?"<>|\s]', '_', ...)`（send_feedback.py:949）。
+/// 全非法字符时退化为 `unknown` —— 空名会让文件名塌成 `.png`。
+pub fn sanitize_filename(name: &str) -> String {
     let s: String = name
         .chars()
         .map(|c| match c {
@@ -78,66 +88,110 @@ fn sanitize(name: &str) -> String {
     }
 }
 
-/// 本地时间戳 `YYYYMMDD_HHMMSS_mmm`
+/// 归档失败的原因
 ///
-/// 无 chrono 依赖，手工按本地时间格式化。取不到时间时退化为进程内计数，
-/// 保证文件名不重复即可（截图本身才是证据，文件名次要）。
-fn timestamp() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-
-    // 累加秒 → 时/分/日/月/年（UTC），命名只需单调可读，不追求时区精确
-    let mut y: i64 = 1970;
-    let mut days = (now / 86_400) as i64;
-    let secs_of_day = now % 86_400;
-    while days > 0 {
-        let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
-        let ylen = if leap { 366 } else { 365 };
-        if days < ylen {
-            break;
-        }
-        days -= ylen;
-        y += 1;
-    }
-    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
-    let mlen = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    let mut mi = 0usize;
-    while mi < 12 && days >= mlen[mi] {
-        days -= mlen[mi];
-        mi += 1;
-    }
-    let m = mi as i64 + 1;
-    let d = days + 1;
-
-    let hh = secs_of_day / 3600;
-    let mm = (secs_of_day % 3600) / 60;
-    let ss = secs_of_day % 60;
-    format!("{:04}{:02}{:02}_{:02}{:02}{:02}", y, m, d, hh, mm, ss)
+/// 刻意不静默吞掉：截图是防误发事故的**唯一**物证，
+/// 存不下来这件事本身必须能被告警看见（对齐经典版 save 前后的
+/// `[现场调试快照保存失败]` WARN 日志，send_feedback.py:952）。
+#[derive(Debug)]
+pub enum DebugShotError {
+    /// 截图无有效尺寸（驱动未提供真实图像时的 1x1 占位图）
+    NotCaptured { width: u32, height: u32 },
+    /// 建目录失败
+    CreateDir {
+        /// 出错环节的中文描述，进日志时无需再翻译
+        context: &'static str,
+        source: std::io::Error,
+    },
+    /// PNG 编码 / 写盘失败
+    Encode {
+        path: PathBuf,
+        source: image::ImageError,
+    },
 }
 
-/// 归档一张现场截图，返回落盘路径
+impl std::fmt::Display for DebugShotError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DebugShotError::NotCaptured { width, height } => write!(
+                f,
+                "未捕获到有效截图（{width}x{height}，疑似驱动未提供图像）"
+            ),
+            DebugShotError::CreateDir { context, source } => write!(f, "{context}失败: {source}"),
+            DebugShotError::Encode { path, source } => {
+                write!(f, "写入现场截图 {} 失败: {source}", path.display())
+            }
+        }
+    }
+}
+
+impl std::error::Error for DebugShotError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            DebugShotError::NotCaptured { .. } => None,
+            DebugShotError::CreateDir { source, .. } => Some(source),
+            DebugShotError::Encode { source, .. } => Some(source),
+        }
+    }
+}
+
+/// 归档一张现场截图到默认目录（`debug_img_dir()`）
 ///
-/// * `img` —— 待保存的裁剪图
-/// * `kind` —— 截图类别（`header` / `dropdown`）
-/// * `tag` —— 判定标签（`mismatch` / `uncertain` / `vlm` / `vlm_mismatch`）
-/// * `target_id` / `target_name` —— 目标学生，用于文件名溯源
-///
-/// 任何失败都只返回 `None`，绝不 panic 也绝不影响主发信流程。
+/// 语义见 [`save_debug_shot_into`]。
 pub fn save_debug_shot(
     img: &DynamicImage,
     kind: &str,
     tag: &str,
     target_id: &str,
     target_name: &str,
-) -> Option<PathBuf> {
+) -> Result<PathBuf, DebugShotError> {
     let dir = debug_img_dir();
-    std::fs::create_dir_all(&dir).ok()?;
+    save_debug_shot_into(&dir, img, kind, tag, target_id, target_name)
+}
 
-    let label = sanitize(&format!("{}_{}", target_id, target_name));
-    let path = dir.join(format!("{}_{}_{}_{}.png", timestamp(), kind, tag, label));
-    img.save(&path).ok()?;
-    Some(path)
+/// 归档一张现场截图到**指定目录**，返回落盘路径
+///
+/// * `dir` —— 输出目录，不存在时自动创建
+/// * `img` —— 待保存的裁剪图
+/// * `kind` —— 截图类别（`header` / `dropdown`）
+/// * `tag` —— 判定标签（`mismatch` / `uncertain` / `choice2_LocalOCR` 等）
+/// * `target_id` / `target_name` —— 目标学生，用于文件名溯源
+///
+/// 目录作为参数而非内部隐式解析，是为了让测试能落到各自的临时目录：
+/// `data_dir()` 依赖进程级环境变量，单测里并行改它会互相串扰
+/// （一个用例的清理会删掉另一个刚写的文件）。
+///
+/// 绝不 panic；失败以 [`DebugShotError`] 返回，由调用方决定是否告警。
+pub fn save_debug_shot_into(
+    dir: &std::path::Path,
+    img: &DynamicImage,
+    kind: &str,
+    tag: &str,
+    target_id: &str,
+    target_name: &str,
+) -> Result<PathBuf, DebugShotError> {
+    // 空白/占位图不是证据，只会污染截图目录。
+    // 驱动未提供真实图像时会退化成 1x1 占位图，这里直接拒绝。
+    let (w, h) = (img.width(), img.height());
+    if w < MIN_SHOT_WIDTH || h < MIN_SHOT_HEIGHT {
+        return Err(DebugShotError::NotCaptured { width: w, height: h });
+    }
+
+    std::fs::create_dir_all(dir).map_err(|e| DebugShotError::CreateDir {
+        context: "创建现场截图目录",
+        source: e,
+    })?;
+
+    let label = sanitize_filename(&format!("{target_id}_{target_name}"));
+    // 用与日志同源的文件名安全时间戳，保证截图能与日志对上同一时刻
+    let path = dir.join(format!(
+        "{}_{}_{}_{}.png",
+        crate::log_file::timestamp_compact(),
+        kind,
+        tag,
+        label
+    ));
+    img.save(&path)
+        .map_err(|e| DebugShotError::Encode { path: path.clone(), source: e })?;
+    Ok(path)
 }

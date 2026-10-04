@@ -31,8 +31,12 @@ pub mod tauri_bridge {
     use super::*;
     use crate::automation::{find_wecom_window, WinAutomationDriver};
     use crate::cloud::CloudClient;
-    use crate::sender_engine::{EngineConfig, EngineEvent, SenderEngine};
+    use crate::sender_engine::{EngineConfig, EngineEvent, EventSink, SenderEngine};
     use std::sync::Arc;
+
+    /// 单次上报的日志条数上限，与经典版 `CLOUD_LOG_TAIL_LINES`（send_feedback.py:1191）一致
+    const CLOUD_LOG_TAIL_LINES: usize = 300;
+
     use tauri::{AppHandle, Emitter, State};
     use tokio::sync::mpsc;
 
@@ -55,7 +59,7 @@ pub mod tauri_bridge {
     /// 任务结束（cmd 通道关闭）后线程自行退出，不残留。
     fn spawn_esc_stop_watcher(
         cmd_tx: watch::Sender<EngineCommand>,
-        event_tx: mpsc::Sender<EngineEvent>,
+        event_tx: EventSink,
     ) {
         use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
         std::thread::spawn(move || {
@@ -97,7 +101,10 @@ pub mod tauri_bridge {
         config: EngineConfig,
     ) -> Result<(), String> {
         let (cmd_tx, cmd_rx) = watch::channel(EngineCommand::Start);
-        let (event_tx, mut event_rx) = mpsc::channel::<EngineEvent>(100);
+        let (raw_tx, mut event_rx) = mpsc::channel::<EngineEvent>(100);
+        // EventSink 把每条 Log 事件同时写入本地持久化日志（5MB 滚动）。
+        // 进程关闭后界面日志随之消失，但落盘的那份可用于事后复盘误发事故。
+        let event_tx = EventSink::new(raw_tx.clone());
         // 全局 ESC 急停监听（对应经典版 safe_sleep 的 GetAsyncKeyState 轮询）：
         // 发信期间焦点在企微窗口，前端收不到键盘事件，必须原生层监听。
         spawn_esc_stop_watcher(cmd_tx.clone(), event_tx.clone());
@@ -121,9 +128,43 @@ pub mod tauri_bridge {
         tokio::spawn(async move {
             let mut items_clone = items;
             engine.run(&mut items_clone, event_tx, cmd_rx).await;
+
+            // 批次结束后自动上报本机诊断日志（对齐经典版 cloud_upload_async）。
+            //
+            // 跑在这个后台 task 里，因此即便网络卡住也不会拖住界面收尾 ——
+            // 界面早就通过 Completed 事件收到通知了。
+            //
+            // 无论成败都只把结果写回本地日志：上报失败原因若不落到文件，
+            // 「管理员那边为什么看不到日志」就又变成一件无据可查的事。
+            if let Some(cc) = engine.cloud_client() {
+                match cc.upload_diagnostic_logs(CLOUD_LOG_TAIL_LINES).await {
+                    Ok(saved) => crate::log_file::write_line(
+                        "DEBUG",
+                        &format!("云端诊断日志已自动上报：{saved} 条"),
+                    ),
+                    Err(e) => crate::log_file::write_line(
+                        "DEBUG",
+                        &format!("云端诊断日志自动上报失败: {e}"),
+                    ),
+                }
+            }
         });
 
         Ok(())
+    }
+
+    /// 上传本机诊断日志到云端，返回已保存条数（供 UI「上传日志」按钮调用）
+    #[tauri::command]
+    pub async fn upload_diagnostic_logs() -> Result<usize, String> {
+        build_cloud_client()
+            .upload_diagnostic_logs(CLOUD_LOG_TAIL_LINES)
+            .await
+    }
+
+    /// 读取本机持久化日志尾部（供 UI「查看日志」面板，不依赖前端内存缓冲）
+    #[tauri::command]
+    pub fn read_local_log(limit: Option<usize>) -> Vec<String> {
+        crate::log_file::tail_lines(limit.unwrap_or(CLOUD_LOG_TAIL_LINES).clamp(1, 2000))
     }
 
     #[tauri::command]

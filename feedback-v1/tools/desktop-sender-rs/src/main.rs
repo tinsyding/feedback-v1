@@ -20,6 +20,8 @@ fn run_gui() {
             pause_send,
             resume_send,
             stop_send,
+            upload_diagnostic_logs,
+            read_local_log,
         ])
         .run(tauri::generate_context!())
         .expect("运行极方反馈程序 GUI 失败");
