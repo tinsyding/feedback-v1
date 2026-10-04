@@ -44,7 +44,7 @@
         <button class="theme-toggle" id="themeToggle" title="切换深色/浅色模式">
           <span class="theme-icon" id="themeIcon">☀️</span>
         </button>
-        <div class="version-tag">v2.4.1-rust</div>
+        <div class="version-tag">v2.5.0-rust</div>
       </div>
     </aside>
 
@@ -287,6 +287,28 @@
                 <input type="checkbox" id="focusGuardToggle" checked disabled />
               </label>
               <span class="setting-desc">核心安全红线（已自动全局启用）：发信途中若老师切换窗口，立即自动挂起暂停，杜绝误触。</span>
+            </div>
+          </div>
+          <div class="settings-card">
+            <h3>🛡️ 防误发核验体系</h3>
+            <div class="setting-item">
+              <label>下拉框视觉核验模式</label>
+              <select id="visionModeSelect">
+                <option value="cloud" selected>模式 A — 云端大模型优先（异常自动降级本地 OCR）</option>
+                <option value="local">模式 B — 仅本地 OCR（完全离线）</option>
+                <option value="off">关闭 — 不做下拉框核验，身份交由下方标题检查点裁决</option>
+              </select>
+              <span class="setting-desc">在下拉候选中定位目标学生本人：若首项是他人的描述性备注，自动按向下键纠正到本人条目；通讯录无本人条目时安全拦截。</span>
+            </div>
+            <div class="setting-item">
+              <label class="switch-label">
+                <span>会话标题安全检查点</span>
+                <input type="checkbox" id="headerVerifyToggle" checked />
+              </label>
+              <span class="setting-desc" style="color:var(--danger,#f56c6c)">
+                不可关闭的核心防线：进入会话后、发送文案前，OCR 核验聊天窗口顶部标题是否确为目标学生。
+                不符或读不到时一律拦截，绝不发送。仅在本机截图/OCR 异常需要排查时才可临时关闭。
+              </span>
             </div>
           </div>
         </div>

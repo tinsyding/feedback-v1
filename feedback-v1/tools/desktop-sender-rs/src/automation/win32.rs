@@ -1,9 +1,14 @@
 #[cfg(windows)]
 use crate::image_proc::preprocess_dropdown_image;
 use crate::sender_engine::AutomationDriver;
-use crate::types::{ContactCandidate, DropdownCapture};
+use crate::types::{ContactCandidate, DropdownCapture, HeaderCapture};
 use image::DynamicImage;
 use std::time::Duration;
+
+/// 标题条 OCR 轮询总超时，对齐经典版 `verify_chat_header_title_via_ocr(timeout=1.2)`
+const HEADER_POLL_TIMEOUT_MS: u64 = 1200;
+/// 标题条 OCR 轮询采样间隔，对齐经典版的 80ms
+const HEADER_POLL_INTERVAL_MS: u64 = 80;
 
 /// 跨平台窗口坐标矩形
 #[derive(Debug, Clone, Copy, Default)]
@@ -201,6 +206,31 @@ mod imp {
         (dpi as f32 / 96.0).clamp(0.5, 4.0)
     }
 
+    /// 多显示器虚拟桌面整体边界 `(vx, vy, vw, vh)`
+    ///
+    /// 对齐 Python 经典版 `get_virtual_screen_bounds()`（send_feedback.py:621）。
+    /// 副显示器在主屏左侧/上方时 `vx`/`vy` 为负，调用方必须做边界收敛。
+    pub fn get_virtual_screen_bounds() -> (i32, i32, i32, i32) {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
+            SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+        };
+        unsafe {
+            let vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+            let vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+            if vw > 0 && vh > 0 {
+                return (
+                    GetSystemMetrics(SM_XVIRTUALSCREEN),
+                    GetSystemMetrics(SM_YVIRTUALSCREEN),
+                    vw,
+                    vh,
+                );
+            }
+            // 多屏接口不可用时退回主屏尺寸
+            (0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN))
+        }
+    }
+
     pub fn capture_window_rect(rect: WindowRect) -> Option<DynamicImage> {
         unsafe {
             let width = rect.width();
@@ -311,6 +341,9 @@ mod imp {
     pub fn get_dpi_scale(_hwnd_val: isize) -> f32 {
         1.0
     }
+    pub fn get_virtual_screen_bounds() -> (i32, i32, i32, i32) {
+        (0, 0, 1920, 1080)
+    }
     pub fn capture_window_rect(_rect: WindowRect) -> Option<DynamicImage> {
         None
     }
@@ -330,6 +363,36 @@ pub struct WinAutomationDriver;
 impl WinAutomationDriver {
     pub fn new() -> Self {
         Self
+    }
+
+    /// 仅截取标题条图像，不做 OCR（模式 A 云端大模型复核用）
+    ///
+    /// 对齐 Python 经典版 `capture_header_crop()`（send_feedback.py:1318）：
+    /// 动态按显示器 DPI 缩放裁剪，避免高缩放屏截错区域。
+    async fn capture_header_image(&self, hwnd: isize) -> Result<(DynamicImage, f32), String> {
+        #[cfg(windows)]
+        {
+            let rect = get_rect(hwnd).ok_or_else(|| "无法获取企微窗口坐标".to_string())?;
+            let scale = get_dpi_scale(hwnd);
+            let (x, y, w, h) = crate::header_verify::compute_header_crop_rect(
+                (rect.left, rect.top, rect.width()),
+                scale,
+                get_virtual_screen_bounds(),
+            );
+            let img = capture_window_rect(WindowRect {
+                left: x,
+                top: y,
+                right: x + w,
+                bottom: y + h,
+            })
+            .ok_or_else(|| "截取标题条图像失败".to_string())?;
+            Ok((img, scale))
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = hwnd;
+            Err("截图仅支持在 Windows 操作系统运行".to_string())
+        }
     }
 }
 
@@ -369,11 +432,14 @@ impl AutomationDriver for WinAutomationDriver {
         self.capture_dropdown(hwnd).await.map(|c| c.candidates)
     }
 
-    async fn capture_dropdown(&self, hwnd: isize) -> Result<DropdownCapture, String> {
+    /// 裁剪并截取下拉框原始图像（不做预处理），供云端大模型视觉核验使用。
+    ///
+    /// 对齐经典版 `capture_dropdown_crop()`（send_feedback.py:1287）：
+    /// 按显示器 DPI 缩放裁剪偏移，否则高缩放屏会截错区域。
+    async fn capture_dropdown_image(&self, hwnd: isize) -> Option<DynamicImage> {
         #[cfg(windows)]
         {
-            let rect = get_rect(hwnd).ok_or_else(|| "无法获取企微窗口坐标".to_string())?;
-            // 关键修复：与经典版一致按显示器 DPI 缩放裁剪偏移，否则高缩放屏会截错区域
+            let rect = get_rect(hwnd)?;
             let scale = get_dpi_scale(hwnd);
             let off_x = (38.0 * scale).round() as i32;
             let off_y = (46.0 * scale).round() as i32;
@@ -389,8 +455,24 @@ impl AutomationDriver for WinAutomationDriver {
             // 窗口过小时保底，避免空区域截图
             search_rect.right = search_rect.right.max(search_rect.left + 50);
             search_rect.bottom = search_rect.bottom.max(search_rect.top + 50);
+            capture_window_rect(search_rect)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = hwnd;
+            None
+        }
+    }
 
-            let img = capture_window_rect(search_rect).ok_or_else(|| "截取下拉框图像失败".to_string())?;
+    async fn capture_dropdown(&self, hwnd: isize) -> Result<DropdownCapture, String> {
+        #[cfg(windows)]
+        {
+            let scale = get_dpi_scale(hwnd);
+            // 关键修复：与经典版一致按显示器 DPI 缩放裁剪偏移，否则高缩放屏会截错区域
+            let img = self
+                .capture_dropdown_image(hwnd)
+                .await
+                .ok_or_else(|| "截取下拉框图像失败".to_string())?;
             let preprocessed = preprocess_dropdown_image(&img);
             let ocr_res = crate::automation::win_ocr::recognize_native_ocr(&preprocessed)?;
             // 传入 DPI 缩放，让解析阶段按物理像素过滤搜索框残留文字与右侧水印
@@ -409,6 +491,41 @@ impl AutomationDriver for WinAutomationDriver {
         {
             let _ = hwnd;
             Ok(DropdownCapture::default())
+        }
+    }
+
+    /// 抓取会话标题条（轮询直到读出文字或超时）。
+    ///
+    /// 轮询是必需的：回车切换会话的动画期间，第一帧截图往往仍是上一位
+    /// 学生的标题条，直接判读会误拦或误放。对齐经典版
+    /// `verify_chat_header_title_via_ocr` 的 `timeout=1.2` / 80ms 采样策略。
+    async fn capture_chat_header(&self, hwnd: isize) -> Result<HeaderCapture, String> {
+        // 轮询直到读出文字或超时：会话切换动画期间截图可能仍是上一位学生的标题条
+        let deadline = std::time::Instant::now() + Duration::from_millis(HEADER_POLL_TIMEOUT_MS);
+        let mut last: HeaderCapture;
+        loop {
+            let (image, scale) = self.capture_header_image(hwnd).await?;
+            #[cfg(windows)]
+            let text = {
+                let res = crate::automation::win_ocr::recognize_native_ocr(&image)?;
+                // 与经典版一致：比对前统一抹掉空格，否则 "80001 李四" ≠ "80001李四"
+                res.full_text.chars().filter(|c| *c != ' ').collect::<String>()
+            };
+            #[cfg(not(windows))]
+            let text = String::new();
+
+            last = HeaderCapture {
+                image,
+                text,
+                dpi_scale: scale,
+            };
+            if !last.text.is_empty() {
+                return Ok(last);
+            }
+            if std::time::Instant::now() >= deadline {
+                return Ok(last);
+            }
+            tokio::time::sleep(Duration::from_millis(HEADER_POLL_INTERVAL_MS)).await;
         }
     }
 

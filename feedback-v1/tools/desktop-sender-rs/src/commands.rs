@@ -30,10 +30,21 @@ pub fn handle_load_data_file(path_str: &str) -> Result<Vec<FeedbackItem>, String
 pub mod tauri_bridge {
     use super::*;
     use crate::automation::{find_wecom_window, WinAutomationDriver};
+    use crate::cloud::CloudClient;
     use crate::sender_engine::{EngineConfig, EngineEvent, SenderEngine};
     use std::sync::Arc;
     use tauri::{AppHandle, Emitter, State};
     use tokio::sync::mpsc;
+
+    /// 构造云端诊断客户端
+    ///
+    /// 之前这里传的是 `None`，导致 `cloud.rs` 里的 `vision_detect` /
+    /// `upload_logs` 成为永不调用的死代码——UI 上「强制默认启用 AI 视觉
+    /// 双保险体系」实际并未生效。现按经典版 `DEFAULT_CLOUD_SERVER`（send_feedback.py:1190）
+    /// 接上真实客户端。
+    fn build_cloud_client() -> Arc<CloudClient> {
+        Arc::new(CloudClient::from_env_or_default())
+    }
 
     #[tauri::command]
     pub fn check_wecom_status() -> bool {
@@ -96,7 +107,7 @@ pub mod tauri_bridge {
         }
 
         let driver = Arc::new(WinAutomationDriver::new());
-        let engine = SenderEngine::new(config, driver, None);
+        let engine = SenderEngine::new(config, driver, Some(build_cloud_client()));
 
         // 转发引擎事件到前端 Webview2
         let app_clone = app.clone();

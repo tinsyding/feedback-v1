@@ -94,6 +94,9 @@
     intervalInput: document.getElementById('intervalInput'),
     batchSizeInput: document.getElementById('batchSizeInput'),
     batchCooldownInput: document.getElementById('batchCooldownInput'),
+    focusGuardToggle: document.getElementById('focusGuardToggle'),
+    visionModeSelect: document.getElementById('visionModeSelect'),
+    headerVerifyToggle: document.getElementById('headerVerifyToggle'),
   };
 
   // ==========================================
@@ -525,11 +528,21 @@
           original_index: idx,
         };
       });
+      const visionMode = dom.visionModeSelect?.value || 'cloud';
+      // 会话标题检查点是唯一的误发拦截防线，默认开启；
+      // 仅当用户在【偏好设置】里显式取消勾选时才关闭。
+      const headerVerify = dom.headerVerifyToggle ? dom.headerVerifyToggle.checked : true;
+      if (!headerVerify) {
+        appendLog('ERROR', '⚠️ 会话标题安全检查点已被关闭 —— 当前没有任何误发拦截防线，强烈不建议正式发信时这样配置！');
+      }
       const config = {
         batch_size: parseInt(dom.batchSizeInput.value, 10) || 15,
         item_interval_ms: parseInt(dom.intervalInput.value, 10) || 1200,
         batch_cooldown_sec: parseInt(dom.batchCooldownInput.value, 10) || 10,
-        use_cloud_vision: true, // 强制默认启用 AI 视觉双保险体系
+        // 云端大模型是否可用。模式 B/关闭 时引擎会忽略此项走本地 OCR。
+        use_cloud_vision: visionMode === 'cloud',
+        vision_mode: visionMode,
+        header_verify: headerVerify,
       };
       appendLog('INFO', `调用 start_send：${itemsToSend.length} 条，配置=${JSON.stringify(config)}`);
       window.__TAURI__.core.invoke('start_send', { items: itemsToSend, config })

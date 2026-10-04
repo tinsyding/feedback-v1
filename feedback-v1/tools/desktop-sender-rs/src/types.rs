@@ -126,6 +126,20 @@ pub struct DropdownCapture {
     pub dpi_scale: f32,
 }
 
+/// 会话标题条单次抓取结果
+///
+/// 同时保留图像与 OCR 文本：文本供本地判定（模式 B），
+/// 图像供云端大模型复核（模式 A）与拦截时的现场截图归档。
+#[derive(Debug, Clone, Default)]
+pub struct HeaderCapture {
+    /// 标题条裁剪图
+    pub image: image::DynamicImage,
+    /// OCR 读到的标题文本（空格已去除；空串表示未读到有效文字）
+    pub text: String,
+    /// 截取时所用显示器 DPI 缩放系数
+    pub dpi_scale: f32,
+}
+
 /// 智能联系人安全决策结果
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DecisionResult {
@@ -145,16 +159,44 @@ pub struct CloudVisionPayload {
     pub image: String,
 }
 
-/// 云端视觉 API 响应
+/// 云端视觉 API 响应（信封）
+///
+/// 服务端 `bootstrap.php:53` 的 `sendResponse()` 统一输出
+/// `{success, data, error}`，业务字段全部嵌在 `data` 里：
+/// * `task=dropdown` → `{ target_found, choice, matched_title, reason, duration_ms }`
+/// * `task=header`   → `{ matched, detected_title, reason, duration_ms }`
+///
+/// 注意：此处**不能**把业务字段平铺到顶层——那与实际报文不符。
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CloudVisionResponse {
+    #[serde(default)]
     pub success: bool,
     #[serde(default)]
+    pub data: Option<CloudVisionData>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// 云端视觉 API 业务数据（`data` 节点）
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CloudVisionData {
+    /// dropdown：目标是否在通讯录中找到独立条目
+    #[serde(default)]
+    pub target_found: Option<bool>,
+    /// dropdown：命中项序号（1~4 命中；0 无联系人；-2 仅他人描述）
+    #[serde(default)]
     pub choice: Option<isize>,
+    /// dropdown：命中条目的主标题
+    #[serde(default)]
+    pub matched_title: Option<String>,
+    /// header：标题是否为目标本人
     #[serde(default)]
     pub matched: Option<bool>,
+    /// header：识别出的完整标题文本
+    #[serde(default)]
+    pub detected_title: Option<String>,
     #[serde(default)]
     pub reason: Option<String>,
     #[serde(default)]
-    pub error: Option<String>,
+    pub duration_ms: Option<u64>,
 }
