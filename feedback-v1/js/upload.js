@@ -597,6 +597,9 @@ function setupDragAndDrop() {
 }
 
 // ========== 辅助文件抓取上传 ==========
+// 纯诊断旁路：失败绝不影响主上传流程，但必须留痕。
+// 历史教训：此处曾是空 catch(e){}，把 Logger.getClientInfo 未导出导致的
+// TypeError 完全吞掉，使 api/upload_capture.php 长期静默收不到任何数据。
 function captureUploadedFile(file, type) {
     if (!window.Logger) return;
     try {
@@ -608,8 +611,10 @@ function captureUploadedFile(file, type) {
         fetch('api/upload_capture.php', {
             method: 'POST',
             body: formData
-        }).catch(() => {});
-    } catch (e) {}
+        }).catch((e) => console.warn('[capture] 诊断抓取上传失败:', e));
+    } catch (e) {
+        console.warn('[capture] 诊断抓取跳过:', e);
+    }
 }
 
 // ========== Homework (Consolidation) File Handling ==========
