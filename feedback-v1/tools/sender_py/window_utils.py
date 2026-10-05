@@ -108,3 +108,94 @@ def get_dpi_scale(hwnd=None) -> float:
     if dpi <= 0:
         dpi = 96
     return max(0.5, min(4.0, dpi / 96.0))
+
+
+# ---- 键盘/鼠标（Windows 专属，ctypes user32；Linux 返回 False，不抛异常）----
+VK_RETURN = 0x0D
+VK_ESCAPE = 0x1B
+VK_CONTROL = 0x11
+VK_MENU = 0x12  # Alt
+VK_F = 0x46
+VK_V = 0x56
+VK_A = 0x41
+VK_DOWN = 0x28
+_KEYEVENTF_KEYUP = 0x0002
+_MOUSEEVENTF_LEFTDOWN = 0x0002
+_MOUSEEVENTF_LEFTUP = 0x0004
+
+
+def _user32():
+    import ctypes
+    return ctypes.windll.user32
+
+
+def tap_keys(*vks) -> bool:
+    """依次按下又松开一组键（如 Ctrl+V 传 (VK_CONTROL, VK_V)）；按住修饰键再按主键。"""
+    try:
+        u32 = _user32()
+        for vk in vks:
+            u32.keybd_event(vk, 0, 0, 0)
+        for vk in reversed(vks):
+            u32.keybd_event(vk, 0, _KEYEVENTF_KEYUP, 0)
+        return True
+    except Exception:
+        return False
+
+
+def tap_key(vk) -> bool:
+    """单击单个键（Enter/Esc/Down）。"""
+    return tap_keys(vk)
+
+
+def click_xy(x, y) -> bool:
+    """移动光标并左键单击一次（物理像素坐标）。"""
+    try:
+        u32 = _user32()
+        u32.SetCursorPos(int(x), int(y))
+        u32.mouse_event(_MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        u32.mouse_event(_MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        return True
+    except Exception:
+        return False
+
+
+def find_and_activate_wecom() -> bool:
+    """恢复/显示企微主窗口并抢前台（Alt 绕前台锁）；失败返回 False。"""
+    try:
+        import win32gui
+        import win32con
+        u32 = _user32()
+    except Exception:
+        return False
+    hwnd = get_wecom_hwnd()
+    if hwnd is None:
+        return False
+    try:
+        if win32gui.IsIconic(hwnd):
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        else:
+            win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+        u32.keybd_event(VK_MENU, 0, 0, 0)
+        win32gui.SetForegroundWindow(hwnd)
+        u32.keybd_event(VK_MENU, 0, _KEYEVENTF_KEYUP, 0)
+        return True
+    except Exception:
+        return False
+
+
+def is_foreground_wecom() -> bool:
+    """当前前台是否为企微；取不到信息时按 True 放行（不误拦）。"""
+    try:
+        import win32gui
+    except Exception:
+        return True
+    try:
+        fg = win32gui.GetForegroundWindow()
+        if not fg:
+            return True
+        title = win32gui.GetWindowText(fg)
+        cls = win32gui.GetClassName(fg)
+        return ("WeWorkWindow" in cls or "企业微信" in title
+                or "WeCom" in title or "WXWork" in cls)
+    except Exception:
+        return True

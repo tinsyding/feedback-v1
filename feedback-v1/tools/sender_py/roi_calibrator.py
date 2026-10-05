@@ -3,7 +3,10 @@
 tkinter 只在 run_calibration 内导入；坐标映射/门槛校验是纯函数，Linux 可单测。
 """
 
-from sender_py.roi_manager import derive_chat, to_abs, to_rel, validate_rel
+try:  # 仓库结构（…/tools 下运行）优先；散装拷贝（文件同目录）兜底
+    from sender_py.roi_manager import derive_chat, to_abs, to_rel, validate_rel
+except ModuleNotFoundError:
+    from roi_manager import derive_chat, to_abs, to_rel, validate_rel
 
 TITLE_COLOR = "#3B82F6"
 INPUT_COLOR = "#EF4444"

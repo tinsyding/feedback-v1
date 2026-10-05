@@ -43,3 +43,32 @@ class HistoryManager:
             if s.get("name") == student_name and ("已发送" in s.get("status", "") or "✓" in s.get("status", "")):
                 return True
         return False
+
+    def mark_status(self, archive_key: str, student_name: str, status: str,
+                    message: str = "", time_str: str = None) -> None:
+        """断点续发写盘：兼容旧条目形状 {index,name,status,time,message,msg_len}。"""
+        import datetime as _dt
+        entry = self._data["classes"].get(archive_key)
+        if not isinstance(entry, dict):
+            entry = {"key": archive_key, "cycle": "第 1 周", "class_name": archive_key,
+                     "students": []}
+            self._data["classes"][archive_key] = entry
+        students = entry.setdefault("students", [])
+        for s in students:
+            if isinstance(s, dict) and s.get("name") == student_name:
+                s["status"] = status
+                s["time"] = time_str or _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                if message:
+                    s["message"] = message
+                    s["msg_len"] = len(message)
+                break
+        else:
+            students.append({
+                "index": len(students) + 1,
+                "name": student_name,
+                "status": status,
+                "time": time_str or _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "message": message,
+                "msg_len": len(message or ""),
+            })
+        self.save()
