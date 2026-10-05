@@ -23,6 +23,7 @@ key = signature_key(rect[2], rect[3], get_dpi_scale())
 print("sig=", key, "need_calib=", needs_calibration(CFG, key))
 root = tk.Tk()
 root.withdraw()
+print("已弹出校准窗口（标题“ROI 校准”）：先点“知道了，开始框选”，再框两框；控制台在此等你确认/放弃。")
 roi = run_calibration(root, capture_wecom_window(rect))
 print("roi=", None if roi is None else "got2boxes")
 if roi is not None:

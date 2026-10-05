@@ -91,6 +91,13 @@ def run_calibration(parent, base_image, example_max_w=EXAMPLE_MAX_W):
     except Exception:
         pass
     win.grab_set()
+    try:  # 确保校准窗弹到最前，避免被企微盖住导致“卡住”错觉
+        win.lift()
+        win.attributes("-topmost", True)
+        win.after(1500, lambda: win.attributes("-topmost", False))
+        win.focus_force()
+    except Exception:
+        pass
 
     guide = tk.Frame(win)
     guide.pack(fill="both", expand=True, padx=12, pady=12)
