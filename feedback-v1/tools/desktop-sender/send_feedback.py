@@ -78,6 +78,29 @@ HAS_OCR = HAS_RAPIDOCR or HAS_WINOCR
 HAS_SMART_CHECK = True  # 视觉智能核验综合可用状态 (模式 A 大模型 + 模式 B 本地 OCR)
 _RAPID_OCR_INSTANCE = None
 
+
+def _get_rapid_ocr():
+    """获取 RapidOCR 单例引擎"""
+    global _RAPID_OCR_INSTANCE
+    if not HAS_RAPIDOCR:
+        return None
+    if _RAPID_OCR_INSTANCE is None:
+        try:
+            from rapidocr_onnxruntime import RapidOCR
+            _RAPID_OCR_INSTANCE = RapidOCR()
+        except Exception as e:
+            try:
+                log(f"[RapidOCR] 初始化失败: {e}", "WARN")
+            except Exception:
+                pass
+            return None
+    return _RAPID_OCR_INSTANCE
+
+
+def get_rapid_ocr():
+    """获取 RapidOCR 引擎（向后兼容别名）"""
+    return _get_rapid_ocr()
+
 # 客户端应用版本号
 APP_VERSION = "v2.6.0"
 
