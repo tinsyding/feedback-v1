@@ -12,10 +12,12 @@
  * 服务端配置（只放配置/环境变量，无管理后台编辑页）：
  *   SENDER_API_TOKEN  发送器访问令牌（必填；为空则本接口直接 500 拒绝服务，不裸奔）
  *                     或 api/secret_key.local.php 中 'senderApiToken'
- *   DASHSCOPE_API_KEY 视觉模型 Key（必填，沿用 secret_key.php 既有约定）
- *   IDENTIFY_API_BASE 兼容 OpenAI chat-completions 的 endpoint
- *                     （默认 https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions）
- *   IDENTIFY_MODEL     视觉模型（默认 qwen-vl-max）
+ *   DASHSCOPE_API_KEY 视觉模型 Key（必填）或 secret_key.local.php 中 'dashscopeApiKey'
+ *   IDENTIFY_API_BASE 兼容 OpenAI chat-completions 的 endpoint（环境变量或
+ *                     secret_key.local.php 中 'identifyApiBase'；可只写到 …/v1，
+ *                     程序自动补 /chat/completions；默认 DashScope 官方地址）
+ *   IDENTIFY_MODEL     视觉模型（环境变量或 secret_key.local.php 中 'identifyModel'；
+ *                     默认 qwen-vl-max）
  *
  * 存档举证：每次判定存 data/identify_archive/YYYYMMDD/uniqid/ 下
  *   title.png + chat.png + request.json + response.json。
@@ -81,14 +83,20 @@ foreach (['image_title', 'image_chat'] as $field) {
     }
 }
 
-// ---- 视觉模型配置 ----
+// ---- 视觉模型配置（环境变量优先，secret_key.local.php 次之，均无则 fail-closed）----
 $keys = require __DIR__ . '/secret_key.php';
-$visionKey = is_array($keys) ? ($keys['dashscopeApiKey'] ?? '') : '';
+$localKeys = is_array($keys) ? $keys : [];
+$visionKey = getenv('DASHSCOPE_API_KEY') ?: ($localKeys['dashscopeApiKey'] ?? '');
 if ($visionKey === '') {
     sendResponse(false, null, '服务端视觉模型未配置，请联系管理员', 500);
 }
-$apiBase = getenv('IDENTIFY_API_BASE') ?: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
-$model = getenv('IDENTIFY_MODEL') ?: 'qwen-vl-max';
+$apiBase = getenv('IDENTIFY_API_BASE') ?: ($localKeys['identifyApiBase'] ?? '');
+if ($apiBase === '') {
+    $apiBase = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+} elseif (substr($apiBase, -17) !== '/chat/completions') {
+    $apiBase = rtrim($apiBase, '/') . '/chat/completions';
+}
+$model = getenv('IDENTIFY_MODEL') ?: ($localKeys['identifyModel'] ?? '') ?: 'qwen-vl-max';
 if (!function_exists('curl_init')) {
     sendResponse(false, null, '服务端缺少 curl 扩展', 500);
 }
