@@ -77,25 +77,37 @@ def _load_example_photo(tk, max_w=EXAMPLE_MAX_W):
 def run_calibration(parent, base_image, example_max_w=EXAMPLE_MAX_W):
     """模态校准：先展示 example.png 指引 → 点确认进 Canvas → 阻塞到确认/放弃。
 
+    parent 为 None 时自建 Tk 主窗口（任务栏有图标，最稳）；传入父窗口时用模态 Toplevel。
     返回 {"title": rel, "input": rel, "chat": rel} 或 None（放弃）。
     """
     import tkinter as tk
 
+    if base_image is None:
+        raise ValueError("实拍图为空，无法校准：请先确认企微窗口能被截到。")
     W, H = base_image.size
     result = {"roi": None}
 
-    win = tk.Toplevel(parent)
+    if parent is None:
+        win = tk.Tk()
+        own_root = True
+    else:
+        win = tk.Toplevel(parent)
+        own_root = False
+        try:
+            win.transient(parent)
+        except Exception:
+            pass
     win.title("ROI 校准：框标题栏 + 输入框")
     try:
-        win.transient(parent)
-    except Exception:
-        pass
-    win.grab_set()
-    try:  # 确保校准窗弹到最前，避免被企微盖住导致“卡住”错觉
+        win.deiconify()
         win.lift()
         win.attributes("-topmost", True)
         win.after(1500, lambda: win.attributes("-topmost", False))
         win.focus_force()
+    except Exception:
+        pass
+    try:
+        win.grab_set()
     except Exception:
         pass
 
