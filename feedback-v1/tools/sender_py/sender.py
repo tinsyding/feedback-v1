@@ -144,6 +144,18 @@ def ensure_roi(parent, rect, scale, config_path: str = None):
     except ModuleNotFoundError:
         from capture import capture_wecom_window
         from roi_calibrator import run_calibration
+    try:  # 校准画布必须是没有遮挡的实拍：先把企微顶到最前再截
+        try:
+            from sender_py import window_utils as wu
+        except ModuleNotFoundError:
+            import window_utils as wu
+        wu.find_and_activate_wecom()
+        time.sleep(0.4)
+        fresh = wu.get_wecom_rect()
+        if fresh and fresh[2] >= 200 and fresh[3] >= 150:
+            rect = fresh
+    except Exception:
+        pass
     img = capture_wecom_window(rect)
     if img is None:
         return None
@@ -188,6 +200,11 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
     name, sid, sname, message = item["studentName"], item["sid"], item["sname"], item["message"]
     notes = []
     for cand in range(1, MAX_CANDIDATES + 1):
+        if not dry_run:  # 所有截图（校准+判定）的前提：企微完整可见，否则 mss 截到的是遮挡物
+            if not wu.find_and_activate_wecom():
+                return {"result": "error", "reason": "企微唤起失败（最小化或无响应），请手动点开后重试",
+                        "notes": notes}
+            time.sleep(0.3)
         rect = wu.get_wecom_rect()
         if not rect:
             return {"result": "error", "reason": "找不到企微窗口", "notes": notes}
