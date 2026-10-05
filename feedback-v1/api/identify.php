@@ -145,19 +145,22 @@ $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
 $curlErr = curl_error($ch);
 curl_close($ch);
 if ($raw === false || $raw === '') {
-    sendResponse(false, null, '视觉模型调用失败：' . $curlErr, 502);
+    // 注：不用 HTTP 502——本站 nginx 对 502 配了 error_page，会吞掉 JSON 包。
+    // 应用层失败一律 200 + success:false，调用方只看 success。
+    sendResponse(false, null, '视觉模型调用失败：' . $curlErr, 200);
 }
 $decoded = json_decode($raw, true);
 $content = $decoded['choices'][0]['message']['content'] ?? '';
 if (!is_string($content) || trim($content) === '') {
-    sendResponse(false, null, '视觉模型返回为空（HTTP ' . $httpCode . '）', 502);
+    $upErr = $decoded['error']['message'] ?? ('HTTP ' . $httpCode);
+    sendResponse(false, null, '视觉模型返回为空：' . $upErr, 200);
 }
 $text = trim($content);
 $text = preg_replace('/^```(?:json)?\s*/i', '', $text);
 $text = preg_replace('/\s*```$/', '', $text);
 $parsed = json_decode(trim($text), true);
 if (!is_array($parsed)) {
-    sendResponse(false, null, '视觉模型返回非 JSON', 502);
+    sendResponse(false, null, '视觉模型返回非 JSON', 200);
 }
 
 // ---- 类型归一（缺失不放行由客户端 fail-closed；此处只做归一）----
