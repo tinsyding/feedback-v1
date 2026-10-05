@@ -9,6 +9,7 @@ import os
 import time
 
 try:  # 仓库结构优先；散装拷贝（文件同目录）兜底
+    from sender_py.pacing import AFTER_SEND_GAP, CANDIDATE_GAP, STUDENT_GAP, pause
     from sender_py.reply_notes import actionable, dedupe_add, make_note, should_record
     from sender_py.roi_manager import (
         crop_chat_tail, default_config_path, derive_chat, load_roi, needs_calibration,
@@ -16,6 +17,7 @@ try:  # 仓库结构优先；散装拷贝（文件同目录）兜底
     )
     from sender_py.utils import load_feedback_items
 except ModuleNotFoundError:
+    from pacing import AFTER_SEND_GAP, CANDIDATE_GAP, STUDENT_GAP, pause
     from reply_notes import actionable, dedupe_add, make_note, should_record
     from roi_manager import (
         crop_chat_tail, default_config_path, derive_chat, load_roi, needs_calibration,
@@ -199,6 +201,11 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         import window_utils as wu
     name, sid, sname, message = item["studentName"], item["sid"], item["sname"], item["message"]
     notes = []
+
+    def _paced(gaps):
+        if not dry_run:
+            log(f"[{name}] 随机停顿 {pause(*gaps):.1f}s")
+
     for cand in range(1, MAX_CANDIDATES + 1):
         if dry_run:
             rect = wu.get_wecom_rect()  # Linux 下为 None，dry-run 不真用
@@ -222,6 +229,7 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         if entered and not dry_run:  # 截图前焦点守护：mss 截的是屏幕像素，失焦会被遮挡物污染
             if not wu.find_and_activate_wecom():
                 log(f"[{name}] 候选{cand}：企微唤起失败，换下一候选")
+                _paced(CANDIDATE_GAP)
                 continue
             time.sleep(0.3)
         judgment, chat_title, err = (None, None, "dry-run 跳过截图判定") if dry_run else judge_candidate(
@@ -235,6 +243,7 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
             dedupe_add(notes, make_note(name, cand, chat_title, bool((judgment or {}).get("matched")), judgment or {}))
         if err is not None and not dry_run:
             log(f"[{name}] 候选{cand}：{err}，换下一候选")
+            _paced(CANDIDATE_GAP)
             continue
         decision = decide_action(judgment)
         log(f"[{name}] 候选{cand}：{decision['action']}（{decision['reason']}）")
@@ -243,11 +252,13 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
                 return {"result": "sent", "at_candidate": cand, "reason": "dry-run 未真发",
                         "notes": notes}
             ok, why = paste_and_send(message)
+            _paced(AFTER_SEND_GAP)
             return {"result": "sent" if ok else "error",
                     "at_candidate": cand, "reason": why, "notes": notes}
         if decision["action"] == "intercept":
             return {"result": "blocked", "at_candidate": cand,
                     "reason": decision["reason"], "notes": notes}
+        _paced(CANDIDATE_GAP)
     return {"result": "unmatched", "reason": "3 候选均未 MATCH", "notes": notes}
 
 
@@ -366,6 +377,8 @@ class SenderApp:
             if res["result"] == "sent" and self._history and not self.dry.get():
                 self._history.mark_status(self.archive_key, item["studentName"], "✅已发送", item["message"])
             self.emit(f"[{item['studentName']}] → {res['result']}：{res.get('reason', '')}")
+            if not self.dry.get():
+                self.emit(f"学生间随机停顿 {pause(*STUDENT_GAP):.1f}s")
         self.emit("本批处理结束")
 
 
