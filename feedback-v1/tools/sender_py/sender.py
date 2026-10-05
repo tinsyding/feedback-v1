@@ -80,7 +80,7 @@ def safe_copy(text: str, retries: int = 5) -> bool:
 
 
 def search_and_enter(name: str, candidate_index: int) -> bool:
-    """搜人进会话：第 candidate_index 个结果。Ctrl+F 聚焦搜索→粘贴→回车→Down 定位→回车进会话。"""
+    """搜人进会话：第 candidate_index 个结果。Ctrl+F 聚焦→全选→Backspace 清空→粘贴→回车搜→Down 定位→回车进会话。"""
     try:
         from sender_py import window_utils as wu
     except ModuleNotFoundError:
@@ -91,6 +91,9 @@ def search_and_enter(name: str, candidate_index: int) -> bool:
     wu.tap_keys(wu.VK_CONTROL, wu.VK_F)
     time.sleep(0.15)
     wu.tap_keys(wu.VK_CONTROL, wu.VK_A)
+    time.sleep(0.1)
+    wu.tap_key(0x08)  # Backspace：清掉搜索框残留，防粘贴追加
+    time.sleep(0.1)
     if not safe_copy(name):
         return False
     wu.tap_keys(wu.VK_CONTROL, wu.VK_V)
@@ -101,7 +104,7 @@ def search_and_enter(name: str, candidate_index: int) -> bool:
         wu.tap_key(wu.VK_DOWN)
         time.sleep(0.15)
     wu.tap_key(wu.VK_RETURN)
-    time.sleep(0.8)
+    time.sleep(1.2)  # 等会话切换渲染完再截图
     return wu.is_foreground_wecom()
 
 
@@ -193,6 +196,11 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         if roi is None:
             return {"result": "error", "reason": "ROI 校准未完成", "notes": notes}
         entered = search_and_enter(name, cand)
+        if entered and not dry_run:  # 截图前焦点守护：mss 截的是屏幕像素，失焦会被遮挡物污染
+            if not wu.find_and_activate_wecom():
+                log(f"[{name}] 候选{cand}：企微唤起失败，换下一候选")
+                continue
+            time.sleep(0.3)
         judgment, chat_title, err = (None, None, "dry-run 跳过截图判定") if dry_run else judge_candidate(
             rect, roi, sid, sname, server, token)
         if dry_run:
