@@ -20,7 +20,22 @@ except ModuleNotFoundError:
 set_per_monitor_dpi_awareness()
 rect = get_wecom_rect()
 print("rect=", rect, "scale=", get_dpi_scale())
-img = capture_wecom_window(rect)
+try:
+    import mss as _mss
+    print("mss=", getattr(_mss, "__version__", "unknown"))
+except Exception as e:
+    print("mss_import_fail=", repr(e))
+try:
+    import PIL as _PIL
+    print("Pillow=", getattr(_PIL, "__version__", "unknown"))
+except Exception as e:
+    print("pillow_import_fail=", repr(e))
+try:
+    img = capture_wecom_window(rect)
+except Exception as e:
+    import traceback
+    traceback.print_exc()
+    img = None
 print("shot=", None if img is None else img.size)
 if img is not None:
     out = os.path.join(os.environ.get("TEMP", "."), "sender_py_debug_wecom_full.png")
