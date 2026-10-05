@@ -199,3 +199,35 @@ def is_foreground_wecom() -> bool:
                 or "WeCom" in title or "WXWork" in cls)
     except Exception:
         return True
+
+
+def ensure_fully_visible() -> tuple:
+    """mss 截屏幕像素：窗口半截出屏则截不全。把企微 Clamp 回虚拟屏内（保尺寸只挪位置）。
+
+    返回 (True, rect)；窗口比整块虚拟屏还大则 (False, reason)，请用户手动处理。
+    """
+    try:
+        import win32gui
+        u32 = _user32()
+    except Exception:
+        return (False, "无 win32 环境")
+    hwnd = get_wecom_hwnd()
+    if hwnd is None:
+        return (False, "找不到企微窗口")
+    try:
+        vx = u32.GetSystemMetrics(76)
+        vy = u32.GetSystemMetrics(77)
+        vw = u32.GetSystemMetrics(78)
+        vh = u32.GetSystemMetrics(79)
+        l, t, r, b = win32gui.GetWindowRect(hwnd)
+        w, h = r - l, b - t
+        if w > vw or h > vh:
+            return (False, "企微窗口比屏幕还大，请先恢复/缩小窗口再跑")
+        nx = min(max(l, vx), vx + vw - w)
+        ny = min(max(t, vy), vy + vh - h)
+        if (nx, ny) != (l, t):
+            win32gui.MoveWindow(hwnd, nx, ny, w, h, True)
+        l, t, r, b = win32gui.GetWindowRect(hwnd)
+        return (True, (l, t, r - l, b - t))
+    except Exception as e:
+        return (False, f"窗口归位失败：{e}")

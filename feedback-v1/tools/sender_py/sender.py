@@ -200,12 +200,18 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
     name, sid, sname, message = item["studentName"], item["sid"], item["sname"], item["message"]
     notes = []
     for cand in range(1, MAX_CANDIDATES + 1):
-        if not dry_run:  # 所有截图（校准+判定）的前提：企微完整可见，否则 mss 截到的是遮挡物
+        if dry_run:
+            rect = wu.get_wecom_rect()  # Linux 下为 None，dry-run 不真用
+        else:  # 所有截图的前提：企微完整可见，否则 mss 截到遮挡物/屏外黑边
             if not wu.find_and_activate_wecom():
                 return {"result": "error", "reason": "企微唤起失败（最小化或无响应），请手动点开后重试",
                         "notes": notes}
             time.sleep(0.3)
-        rect = wu.get_wecom_rect()
+            ok_vis, vis = wu.ensure_fully_visible()
+            if not ok_vis:
+                return {"result": "error", "reason": f"窗口半截在屏幕外且无法自动归位：{vis}",
+                        "notes": notes}
+            rect = vis
         if not rect:
             return {"result": "error", "reason": "找不到企微窗口", "notes": notes}
         scale = wu.get_dpi_scale()
