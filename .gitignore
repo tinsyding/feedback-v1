@@ -26,6 +26,9 @@ feedback-v1/data/vision_config.json
 # v1 学生 PII 与派生数据（学情档案/Token映射/题库镜像/上传PDF/原始CSV备份）
 feedback-v1/data/history/*
 !feedback-v1/data/history/.gitkeep
+# identify 判定存档：两裁剪图+请求/返回 JSON（含真实聊天内容），保留 14 天，绝不入库
+feedback-v1/data/identify_archive/*
+!feedback-v1/data/identify_archive/.gitkeep
 feedback-v1/data/qbank/*
 !feedback-v1/data/qbank/.gitkeep
 feedback-v1/data/pdfs/*
