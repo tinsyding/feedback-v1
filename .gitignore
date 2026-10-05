@@ -41,7 +41,7 @@ _enc.txt
 feedback-v1/tools/desktop-sender/feedback_history.json
 feedback-v1/tools/desktop-sender/测试*.json
 # 重写版 sender_py 真机验证截图（mss 实拍，含真实学生姓名/聊天内容，绝不入库）
-feedback-v1/tools/sender_py_debug_*.png
+feedback-v1/tools/sender_py_debug_*
 feedback-v1/tools/sender_py/debug/
 # WGC 探针的取证输出：真机企微窗口截图 + JSON，含真实学生姓名/学号与聊天内容。
 # 探针脚本 probe_wgc.py 入库（方法可复现），取证产物不入库。
