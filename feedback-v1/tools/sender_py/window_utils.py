@@ -2,18 +2,28 @@
 
 
 def set_per_monitor_dpi_awareness():
-    """启动时设置 Per-Monitor DPI 感知，三段兜底；非 Windows 直接返回 False。"""
+    """启动时设置 Per-Monitor DPI 感知，三段兜底（与旧版一致）；非 Windows 返回 False。
+
+    顺序：SetProcessDpiAwarenessContext(-4, V2) → shcore.SetProcessDpiAwareness(2)
+    → user32.SetProcessDPIAware()。ctypes.windll 只在 Windows 存在，Linux 直接 False。
+    """
     try:
         import ctypes
+        windll = ctypes.windll  # Linux 无此属性，直接抛 AttributeError 走 False
     except Exception:
         return False
     try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
         return True
     except Exception:
         pass
     try:
-        ctypes.windll.user32.SetProcessDPIAware()
+        windll.shcore.SetProcessDpiAwareness(2)
+        return True
+    except Exception:
+        pass
+    try:
+        windll.user32.SetProcessDPIAware()
         return True
     except Exception:
         return False
@@ -65,7 +75,7 @@ def get_wecom_rect():
 
 
 def get_dpi_scale(hwnd=None) -> float:
-    """GetDpiForWindow -> GetDpiForSystem -> GetDeviceCaps 兜底；范围 clamp 到 [0.5, 4.0]。"""
+    """GetDpiForWindow → GetDpiForSystem → GetDeviceCaps(88) 兜底；clamp 到 [0.5, 4.0]。"""
     try:
         import ctypes
         user32 = ctypes.windll.user32
@@ -84,4 +94,17 @@ def get_dpi_scale(hwnd=None) -> float:
             dpi = user32.GetDpiForSystem()
         except Exception:
             dpi = 96
+    if dpi == 96:
+        try:
+            hdc = user32.GetDC(0)
+            dpi = ctypes.windll.gdi32.GetDeviceCaps(hdc, 88)  # LOGPIXELSX
+            user32.ReleaseDC(0, hdc)
+        except Exception:
+            dpi = 96
+    try:
+        dpi = int(dpi)
+    except Exception:
+        dpi = 96
+    if dpi <= 0:
+        dpi = 96
     return max(0.5, min(4.0, dpi / 96.0))
