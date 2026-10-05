@@ -68,6 +68,7 @@ feedback-v1/data/seeds/
 feedback-v1/.well-known/
 Thumbs.db
 .DS_Store
+*:Zone.Identifier
 .idea/
 .vscode/
 *.swp
