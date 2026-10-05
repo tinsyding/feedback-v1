@@ -26,14 +26,6 @@
                 title: '操作日志',
                 breadcrumb: '操作日志'
             },
-            desktop: {
-                title: '桌面云端日志',
-                breadcrumb: '桌面云端日志'
-            },
-            vision: {
-                title: '视觉大模型配置',
-                breadcrumb: '视觉大模型配置'
-            },
             database: {
                 title: '数据库管理',
                 breadcrumb: '数据库管理'
@@ -76,10 +68,6 @@
             } else if (tab === 'logs') {
                 loadFilters();
                 loadLogs(1);
-            } else if (tab === 'desktop') {
-                initDesktopTab();
-            } else if (tab === 'vision') {
-                loadVisionConfig();
             } else if (tab === 'database') {
                 initDatabaseTab();
             } else if (tab === 'changelog') {
@@ -157,7 +145,6 @@
             const authed = await checkAuth();
             if (authed) {
                 await loadConfig();
-                loadVisionConfig();
                 loadRecordsStats();
             }
             document.body.classList.add('page-ready', 'ready');
