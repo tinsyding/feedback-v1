@@ -10,6 +10,7 @@ class TestPacing(unittest.TestCase):
         for low, high in (CANDIDATE_GAP, AFTER_SEND_GAP, STUDENT_GAP):
             self.assertLess(low, high)
             self.assertGreaterEqual(low, 0)
+            self.assertLessEqual(high, 1.0)  # 全部控制在 1 秒以内
 
     def test_pause_stubbed(self):
         calls = []

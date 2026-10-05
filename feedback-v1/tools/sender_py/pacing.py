@@ -3,9 +3,9 @@
 import random
 import time
 
-CANDIDATE_GAP = (0.8, 2.0)  # 换候选前
-AFTER_SEND_GAP = (1.5, 3.5)  # 发完一条后
-STUDENT_GAP = (2.0, 5.0)  # 换下一学生前
+CANDIDATE_GAP = (0.3, 0.8)  # 换候选前
+AFTER_SEND_GAP = (0.4, 1.0)  # 发完一条后
+STUDENT_GAP = (0.5, 1.0)  # 换下一学生前
 
 
 def pause(low: float, high: float, _sleep=time.sleep, _rand=random.uniform) -> float:
