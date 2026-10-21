@@ -208,11 +208,17 @@ foreach ($tokenMap as $token => $entry) {
     $entryKey = trim((string)($entry['k'] ?? ''));
     $entryName = trim((string)($entry['n'] ?? ''));
     if ($entryId === '' || $entryKey === '' || $entryName === '') continue;
-    if ($entryKey === legacy_student_key($entryId, $entryName)) {
-        $newKey = build_student_key($entryId, $entryName, (string)($entry['s'] ?? ''), (string)($entry['g'] ?? ''));
-        if ($newKey !== $entryKey) {
-            $tokenPlans[$token] = ['old' => $entryKey, 'new' => $newKey];
-        }
+    // 注意 token_map 字段：s = 学科，g = 年级
+    $entrySubject = trim((string)($entry['s'] ?? ''));
+    $entryGrade = trim((string)($entry['g'] ?? ''));
+    $correctKey = build_student_key($entryId, $entryName, $entryGrade, $entrySubject);
+    // 兼容 2026-10-21 首轮迁移中 s/g 传反产生的错误 key
+    $swappedKey = build_student_key($entryId, $entryName, $entrySubject, $entryGrade);
+    $legacyKey = legacy_student_key($entryId, $entryName);
+    $needsRewrite = $entryKey !== $correctKey
+        && ($entryKey === $legacyKey || ($swappedKey !== $correctKey && $entryKey === $swappedKey));
+    if ($needsRewrite) {
+        $tokenPlans[$token] = ['old' => $entryKey, 'new' => $correctKey];
     }
 }
 printLine("[token_map] 共 " . count($tokenMap) . " 条，待改写: " . count($tokenPlans));
