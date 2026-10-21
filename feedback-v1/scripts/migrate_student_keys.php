@@ -177,6 +177,7 @@ foreach ($files as $file) {
         'changed' => $changed,
         'data' => $newData,
         'path' => $file,
+        'mtime' => filemtime($file) ?: time(),
         'skip' => '',
     ];
 }
@@ -191,6 +192,7 @@ foreach ($filePlans as $plan) {
 
 // ---------- 4. token_map.json ----------
 $tokenMapPath = $historyDir . '/token_map.json';
+$tokenMapMtime = is_file($tokenMapPath) ? (filemtime($tokenMapPath) ?: time()) : time();
 $tokenMap = [];
 if (is_file($tokenMapPath)) {
     $raw = @file_get_contents($tokenMapPath);
@@ -335,6 +337,8 @@ foreach ($filePlans as $plan) {
         fail('写入临时文件失败: ' . $plan['file']);
     }
     @chmod($tmp, 0644);
+    // 档案 mtime 参与家长端跨班型合并排序，改写内容时必须保留原时间。
+    @touch($tmp, $plan['mtime']);
     if (!rename($tmp, $plan['path'])) {
         @unlink($tmp);
         fail('替换档案文件失败: ' . $plan['file']);
@@ -355,6 +359,7 @@ if (!empty($tokenPlans)) {
         fail('写入 token_map.json 临时文件失败');
     }
     @chmod($tmp, 0644);
+    @touch($tmp, $tokenMapMtime);
     if (!rename($tmp, $tokenMapPath)) {
         @unlink($tmp);
         fail('替换 token_map.json 失败');

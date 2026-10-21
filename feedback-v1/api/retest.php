@@ -1260,6 +1260,8 @@ if ($action === 'decrypt') {
     // 这里把全部相关档案合并读取，学生换班型后历史保持连续。
     $studentHistory = [];
     $historyWeekTiers = [];
+    $historyByTier = [];
+    $tierlessWeeks = [];
     $historyFiles = [];
     $tierlessHistoryFile = $historyDir . '/' . rawurlencode($subject) . '_' . rawurlencode($grade) . '.json';
     if (is_file($tierlessHistoryFile)) {
@@ -1283,6 +1285,14 @@ if ($action === 'decrypt') {
             $histWeek = (string)$histWeek;
             if (!array_key_exists($histWeek, $studentHistory)) {
                 $studentHistory[$histWeek] = $histErrors;
+            }
+            if ($hfTier !== '') {
+                if (!isset($historyByTier[$hfTier][$histWeek])) {
+                    $historyByTier[$hfTier][$histWeek] = $histErrors;
+                }
+            } else {
+                // 无班型后缀的是迁移后新写入的档案，优先级最高
+                $tierlessWeeks[$histWeek] = true;
             }
             if ($hfTier !== '' && !isset($historyWeekTiers[$histWeek])) {
                 $historyWeekTiers[$histWeek] = $hfTier;
@@ -1368,6 +1378,16 @@ if ($action === 'decrypt') {
         }
     } catch (Throwable $e) {
         error_log("DB studentHistory query error: " . $e->getMessage());
+    }
+
+    // 同一周可能在多个班型都有记录：以数据库中最新的班型为准，
+    // 优先采用该班型历史档案中的错题，避免多个档案 mtime 相同导致取值不确定。
+    foreach ($dbWeekTiers as $dbWeek => $dbTier) {
+        $dbWeek = (string)$dbWeek;
+        if ($dbTier === '' || isset($tierlessWeeks[$dbWeek])) continue;
+        if (isset($historyByTier[$dbTier][$dbWeek])) {
+            $studentHistory[$dbWeek] = $historyByTier[$dbTier][$dbWeek];
+        }
     }
 
     // 若历史库已有该周错题，优先采用历史库数据
