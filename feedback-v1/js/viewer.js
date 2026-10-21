@@ -1226,6 +1226,16 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
             source_files: uploadedFileNames,
             students: []
         };
+
+        // 错题本身份 Key：学号_姓名_年级_学科（与服务端 build_student_key 保持一致）
+        const plusGradeForKey = sessionPayload.plusData.grade || '';
+        const plusSubjectForKey = batchPayload.subject || '';
+        const buildPlusStudentKey = (studentId, studentName, fullName, index) => {
+            if (!studentId) return fullName || `${studentName}_${index}`;
+            if (!plusGradeForKey || !plusSubjectForKey) return `${studentId}_${studentName}`;
+            return `${studentId}_${studentName}_${plusGradeForKey}_${plusSubjectForKey}`;
+        };
+        const buildLegacyStudentKey = (studentId, studentName) => studentId ? `${studentId}_${studentName}` : studentName;
         
         hwRows.forEach((row, index) => {
             const fullName = (row[nameIdx] || '').trim();
@@ -1241,7 +1251,7 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
             } else if (studentIdMatch) {
                 studentId = studentIdMatch[1];
             }
-            const studentKey = studentId ? `${studentId}_${studentName}` : (fullName || `${studentName}_${index}`);
+            const studentKey = buildPlusStudentKey(studentId, studentName, fullName, index);
             
             const rawScore = parseScoreValue(row[scoreIdx]);
             const homeworkScore = rawScore !== null ? rawScore : 0;
@@ -1289,9 +1299,9 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
     }
 
     hwRows.forEach((row, index) => {
-        const fullName = row[nameIdx] || '';
+        const fullName = (row[nameIdx] || '').trim();
         const nameMatch = fullName.match(/\d+(.+)/);
-        const studentName = nameMatch ? nameMatch[1] : fullName;
+        const studentName = nameMatch ? nameMatch[1].trim() : fullName;
 
         // Skip dropped students and excluded students
         if (allDroppedSet.has(studentName)) return;
@@ -1305,7 +1315,8 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
         } else if (studentIdMatch) {
             studentId = studentIdMatch[1];
         }
-        const studentKey = studentId ? `${studentId}_${studentName}` : (fullName || `${studentName}_${index}`);
+        const studentKey = buildPlusStudentKey(studentId, studentName, fullName, index);
+        const legacyStudentKey = buildLegacyStudentKey(studentId, studentName);
         const rawScore = parseScoreValue(row[scoreIdx]);
         const score = rawScore !== null ? rawScore : 0;
         const rank = scores.filter(s => s > score).length + 1;
@@ -1436,7 +1447,9 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                         plusFeedbackPart += `【个人薄弱点】：${errorTopics.join('、')}\n`;
                     }
                     plusFeedbackPart += `【错题本】：点击链接查看本专题的错题\n`;
-                    const token = plusTokens[studentKey] || plusTokens[fullName] || plusTokens[studentName];
+                    const token = plusTokens[studentKey]
+                        || plusTokens[legacyStudentKey]
+                        || (!studentId ? (plusTokens[fullName] || plusTokens[studentName]) : '');
                     if (token) {
                         const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
                         const retestBase = isLocal

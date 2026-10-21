@@ -3285,6 +3285,7 @@ function getIncomingStudentsList() {
     if (!homeworkData || homeworkData.length <= 1) return [];
     const hwHeader = homeworkData[0];
     const nameIdx = hwHeader.findIndex(h => String(h).includes('姓名'));
+    const idIdx = hwHeader.findIndex(h => String(h).includes('学号') || String(h).includes('编号') || String(h).includes('卡号'));
     const scoreIdx = hwHeader.findIndex(h => String(h).includes('得分'));
     const commentIdx = hwHeader.findIndex(h => String(h).includes('批改评语'));
     const hwStatusIdx = hwHeader.findIndex(h => String(h).includes('作业状态'));
@@ -3304,6 +3305,15 @@ function getIncomingStudentsList() {
 
         const nameMatch = fullName.match(/\d+(.+)/);
         const studentName = nameMatch ? nameMatch[1].trim() : fullName;
+
+        // 学号是错题本身份的关键维度：优先取“学号”列，缺失时取姓名前缀数字
+        let studentId = '';
+        if (idIdx >= 0 && row[idIdx] !== undefined && row[idIdx] !== null && String(row[idIdx]).trim() !== '') {
+            studentId = String(row[idIdx]).trim();
+        } else {
+            const studentIdMatch = fullName.match(/^(\d+)/);
+            if (studentIdMatch) studentId = studentIdMatch[1];
+        }
 
         if (detectedDroppedStudents && detectedDroppedStudents.homework && detectedDroppedStudents.homework.includes(studentName)) {
             continue;
@@ -3335,6 +3345,7 @@ function getIncomingStudentsList() {
         errorNums = Array.from(new Set(errorNums)).sort((a, b) => a - b);
 
         list.push({
+            id: studentId,
             name: studentName,
             score: score,
             errors: errorNums
@@ -3366,6 +3377,7 @@ function showBatchOverwriteModal(options) {
             <div style="display:flex; align-items:flex-start; gap:8px; padding:7px 10px; background:rgba(255,255,255,0.04); border-radius:6px; border:1px solid rgba(255,255,255,0.07); margin-bottom:5px; font-size:0.83rem; line-height:1.5;">
                 <span style="flex-shrink:0; background:rgba(56,189,248,0.18); color:#38bdf8; padding:1px 6px; border-radius:4px; font-weight:600;">修改</span>
                 <strong style="color:var(--text-primary,#fff); flex-shrink:0;">${escapeHtml(m.name)}</strong>
+                ${m.operator ? `<span style="flex-shrink:0; color:var(--text-secondary,#94a3b8); font-size:0.75rem; padding-top:1px;">（上次操作：${escapeHtml(m.operator)}）</span>` : ''}
                 <div style="color:var(--text-secondary,#cbd5e1);">${parts.join('；')}</div>
             </div>
         `;
@@ -3381,8 +3393,8 @@ function showBatchOverwriteModal(options) {
             </div>
 
             <div style="display:flex; justify-content:space-between; gap:8px; margin-bottom:12px; font-size:0.8rem; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); padding:8px 12px; border-radius:8px;">
-                <div><span style="color:var(--text-secondary,#94a3b8);">上次生成：</span><strong style="color:var(--text-primary,#fff);">${batchData.createdAt || '未知'}</strong></div>
-                <div><span style="color:var(--text-secondary,#94a3b8);">操作教师：</span><strong style="color:var(--text-primary,#fff);">${escapeHtml(operator)}</strong></div>
+                <div><span style="color:var(--text-secondary,#94a3b8);">最近更新：</span><strong style="color:var(--text-primary,#fff);">${batchData.createdAt || '未知'}</strong></div>
+                <div><span style="color:var(--text-secondary,#94a3b8);">最近操作教师：</span><strong style="color:var(--text-primary,#fff);">${escapeHtml(operator)}</strong></div>
             </div>
 
             <div style="font-weight:600; color:var(--text-primary,#fff); margin-bottom:8px;">

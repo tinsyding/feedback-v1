@@ -55,6 +55,8 @@ $cipherAlgo = 'aes-256-cbc';
 
 // 加载 MySQL 数据库模块
 require_once __DIR__ . '/db.php';
+// 错题本身份 Key 纯函数（统一 学号_姓名_年级_学科，兼容旧格式）
+require_once __DIR__ . '/lib_retest_keys.php';
 
 /**
  * 记录家长端访问与下载审计日志
@@ -355,62 +357,93 @@ if ($action === 'check_existing_batch') {
         // 如果传入了当前上传的学生名单，按学生白名单维度进行精准对比
         if (is_array($incomingStudents)) {
             $studentKeys = [];
-            $studentNames = [];
+            $nameOnlyNames = [];
             $incomingMap = [];
             foreach ($incomingStudents as $st) {
                 $sName = trim($st['name'] ?? '');
-                if ($sName !== '') {
-                    $sId = trim((string)($st['id'] ?? ''));
-                    $sKey = trim($st['key'] ?? ($sId ? "{$sId}_{$sName}" : $sName));
-                    $sScore = isset($st['score']) ? floatval($st['score']) : 0.0;
-                    $sErrors = isset($st['errors']) && is_array($st['errors']) ? array_values(array_unique(array_map('intval', $st['errors']))) : [];
-                    sort($sErrors, SORT_NUMERIC);
-                    $incomingData = [
-                        'name' => $sName,
-                        'id' => $sId,
-                        'key' => $sKey,
-                        'score' => $sScore,
-                        'errors' => $sErrors
-                    ];
-                    $incomingMap[$sKey] = $incomingData;
-                    if (!isset($incomingMap[$sName])) {
-                        $incomingMap[$sName] = $incomingData;
-                    }
-                    $studentKeys[] = $sKey;
-                    $studentNames[] = $sName;
+                if ($sName === '') continue;
+                $sId = trim((string)($st['id'] ?? ''));
+                // 服务端统一构建身份 Key，不信任前端传来的旧格式 Key
+                $sKey = build_student_key($sId, $sName, $grade, $subject);
+                $legacyKey = legacy_student_key($sId, $sName);
+                $sScore = isset($st['score']) ? floatval($st['score']) : 0.0;
+                $sErrors = isset($st['errors']) && is_array($st['errors']) ? array_values(array_unique(array_map('intval', $st['errors']))) : [];
+                sort($sErrors, SORT_NUMERIC);
+                $incomingData = [
+                    'name' => $sName,
+                    'id' => $sId,
+                    'key' => $sKey,
+                    'score' => $sScore,
+                    'errors' => $sErrors
+                ];
+                $incomingMap[$sKey] = $incomingData;
+                if ($legacyKey !== $sKey) {
+                    $incomingMap[$legacyKey] = $incomingData;
+                }
+                $studentKeys[] = $sKey;
+                if ($legacyKey !== $sKey) {
+                    $studentKeys[] = $legacyKey;
+                }
+                // 仅无学号学生允许进入姓名兜底匹配集合
+                if ($sId === '') {
+                    $nameOnlyNames[$sName] = true;
                 }
             }
 
-            if (empty($studentKeys)) {
+            $studentKeys = array_values(array_unique(array_filter($studentKeys)));
+            $nameOnlyNames = array_keys($nameOnlyNames);
+
+            if (empty($studentKeys) && empty($nameOnlyNames)) {
                 echo json_encode(['success' => true, 'exists' => false, 'hasDiff' => false, 'modifiedStudents' => []], JSON_UNESCAPED_UNICODE);
                 exit;
             }
 
             // 仅查询当前上传的学生在数据库中的已有存档（忽略其他老师的学生或未上传学生）
-            $searchTokens = array_values(array_unique(array_filter(array_merge($studentKeys, $studentNames))));
-            $placeholders = implode(',', array_fill(0, count($searchTokens), '?'));
-            $params = array_merge([$batchId, $week], $searchTokens, $searchTokens);
+            $whereOr = [];
+            $params = [$batchId, $week];
+            if (!empty($studentKeys)) {
+                $placeholders = implode(',', array_fill(0, count($studentKeys), '?'));
+                $whereOr[] = "`student_key` IN ($placeholders)";
+                $params = array_merge($params, $studentKeys);
+            }
+            if (!empty($nameOnlyNames)) {
+                $placeholders = implode(',', array_fill(0, count($nameOnlyNames), '?'));
+                $whereOr[] = "((`student_key` IS NULL OR `student_key` = '' OR `student_key` = `student_name`) AND `student_name` IN ($placeholders))";
+                $params = array_merge($params, $nameOnlyNames);
+            }
             $recRows = $db->fetchAll(
-                "SELECT student_name, student_id, student_key, homework_score, error_count, error_questions, updated_at 
+                "SELECT student_name, student_id, student_key, homework_score, error_count, error_questions, updated_at, created_by
                  FROM `student_records` 
-                 WHERE `batch_id` = ? AND `week_num` = ? AND (`student_key` IN ($placeholders) OR `student_name` IN ($placeholders))
-                 ORDER BY id ASC",
+                 WHERE `batch_id` = ? AND `week_num` = ? AND (" . implode(' OR ', $whereOr) . ")
+                 ORDER BY updated_at ASC, id ASC",
                 $params
             );
 
             $matchedCount = count($recRows);
             $modifiedStudents = [];
             $lastUpdated = '';
+            $latestRowOperator = '';
 
             foreach ($recRows as $r) {
                 $rKey = trim($r['student_key'] ?? '');
                 $rName = trim($r['student_name']);
-                $matchedData = ($rKey && isset($incomingMap[$rKey])) ? $incomingMap[$rKey] : ($incomingMap[$rName] ?? null);
+                $matchedData = ($rKey !== '' && isset($incomingMap[$rKey])) ? $incomingMap[$rKey] : null;
+                if (!$matchedData) {
+                    $rLegacyKey = legacy_student_key((string)($r['student_id'] ?? ''), $rName);
+                    if ($rLegacyKey !== $rKey && isset($incomingMap[$rLegacyKey])) {
+                        $matchedData = $incomingMap[$rLegacyKey];
+                    }
+                }
+                if (!$matchedData && is_legacy_name_only_key($rKey, $rName) && isset($incomingMap[$rName])) {
+                    $matchedData = $incomingMap[$rName];
+                }
                 if (!$matchedData) continue;
 
                 if (!empty($r['updated_at']) && $r['updated_at'] > $lastUpdated) {
                     $lastUpdated = $r['updated_at'];
                 }
+                // 记录按 updated_at 升序，最后一条即该批学生最近一次操作的教师
+                $latestRowOperator = trim((string)($r['created_by'] ?? ''));
 
                 $incoming = $matchedData;
 
@@ -439,6 +472,7 @@ if ($action === 'check_existing_batch') {
                         'name' => $displayName,
                         'rawName' => $rName,
                         'studentId' => $r['student_id'] ?? '',
+                        'operator' => trim((string)($r['created_by'] ?? '')),
                         'scoreChanged' => $scoreChanged,
                         'errorsChanged' => $errorsChanged,
                         'oldScore' => $oldScoreDisplay,
@@ -449,8 +483,18 @@ if ($action === 'check_existing_batch') {
                 }
             }
 
-            if (empty($createdAtFormatted) && !empty($lastUpdated)) {
+            if (!empty($lastUpdated)) {
                 $createdAtFormatted = date('Y-m-d H:i', strtotime($lastUpdated));
+            }
+            // 班级批次被多个教师共用，批次级操作人可能属于别的班；
+            // 这里以本次上传学生的实际记录为准，显示最近一次操作教师。
+            if ($latestRowOperator !== '') {
+                $operator = $latestRowOperator;
+                $operatorName = '';
+                $uRow = $db->fetchOne("SELECT real_name FROM users WHERE username = ? LIMIT 1", [$operator]);
+                if ($uRow && !empty($uRow['real_name'])) {
+                    $operatorName = $uRow['real_name'];
+                }
             }
 
             echo json_encode([
@@ -596,7 +640,9 @@ if ($action === 'encrypt_batch') {
     }
 
     // 班级历史错题档案路径与短 Token 索引路径（文件系统，双写保证向下兼容）
-    $historyFile = $historyDir . '/' . rawurlencode($subject) . '_' . rawurlencode($grade) . '_' . rawurlencode($tier) . '.json';
+    // 错题本按学生身份聚合，不再按班型分档：新写入统一落到 `学科_年级.json`；
+    // 读取时会同时合并旧的 `学科_年级_班型.json`，保证换班型后历史不断档。
+    $historyFile = $historyDir . '/' . rawurlencode($subject) . '_' . rawurlencode($grade) . '.json';
     $tokenMapFile = $historyDir . '/token_map.json';
     $batchHistoryUpdates = [];
     $batchNameMap = [];
@@ -633,9 +679,9 @@ if ($action === 'encrypt_batch') {
                 $stName = trim($stItem['name'] ?? '');
                 if (empty($stName)) continue;
                 $stId = trim((string)($stItem['id'] ?? ''));
-                $stKey = trim($stItem['key'] ?? ($stId ? "{$stId}_{$stName}" : $stName));
                 if ($stId !== '') {
-                    $studentKeysToArchive[] = $stKey;
+                    $studentKeysToArchive[] = build_student_key($stId, $stName, $grade, $subject);
+                    $studentKeysToArchive[] = legacy_student_key($stId, $stName);
                 } else {
                     $studentNamesToArchive[] = $stName;
                 }
@@ -720,7 +766,8 @@ if ($action === 'encrypt_batch') {
         $name = trim($student['name'] ?? '');
         if (empty($name)) continue;
         $studentId = trim((string)($student['id'] ?? ''));
-        $studentKey = trim($student['key'] ?? ($studentId ? "{$studentId}_{$name}" : $name));
+        $studentKey = build_student_key($studentId, $name, $grade, $subject);
+        $legacyKey = legacy_student_key($studentId, $name);
         $rawErrors = $student['errors'] ?? [];
 
         $errors = [];
@@ -775,8 +822,9 @@ if ($action === 'encrypt_batch') {
         $batchNameMap[$studentKey] = $name;
         $batchHistoryUpdates[$studentKey][(string)$week] = $errors;
 
-        // 生成简短、高熵且防篡改的短 Token（10位，基于 HMAC-SHA256，哈希因子绑定唯一 studentKey，确保同名学生链接完全独立）
-        $rawHash = hash_hmac('sha256', "{$subject}_{$grade}_{$tier}_{$studentKey}", $secretKey, true);
+        // 生成简短、高熵且防篡改的短 Token（10位，基于 HMAC-SHA256）
+        // 哈希因子不再包含班型：学生换班型后仍得到同一个稳定链接，历史不断档
+        $rawHash = hash_hmac('sha256', "{$subject}_{$grade}_{$studentKey}", $secretKey, true);
         $shortToken = substr(str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($rawHash)), 0, 10);
 
         // 记录短 Token 映射条目
@@ -798,6 +846,15 @@ if ($action === 'encrypt_batch') {
             try {
                 $errCount = count($errors);
                 $errJson = json_encode($errors, JSON_UNESCAPED_UNICODE);
+                // 迁移过渡期自愈：若该生本周还是旧格式 Key 的旧行，先原地升级 Key，
+                // 再走 ON DUPLICATE KEY UPDATE，避免同一学生同一周出现新旧两行。
+                if ($legacyKey !== $studentKey) {
+                    $db->execute(
+                        "UPDATE `student_records` SET `student_key` = ?
+                         WHERE `batch_id` = ? AND `week_num` = ? AND `student_key` = ?",
+                        [$studentKey, $batchId, $week, $legacyKey]
+                    );
+                }
                 $db->execute(
                     "INSERT INTO student_records 
                         (`batch_id`, `batch_code`, `source_files`, `student_id`, `student_name`, `student_key`, `week_num`, `homework_score`, `preview_score`, `total_score`, `error_count`, `error_questions`, `teacher_comment`, `retest_token`, `created_by`)
@@ -852,16 +909,19 @@ if ($action === 'encrypt_batch') {
             }
         }
 
-        // 优先以 studentKey 为键返回，并映射 fullName 与 name，保证同名不同学号各得其独享 Token
+        // 新 Key + 旧 Key 双映射；纯姓名只映射给无学号数据，避免同名学生互相覆盖
         $tokens[$studentKey] = $shortToken;
+        if ($legacyKey !== $studentKey) {
+            $tokens[$legacyKey] = $shortToken;
+        }
         $fullName = trim((string)($student['fullName'] ?? ''));
         if ($fullName !== '') {
             $tokens[$fullName] = $shortToken;
         }
-        if (!empty($studentId)) {
+        if ($studentId !== '') {
+            // 兼容历史前端可能使用的无下划线拼接
             $tokens[$studentId . $name] = $shortToken;
-        }
-        if (!isset($tokens[$name])) {
+        } else {
             $tokens[$name] = $shortToken;
         }
     }
@@ -1081,13 +1141,23 @@ if ($action === 'decrypt') {
     $studentName = trim($data['n'] ?? '');
     $studentKey = trim($data['k'] ?? $studentName);
     $studentId = trim($data['id'] ?? '');
+    // 兼容极旧的长 Token：未存 id 字段时，从 k 的旧格式 "学号_姓名" 前缀还原学号
+    if ($studentId === '' && preg_match('/^(\d+)_/u', $studentKey, $kvMatch)) {
+        $studentId = $kvMatch[1];
+    }
+    $studentKeyCandidates = student_key_candidates($studentId, $studentName, $grade, $subject);
+    if (empty($studentKeyCandidates)) {
+        $studentKeyCandidates = [(string)$studentKey];
+    }
     $currErrors = $data['q'] ?? [];
     $tokenYear = intval($data['year'] ?? 0);
     $tokenSeason = trim($data['season'] ?? '');
 
     // 身份验证检查（学生姓名 + 图形验证码）
     $sessionKey = 'verified_token_' . md5($rawToken);
-    $isSessionVerified = isset($_SESSION[$sessionKey]) && ($_SESSION[$sessionKey] === $studentName || $_SESSION[$sessionKey] === $studentKey);
+    $verifiedIdentity = (string)($_SESSION[$sessionKey] ?? '');
+    $isSessionVerified = $verifiedIdentity !== ''
+        && in_array($verifiedIdentity, array_merge([$studentName], $studentKeyCandidates), true);
 
     // 管理员免密直通判定（通过签名或后台已登录会话）
     if (!$isSessionVerified) {
@@ -1112,7 +1182,7 @@ if ($action === 'decrypt') {
 
         if ($isAdminAuthorized) {
             $isSessionVerified = true;
-            $_SESSION[$sessionKey] = $studentKey;
+            $_SESSION[$sessionKey] = $studentKeyCandidates[0] ?? $studentKey;
             logRetestAccess($rawToken, $studentName . ' (管理员直通)', 'admin_bypass', '管理员免密查看');
         }
     }
@@ -1174,7 +1244,7 @@ if ($action === 'decrypt') {
         }
 
         // 验证通过，记录到当前会话中，并记录日志
-        $_SESSION[$sessionKey] = $studentKey;
+        $_SESSION[$sessionKey] = $studentKeyCandidates[0] ?? $studentKey;
         logRetestAccess($rawToken, $studentName, 'verify_success', "第 {$currWeek} 周");
     } else {
         // 会话已验证，记录访问轨迹
@@ -1186,22 +1256,65 @@ if ($action === 'decrypt') {
     }
 
     // 检索该学生的历史记录
-    $historyFile = $historyDir . '/' . rawurlencode($subject) . '_' . rawurlencode($grade) . '_' . rawurlencode($tier) . '.json';
-    $historyData = file_exists($historyFile) ? (json_decode(file_get_contents($historyFile), true) ?: []) : [];
-    // 优先采用隔离的 studentKey，兜底兼容旧版历史数据
-    $studentHistory = $historyData[$studentKey] ?? ($historyData[$studentName] ?? []);
+    // 新写入落在 `学科_年级.json`；旧数据仍在 `学科_年级_班型.json`。
+    // 这里把全部相关档案合并读取，学生换班型后历史保持连续。
+    $studentHistory = [];
+    $historyWeekTiers = [];
+    $historyFiles = [];
+    $tierlessHistoryFile = $historyDir . '/' . rawurlencode($subject) . '_' . rawurlencode($grade) . '.json';
+    if (is_file($tierlessHistoryFile)) {
+        $historyFiles[] = $tierlessHistoryFile;
+    }
+    $legacyHistoryFiles = glob($historyDir . '/' . rawurlencode($subject) . '_' . rawurlencode($grade) . '_*.json') ?: [];
+    // 新的档案优先；旧班型档案按修改时间从新到旧合并
+    usort($legacyHistoryFiles, static function ($a, $b) {
+        return (filemtime($b) ?: 0) <=> (filemtime($a) ?: 0);
+    });
+    $historyFiles = array_merge($historyFiles, $legacyHistoryFiles);
+    foreach ($historyFiles as $hf) {
+        $rawHistory = @file_get_contents($hf);
+        if ($rawHistory === false) continue;
+        $historyData = json_decode($rawHistory, true);
+        if (!is_array($historyData)) continue;
+        // 旧档案文件名末尾带班型：用于在数据库缺行时仍按原班型定位 PDF
+        $hfParts = explode('_', basename($hf, '.json'));
+        $hfTier = count($hfParts) >= 3 ? rawurldecode(implode('_', array_slice($hfParts, 2))) : '';
+        foreach (merge_history_for_keys($historyData, $studentKeyCandidates) as $histWeek => $histErrors) {
+            $histWeek = (string)$histWeek;
+            if (!array_key_exists($histWeek, $studentHistory)) {
+                $studentHistory[$histWeek] = $histErrors;
+            }
+            if ($hfTier !== '' && !isset($historyWeekTiers[$histWeek])) {
+                $historyWeekTiers[$histWeek] = $hfTier;
+            }
+        }
+    }
 
     // 尝试从 MySQL student_records 查询该学生的历史周次数据及成绩评语进行双向融合
+    // 匹配只认身份 Key（新/旧格式），不再按姓名 OR 匹配，杜绝同名学生串档；
+    // 仅无学号旧数据允许受控的姓名兜底。
     $dbStudentScores = [];
     $dbWeekAverages = [];
+    $dbWeekAveragesByBatch = [];
+    $dbWeekTiers = [];
+    $dbWeekBatchIds = [];
     try {
         $db = Database::getInstance();
+        $keyPlaceholders = implode(',', array_fill(0, count($studentKeyCandidates), '?'));
+        $dbWhere = "cb.subject = ? AND cb.grade = ? AND (sr.student_key IN ($keyPlaceholders)";
+        $dbParams = array_merge([$subject, $grade], $studentKeyCandidates);
+        if ($studentId === '') {
+            $dbWhere .= " OR ((sr.student_key IS NULL OR sr.student_key = '' OR sr.student_key = sr.student_name) AND sr.student_name = ?)";
+            $dbParams[] = $studentName;
+        }
+        $dbWhere .= ")";
         $dbRecords = $db->fetchAll(
-            "SELECT sr.batch_id, sr.week_num, sr.homework_score, sr.preview_score, sr.total_score, sr.teacher_comment, sr.error_questions 
+            "SELECT sr.batch_id, sr.week_num, sr.homework_score, sr.preview_score, sr.total_score, sr.teacher_comment, sr.error_questions, cb.tier AS batch_tier
              FROM student_records sr
              JOIN class_batches cb ON sr.batch_id = cb.id
-             WHERE cb.subject = ? AND cb.grade = ? AND cb.tier = ? AND (sr.student_key = ? OR sr.student_name = ?)",
-            [$subject, $grade, $tier, $studentKey, $studentName]
+             WHERE {$dbWhere}
+             ORDER BY sr.updated_at ASC, sr.id ASC",
+            $dbParams
         );
         if (!empty($dbRecords)) {
             foreach ($dbRecords as $r) {
@@ -1216,6 +1329,8 @@ if ($action === 'decrypt') {
                     'totalScore' => $r['total_score'],
                     'comment' => $r['teacher_comment']
                 ];
+                $dbWeekTiers[(string)$wn] = trim((string)($r['batch_tier'] ?? ''));
+                $dbWeekBatchIds[(string)$wn] = (int)$r['batch_id'];
             }
 
             // 计算该学生所在班级在各周次的平均巩固分
@@ -1224,13 +1339,14 @@ if ($action === 'decrypt') {
             if (!empty($batchIds)) {
                 $placeholders = implode(',', array_fill(0, count($batchIds), '?'));
                 $avgRows = $db->fetchAll(
-                    "SELECT week_num, ROUND(AVG(ROUND(homework_score)), 1) as avg_score 
+                    "SELECT batch_id, week_num, ROUND(AVG(ROUND(homework_score)), 1) as avg_score
                      FROM student_records 
                      WHERE batch_id IN ($placeholders) AND homework_score IS NOT NULL AND homework_score > 0 
-                     GROUP BY week_num",
+                     GROUP BY batch_id, week_num",
                     $batchIds
                 );
                 foreach ($avgRows as $ar) {
+                    $dbWeekAveragesByBatch[(int)$ar['batch_id'] . ':' . (int)$ar['week_num']] = (float)$ar['avg_score'];
                     $dbWeekAverages[(string)$ar['week_num']] = (float)$ar['avg_score'];
                 }
             }
@@ -1274,7 +1390,11 @@ if ($action === 'decrypt') {
     $weeksData = [];
     foreach ($studentHistory as $weekStr => $errors) {
         $wNum = intval($weekStr);
-        $pdfList = getWeekPdfs($qbankDir, $subject, $grade, $tier, $wNum, $errors, $tokenYear, $tokenSeason);
+        // 历史周次可能属于旧班型：按该周实际所在班型取 PDF，保证换班后旧周错题仍可下载
+        $weekTier = $dbWeekTiers[(string)$wNum] ?? '';
+        if ($weekTier === '') $weekTier = $historyWeekTiers[(string)$wNum] ?? '';
+        if ($weekTier === '') $weekTier = $tier;
+        $pdfList = getWeekPdfs($qbankDir, $subject, $grade, $weekTier, $wNum, $errors, $tokenYear, $tokenSeason);
         $wEntry = [
             'week' => $wNum,
             'errors' => $errors,
@@ -1293,7 +1413,10 @@ if ($action === 'decrypt') {
         $isUnsub = (!empty($cm) && (mb_strpos($cm, '未交') !== false || mb_strpos($cm, '未提交') !== false || mb_strpos($cm, '缺交') !== false))
             || (empty($errors) && ($wEntry['homeworkScore'] === null || $wEntry['homeworkScore'] <= 0));
         $wEntry['isUnsubmitted'] = $isUnsub;
-        if (isset($dbWeekAverages[(string)$wNum])) {
+        $weekBatchId = $dbWeekBatchIds[(string)$wNum] ?? 0;
+        if ($weekBatchId > 0 && isset($dbWeekAveragesByBatch[$weekBatchId . ':' . $wNum])) {
+            $wEntry['avgScore'] = $dbWeekAveragesByBatch[$weekBatchId . ':' . $wNum];
+        } elseif (isset($dbWeekAverages[(string)$wNum])) {
             $wEntry['avgScore'] = $dbWeekAverages[(string)$wNum];
         }
         $weeksData[(string)$wNum] = $wEntry;
@@ -1304,7 +1427,7 @@ if ($action === 'decrypt') {
         $wEntry = [
             'week' => $currWeek,
             'errors' => $currErrors,
-            'pdfs' => getWeekPdfs($qbankDir, $subject, $grade, $tier, $currWeek, $currErrors, $tokenYear, $tokenSeason),
+            'pdfs' => getWeekPdfs($qbankDir, $subject, $grade, (($dbWeekTiers[(string)$currWeek] ?? '') ?: (($historyWeekTiers[(string)$currWeek] ?? '') ?: $tier)), $currWeek, $currErrors, $tokenYear, $tokenSeason),
             'homeworkScore' => null,
             'avgScore' => null
         ];

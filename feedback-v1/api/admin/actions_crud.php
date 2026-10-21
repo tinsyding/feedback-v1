@@ -3,6 +3,8 @@
  * Admin CRUD 动作处理: db_list, db_get, db_create, db_update, db_delete, db_reset_teacher_password
  */
 
+require_once __DIR__ . '/../lib_retest_keys.php';
+
 switch ($action) {
         case 'db_list':
             requireAdmin();
@@ -535,9 +537,17 @@ switch ($action) {
                     }
                 }
                 if (isset($input['student_id']) && isset($input['student_name']) && empty($input['student_key'])) {
-                    $sId = trim($input['student_id']);
-                    $sName = trim($input['student_name']);
-                    $input['student_key'] = $sId ? "{$sId}_{$sName}" : $sName;
+                    $sId = trim((string)$input['student_id']);
+                    $sName = trim((string)$input['student_name']);
+                    $sBatch = !empty($input['batch_id'])
+                        ? DB::fetchOne("SELECT grade, subject FROM class_batches WHERE id = ?", [(int)$input['batch_id']])
+                        : null;
+                    $input['student_key'] = build_student_key(
+                        $sId,
+                        $sName,
+                        (string)($sBatch['grade'] ?? ''),
+                        (string)($sBatch['subject'] ?? '')
+                    );
                 }
                 if (isset($input['error_questions'])) {
                     $eq = $input['error_questions'];
@@ -675,10 +685,19 @@ switch ($action) {
 
             if ($table === 'student_records') {
                 if (isset($input['student_id']) || isset($input['student_name'])) {
-                    $curr = DB::fetchOne("SELECT student_id, student_name FROM student_records WHERE id = ?", [$id]);
-                    $sId = trim($input['student_id'] ?? ($curr['student_id'] ?? ''));
-                    $sName = trim($input['student_name'] ?? ($curr['student_name'] ?? ''));
-                    $input['student_key'] = $sId ? "{$sId}_{$sName}" : $sName;
+                    $curr = DB::fetchOne("SELECT student_id, student_name, batch_id FROM student_records WHERE id = ?", [$id]);
+                    $sId = trim((string)($input['student_id'] ?? ($curr['student_id'] ?? '')));
+                    $sName = trim((string)($input['student_name'] ?? ($curr['student_name'] ?? '')));
+                    $sBatchId = (int)($input['batch_id'] ?? ($curr['batch_id'] ?? 0));
+                    $sBatch = $sBatchId > 0
+                        ? DB::fetchOne("SELECT grade, subject FROM class_batches WHERE id = ?", [$sBatchId])
+                        : null;
+                    $input['student_key'] = build_student_key(
+                        $sId,
+                        $sName,
+                        (string)($sBatch['grade'] ?? ''),
+                        (string)($sBatch['subject'] ?? '')
+                    );
                 }
                 if (isset($input['error_questions'])) {
                     $eq = $input['error_questions'];

@@ -3,6 +3,8 @@
  * Admin Token 错题本反查动作处理: get_retest_admin_url, search_by_token
  */
 
+require_once __DIR__ . '/../lib_retest_keys.php';
+
 switch ($action) {
         case 'get_retest_admin_url':
             requireAdmin();
@@ -214,7 +216,13 @@ switch ($action) {
                             $wk = $decData['w'] ?? ($decData['week'] ?? null);
                             $errs = $decData['q'] ?? ($decData['errors'] ?? []);
                             $sId = $decData['id'] ?? '';
-                            $sKey = $decData['k'] ?? ($sId ? "{$sId}_{$sName}" : $sName);
+                            $sKey = trim((string)($decData['k'] ?? ''));
+                            // 旧长 Token 里的 k 可能是旧格式，展示时归一化为新格式
+                            if ($sId !== '' && ($sKey === '' || $sKey === legacy_student_key($sId, $sName))) {
+                                $sKey = build_student_key($sId, $sName, $grd, $sub);
+                            } elseif ($sKey === '') {
+                                $sKey = $sName;
+                            }
 
                             $nowTs = time();
                             $sig = hash_hmac('sha256', "{$token}_{$nowTs}", $retestSecret);

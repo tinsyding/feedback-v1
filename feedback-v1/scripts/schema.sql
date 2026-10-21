@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS `student_records` (
   `batch_code` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT '生成批次编号',
   `student_id` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT '' COMMENT '学号',
   `student_name` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '姓名',
-  `student_key` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT '' COMMENT '唯一标识学号_姓名',
+  `student_key` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT '' COMMENT '唯一标识：学号_姓名_年级_学科（无学号则纯姓名）',
   `week_num` int(11) NOT NULL COMMENT '专题周次/讲次',
   `homework_score` decimal(6,2) DEFAULT '0.00' COMMENT '课后巩固得分',
   `preview_score` decimal(6,2) DEFAULT NULL COMMENT '预习得分',

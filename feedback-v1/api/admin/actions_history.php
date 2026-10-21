@@ -3,6 +3,8 @@
  * Admin History 学情版本历史与回滚动作处理: record_history, record_rollback
  */
 
+require_once __DIR__ . '/../lib_retest_keys.php';
+
 switch ($action) {
         case 'record_history':
             requireAdmin();
@@ -83,6 +85,22 @@ switch ($action) {
                 sendResponse(false, null, '未找到指定的历史版本记录', 404);
             }
 
+            // 历史快照里的身份 Key 归一化为当前标准格式（兼容迁移前的旧快照）
+            $hStudentId = trim((string)($h['student_id'] ?? ''));
+            $hStudentName = (string)($h['student_name'] ?? '');
+            $hStudentKey = trim((string)($h['student_key'] ?? ''));
+            if ($hStudentKey === '' || ($hStudentId !== '' && $hStudentKey === legacy_student_key($hStudentId, $hStudentName))) {
+                $hBatch = !empty($h['batch_id'])
+                    ? DB::fetchOne("SELECT grade, subject FROM class_batches WHERE id = ?", [$h['batch_id']])
+                    : null;
+                $hStudentKey = build_student_key(
+                    $hStudentId,
+                    $hStudentName,
+                    (string)($hBatch['grade'] ?? ''),
+                    (string)($hBatch['subject'] ?? '')
+                );
+            }
+
             // 查找当前对应的主表记录
             $currentRec = null;
             if (!empty($h['record_id'])) {
@@ -91,7 +109,7 @@ switch ($action) {
             if (!$currentRec && !empty($h['batch_id']) && !empty($h['student_name'])) {
                 $currentRec = DB::fetchOne(
                     "SELECT * FROM `student_records` WHERE batch_id = ? AND (student_key = ? OR student_name = ?) AND week_num = ? LIMIT 1",
-                    [$h['batch_id'], $h['student_key'], $h['student_name'], $h['week_num']]
+                    [$h['batch_id'], $hStudentKey, $h['student_name'], $h['week_num']]
                 );
             }
 
@@ -159,7 +177,7 @@ switch ($action) {
                     ", [
                         $h['student_id'] ?? '',
                         $h['student_name'],
-                        $h['student_key'] ?? ($h['student_id'] ? "{$h['student_id']}_{$h['student_name']}" : $h['student_name']),
+                        $hStudentKey,
                         $h['homework_score'],
                         $h['preview_score'],
                         $h['total_score'],
@@ -188,7 +206,7 @@ switch ($action) {
                         $h['batch_id'],
                         $h['student_id'] ?? '',
                         $h['student_name'],
-                        $h['student_key'] ?? ($h['student_id'] ? "{$h['student_id']}_{$h['student_name']}" : $h['student_name']),
+                        $hStudentKey,
                         $h['week_num'],
                         $h['homework_score'],
                         $h['preview_score'],
