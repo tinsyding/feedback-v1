@@ -40,17 +40,11 @@ feedback-v1/data/uploads/*
 backups_server/
 _enc.txt
 
-# 桌面发送工具的本地运行产物（真实学生数据/日志/截图/打包输出，绝不入库）
-feedback-v1/tools/desktop-sender/feedback_history.json
-feedback-v1/tools/desktop-sender/测试*.json
-# 重写版 sender_py 真机验证截图（mss 实拍，含真实学生姓名/聊天内容，绝不入库）
+# 重写版 sender_py 本地运行产物（真实学生数据/日志/截图/打包输出，绝不入库）
+feedback-v1/tools/sender_py/feedback_history.json
+feedback-v1/tools/sender_py/测试*.json
 feedback-v1/tools/sender_py_debug_*
 feedback-v1/tools/sender_py/debug/
-# WGC 探针的取证输出：真机企微窗口截图 + JSON，含真实学生姓名/学号与聊天内容。
-# 探针脚本 probe_wgc.py 入库（方法可复现），取证产物不入库。
-feedback-v1/tools/desktop-sender/probe_out/
-feedback-v1/tools/desktop-sender/dist/
-feedback-v1/tools/desktop-sender/build/
 build/
 appdata/
 __pycache__/

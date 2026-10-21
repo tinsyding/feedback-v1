@@ -27,7 +27,7 @@ feedback-v1/
 ├── scripts/                # 自动化与前端构建工具
 │   └── bundle_admin_js.py         # 管理后台 JS 模块一键打包工具
 ├── tools/                  # 辅助工具与非 Web 桌面端程序
-│   └── desktop-sender/     # 教师端企业微信发送自动化程序（详见 tools/desktop-sender/README.md）
+│   └── sender_py/          # 重写版企业微信反馈发送器（详见 tools/sender_py/README.md）
 ├── index.html              # 门户登录页
 ├── upload.html             # 教师作业反馈上传页面
 ├── viewer.html             # 教师评语查看与未交提醒页面

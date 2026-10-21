@@ -42,8 +42,6 @@ feedback/
   经 GitHub Actions ssh 到服务器执行 `git pull` + 权限修复 + 冒烟检查。
   首次配置需在仓库 Secrets 中填入 `DEPLOY_HOST/DEPLOY_PORT/DEPLOY_USER/DEPLOY_SSH_KEY`
  （详见 workflow 文件头注释）。
-- 桌面工具发版：`git tag tools-x.y && git push origin tools-x.y` 触发
-  `.github/workflows/build-tools.yml`，在云端构建 `极方每周反馈程序-x.y.zip`
-  并挂到同名 Release（构建参数锁定见 `tools/desktop-sender/requirements.txt`）。
-  产物为**目录式分发压缩包**，需完整解压后运行，详见
-  `tools/desktop-sender/README.md` 第八章「反误报打包策略」。
+- 桌面工具：旧 `desktop-sender` 及其云端打包工作流已移除（历史版本可从 git 历史取回）；
+  重写版源码位于 `feedback-v1/tools/sender_py/`，当前不提供打包产物，按该目录 README
+  从源码运行。
