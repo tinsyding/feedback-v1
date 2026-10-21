@@ -1931,7 +1931,8 @@ function collectDuplicateGroups() {
         const nameIdx = header.findIndex(h => String(h).includes('姓名'));
         const scoreIdx = header.findIndex(h => String(h).includes('得分'));
         const statusIdx = header.findIndex(h => String(h).includes('作业状态'));
-        const commentIdx = header.findIndex(h => String(h).includes('批改评语'));
+        const commentIdx = findCommentColumnIndex(header, '批改评语');
+        const correctionCommentIdx = findCommentColumnIndex(header, '订正评语');
         if (nameIdx < 0) return;
         const byName = new Map();
         def.files.forEach((file, fi) => {
@@ -1946,7 +1947,7 @@ function collectDuplicateGroups() {
                     rowRef: row,
                     score: (scoreIdx >= 0 && typeof parseScoreValue === 'function') ? parseScoreValue(row[scoreIdx]) : null,
                     status: statusIdx >= 0 ? String(row[statusIdx] || '').trim() : '',
-                    comment: commentIdx >= 0 ? String(row[commentIdx] || '').trim() : ''
+                    comment: getEffectiveComment(row, commentIdx, correctionCommentIdx).trim()
                 });
             });
         });
@@ -2773,9 +2774,10 @@ function checkCommentPrefixStandards() {
     const hwHeader = homeworkData[0];
     const nameIdx = hwHeader.findIndex(h => h.includes('姓名'));
     const scoreIdx = hwHeader.findIndex(h => h.includes('得分'));
-    const commentIdx = hwHeader.findIndex(h => h.includes('批改评语'));
+    const commentIdx = findCommentColumnIndex(hwHeader, '批改评语');
+    const correctionCommentIdx = findCommentColumnIndex(hwHeader, '订正评语');
     const hwStatusIdx = hwHeader.findIndex(h => h.includes('作业状态'));
-    if (commentIdx < 0 || nameIdx < 0) return [];
+    if (nameIdx < 0 || (commentIdx < 0 && correctionCommentIdx < 0)) return [];
 
     const nonStandardList = [];
     const STANDARD_PREFIX_REGEX = /^本次作业的错题题号为\s*[:：]/;
@@ -2797,13 +2799,18 @@ function checkCommentPrefixStandards() {
                 ? Math.round(parseFloat(String(row[scoreIdx]).trim()) || 0)
                 : null);
         const score = rawScore !== null ? rawScore : 0;
-        const rawComment = (row[commentIdx] || '').trim();
+        const originalComment = commentIdx >= 0 ? String(row[commentIdx] || '').trim() : '';
+        const correctionComment = correctionCommentIdx >= 0 ? String(row[correctionCommentIdx] || '').trim() : '';
+        // 最终展示评语以订正评语优先；格式校验也应针对最终评语，避免原评语误拦截。
+        const rawComment = correctionComment || originalComment;
         if (!rawComment) continue;
+        const targetCommentIdx = correctionComment ? correctionCommentIdx : commentIdx;
+        const targetColumn = correctionComment ? 'correction' : 'original';
 
         // 全角数字自动转半角（如 "２，５，６" -> "2，5，6"），同步规范数据
         const comment = rawComment.replace(/[\uff10-\uff19]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xfee0));
         if (comment !== rawComment) {
-            row[commentIdx] = comment;
+            row[targetCommentIdx] = comment;
         }
 
         const lines = comment.split('\n');
@@ -2863,7 +2870,8 @@ function checkCommentPrefixStandards() {
                 fullComment: comment,
                 suggestedFullComment: newComment,
                 reason: reason,
-                type: 'prefix_deviation'
+                type: 'prefix_deviation',
+                targetColumn: targetColumn
             });
             continue;
         }
@@ -2882,7 +2890,8 @@ function checkCommentPrefixStandards() {
                 fullComment: comment,
                 suggestedFullComment: newComment,
                 reason: '未写标准前缀，首行直接写了题号',
-                type: 'pure_numbers'
+                type: 'pure_numbers',
+                targetColumn: targetColumn
             });
             continue;
         }
@@ -2901,7 +2910,8 @@ function checkCommentPrefixStandards() {
                     fullComment: comment,
                     suggestedFullComment: newComment,
                     reason: `非满分(${score}分)且评语提及题号，首行缺少标准前缀`,
-                    type: 'missing_prefix'
+                    type: 'missing_prefix',
+                    targetColumn: targetColumn
                 });
             }
         }
@@ -2962,7 +2972,7 @@ function autoFixCommentStandardsAndGenerate() {
     let fixCount = 0;
     const fixMap = new Map();
     currentNonStandardList.forEach(item => {
-        fixMap.set(item.studentName, item.suggestedFullComment);
+        fixMap.set(item.studentName, item);
     });
 
     // 1. 更新各已加载文件中的数据行与文本内容
@@ -2970,14 +2980,18 @@ function autoFixCommentStandardsAndGenerate() {
         if (!file.data || file.data.length <= 1) return;
         const fHeader = file.data[0];
         const fNameIdx = fHeader.findIndex(h => h.includes('姓名'));
-        const fCommentIdx = fHeader.findIndex(h => h.includes('批改评语'));
-        if (fNameIdx < 0 || fCommentIdx < 0) return;
+        const fCommentIdx = findCommentColumnIndex(fHeader, '批改评语');
+        const fCorrectionCommentIdx = findCommentColumnIndex(fHeader, '订正评语');
+        if (fNameIdx < 0) return;
 
         let fileModified = false;
         for (let i = 1; i < file.data.length; i++) {
             const rowName = (file.data[i][fNameIdx] || '').trim();
-            if (fixMap.has(rowName)) {
-                file.data[i][fCommentIdx] = fixMap.get(rowName);
+            const fixItem = fixMap.get(rowName);
+            if (fixItem) {
+                const targetIdx = fixItem.targetColumn === 'correction' ? fCorrectionCommentIdx : fCommentIdx;
+                if (targetIdx < 0) continue;
+                file.data[i][targetIdx] = fixItem.suggestedFullComment;
                 fileModified = true;
                 fixCount++;
             }
@@ -3040,7 +3054,8 @@ function checkMissingErrorQuestions() {
     const hwHeader = homeworkData[0];
     const nameIdx = hwHeader.findIndex(h => h.includes('姓名'));
     const scoreIdx = hwHeader.findIndex(h => h.includes('得分'));
-    const commentIdx = hwHeader.findIndex(h => h.includes('批改评语'));
+    const commentIdx = findCommentColumnIndex(hwHeader, '批改评语');
+    const correctionCommentIdx = findCommentColumnIndex(hwHeader, '订正评语');
     const hwStatusIdx = hwHeader.findIndex(h => h.includes('作业状态'));
     const totalScoreIdx = hwHeader.findIndex(h => h.includes('满分') || h.includes('总分'));
     const accIdx = hwHeader.findIndex(h => h.includes('正确率') || h.includes('正答率'));
@@ -3068,23 +3083,26 @@ function checkMissingErrorQuestions() {
         if (rawScore === null && !status) continue;
         const score = rawScore !== null ? rawScore : 0;
         const accVal = accIdx >= 0 ? parsePercentValue(row[accIdx]) : null;
-        const comment = commentIdx >= 0 ? (row[commentIdx] || '').trim() : '';
+        const originalComment = commentIdx >= 0 ? String(row[commentIdx] || '').trim() : '';
+        const correctionComment = correctionCommentIdx >= 0 ? String(row[correctionCommentIdx] || '').trim() : '';
+        const effectiveComment = correctionComment || originalComment;
 
-        // 判断是否满分或文字标明全对
+        // 判断是否满分或文字标明全对（原评语或最终评语任一明确全对即可）
         const totScoreVal = totalScoreIdx >= 0 ? parseScoreValue(row[totalScoreIdx]) : standardTotal;
+        const fullScoreComment = [originalComment, effectiveComment].filter(Boolean).join('\n');
         const isFullScore = (typeof checkStudentFullScore === 'function')
-            ? checkStudentFullScore({ score, accuracy: accVal, totalScore: totScoreVal, comment })
-            : ((score >= 100 || (totScoreVal && score >= totScoreVal && score > 0)) || /全对|全部正确|满分|零失误|无错题|免除加练/i.test(comment));
+            ? checkStudentFullScore({ score, accuracy: accVal, totalScore: totScoreVal, comment: fullScoreComment })
+            : ((score >= 100 || (totScoreVal && score >= totScoreVal && score > 0)) || /全对|全部正确|满分|零失误|无错题|免除加练/i.test(fullScoreComment));
         if (isFullScore) continue;
 
-        // 提交了且不是满分，检查是否有错题题号
-        if (!hasErrorQuestionNumbers(comment)) {
+        // 提交了且不是满分，检查原评语或订正评语中是否有错题题号
+        if (!hasErrorQuestionNumbers(originalComment) && !hasErrorQuestionNumbers(effectiveComment)) {
             missingList.push({
                 rowIndex: r,
                 studentName: fullName,
                 score: score,
                 totalScore: totScoreVal || standardTotal,
-                comment: comment || '（未填写评语）'
+                comment: effectiveComment || '（未填写评语）'
             });
         }
     }
@@ -3100,7 +3118,7 @@ function showMissingErrorsModal(missingList) {
 
     let html = `
         <div style="margin-bottom: 12px; padding: 10px 14px; background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 8px; font-size: 0.85rem; color: var(--text-secondary); line-height: 1.5;">
-            共检测到 <b style="color: #f59e0b; font-size: 0.95rem;">${missingList.length}</b> 位学生<strong>已提交课后巩固且非满分</strong>，但在批改评语中<strong>未检测到错题题号</strong>。若继续生成，这些学生将无法匹配错题与专属微课。
+            共检测到 <b style="color: #f59e0b; font-size: 0.95rem;">${missingList.length}</b> 位学生<strong>已提交课后巩固且非满分</strong>，但在原批改评语或订正评语中<strong>未检测到错题题号</strong>。若继续生成，这些学生将无法匹配错题与专属微课。
         </div>
         <div style="display: flex; flex-direction: column; gap: 8px;">
     `;
@@ -3287,7 +3305,8 @@ function getIncomingStudentsList() {
     const nameIdx = hwHeader.findIndex(h => String(h).includes('姓名'));
     const idIdx = hwHeader.findIndex(h => String(h).includes('学号') || String(h).includes('编号') || String(h).includes('卡号'));
     const scoreIdx = hwHeader.findIndex(h => String(h).includes('得分'));
-    const commentIdx = hwHeader.findIndex(h => String(h).includes('批改评语'));
+    const commentIdx = findCommentColumnIndex(hwHeader, '批改评语');
+    const correctionCommentIdx = findCommentColumnIndex(hwHeader, '订正评语');
     const hwStatusIdx = hwHeader.findIndex(h => String(h).includes('作业状态'));
 
     const list = [];
@@ -3324,22 +3343,17 @@ function getIncomingStudentsList() {
             : Math.round(parseFloat(row[scoreIdx]) || 0);
         const score = rawScore !== null ? rawScore : 0;
 
-        const comment = commentIdx >= 0 ? (row[commentIdx] || '').trim() : '';
+        const originalComment = commentIdx >= 0 ? String(row[commentIdx] || '').trim() : '';
+        const effectiveComment = getEffectiveComment(row, commentIdx, correctionCommentIdx).trim();
 
         let errorNums = [];
-        if (typeof parseErrorQuestionsFromComment === 'function') {
-            const parsed = parseErrorQuestionsFromComment(comment, { homeworkScore: score });
+        if (typeof parseCommentForPlus === 'function') {
+            const parsed = parseCommentForPlus(originalComment, effectiveComment, { homeworkScore: score });
+            errorNums = parsed.errorNums || [];
+        } else if (typeof parseErrorQuestionsFromComment === 'function') {
+            const parsed = parseErrorQuestionsFromComment(originalComment || effectiveComment, { homeworkScore: score });
             if (parsed && Array.isArray(parsed.errorNums)) {
                 errorNums = parsed.errorNums;
-            }
-        } else {
-            const errLine = comment.split('\n')[0] || '';
-            const match = errLine.match(/(?:错题|做错)(?:题号)?(?:为|是)?[:：\s]*([\d\s,，、/]+)/i);
-            if (match) {
-                const nums = match[1].match(/\d+/g);
-                if (nums) {
-                    errorNums = nums.map(n => parseInt(n));
-                }
             }
         }
         errorNums = Array.from(new Set(errorNums)).sort((a, b) => a - b);
@@ -3663,8 +3677,8 @@ function switchCommentSourceUI(source, fileBtnId, manualBtnId, mergeBtnId, fileC
         // Reset to original text
         const isPreview = infoId.includes('preview');
         infoEl.querySelector('span').textContent = isPreview 
-            ? '从预习 CSV 文件中提取"批改评语"'
-            : '从课后 CSV 文件中提取"批改评语"';
+            ? '从预习 CSV 文件中提取评语（订正评语优先）'
+            : '从课后 CSV 文件中提取评语（订正评语优先）';
     }
 }
 

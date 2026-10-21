@@ -423,7 +423,8 @@ function buildPreviewMetrics(data, mode, totalQuestions = 0) {
     const pvStatusIdx = pvHeader.findIndex(h => h.includes('作业状态'));
     const pvScoreIdx = pvHeader.findIndex(h => h.includes('得分'));
     const pvAccIdx = pvHeader.findIndex(h => h.includes('正确率'));
-    const pvCommentIdx = pvHeader.findIndex(h => h.includes('批改评语'));
+    const pvCommentIdx = findCommentColumnIndex(pvHeader, '批改评语');
+    const pvCorrectionCommentIdx = findCommentColumnIndex(pvHeader, '订正评语');
     const rows = data.slice(1).filter(r => r[pvNameIdx] && r[pvNameIdx].trim());
 
     const map = {};
@@ -453,7 +454,7 @@ function buildPreviewMetrics(data, mode, totalQuestions = 0) {
             errorCount,
             correctCount,
             rank: null,
-            comment: r[pvCommentIdx] || ''
+            comment: getEffectiveComment(r, pvCommentIdx, pvCorrectionCommentIdx)
         };
 
         if (!isSubmitted) return;
@@ -918,7 +919,8 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
     const hwHeader = homeworkData[0];
     const nameIdx = hwHeader.findIndex(h => h.includes('姓名'));
     const scoreIdx = hwHeader.findIndex(h => h.includes('得分'));
-    const commentIdx = hwHeader.findIndex(h => h.includes('批改评语'));
+    const commentIdx = findCommentColumnIndex(hwHeader, '批改评语');
+    const correctionCommentIdx = findCommentColumnIndex(hwHeader, '订正评语');
     const hwStatusIdx = hwHeader.findIndex(h => h.includes('作业状态'));
     const accIdx = hwHeader.findIndex(h => h.includes('正确率') || h.includes('正答率'));
     const totalScoreIdx = hwHeader.findIndex(h => h.includes('满分') || h.includes('总分'));
@@ -1258,9 +1260,10 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
             const pvInfo = cachedPreviewMap ? cachedPreviewMap[studentName] : null;
             const previewScore = pvInfo ? (pvInfo.score ?? pvInfo.metricValue ?? null) : null;
 
-            const fileCommentForPlus = row[commentIdx] || '';
+            const originalCommentForPlus = commentIdx >= 0 ? String(row[commentIdx] || '') : '';
+            const fileCommentForPlus = getEffectiveComment(row, commentIdx, correctionCommentIdx);
             const studentTot = (totalScoreIdx >= 0) ? parseScoreValue(row[totalScoreIdx]) : batchTotalScore;
-            const parsed = parseErrorQuestionsFromComment(fileCommentForPlus, {
+            const commentForPlus = parseCommentForPlus(originalCommentForPlus, fileCommentForPlus, {
                 homeworkScore: homeworkScore,
                 maxScore: studentTot || batchTotalScore || 100,
                 questions: sessionPayload?.plusData?.questions
@@ -1270,7 +1273,7 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                 name: studentName,
                 fullName: fullName,
                 key: studentKey,
-                errors: (parsed && Array.isArray(parsed.errorNums)) ? parsed.errorNums : [],
+                errors: commentForPlus.errorNums,
                 homeworkScore: homeworkScore,
                 previewScore: previewScore,
                 totalScore: studentTot || batchTotalScore || 100,
@@ -1333,7 +1336,8 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
         const commentSummary = getCommentSummary();
         let summaryPart = commentSummary ? `本节课总结：\n${commentSummary.trim()}\n` : '';
         let comment = '';
-        let fileCommentForPlus = row[commentIdx] || '';
+        const originalCommentForPlus = commentIdx >= 0 ? String(row[commentIdx] || '') : '';
+        let fileCommentForPlus = getEffectiveComment(row, commentIdx, correctionCommentIdx);
         const homeworkSource = getHomeworkCommentSource();
         if (homeworkSource === 'file') {
             comment = fileCommentForPlus;
@@ -1398,28 +1402,26 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
             let errorQuestionNums = [];
 
             if (plusData && plusData.enabled && plusData.questions && plusData.questions.length > 0 && fileCommentForPlus) {
-                const parsed = parseErrorQuestionsFromComment(fileCommentForPlus, {
+                const commentForPlus = parseCommentForPlus(originalCommentForPlus, fileCommentForPlus, {
                     homeworkScore: score,
                     maxScore: maxScore || 100,
                     questions: plusData.questions
                 });
-                if (parsed) {
-                    errorQuestionNums = parsed.errorNums;
-                    const homeworkSource = getHomeworkCommentSource();
-                    if (homeworkSource === 'file') {
-                        actualComment = parsed.cleanComment;
-                    } else if (homeworkSource === 'merge') {
-                        // In merge mode, use parsed file comment + manual comment
-                        const manualComment = getCommentByScore(score, maxScore, avgScore, rank, totalStudents);
-                        const parts = [];
-                        if (parsed.cleanComment) {
-                            parts.push(parsed.cleanComment.trim());
-                        }
-                        if (manualComment) {
-                            parts.push(manualComment);
-                        }
-                        actualComment = parts.join('\n');
+                errorQuestionNums = commentForPlus.errorNums;
+                const homeworkSource = getHomeworkCommentSource();
+                if (homeworkSource === 'file') {
+                    actualComment = commentForPlus.displayComment;
+                } else if (homeworkSource === 'merge') {
+                    // In merge mode, use parsed file comment + manual comment
+                    const manualComment = getCommentByScore(score, maxScore, avgScore, rank, totalStudents);
+                    const parts = [];
+                    if (commentForPlus.displayComment) {
+                        parts.push(commentForPlus.displayComment.trim());
                     }
+                    if (manualComment) {
+                        parts.push(manualComment);
+                    }
+                    actualComment = parts.join('\n');
                 }
             }
 
@@ -1476,8 +1478,8 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                     const studentAcc = (accIdx >= 0) ? parsePercentValue(row[accIdx]) : null;
                     const studentTot = (totalScoreIdx >= 0) ? parseScoreValue(row[totalScoreIdx]) : batchTotalScore;
                     const isFullScore = (typeof checkStudentFullScore === 'function')
-                        ? checkStudentFullScore({ score, accuracy: studentAcc, totalScore: studentTot, comment: fileCommentForPlus || comment || '' })
-                        : ((score >= 100 || (studentTot && score >= studentTot && score > 0)) || /(?:全对|全部正确|零失误|无错题|免除加练|错题(?:题号)?(?:为|是)?\s*[:：]\s*(?:无|0|零))/i.test(fileCommentForPlus || comment || ''));
+                        ? checkStudentFullScore({ score, accuracy: studentAcc, totalScore: studentTot, comment: [originalCommentForPlus, fileCommentForPlus].filter(Boolean).join('\n') || comment || '' })
+                        : ((score >= 100 || (studentTot && score >= studentTot && score > 0)) || /(?:全对|全部正确|零失误|无错题|免除加练|错题(?:题号)?(?:为|是)?\s*[:：]\s*(?:无|0|零))/i.test([originalCommentForPlus, fileCommentForPlus].filter(Boolean).join('\n') || comment || ''));
 
                     if (isFullScore) {
                         plusFeedbackPart += `【错题本】：本次作业满分，暂无错题需要重练，表现优异，继续加油！\n`;
@@ -1499,7 +1501,8 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
             const noteRows = noteData.slice(1);
             const noteNameIdx = noteHeader.findIndex(h => h.includes('姓名'));
             const noteScoreIdx = noteHeader.findIndex(h => h.includes('得分'));
-            const noteCommentIdx = noteHeader.findIndex(h => h.includes('批改评语'));
+            const noteCommentIdx = findCommentColumnIndex(noteHeader, '批改评语');
+            const noteCorrectionCommentIdx = findCommentColumnIndex(noteHeader, '订正评语');
             const noteStatusIdx = noteHeader.findIndex(h => h.includes('作业状态'));
             
             // Find note data for this student
@@ -1513,7 +1516,7 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
             if (noteRow) {
                 const rawNoteScore = noteScoreIdx >= 0 ? parseScoreValue(noteRow[noteScoreIdx]) : null;
                 const noteScore = rawNoteScore !== null ? rawNoteScore : 0;
-                const noteComment = noteCommentIdx >= 0 ? (noteRow[noteCommentIdx] || '') : '';
+                const noteComment = getEffectiveComment(noteRow, noteCommentIdx, noteCorrectionCommentIdx);
                 const noteStatus = noteStatusIdx >= 0 ? (noteRow[noteStatusIdx] || '') : '';
                 const noteSubmitted = noteStatus.includes('已完成') || noteStatus.includes('待订正') || noteStatus.includes('已订正');
                 
@@ -1565,7 +1568,8 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
             const ctRows = classTestData.slice(1);
             const ctNameIdx = ctHeader.findIndex(h => h.includes('姓名'));
             const ctScoreIdx = ctHeader.findIndex(h => h.includes('得分'));
-            const ctCommentIdx = ctHeader.findIndex(h => h.includes('批改评语'));
+            const ctCommentIdx = findCommentColumnIndex(ctHeader, '批改评语');
+            const ctCorrectionCommentIdx = findCommentColumnIndex(ctHeader, '订正评语');
             const ctStatusIdx = ctHeader.findIndex(h => h.includes('作业状态'));
 
             // Find class test data for this student
@@ -1579,7 +1583,7 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
             if (ctRow) {
                 const rawCtScore = ctScoreIdx >= 0 ? parseScoreValue(ctRow[ctScoreIdx]) : null;
                 const ctScore = rawCtScore !== null ? rawCtScore : 0;
-                const ctComment = ctCommentIdx >= 0 ? (ctRow[ctCommentIdx] || '') : '';
+                const ctComment = getEffectiveComment(ctRow, ctCommentIdx, ctCorrectionCommentIdx);
                 const ctStatus = ctStatusIdx >= 0 ? (ctRow[ctStatusIdx] || '') : '';
                 const ctSubmitted = ctStatus.includes('已完成') || ctStatus.includes('待订正') || ctStatus.includes('已订正');
 
@@ -1999,7 +2003,8 @@ function doGeneratePreviewOnlyFeedback() {
             const noteRows = noteData.slice(1);
             const noteNameIdx = noteHeader.findIndex(h => h.includes('姓名'));
             const noteScoreIdx = noteHeader.findIndex(h => h.includes('得分'));
-            const noteCommentIdx = noteHeader.findIndex(h => h.includes('批改评语'));
+            const noteCommentIdx = findCommentColumnIndex(noteHeader, '批改评语');
+            const noteCorrectionCommentIdx = findCommentColumnIndex(noteHeader, '订正评语');
             const noteStatusIdx = noteHeader.findIndex(h => h.includes('作业状态'));
             
             // Find note data for this student
@@ -2013,7 +2018,7 @@ function doGeneratePreviewOnlyFeedback() {
             if (noteRow) {
                 const rawNoteScore = noteScoreIdx >= 0 ? parseScoreValue(noteRow[noteScoreIdx]) : null;
                 const noteScore = rawNoteScore !== null ? rawNoteScore : 0;
-                const noteComment = noteCommentIdx >= 0 ? (noteRow[noteCommentIdx] || '') : '';
+                const noteComment = getEffectiveComment(noteRow, noteCommentIdx, noteCorrectionCommentIdx);
                 const noteStatus = noteStatusIdx >= 0 ? (noteRow[noteStatusIdx] || '') : '';
                 const noteSubmitted = noteStatus.includes('已完成') || noteStatus.includes('待订正') || noteStatus.includes('已订正');
                 
@@ -2065,7 +2070,8 @@ function doGeneratePreviewOnlyFeedback() {
             const ctRows = classTestData.slice(1);
             const ctNameIdx = ctHeader.findIndex(h => h.includes('姓名'));
             const ctScoreIdx = ctHeader.findIndex(h => h.includes('得分'));
-            const ctCommentIdx = ctHeader.findIndex(h => h.includes('批改评语'));
+            const ctCommentIdx = findCommentColumnIndex(ctHeader, '批改评语');
+            const ctCorrectionCommentIdx = findCommentColumnIndex(ctHeader, '订正评语');
             const ctStatusIdx = ctHeader.findIndex(h => h.includes('作业状态'));
 
             // Find class test data for this student
@@ -2079,7 +2085,7 @@ function doGeneratePreviewOnlyFeedback() {
             if (ctRow) {
                 const rawCtScore = ctScoreIdx >= 0 ? parseScoreValue(ctRow[ctScoreIdx]) : null;
                 const ctScore = rawCtScore !== null ? rawCtScore : 0;
-                const ctComment = ctCommentIdx >= 0 ? (ctRow[ctCommentIdx] || '') : '';
+                const ctComment = getEffectiveComment(ctRow, ctCommentIdx, ctCorrectionCommentIdx);
                 const ctStatus = ctStatusIdx >= 0 ? (ctRow[ctStatusIdx] || '') : '';
                 const ctSubmitted = ctStatus.includes('已完成') || ctStatus.includes('待订正') || ctStatus.includes('已订正');
 

@@ -370,6 +370,56 @@ function parseErrorQuestionsFromComment(comment, options = {}) {
 }
 window.parseErrorQuestionsFromComment = parseErrorQuestionsFromComment;
 
+/**
+ * 查找评语列索引。
+ * 优先精确匹配列名，避免把“学生批改评语/学生订正评语”误当成老师评语列。
+ */
+function findCommentColumnIndex(header, columnName) {
+    if (!Array.isArray(header) || !columnName) return -1;
+    const normalized = header.map(h => String(h ?? '').replace(/^\uFEFF/, '').trim());
+    const exactIdx = normalized.indexOf(columnName);
+    if (exactIdx >= 0) return exactIdx;
+    return normalized.findIndex(h => h.includes(columnName) && !h.includes('学生'));
+}
+
+/**
+ * 最终展示评语：订正评语非空时优先使用，否则回退批改评语。
+ * 错题题号解析仍优先使用原批改评语，避免丢失错题信息。
+ */
+function getEffectiveComment(row, originalCommentIdx, correctionCommentIdx) {
+    if (!Array.isArray(row)) return '';
+    const correctionComment = correctionCommentIdx >= 0 ? String(row[correctionCommentIdx] ?? '') : '';
+    if (correctionComment.trim()) return correctionComment;
+    return originalCommentIdx >= 0 ? String(row[originalCommentIdx] ?? '') : '';
+}
+
+/**
+ * 解析错题时优先使用原批改评语；原评语没有题号时，再回退到订正评语。
+ * 展示用评语始终取最终评语（订正评语优先），并清洗掉标准错题前缀。
+ */
+function parseCommentForPlus(originalComment, finalComment, options = {}) {
+    const originalParsed = parseErrorQuestionsFromComment(originalComment, options);
+    let errorParsed = originalParsed;
+
+    const hasOriginalErrors = !!(originalParsed && Array.isArray(originalParsed.errorNums) && originalParsed.errorNums.length > 0);
+    if (!hasOriginalErrors && finalComment && finalComment !== originalComment) {
+        const finalParsed = parseErrorQuestionsFromComment(finalComment, options);
+        if (finalParsed && Array.isArray(finalParsed.errorNums) && finalParsed.errorNums.length > 0) {
+            errorParsed = finalParsed;
+        }
+    }
+
+    const displayParsed = parseErrorQuestionsFromComment(finalComment, options);
+    return {
+        errorParsed,
+        errorNums: (errorParsed && Array.isArray(errorParsed.errorNums)) ? errorParsed.errorNums : [],
+        displayComment: displayParsed ? displayParsed.cleanComment : (finalComment || '')
+    };
+}
+window.findCommentColumnIndex = findCommentColumnIndex;
+window.getEffectiveComment = getEffectiveComment;
+window.parseCommentForPlus = parseCommentForPlus;
+
 
 // 全站唯一 toast：showToast(message, type?)，type ∈ success/error/warning，缺省无色；旧单参调用行为不变
 function showToast(message, type) {
