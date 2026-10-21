@@ -1191,6 +1191,17 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
 
     // Plus feature: Batch encrypt retest tokens
     let plusTokens = {};
+    // 错题本身份 Key：学号_姓名_年级_学科（与服务端 build_student_key 保持一致）
+    // 注意：这两个 helper 在无错题本（plusData 关闭）时也要可用于生成学生行 Key。
+    const plusGradeForKey = sessionPayload.plusData?.grade || '';
+    const plusSubjectForKey = sessionPayload.subject || '数学';
+    const buildPlusStudentKey = (studentId, studentName, fullName, index) => {
+        if (!studentId) return fullName || `${studentName}_${index}`;
+        if (!plusGradeForKey || !plusSubjectForKey) return `${studentId}_${studentName}`;
+        return `${studentId}_${studentName}_${plusGradeForKey}_${plusSubjectForKey}`;
+    };
+    const buildLegacyStudentKey = (studentId, studentName) => studentId ? `${studentId}_${studentName}` : studentName;
+
     if (sessionPayload.plusData && sessionPayload.plusData.enabled) {
         const idIdx = hwHeader.findIndex(h => h.includes('学号') || h.includes('编号') || h.includes('卡号'));
         const uploadedFileNames = [];
@@ -1229,16 +1240,6 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
             students: []
         };
 
-        // 错题本身份 Key：学号_姓名_年级_学科（与服务端 build_student_key 保持一致）
-        const plusGradeForKey = sessionPayload.plusData.grade || '';
-        const plusSubjectForKey = batchPayload.subject || '';
-        const buildPlusStudentKey = (studentId, studentName, fullName, index) => {
-            if (!studentId) return fullName || `${studentName}_${index}`;
-            if (!plusGradeForKey || !plusSubjectForKey) return `${studentId}_${studentName}`;
-            return `${studentId}_${studentName}_${plusGradeForKey}_${plusSubjectForKey}`;
-        };
-        const buildLegacyStudentKey = (studentId, studentName) => studentId ? `${studentId}_${studentName}` : studentName;
-        
         hwRows.forEach((row, index) => {
             const fullName = (row[nameIdx] || '').trim();
             const nameMatch = fullName.match(/\d+(.+)/);
