@@ -10,8 +10,8 @@
  *    last_sender, last_message_text, needs_reply, reason, duration_ms}
  *
  * 服务端配置（只放配置/环境变量，无管理后台编辑页）：
- *   SENDER_API_TOKEN  发送器访问令牌（必填；为空则本接口直接 500 拒绝服务，不裸奔）
- *                     或 api/secret_key.local.php 中 'senderApiToken'
+ *   SENDER_API_TOKEN  发送器访问令牌（必填；为空则本接口直接 200+success:false
+ *                     拒绝服务，不裸奔）或 api/secret_key.local.php 中 'senderApiToken'
  *   DASHSCOPE_API_KEY 视觉模型 Key（必填）或 secret_key.local.php 中 'dashscopeApiKey'
  *   IDENTIFY_API_BASE 兼容 OpenAI chat-completions 的 endpoint（环境变量或
  *                     secret_key.local.php 中 'identifyApiBase'；可只写到 …/v1，
@@ -42,7 +42,9 @@ if ($serverToken === '') {
     }
 }
 if ($serverToken === '') {
-    sendResponse(false, null, '服务端发送器令牌未配置，请联系管理员', 500);
+    // 本站 nginx 对 403/5xx 配了 error_page（会吞成 HTML 错误页），应用层失败统一
+    // 200 + success:false；调用方只认 success。下同。
+    sendResponse(false, null, '服务端发送器令牌未配置，请联系管理员', 200);
 }
 $given = $_POST['token'] ?? '';
 $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
@@ -50,7 +52,7 @@ if ($given === '' && stripos($authHeader, 'bearer ') === 0) {
     $given = trim(substr($authHeader, 7));
 }
 if (!hash_equals($serverToken, (string)$given)) {
-    sendResponse(false, null, '鉴权失败', 403);
+    sendResponse(false, null, '鉴权失败', 200);
 }
 
 $t0 = microtime(true);
@@ -88,7 +90,7 @@ $keys = require __DIR__ . '/secret_key.php';
 $localKeys = is_array($keys) ? $keys : [];
 $visionKey = getenv('DASHSCOPE_API_KEY') ?: ($localKeys['dashscopeApiKey'] ?? '');
 if ($visionKey === '') {
-    sendResponse(false, null, '服务端视觉模型未配置，请联系管理员', 500);
+    sendResponse(false, null, '服务端视觉模型未配置，请联系管理员', 200);
 }
 $apiBase = getenv('IDENTIFY_API_BASE') ?: ($localKeys['identifyApiBase'] ?? '');
 if ($apiBase === '') {
@@ -98,7 +100,7 @@ if ($apiBase === '') {
 }
 $model = getenv('IDENTIFY_MODEL') ?: ($localKeys['identifyModel'] ?? '') ?: 'qwen-vl-max';
 if (!function_exists('curl_init')) {
-    sendResponse(false, null, '服务端缺少 curl 扩展', 500);
+    sendResponse(false, null, '服务端缺少 curl 扩展', 200);
 }
 
 $prompt = '你是企业微信窗口核验器。看两张图：图1是聊天窗口顶部标题栏截图，图2是同一窗口聊天区末尾截图。'
