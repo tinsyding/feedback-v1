@@ -3,8 +3,8 @@
  *
  * 运行：node feedback-v1/scripts/test_comment_precedence.js
  *
- * 规则：订正评语非空时作为最终展示评语；错题题号仍优先从原批改评语解析，
- * 原评语没有题号时回退到订正评语。
+ * 规则：订正评语非空时作为最终展示评语；错题题号也优先从订正评语解析，
+ * 订正评语没有题号时回退到原批改评语。
  */
 const fs = require('fs');
 const path = require('path');
@@ -65,12 +65,21 @@ let result = parseCommentForPlus(
 expectNums(result.errorNums, [4, 6]);
 assert.strictEqual(result.displayComment, '都订正对啦');
 
-// 原评语没有题号，订正评语有题号：回退使用订正评语的题号。
+// 原评语和订正评语都有题号且不一致：优先使用订正评语的题号。
+result = parseCommentForPlus(
+    '本次作业的错题题号为：4，6\n原评语',
+    '本次作业的错题题号为：7，8\n都订正对啦',
+    {}
+);
+expectNums(result.errorNums, [7, 8]);
+assert.strictEqual(result.displayComment, '都订正对啦');
+
+// 原评语没有题号，订正评语有题号：使用订正评语的题号。
 result = parseCommentForPlus('作业没拍全', '本次作业的错题题号为：6，7', {});
 expectNums(result.errorNums, [6, 7]);
 assert.strictEqual(result.displayComment, '');
 
-// 原评语有题号，订正评语没有题号：保留原错题信息，展示订正评语。
+// 订正评语没有题号，原评语有题号：回退保留原错题信息，展示订正评语。
 result = parseCommentForPlus('本次作业的错题题号为：4，6\n原评语', '订正的都对啦', {});
 expectNums(result.errorNums, [4, 6]);
 assert.strictEqual(result.displayComment, '订正的都对啦');
@@ -85,7 +94,7 @@ result = parseCommentForPlus('', '本次作业的错题题号为：６', {});
 expectNums(result.errorNums, [6]);
 assert.strictEqual(result.displayComment, '');
 
-// 订正评语明确全对，但原评语有题号：错题本仍保留原题号。
+// 订正评语明确全对、没有题号，但原评语有题号：回退保留原题号。
 result = parseCommentForPlus('本次作业的错题题号为：7', '全对！\n非常优秀！', {});
 expectNums(result.errorNums, [7]);
 assert.strictEqual(result.displayComment, '全对！\n非常优秀！');

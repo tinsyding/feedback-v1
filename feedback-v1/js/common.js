@@ -384,7 +384,7 @@ function findCommentColumnIndex(header, columnName) {
 
 /**
  * 最终展示评语：订正评语非空时优先使用，否则回退批改评语。
- * 错题题号解析仍优先使用原批改评语，避免丢失错题信息。
+ * 错题题号也优先从订正评语解析；订正评语没有题号时再回退批改评语。
  */
 function getEffectiveComment(row, originalCommentIdx, correctionCommentIdx) {
     if (!Array.isArray(row)) return '';
@@ -394,26 +394,25 @@ function getEffectiveComment(row, originalCommentIdx, correctionCommentIdx) {
 }
 
 /**
- * 解析错题时优先使用原批改评语；原评语没有题号时，再回退到订正评语。
+ * 解析错题时优先使用订正评语；订正评语没有题号时，再回退到原批改评语。
  * 展示用评语始终取最终评语（订正评语优先），并清洗掉标准错题前缀。
  */
 function parseCommentForPlus(originalComment, finalComment, options = {}) {
-    const originalParsed = parseErrorQuestionsFromComment(originalComment, options);
-    let errorParsed = originalParsed;
+    const finalParsed = parseErrorQuestionsFromComment(finalComment, options);
+    let errorParsed = finalParsed;
 
-    const hasOriginalErrors = !!(originalParsed && Array.isArray(originalParsed.errorNums) && originalParsed.errorNums.length > 0);
-    if (!hasOriginalErrors && finalComment && finalComment !== originalComment) {
-        const finalParsed = parseErrorQuestionsFromComment(finalComment, options);
-        if (finalParsed && Array.isArray(finalParsed.errorNums) && finalParsed.errorNums.length > 0) {
-            errorParsed = finalParsed;
+    const hasFinalErrors = !!(finalParsed && Array.isArray(finalParsed.errorNums) && finalParsed.errorNums.length > 0);
+    if (!hasFinalErrors && originalComment && originalComment !== finalComment) {
+        const originalParsed = parseErrorQuestionsFromComment(originalComment, options);
+        if (originalParsed && Array.isArray(originalParsed.errorNums) && originalParsed.errorNums.length > 0) {
+            errorParsed = originalParsed;
         }
     }
 
-    const displayParsed = parseErrorQuestionsFromComment(finalComment, options);
     return {
         errorParsed,
         errorNums: (errorParsed && Array.isArray(errorParsed.errorNums)) ? errorParsed.errorNums : [],
-        displayComment: displayParsed ? displayParsed.cleanComment : (finalComment || '')
+        displayComment: finalParsed ? finalParsed.cleanComment : (finalComment || '')
     };
 }
 window.findCommentColumnIndex = findCommentColumnIndex;
