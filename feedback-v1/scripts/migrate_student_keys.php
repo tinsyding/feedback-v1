@@ -302,10 +302,13 @@ printLine("已备份数据库 Key 映射（student_records " . count($recordBack
 printLine();
 $pdo->beginTransaction();
 try {
+    // student_records.updated_at 是 ON UPDATE CURRENT_TIMESTAMP；
+    // 显式赋值为自身可抑制自动刷新，迁移只改 key，不改变业务时间。
     $updatedRecords = DB::execute(
         "UPDATE student_records sr
          JOIN class_batches cb ON sr.batch_id = cb.id
-         SET sr.student_key = {$newExprRecords}
+         SET sr.student_key = {$newExprRecords},
+             sr.updated_at = sr.updated_at
          WHERE sr.student_id <> '' AND sr.student_key = {$legacyExprRecords}"
     );
     $updatedHistory = DB::execute(
