@@ -657,6 +657,92 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         }
     }
 
+    // 每道题首切片上方的专题/知识点横条缓存（key 含宽度与文字，避免串用）
+    const questionTopicBadgeCache = {};
+
+    function questionTopicBadgeRoundRect(ctx, x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+    }
+
+    // 错题本每道题前的标题：优先显示“专题五：勾股定理”，没有专题时退回知识点。
+    function formatQuestionTopicLabel(week, topic) {
+        const weekNum = parseInt(week, 10);
+        const weekLabel = weekNum > 0 ? ('专题' + numToChinese(weekNum)) : '';
+        const topicText = String(topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
+        if (weekLabel && topicText) return weekLabel + '：' + topicText;
+        if (weekLabel) return weekLabel;
+        if (topicText) return '知识点：' + topicText;
+        return '';
+    }
+
+    /**
+     * 把专题/知识点文字渲染成横条 PNG DataURL（pdf-lib 内置字体无中文，只能走 canvas）。
+     * 返回 null 时调用方跳过，不影响正文排版。
+     */
+    function generateQuestionTopicBadgeDataUrl(labelText, widthPt) {
+        const label = String(labelText || '').trim().slice(0, 100);
+        if (!label) return null;
+        const wPt = Math.max(120, Math.min(540, Number(widthPt) || 540));
+        const cacheKey = wPt.toFixed(1) + '___' + label;
+        if (questionTopicBadgeCache[cacheKey]) {
+            return questionTopicBadgeCache[cacheKey];
+        }
+        try {
+            const K = 2; // 2 倍超采样，保证打印清晰
+            const hpx = 20 * K;
+            const wpx = Math.max(240, Math.round(wPt * K));
+            const badgeCanvas = document.createElement('canvas');
+            badgeCanvas.width = wpx;
+            badgeCanvas.height = hpx;
+            const ctx = badgeCanvas.getContext('2d');
+
+            // 浅蓝底 + 描边
+            questionTopicBadgeRoundRect(ctx, 1, 1, wpx - 2, hpx - 2, 9 * K);
+            ctx.fillStyle = '#eff6ff';
+            ctx.fill();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#bfdbfe';
+            ctx.stroke();
+
+            // 左侧蓝色色条
+            ctx.fillStyle = '#2563eb';
+            ctx.fillRect(0, 5 * K, 3 * K, hpx - 10 * K);
+
+            // 文字（超宽截断加省略号）
+            const padL = 9 * K;
+            const padR = 6 * K;
+            ctx.font = '700 ' + (12 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+            ctx.textBaseline = 'middle';
+            const maxW = wpx - padL - padR;
+            let shown = label;
+            while (shown.length > 1 && ctx.measureText(shown).width > maxW) {
+                shown = shown.slice(0, -1);
+            }
+            if (shown !== label) {
+                shown = shown.slice(0, -1) + '…';
+            }
+            ctx.fillStyle = '#1e40af';
+            ctx.fillText(shown, padL, hpx / 2 + K);
+
+            const dataUrl = badgeCanvas.toDataURL('image/png');
+            questionTopicBadgeCache[cacheKey] = dataUrl;
+            return dataUrl;
+        } catch (err) {
+            console.warn('generateQuestionTopicBadge failed:', err);
+            return null;
+        }
+    }
+
     // Download & Merge PDFs with modal progress feedback
     async function downloadMergedPdf(type, allWeeks) {
         if (!retestData) return;
@@ -934,6 +1020,10 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             const TOP_MARGIN = 26;
             const BOTTOM_MARGIN = 28;
             const SEPARATOR_HEIGHT = (window.retestQuestionSpacing && window.retestQuestionSpacing >= 8) ? window.retestQuestionSpacing : 85;
+            // 每道题首切片上方的“专题X：知识点”横条（高 20pt + 下间距 6pt）
+            const QUESTION_TOPIC_BANNER_H = 20;
+            const QUESTION_TOPIC_BANNER_GAP = 6;
+            const QUESTION_TOPIC_BANNER_BLOCK = QUESTION_TOPIC_BANNER_H + QUESTION_TOPIC_BANNER_GAP;
 
             const mergedPdf = await PDFLib.PDFDocument.create();
             let currentPage = null;
@@ -944,6 +1034,9 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 const qItem = pdfsToMerge[i];
                 const targetUrl = typeof qItem === 'string' ? qItem : qItem.url;
                 const videoUrl = (typeof qItem === 'object' && qItem.videoUrl) ? String(qItem.videoUrl).trim() : '';
+                const qWeek = (typeof qItem === 'object' && qItem.week) ? qItem.week : activeWeek;
+                const qTopic = (typeof qItem === 'object' && qItem.topic) ? String(qItem.topic).trim() : '';
+                const qTopicLabel = formatQuestionTopicLabel(qWeek, qTopic);
                 const qNum = typeof qItem === 'object' ? (qItem.errorNum || (i + 1)) : (i + 1);
 
                 try {
@@ -965,10 +1058,12 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                         const { topCropPt, bottomCutPt, effectiveHeightPt, isFullPage } = bounds;
 
                         // 检查当前页剩余空间是否足够
+                        const showTopicBanner = (pIdx === 0 && !!qTopicLabel);
                         const isPageTop = (!currentPage || currentY >= (PAGE_HEIGHT - TOP_MARGIN - 5));
                         const neededH = isPageTop ? effectiveHeightPt : (SEPARATOR_HEIGHT + effectiveHeightPt);
+                        const neededHWithBanner = neededH + (showTopicBanner ? QUESTION_TOPIC_BANNER_BLOCK : 0);
 
-                        if (!currentPage || (currentY - neededH < BOTTOM_MARGIN) || (isFullPage && !isPageTop)) {
+                        if (!currentPage || (currentY - neededHWithBanner < BOTTOM_MARGIN) || (isFullPage && !isPageTop)) {
                             // 空间不足，或当前是整页大题且当前页已被占用 -> 开新 A4 页
                             currentPage = mergedPdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
                             currentY = PAGE_HEIGHT - TOP_MARGIN;
@@ -996,12 +1091,32 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             }
                         }
 
-                        const scale = isFullPage 
-                            ? Math.min(PAGE_WIDTH / origW, (PAGE_HEIGHT - TOP_MARGIN - BOTTOM_MARGIN) / effectiveHeightPt, 1.0)
+                        const contentAreaH = PAGE_HEIGHT - TOP_MARGIN - BOTTOM_MARGIN;
+                        const scale = isFullPage
+                            ? Math.min(PAGE_WIDTH / origW, Math.max(0.1, (contentAreaH - (showTopicBanner ? QUESTION_TOPIC_BANNER_BLOCK : 0)) / effectiveHeightPt), 1.0)
                             : Math.min(PAGE_WIDTH / origW, 1.0);
                         const drawW = origW * scale;
                         const drawH = effectiveHeightPt * scale;
                         const drawX = (PAGE_WIDTH - drawW) / 2;
+
+                        // 在每道题首切片上方绘制“专题X：知识点”横条（失败则跳过，不挡正文）
+                        if (showTopicBanner) {
+                            try {
+                                const badgeUrl = generateQuestionTopicBadgeDataUrl(qTopicLabel, drawW);
+                                if (badgeUrl) {
+                                    const badgeImg = await mergedPdf.embedPng(badgeUrl);
+                                    currentPage.drawImage(badgeImg, {
+                                        x: drawX,
+                                        y: currentY - QUESTION_TOPIC_BANNER_H,
+                                        width: drawW,
+                                        height: QUESTION_TOPIC_BANNER_H
+                                    });
+                                    currentY -= QUESTION_TOPIC_BANNER_BLOCK;
+                                }
+                            } catch (badgeErr) {
+                                console.warn('Question topic banner skipped:', badgeErr);
+                            }
+                        }
 
                         currentPage.drawPage(embedded, {
                             x: drawX,

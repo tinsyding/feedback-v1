@@ -675,13 +675,24 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         ctx.closePath();
     }
 
+    // 错题本每道题前的标题：优先显示“专题五：勾股定理”，没有专题时退回知识点。
+    function formatQuestionTopicLabel(week, topic) {
+        const weekNum = parseInt(week, 10);
+        const weekLabel = weekNum > 0 ? ('专题' + numToChinese(weekNum)) : '';
+        const topicText = String(topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
+        if (weekLabel && topicText) return weekLabel + '：' + topicText;
+        if (weekLabel) return weekLabel;
+        if (topicText) return '知识点：' + topicText;
+        return '';
+    }
+
     /**
-     * Beta 新增：把知识点文字渲染成横条 PNG DataURL（pdf-lib 内置字体无中文，只能走 canvas，
+     * Beta 新增：把专题/知识点文字渲染成横条 PNG DataURL（pdf-lib 内置字体无中文，只能走 canvas，
      * 与题目二维码牌同路线）。返回 null 时调用方跳过，不影响正文排版。
      */
-    function generateTopicBadgeDataUrl(topicText, widthPt) {
-        const label = '知识点：' + String(topicText || '').trim().slice(0, 80);
-        if (!label || label === '知识点：') return null;
+    function generateTopicBadgeDataUrl(labelText, widthPt) {
+        const label = String(labelText || '').trim().slice(0, 100);
+        if (!label) return null;
         const wPt = Math.max(120, Math.min(540, Number(widthPt) || 540));
         const cacheKey = wPt.toFixed(1) + '___' + label;
         if (topicBadgeCache[cacheKey]) {
@@ -1024,7 +1035,9 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 const qItem = pdfsToMerge[i];
                 const targetUrl = typeof qItem === 'string' ? qItem : qItem.url;
                 const videoUrl = (typeof qItem === 'object' && qItem.videoUrl) ? String(qItem.videoUrl).trim() : '';
+                const qWeek = (typeof qItem === 'object' && qItem.week) ? qItem.week : activeWeek;
                 const qTopic = (typeof qItem === 'object' && qItem.topic) ? String(qItem.topic).trim() : '';
+                const qTopicLabel = formatQuestionTopicLabel(qWeek, qTopic);
                 const qNum = typeof qItem === 'object' ? (qItem.errorNum || (i + 1)) : (i + 1);
 
                 try {
@@ -1046,8 +1059,8 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                         const { topCropPt, bottomCutPt, effectiveHeightPt, isFullPage } = bounds;
 
                         // 检查当前页剩余空间是否足够
-                        // Beta 新增：含答案版每道题首切片附带知识点横条，预留其高度（含答案版才有，练习版不受影响）
-                        const showTopicBanner = (type === 'answer' && pIdx === 0 && !!qTopic);
+                        // 每道题首切片附带“专题X：知识点”横条，预留其高度
+                        const showTopicBanner = (pIdx === 0 && !!qTopicLabel);
                         const isPageTop = (!currentPage || currentY >= (PAGE_HEIGHT - TOP_MARGIN - 5));
                         const neededH = isPageTop ? effectiveHeightPt : (SEPARATOR_HEIGHT + effectiveHeightPt);
                         const neededHWithBanner = neededH + (showTopicBanner ? TOPIC_BANNER_BLOCK : 0);
@@ -1080,17 +1093,18 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             }
                         }
 
-                        const scale = isFullPage 
-                            ? Math.min(PAGE_WIDTH / origW, (PAGE_HEIGHT - TOP_MARGIN - BOTTOM_MARGIN) / effectiveHeightPt, 1.0)
+                        const contentAreaH = PAGE_HEIGHT - TOP_MARGIN - BOTTOM_MARGIN;
+                        const scale = isFullPage
+                            ? Math.min(PAGE_WIDTH / origW, Math.max(0.1, (contentAreaH - (showTopicBanner ? TOPIC_BANNER_BLOCK : 0)) / effectiveHeightPt), 1.0)
                             : Math.min(PAGE_WIDTH / origW, 1.0);
                         const drawW = origW * scale;
                         const drawH = effectiveHeightPt * scale;
                         const drawX = (PAGE_WIDTH - drawW) / 2;
 
-                        // Beta 新增：含答案版在每道题首切片上方绘制知识点横条（失败则跳过，不挡正文）
+                        // 在每道题首切片上方绘制“专题X：知识点”横条（失败则跳过，不挡正文）
                         if (showTopicBanner) {
                             try {
-                                const badgeUrl = generateTopicBadgeDataUrl(qTopic, drawW);
+                                const badgeUrl = generateTopicBadgeDataUrl(qTopicLabel, drawW);
                                 if (badgeUrl) {
                                     const badgeImg = await mergedPdf.embedPng(badgeUrl);
                                     currentPage.drawImage(badgeImg, {
