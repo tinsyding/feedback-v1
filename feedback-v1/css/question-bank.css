@@ -371,6 +371,27 @@
     background: currentColor;
 }
 
+/* Step 3 自动识别题号状态 */
+.qb-auto-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #60a5fa;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    white-space: nowrap;
+}
+
+.qb-auto-status.no-match {
+    color: #fbbf24;
+    background: rgba(245, 158, 11, 0.1);
+    border-color: rgba(245, 158, 11, 0.25);
+}
+
 /* Saved data list */
 /* Saved data list: Step 1 直接可见与学科多维筛选 */
 .saved-data-section {
@@ -1459,6 +1480,20 @@
     margin-left: 2px;
 }
 
+.page-auto-indicator {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 5px;
+    border-radius: 5px;
+    font-size: 0.62rem;
+    font-weight: 700;
+    line-height: 1.35;
+    color: #60a5fa;
+    background: rgba(59, 130, 246, 0.12);
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    vertical-align: 1px;
+}
+
 .page-status-badge {
     font-size: 0.72rem;
     font-weight: 600;
@@ -1505,6 +1540,10 @@
 .page-label-input:focus {
     border-color: var(--accent, #0a84ff);
     box-shadow: 0 0 0 3px rgba(var(--accent-rgb, 10, 132, 255), 0.35);
+}
+
+.page-label-input.auto-detected:not(:focus) {
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.22), 0 2px 6px rgba(0, 0, 0, 0.2);
 }
 
 @keyframes numberPop {
@@ -2193,6 +2232,24 @@ input[type=number] {
 [data-theme="light"] .page-card-footer {
     background: #f8fafc !important;
     border-top-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+[data-theme="light"] .qb-auto-status {
+    color: #2563eb;
+    background: #eff6ff;
+    border-color: #bfdbfe;
+}
+
+[data-theme="light"] .qb-auto-status.no-match {
+    color: #b45309;
+    background: #fffbeb;
+    border-color: #fde68a;
+}
+
+[data-theme="light"] .page-auto-indicator {
+    color: #2563eb;
+    background: #eff6ff;
+    border-color: #bfdbfe;
 }
 
 [data-theme="light"] .zoom-btn {
