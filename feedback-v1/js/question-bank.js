@@ -27,6 +27,131 @@ let batchQuestionLabels = [];
 let batchAnswerLabels = [];
 let batchQuestionThumbs = [];
 let batchAnswerThumbs = [];
+// 自动识别出的题号（null 表示该页未识别到），以及当前题号是否仍来自自动识别
+let batchQuestionDetectedLabels = [];
+let batchAnswerDetectedLabels = [];
+let batchQuestionAutoFlags = [];
+let batchAnswerAutoFlags = [];
+let batchQuestionInheritedFlags = [];
+let batchAnswerInheritedFlags = [];
+let batchQuestionAutoCount = 0;
+let batchAnswerAutoCount = 0;
+let batchQuestionInheritedCount = 0;
+let batchAnswerInheritedCount = 0;
+
+// ========== PDF 页面题号自动识别 ==========
+// 题库上传的题目/答案 PDF 通常会在每页左上角印刷“6.”、“第 11 题”等作业题号。
+// 这里直接使用 PDF.js 提取的文字坐标做本地识别，不发送 PDF 内容、不依赖 OCR。
+function normalizeQuestionNumber(raw) {
+    const n = parseInt(raw, 10);
+    return Number.isInteger(n) && n >= 1 && n <= 300 ? n : null;
+}
+
+function parseQuestionNumberFromText(raw, allowBareNumber = true) {
+    let s = String(raw || '').replace(/\u00a0/g, ' ').trim();
+    if (!s) return null;
+    // 常见题目前缀，如“典例15．”“例 3.”“变式2”
+    s = s.replace(/^(?:典例|例题|例|变式|拓展|【典例】|【例】)[\s:：]*/, '');
+    s = s.replace(/\s+/g, '');
+    if (!s) return null;
+    // 排除页眉/页脚中的“第1页”“共3页”“Page 1”“1/10”等
+    if (/第\d+页|共\d+页|page\d+/i.test(s)) return null;
+    if (/^\d{1,3}\/\d{1,3}/.test(s)) return null;
+    // 第 11 题
+    let m = s.match(/^第(\d{1,3})题/);
+    if (m) return normalizeQuestionNumber(m[1]);
+    // ( ) 2. / （ ）2． / (   )13.
+    m = s.match(/^[（(]\s*[）)]\s*(\d{1,3})\s*(?:[.．、,，:：]|题)/);
+    if (m) return normalizeQuestionNumber(m[1]);
+    // （2） / (2).
+    m = s.match(/^[（(]\s*(\d{1,3})\s*[）)]\s*(?:[.．、,，:：]|题)?/);
+    if (m) return normalizeQuestionNumber(m[1]);
+    // 6. / 24． / 5、 / 3: / 第3题
+    m = s.match(/^(\d{1,3})\s*(?:[.．、,，:：]|题)(?![0-9])/);
+    if (m) return normalizeQuestionNumber(m[1]);
+    // 整行只有一个数字（如题号单独占一行）
+    if (allowBareNumber && /^\d{1,3}$/.test(s)) return normalizeQuestionNumber(s);
+    return null;
+}
+
+function detectQuestionNumberFromPageText(items, pageWidth, pageHeight, pageNumber = null) {
+    if (!Array.isArray(items) || !items.length || !pageWidth || !pageHeight) return null;
+
+    // 先按纵坐标把文字合并成行，行内再按横坐标从左到右排列
+    const lines = [];
+    const tolerance = 3.5;
+    const sorted = items
+        .filter(item => item && typeof item.str === 'string' && item.str.trim() && item.transform)
+        .map(item => {
+            const tr = item.transform;
+            return {
+                text: item.str.trim(),
+                x: Number(tr[4]) || 0,
+                y: Number(tr[5]) || 0,
+                fontSize: Math.hypot(Number(tr[2]) || 0, Number(tr[3]) || 0)
+            };
+        })
+        .sort((a, b) => b.y - a.y || a.x - b.x);
+
+    for (const item of sorted) {
+        let line = lines.find(l => Math.abs(l.y - item.y) <= tolerance);
+        if (!line) {
+            line = { y: item.y, items: [] };
+            lines.push(line);
+        }
+        line.items.push(item);
+    }
+    lines.sort((a, b) => b.y - a.y);
+
+    const candidates = [];
+    for (const line of lines) {
+        line.items.sort((a, b) => a.x - b.x);
+        const first = line.items[0];
+        const yRatio = line.y / pageHeight;
+        if (yRatio < 0.72) continue; // 只认页面上部靠近顶端的位置，避免正文中的小问编号/上标
+        if (first.fontSize > 0 && first.fontSize < 8) continue;
+
+        const compact = line.items.map(item => item.text.replace(/\s+/g, '')).join('');
+        const explicit = /第\d{1,3}题/.test(compact);
+        // 普通题号必须紧贴左侧；只有“第X题”这种明确格式允许居中
+        if (!explicit && first.x > pageWidth * 0.18) continue;
+
+        // 只有真正贴着左上角且靠近页顶的单独数字，才允许不带“.”“题”等标记
+        const allowBare = yRatio >= 0.85 && first.x < pageWidth * 0.12;
+        let num = parseQuestionNumberFromText(compact, allowBare);
+        // 单独一个数字很可能只是页眉/页脚页码；若它正好等于当前页码，优先按页码处理，
+        // 不作为题号，后续会沿用上一页题号。带“.”“题”等标记的才是明确题号。
+        if (num !== null && pageNumber && /^\d{1,3}$/.test(compact) && num === Number(pageNumber)) {
+            num = null;
+        }
+        if (num === null) {
+            // 行内文字被拆成多个 item 时（常见于“1”“5”“．”分开），再逐项尝试
+            for (const item of line.items.slice(0, 8)) {
+                if (!explicit && item.x > pageWidth * 0.18) break;
+                const n = parseQuestionNumberFromText(item.text, false);
+                if (n !== null) {
+                    num = n;
+                    break;
+                }
+            }
+        }
+        if (num === null) continue;
+
+        let score = 100;
+        if (yRatio >= 0.80 && yRatio <= 0.95) score += 20;
+        else if (yRatio > 0.95) score -= 10;
+        if (first.x < pageWidth * 0.10) score += 10;
+        else if (first.x < pageWidth * 0.18) score += 5;
+        if (first.fontSize >= 9) score += 5;
+        if (compact.length > 6) score += 5;
+        if (explicit) score += 5;
+        candidates.push({ num, score, y: line.y, x: first.x });
+    }
+
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => b.score - a.score || b.y - a.y || a.x - b.x);
+    return candidates[0].num;
+}
 
 const yearSelect = document.getElementById('qb-year');
 const seasonSelect = document.getElementById('qb-season');
@@ -285,6 +410,16 @@ function onSelectorChange() {
     batchExerciseFile = null;
     batchAnswerFile = null;
     batchImported = false;
+    batchQuestionDetectedLabels = [];
+    batchAnswerDetectedLabels = [];
+    batchQuestionAutoFlags = [];
+    batchAnswerAutoFlags = [];
+    batchQuestionInheritedFlags = [];
+    batchAnswerInheritedFlags = [];
+    batchQuestionAutoCount = 0;
+    batchAnswerAutoCount = 0;
+    batchQuestionInheritedCount = 0;
+    batchAnswerInheritedCount = 0;
     updateBatchPdfStatus();
 
     const resetStep = () => goToStep(1);
@@ -455,6 +590,7 @@ async function renderPdfToThumbs(file) {
         throw new Error(`PDF 共 ${pdf.numPages} 页，超出单次上限 ${MAX_BATCH_PDF_PAGES} 页，请拆分为多个专题分批录入`);
     }
     const thumbs = [];
+    const detectedLabels = [];
     for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
         const base = page.getViewport({ scale: 1 });
@@ -469,16 +605,33 @@ async function renderPdfToThumbs(file) {
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         await page.render({ canvasContext: ctx, viewport }).promise;
+
+        // 在渲染缩略图的同时读取文字坐标，自动识别页面左上角印刷题号。
+        // 识别失败不影响预览；该页会保留默认序号，老师可继续手动修改。
+        let detectedNumber = null;
+        try {
+            const textContent = await page.getTextContent();
+            detectedNumber = detectQuestionNumberFromPageText(
+                textContent && textContent.items,
+                base.width,
+                base.height,
+                i
+            );
+        } catch (textErr) {
+            console.warn('PDF 题号自动识别失败，保留手动填写:', textErr);
+        }
+        detectedLabels.push(detectedNumber);
+
         thumbs.push(canvas.toDataURL('image/jpeg', 0.88));
         page.cleanup();
     }
     if (typeof pdf.destroy === 'function') { try { await pdf.destroy(); } catch (_) {} }
-    return { pageCount: pdf.numPages, thumbs };
+    return { pageCount: pdf.numPages, thumbs, detectedLabels };
 }
 
 async function loadBatchPreviews() {
     try {
-        showToast('正在生成高清晰度页面预览...');
+        showToast('正在生成页面预览并自动识别题号...');
         const [q, a] = await Promise.all([
             renderPdfToThumbs(batchExerciseFile),
             renderPdfToThumbs(batchAnswerFile)
@@ -487,6 +640,8 @@ async function loadBatchPreviews() {
         batchAnswerPageCount = a.pageCount;
         batchQuestionThumbs = q.thumbs;
         batchAnswerThumbs = a.thumbs;
+        batchQuestionDetectedLabels = q.detectedLabels || [];
+        batchAnswerDetectedLabels = a.detectedLabels || [];
         return true;
     } catch (e) {
         console.error('PDF 预览生成失败', e);
@@ -497,12 +652,92 @@ async function loadBatchPreviews() {
 
 function buildDefaultLabels() {
     batchQuestionLabels = [];
-    for (let i = 1; i <= batchQuestionPageCount; i++) batchQuestionLabels.push(i);
+    batchQuestionAutoFlags = [];
+    batchQuestionInheritedFlags = [];
+    batchQuestionAutoCount = 0;
+    batchQuestionInheritedCount = 0;
+    for (let i = 0; i < batchQuestionPageCount; i++) {
+        const detected = batchQuestionDetectedLabels[i];
+        const hasDetected = Number.isInteger(detected) && detected > 0;
+        if (hasDetected) {
+            batchQuestionLabels.push(detected);
+            batchQuestionAutoFlags.push(true);
+            batchQuestionInheritedFlags.push(false);
+            batchQuestionAutoCount++;
+        } else if (i > 0 && Number.isInteger(batchQuestionLabels[i - 1]) && batchQuestionLabels[i - 1] > 0) {
+            // 一题跨多页时，续页通常没有重复印刷题号；沿用上一页题号，避免被默认页序拆成下一题。
+            batchQuestionLabels.push(batchQuestionLabels[i - 1]);
+            batchQuestionAutoFlags.push(false);
+            batchQuestionInheritedFlags.push(true);
+            batchQuestionInheritedCount++;
+        } else {
+            batchQuestionLabels.push(i + 1);
+            batchQuestionAutoFlags.push(false);
+            batchQuestionInheritedFlags.push(false);
+        }
+    }
     batchAnswerLabels = [];
-    for (let i = 1; i <= batchAnswerPageCount; i++) batchAnswerLabels.push(i);
+    batchAnswerAutoFlags = [];
+    batchAnswerInheritedFlags = [];
+    batchAnswerAutoCount = 0;
+    batchAnswerInheritedCount = 0;
+    for (let i = 0; i < batchAnswerPageCount; i++) {
+        const detected = batchAnswerDetectedLabels[i];
+        const hasDetected = Number.isInteger(detected) && detected > 0;
+        if (hasDetected) {
+            batchAnswerLabels.push(detected);
+            batchAnswerAutoFlags.push(true);
+            batchAnswerInheritedFlags.push(false);
+            batchAnswerAutoCount++;
+        } else if (i > 0 && Number.isInteger(batchAnswerLabels[i - 1]) && batchAnswerLabels[i - 1] > 0) {
+            batchAnswerLabels.push(batchAnswerLabels[i - 1]);
+            batchAnswerAutoFlags.push(false);
+            batchAnswerInheritedFlags.push(true);
+            batchAnswerInheritedCount++;
+        } else {
+            batchAnswerLabels.push(i + 1);
+            batchAnswerAutoFlags.push(false);
+            batchAnswerInheritedFlags.push(false);
+        }
+    }
     lastLabelState = null;
     const undoBtn = document.getElementById('undo-cascade-btn');
     if (undoBtn) undoBtn.style.display = 'none';
+    updateAutoDetectStatus();
+}
+
+function updateAutoDetectStatus() {
+    const el = document.getElementById('auto-detect-status');
+    if (!el) return;
+    const qTotal = batchQuestionPageCount || 0;
+    const aTotal = batchAnswerPageCount || 0;
+    const total = qTotal + aTotal;
+    if (total === 0) {
+        el.style.display = 'none';
+        return;
+    }
+    const autoTotal = batchQuestionAutoCount + batchAnswerAutoCount;
+    const inheritedTotal = batchQuestionInheritedCount + batchAnswerInheritedCount;
+    const remainingAuto = batchQuestionAutoFlags.filter(Boolean).length + batchAnswerAutoFlags.filter(Boolean).length;
+    const remainingInherited = batchQuestionInheritedFlags.filter(Boolean).length + batchAnswerInheritedFlags.filter(Boolean).length;
+    const manualTotal = Math.max(0, autoTotal + inheritedTotal - remainingAuto - remainingInherited);
+    el.style.display = 'inline-flex';
+    if (autoTotal === 0 && inheritedTotal === 0) {
+        el.className = 'qb-auto-status no-match';
+        el.textContent = '未识别到题号，请手动填写';
+        el.title = 'PDF 中没有找到可识别的印刷题号，已保留默认序号；可直接在每页题号框中修改';
+    } else if (autoTotal === 0) {
+        el.className = 'qb-auto-status no-match';
+        el.textContent = '未识别到印刷题号，已沿用上页';
+        el.title = `题目 ${batchQuestionInheritedCount}/${qTotal} 页、答案 ${batchAnswerInheritedCount}/${aTotal} 页已沿用上页题号；请核对续页是否属于同一道题` +
+            (manualTotal > 0 ? `；其中 ${manualTotal} 页已手动修改` : '');
+    } else {
+        el.className = 'qb-auto-status';
+        el.textContent = `已自动识别 ${autoTotal}/${total} 页` + (inheritedTotal > 0 ? ` · ${inheritedTotal} 页沿用上页` : '');
+        el.title = `题目 ${batchQuestionAutoCount}/${qTotal} 页自动识别${batchQuestionInheritedCount ? `，${batchQuestionInheritedCount} 页沿用上页` : ''}；` +
+            `答案 ${batchAnswerAutoCount}/${aTotal} 页自动识别${batchAnswerInheritedCount ? `，${batchAnswerInheritedCount} 页沿用上页` : ''}；` +
+            '识别结果可直接修改' + (manualTotal > 0 ? `；其中 ${manualTotal} 页已手动修改` : '');
+    }
 }
 
 function setMappingView(view = 'split') {
@@ -530,13 +765,29 @@ function autoNumberPages(kind) {
 
     if (kind === 'q') {
         batchQuestionLabels = [];
-        for (let i = 1; i <= batchQuestionPageCount; i++) batchQuestionLabels.push(i);
+        batchQuestionAutoFlags = [];
+        batchQuestionInheritedFlags = [];
+        batchQuestionAutoCount = 0;
+        batchQuestionInheritedCount = 0;
+        for (let i = 1; i <= batchQuestionPageCount; i++) {
+            batchQuestionLabels.push(i);
+            batchQuestionAutoFlags.push(false);
+            batchQuestionInheritedFlags.push(false);
+        }
         renderAnnotationList();
         updateAnnotationStatus();
         showToast(`已为 ${batchQuestionPageCount} 页题目按 1~${batchQuestionPageCount} 顺序编号`);
     } else if (kind === 'a') {
         batchAnswerLabels = [];
-        for (let i = 1; i <= batchAnswerPageCount; i++) batchAnswerLabels.push(i);
+        batchAnswerAutoFlags = [];
+        batchAnswerInheritedFlags = [];
+        batchAnswerAutoCount = 0;
+        batchAnswerInheritedCount = 0;
+        for (let i = 1; i <= batchAnswerPageCount; i++) {
+            batchAnswerLabels.push(i);
+            batchAnswerAutoFlags.push(false);
+            batchAnswerInheritedFlags.push(false);
+        }
         renderAnnotationList();
         updateAnnotationStatus();
         showToast(`已为 ${batchAnswerPageCount} 页答案按 1~${batchAnswerPageCount} 顺序编号`);
@@ -551,7 +802,11 @@ function syncAnswerToQuestionNumbers() {
     const minCount = Math.min(batchAnswerPageCount, batchQuestionLabels.length);
     for (let i = 0; i < minCount; i++) {
         batchAnswerLabels[i] = batchQuestionLabels[i];
+        batchAnswerAutoFlags[i] = false;
+        batchAnswerInheritedFlags[i] = false;
     }
+    batchAnswerAutoCount = 0;
+    batchAnswerInheritedCount = 0;
     renderAnnotationList();
     updateAnnotationStatus();
     showToast(`已将前 ${minCount} 页答案题号快速对齐题目`);
@@ -569,6 +824,7 @@ function renderAnnotationList() {
     renderPageGrid('qpdf-page-grid', batchQuestionThumbs, batchQuestionLabels, 'q');
     renderPageGrid('apdf-page-grid', batchAnswerThumbs, batchAnswerLabels, 'a');
     setThumbSize(currentThumbSize);
+    updateAutoDetectStatus();
 }
 
 function renderPageGrid(containerId, thumbs, labels, kind) {
@@ -576,12 +832,17 @@ function renderPageGrid(containerId, thumbs, labels, kind) {
     if (!el) return;
     el.innerHTML = '';
     const otherLabels = kind === 'q' ? batchAnswerLabels : batchQuestionLabels;
+    const autoFlags = kind === 'q' ? batchQuestionAutoFlags : batchAnswerAutoFlags;
+    const inheritedFlags = kind === 'q' ? batchQuestionInheritedFlags : batchAnswerInheritedFlags;
 
     thumbs.forEach((thumb, i) => {
         const card = document.createElement('div');
         const currNum = labels[i];
         const isPaired = otherLabels && otherLabels.includes(currNum);
+        const isAuto = Boolean(autoFlags && autoFlags[i]);
+        const isInherited = Boolean(inheritedFlags && inheritedFlags[i]);
         card.className = `page-card page-card-${kind}${isPaired ? ' paired' : ''}`;
+        card.dataset.pageIndex = String(i);
         card.innerHTML = `
             <div class="page-thumb-wrap" onclick="openPageLightbox('${kind}', ${i})" title="点击全屏放大查看">
                 <img class="page-thumb" src="${thumb}" alt="第 ${i + 1} 页" loading="lazy">
@@ -599,8 +860,9 @@ function renderPageGrid(containerId, thumbs, labels, kind) {
                     <button type="button" class="stepper-btn stepper-btn-minus" onclick="stepPageLabel('${kind}', ${i}, -1, event)" title="题号减 1" aria-label="减少题号">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                     </button>
-                    <input type="number" class="page-label-input" min="1" step="1"
+                    <input type="number" class="page-label-input${isAuto ? ' auto-detected' : ''}${isInherited ? ' inherited-detected' : ''}" min="1" step="1"
                            value="${currNum}" data-kind="${kind}" data-index="${i}"
+                           title="${isAuto ? '题号由 PDF 自动识别，可直接修改' : (isInherited ? '此页没有印刷题号，已沿用上一页题号；请核对是否属于同一道题' : '请手动填写此页对应的作业题号')}"
                            onwheel="this.blur()"
                            onclick="event.stopPropagation()"
                            onkeydown="if(event.key==='Enter') this.blur(); event.stopPropagation();"
@@ -611,7 +873,7 @@ function renderPageGrid(containerId, thumbs, labels, kind) {
                 </div>
             </div>
             <div class="page-card-footer">
-                <span class="page-no-tag">第 ${i + 1} 页 ${isPaired ? '<span class="page-paired-indicator" title="已与对应' + (kind === 'q' ? '答案' : '题目') + '匹配"></span>' : ''}</span>
+                <span class="page-no-tag">第 ${i + 1} 页 ${isAuto ? '<span class="page-auto-indicator" title="题号由 PDF 文本自动识别，可手动修改">自动</span>' : (isInherited ? '<span class="page-inherited-indicator" title="此页没有印刷题号，已沿用上一页题号；请核对是否属于同一道题">沿用上页</span>' : '')} ${isPaired ? '<span class="page-paired-indicator" title="已与对应' + (kind === 'q' ? '答案' : '题目') + '匹配"></span>' : ''}</span>
                 <span class="page-status-badge ${isPaired ? 'paired' : ''}">${isPaired ? '已对齐' : '未对齐'}</span>
             </div>
         `;
@@ -908,6 +1170,25 @@ function updatePairedIndicators() {
     });
 }
 
+function markPageLabelManual(kind, index) {
+    const flags = kind === 'q' ? batchQuestionAutoFlags : batchAnswerAutoFlags;
+    const inheritedFlags = kind === 'q' ? batchQuestionInheritedFlags : batchAnswerInheritedFlags;
+    if (flags) flags[index] = false;
+    if (inheritedFlags) inheritedFlags[index] = false;
+    const card = document.querySelector(`.page-card-${kind}[data-page-index="${index}"]`);
+    if (!card) return;
+    const indicator = card.querySelector('.page-auto-indicator');
+    if (indicator) indicator.remove();
+    const inheritedIndicator = card.querySelector('.page-inherited-indicator');
+    if (inheritedIndicator) inheritedIndicator.remove();
+    const input = card.querySelector('.page-label-input');
+    if (input) {
+        input.classList.remove('auto-detected');
+        input.classList.remove('inherited-detected');
+        input.title = '请手动填写此页对应的作业题号';
+    }
+}
+
 function onPageLabelChange(kind, index, value) {
     const arr = kind === 'q' ? batchQuestionLabels : batchAnswerLabels;
     const oldVal = arr[index];
@@ -937,6 +1218,7 @@ function onPageLabelChange(kind, index, value) {
     };
 
     arr[index] = num;
+    markPageLabelManual(kind, index);
 
     const currInput = document.querySelector(`input.page-label-input[data-kind="${kind}"][data-index="${index}"]`);
     if (currInput) {
@@ -955,6 +1237,7 @@ function onPageLabelChange(kind, index, value) {
     if (autoCascadeNumbers && diff !== 0 && index + 1 < arr.length) {
         for (let j = index + 1; j < arr.length; j++) {
             arr[j] = Math.max(1, arr[j] + diff);
+            markPageLabelManual(kind, j);
             const input = document.querySelector(`input.page-label-input[data-kind="${kind}"][data-index="${j}"]`);
             if (input) {
                 input.value = arr[j];
@@ -984,6 +1267,7 @@ function onPageLabelChange(kind, index, value) {
 
     updatePairedIndicators();
     updateAnnotationStatus();
+    updateAutoDetectStatus();
 }
 
 function updateAnnotationStatus() {
@@ -1073,8 +1357,18 @@ function selectBatchPdf(type) {
             }
             if (t === 'exercise') {
                 batchExerciseFile = file;
+                batchQuestionDetectedLabels = [];
+                batchQuestionAutoFlags = [];
+                batchQuestionInheritedFlags = [];
+                batchQuestionAutoCount = 0;
+                batchQuestionInheritedCount = 0;
             } else if (t === 'answer') {
                 batchAnswerFile = file;
+                batchAnswerDetectedLabels = [];
+                batchAnswerAutoFlags = [];
+                batchAnswerInheritedFlags = [];
+                batchAnswerAutoCount = 0;
+                batchAnswerInheritedCount = 0;
             }
             batchImported = false;
             updateBatchPdfStatus();

@@ -12,7 +12,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261021-4';
+            const v = '20261022-2';
             document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/question-bank.css?v=${v}">`);
@@ -365,6 +365,7 @@
                             </div>
                             <h3 style="flex:1; margin:0;">页面标注</h3>
                             <div class="mapping-toolbar-actions">
+                                <span class="qb-auto-status" id="auto-detect-status" style="display:none;" title="系统会尝试从 PDF 每页左上角自动识别印刷题号"></span>
                                 <label class="cascade-toggle-label" title="开启后，修改多页题目的题号时，会自动顺延调整后续页面的题号，无需逐页手动修改">
                                     <input type="checkbox" id="auto-cascade-numbers" checked onchange="toggleAutoCascade(this.checked)">
                                     <span>题号智能顺延</span>
@@ -379,7 +380,7 @@
                             </div>
                         </div>
                         <div class="config-card-body">
-                            <p class="qb-step-hint">请为每一页输入它对应的作业题号。跨多页的题目/答案，填成同一个题号即可（已开启 <b>题号智能顺延</b>：当把多页题目的第 2 页改成 5 时，后续原本的 7 会自动换回 6 并整体顺延）。点击任意缩略图可全屏放大查阅。</p>
+                            <p class="qb-step-hint">系统会先尝试从每页左上角的印刷文字中自动识别作业题号，并填入下方；<b>没有印刷题号的续页会自动沿用上一页题号</b>，并标注「沿用上页」供核对。<b>自动识别结果仍可直接手动修改</b>，未识别或识别错误的页面请手动填写。跨多页的题目/答案，填成同一个题号即可（已开启 <b>题号智能顺延</b>：当把多页题目的第 2 页改成 5 时，后续原本的 7 会自动换回 6 并整体顺延）。点击任意缩略图可全屏放大查阅。</p>
 
                             <div class="mapping-sections-container view-split" id="mapping-sections-container">
                                 <div class="mapping-section" id="section-exercise">
@@ -594,7 +595,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261021-4';
+            const v = '20261022-2';
             document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
             document.write(`<script src="js/common.js?v=${v}"><\/script>`);
             document.write(`<script src="js/auth.js?v=${v}"><\/script>`);
