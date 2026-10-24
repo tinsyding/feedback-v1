@@ -65,6 +65,15 @@ def archive_key_for_input(input_path: str) -> str:
     return f"{base} [第 1 周]"
 
 
+def candidate_search_plan(candidate_index: int) -> list:
+    """候选定位按键：先按 Down 选中第 N 个搜索结果，最后 Enter 进入会话。
+
+    企业微信粘贴搜索词后结果列表已经刷新；不能先按 Enter，否则会直接进入
+    第一个结果，Down 就变成在会话里移动，第二个候选会选错。
+    """
+    return ["down"] * max(0, int(candidate_index) - 1) + ["enter"]
+
+
 # ================= Windows 动作（需真机验证） =================
 
 def safe_copy(text: str, retries: int = 5) -> bool:
@@ -99,14 +108,14 @@ def search_and_enter(name: str, candidate_index: int) -> bool:
     if not safe_copy(name):
         return False
     wu.tap_keys(wu.VK_CONTROL, wu.VK_V)
-    time.sleep(0.5)
-    wu.tap_key(wu.VK_RETURN)
-    time.sleep(0.8)
-    for _ in range(max(0, candidate_index - 1)):
-        wu.tap_key(wu.VK_DOWN)
-        time.sleep(0.15)
-    wu.tap_key(wu.VK_RETURN)
-    time.sleep(1.2)  # 等会话切换渲染完再截图
+    time.sleep(1.0)  # 等搜索结果列表刷新；先 Down 选中候选，最后再 Enter
+    for action in candidate_search_plan(candidate_index):
+        if action == "down":
+            wu.tap_key(wu.VK_DOWN)
+            time.sleep(0.2)
+        else:
+            wu.tap_key(wu.VK_RETURN)
+            time.sleep(1.2)  # 等会话切换渲染完再截图
     return wu.is_foreground_wecom()
 
 

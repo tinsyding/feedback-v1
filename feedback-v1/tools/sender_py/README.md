@@ -268,7 +268,7 @@ cd feedback-v1/tools
 python3 -m unittest discover -s sender_py/tests -v
 ```
 
-当前覆盖 47 项，包含：
+当前覆盖 49 项，包含：
 
 - 输入契约解析；
 - ROI 反推与相对比例校验；

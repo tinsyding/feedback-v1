@@ -4,11 +4,16 @@ import csv
 import os
 import tempfile
 import unittest
+from unittest import mock
 
+from sender_py import window_utils as wu
 from sender_py.reply_notes import (
     actionable, dedupe_add, export_csv, make_note, should_record, verdict,
 )
-from sender_py.sender import archive_key_for_input, decide_action, run_candidate_outcomes
+from sender_py.sender import (
+    archive_key_for_input, candidate_search_plan, decide_action, run_candidate_outcomes,
+    search_and_enter,
+)
 from sender_py.store import HistoryManager
 
 
@@ -89,6 +94,43 @@ class TestStage6(unittest.TestCase):
 
     def test_archive_key(self):
         self.assertEqual(archive_key_for_input("测试.json"), "测试 [第 1 周]")
+
+    def test_candidate_search_plan_down_before_enter(self):
+        # 先按 Down 选中候选，最后才 Enter；不能先 Enter 进第一个会话
+        self.assertEqual(candidate_search_plan(1), ["enter"])
+        self.assertEqual(candidate_search_plan(2), ["down", "enter"])
+        self.assertEqual(candidate_search_plan(3), ["down", "down", "enter"])
+        self.assertEqual(candidate_search_plan(0), ["enter"])
+        for idx in (1, 2, 3):
+            plan = candidate_search_plan(idx)
+            self.assertEqual(plan.count("enter"), 1)
+            self.assertEqual(plan[-1], "enter")
+            self.assertNotIn("enter", plan[:-1])
+
+    def test_search_and_enter_down_before_enter(self):
+        calls = []
+
+        def record_key(vk):
+            calls.append(("key", vk))
+            return True
+
+        def record_keys(*vks):
+            calls.append(("keys",) + tuple(vks))
+            return True
+
+        with mock.patch.object(wu, "find_and_activate_wecom", return_value=True), \
+                mock.patch.object(wu, "tap_keys", side_effect=record_keys), \
+                mock.patch.object(wu, "tap_key", side_effect=record_key), \
+                mock.patch.object(wu, "is_foreground_wecom", return_value=True), \
+                mock.patch("sender_py.sender.safe_copy", return_value=True), \
+                mock.patch("sender_py.sender.time.sleep", return_value=None):
+            self.assertTrue(search_and_enter("80001李四", 2))
+
+        key_calls = [c for c in calls if c[0] == "key"]
+        self.assertEqual([c[1] for c in key_calls],
+                         [0x08, wu.VK_DOWN, wu.VK_RETURN])
+        self.assertLess(key_calls.index(("key", wu.VK_DOWN)),
+                        key_calls.index(("key", wu.VK_RETURN)))
 
 
 if __name__ == "__main__":
