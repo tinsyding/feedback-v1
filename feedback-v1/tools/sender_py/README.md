@@ -123,6 +123,10 @@ cd feedback-v1\tools
 python sender_py\sender.py --input 测试.json
 ```
 
+启动 GUI 后，可点「选择 JSON 文件（可多选）」一次选中多个 JSON。发送器会合并这些文件，按「学号 + 姓名」去重，并在界面上显示已选文件数和合并后的学生总数；同一学生在多个文件中重复时只保留第一次出现的那条。
+
+`--input` 仍然作为启动时预加载的单个文件；之后可以在界面里重新选择。
+
 可选参数：
 
 ```text
@@ -224,6 +228,7 @@ python sender_py\verify_stage4_win.py
 ```
 
 - 存档键为「输入文件名 [第 1 周]」，兼容旧版 `{"classes": {...}}` 结构；
+- 多文件选择时，每条记录按来源文件分别存档；
 - 当前临时关闭“已发送自动跳过”（`sender.py` 的 `SKIP_SENT = False`），历史仍会记录，但重复运行会再次发送；恢复时改为 `True`；
 - 旧版历史可以直接读取，不需要手工转换。
 
@@ -268,9 +273,10 @@ cd feedback-v1/tools
 python3 -m unittest discover -s sender_py/tests -v
 ```
 
-当前覆盖 49 项，包含：
+当前覆盖 50 项，包含：
 
 - 输入契约解析；
+- 多文件合并与按学号+姓名去重；
 - ROI 反推与相对比例校验；
 - 两框校准的坐标映射与门槛；
 - 云端返回映射与 fail-closed / fail-open；

@@ -1,6 +1,7 @@
 """阶段 6 单测（Linux 全测）：决策矩阵/候选推演/名单/断点续发。无 tkinter/真机依赖。"""
 
 import csv
+import json
 import os
 import tempfile
 import unittest
@@ -11,8 +12,8 @@ from sender_py.reply_notes import (
     actionable, dedupe_add, export_csv, make_note, should_record, verdict,
 )
 from sender_py.sender import (
-    archive_key_for_input, candidate_search_plan, decide_action, run_candidate_outcomes,
-    search_and_enter,
+    archive_key_for_input, candidate_search_plan, decide_action, load_feedback_inputs,
+    run_candidate_outcomes, search_and_enter,
 )
 from sender_py.store import HistoryManager
 
@@ -94,6 +95,30 @@ class TestStage6(unittest.TestCase):
 
     def test_archive_key(self):
         self.assertEqual(archive_key_for_input("测试.json"), "测试 [第 1 周]")
+
+    def test_load_feedback_inputs_merge_dedupe(self):
+        with tempfile.TemporaryDirectory() as d:
+            p1 = os.path.join(d, "a.json")
+            p2 = os.path.join(d, "b.json")
+            with open(p1, "w", encoding="utf-8") as f:
+                json.dump([
+                    {"studentName": "90001张三", "message": "a1"},
+                    {"studentName": "80001李四", "message": "a2"},
+                ], f, ensure_ascii=False)
+            with open(p2, "w", encoding="utf-8") as f:
+                json.dump([
+                    {"studentName": "90001,张三", "message": "dup"},
+                    {"studentName": "70001王五", "message": "b2"},
+                ], f, ensure_ascii=False)
+            items, file_counts, duplicates = load_feedback_inputs([p1, p2])
+
+        self.assertEqual([i["studentName"] for i in items],
+                         ["90001张三", "80001李四", "70001王五"])
+        self.assertEqual([n for _, n in file_counts], [2, 2])
+        self.assertEqual(duplicates, 1)
+        self.assertEqual(items[0]["_archive_key"], "a [第 1 周]")
+        self.assertEqual(items[1]["_archive_key"], "a [第 1 周]")
+        self.assertEqual(items[2]["_archive_key"], "b [第 1 周]")
 
     def test_candidate_search_plan_down_before_enter(self):
         # 先按 Down 选中候选，最后才 Enter；不能先 Enter 进第一个会话

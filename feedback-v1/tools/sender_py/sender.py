@@ -67,6 +67,35 @@ def archive_key_for_input(input_path: str) -> str:
     return f"{base} [第 1 周]"
 
 
+def load_feedback_inputs(paths) -> tuple:
+    """读取多个 JSON，合并并按学号+姓名去重，给每条数据标上来源存档键。
+
+    返回 (items, file_counts, duplicate_count)：
+      items: 合并后的反馈条目
+      file_counts: [(path, 该文件有效条目数), ...]
+      duplicate_count: 跨文件/文件内被去掉的重复条目数
+    """
+    merged = []
+    seen = set()
+    file_counts = []
+    duplicate_count = 0
+    for path in paths:
+        loaded = load_feedback_items(path)
+        file_counts.append((path, len(loaded)))
+        key = archive_key_for_input(path)
+        for item in loaded:
+            sid = (item.get("sid") or "").strip()
+            sname = (item.get("sname") or "").strip()
+            identity = (sid, sname) if (sid or sname) else (item.get("studentName") or "", "")
+            if identity in seen:
+                duplicate_count += 1
+                continue
+            seen.add(identity)
+            item["_archive_key"] = key
+            merged.append(item)
+    return merged, file_counts, duplicate_count
+
+
 def candidate_search_plan(candidate_index: int) -> list:
     """候选定位按键：先按 Down 选中第 N 个搜索结果，最后 Enter 进入会话。
 
@@ -93,7 +122,7 @@ def safe_copy(text: str, retries: int = 5) -> bool:
 
 
 def search_and_enter(name: str, candidate_index: int) -> bool:
-    """搜人进会话：第 candidate_index 个结果。Ctrl+F 聚焦→全选→Backspace 清空→粘贴→回车搜→Down 定位→回车进会话。"""
+    """搜人进会话：第 candidate_index 个结果。Ctrl+F 聚焦→全选→Backspace 清空→粘贴→等结果→Down 定位→回车进会话。"""
     try:
         from sender_py import window_utils as wu
     except ModuleNotFoundError:
@@ -276,13 +305,15 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
 # ================= Tk 主界面 =================
 
 class SenderApp:
-    def __init__(self, root, items: list, server: str, archive_key: str):
+    def __init__(self, root, items: list, server: str, archive_key: str, input_paths=None):
         import tkinter as tk
         from tkinter import ttk
         self.tk = tk
         self.items = items
         self.server = server
         self.archive_key = archive_key
+        self.input_paths = list(input_paths or [])
+        self.duplicate_count = 0
         self.reply_notes = []
         self._history = None
         try:
@@ -303,6 +334,13 @@ class SenderApp:
         self.reply_btn = tk.Button(top, text="📨 待回名单 (0)", command=self.show_reply_notes_dialog)
         self.reply_btn.pack(side="left", padx=6)
         tk.Button(top, text="开始发送", command=self.run_all).pack(side="right")
+        file_frame = tk.Frame(root)
+        file_frame.pack(fill="x", padx=10, pady=(0, 6))
+        tk.Button(file_frame, text="选择 JSON 文件（可多选）",
+                  command=self.choose_input_files).pack(side="left")
+        self.input_label = tk.Label(file_frame, text="", anchor="w", justify="left", wraplength=900)
+        self.input_label.pack(side="left", padx=8, fill="x", expand=True)
+        self.update_input_label()
         self.log = tk.Text(root, height=20, width=100)
         self.log.pack(fill="both", expand=True, padx=10, pady=6)
         self._ttk = ttk
@@ -314,6 +352,51 @@ class SenderApp:
 
     def refresh_reply_count(self):
         self.reply_btn.config(text=f"📨 待回名单 ({len(actionable(self.reply_notes))})")
+
+    def update_input_label(self):
+        if not self.input_paths:
+            text = f"当前输入：未选择文件（{len(self.items)} 个学生）"
+        elif len(self.input_paths) == 1:
+            text = f"当前输入：{os.path.basename(self.input_paths[0])}（{len(self.items)} 个学生）"
+        else:
+            names = "、".join(os.path.basename(p) for p in self.input_paths)
+            text = f"已选 {len(self.input_paths)} 个文件：{names}；共 {len(self.items)} 个学生"
+        if self.duplicate_count:
+            text += f"（已去重 {self.duplicate_count} 条）"
+        self.input_label.config(text=text)
+
+    def choose_input_files(self):
+        from tkinter import filedialog, messagebox
+        paths = filedialog.askopenfilenames(
+            parent=self.log.master,
+            title="选择反馈 JSON 文件（可多选）",
+            filetypes=[("JSON 文件", "*.json"), ("所有文件", "*.*")],
+        )
+        if not paths:
+            return
+        try:
+            items, file_counts, duplicates = load_feedback_inputs(paths)
+        except Exception as exc:
+            messagebox.showerror("读取失败",
+                                 f"本次选择未生效，仍保留原来的文件列表。\n{exc}",
+                                 parent=self.log.master)
+            return
+        if not items:
+            messagebox.showwarning("没有可用数据",
+                                   "选中的文件里没有有效的学生数据，本次选择未生效。",
+                                   parent=self.log.master)
+            return
+        self.items = items
+        self.input_paths = list(paths)
+        self.duplicate_count = duplicates
+        self.reply_notes = []
+        self.refresh_reply_count()
+        self.archive_key = (archive_key_for_input(paths[0]) if len(paths) == 1
+                            else "多文件 [第 1 周]")
+        self.update_input_label()
+        details = "，".join(f"{os.path.basename(p)} {n} 人" for p, n in file_counts)
+        self.emit(f"已加载 {len(paths)} 个文件：{details}")
+        self.emit(f"合并后共 {len(items)} 个学生" + (f"（去重 {duplicates} 条）" if duplicates else ""))
 
     def recalibrate(self):
         try:
@@ -376,8 +459,12 @@ class SenderApp:
             token = load_token() or None
         except Exception:
             pass
+        if not self.items:
+            self.emit("没有可发送的学生，请先选择 JSON 文件")
+            return
         for item in self.items:
-            if SKIP_SENT and self._history and self._history.is_sent(self.archive_key, item["studentName"]):
+            item_key = item.get("_archive_key") or self.archive_key
+            if SKIP_SENT and self._history and self._history.is_sent(item_key, item["studentName"]):
                 self.emit(f"[{item['studentName']}] 已发送过，跳过")
                 continue
             res = send_student(item, self.server, token, parent=self.log.master,
@@ -386,7 +473,7 @@ class SenderApp:
                 dedupe_add(self.reply_notes, n)
             self.refresh_reply_count()
             if res["result"] == "sent" and self._history and not self.dry.get():
-                self._history.mark_status(self.archive_key, item["studentName"], "✅已发送", item["message"])
+                self._history.mark_status(item_key, item["studentName"], "✅已发送", item["message"])
             self.emit(f"[{item['studentName']}] → {res['result']}：{res.get('reason', '')}")
             if not self.dry.get():
                 self.emit(f"学生间随机停顿 {pause(*STUDENT_GAP):.1f}s")
@@ -400,15 +487,26 @@ def main(argv=None):
     ap.add_argument("--server", default="https://feedback.wxjifang.cn", help="判定服务端")
     ap.add_argument("--dry-run", action="store_true", help="只走流程不真发")
     args = ap.parse_args(argv)
-    items = load_feedback_items(args.input)
-    key = archive_key_for_input(args.input)
     if args.dry_run:  # 无界面干跑：决策链全覆盖，供 Linux/CI 验证
+        items = load_feedback_items(args.input)
         for item in items:
             out = run_candidate_outcomes([
                 {"matched": True, "is_group": False, "needs_reply": None},
             ])
             print(f"[{item['studentName']}] dry-run 决策：{out['result']}（{out['reason']}）")
         return 0
+    items = []
+    key = ""
+    input_paths = []
+    load_error = None
+    try:
+        items = load_feedback_items(args.input)
+        key = archive_key_for_input(args.input)
+        input_paths = [args.input]
+        if not items:
+            load_error = f"启动文件 {args.input} 没有有效学生数据，请点击“选择 JSON 文件（可多选）”重新选择。"
+    except Exception as exc:
+        load_error = f"启动时未能读取 {args.input}：{exc}\n请点击“选择 JSON 文件（可多选）”。"
     import tkinter as tk
     try:
         from sender_py.window_utils import set_per_monitor_dpi_awareness
@@ -416,7 +514,9 @@ def main(argv=None):
         from window_utils import set_per_monitor_dpi_awareness
     set_per_monitor_dpi_awareness()
     root = tk.Tk()
-    SenderApp(root, items, args.server, key)
+    app = SenderApp(root, items, args.server, key, input_paths=input_paths)
+    if load_error:
+        app.emit(load_error)
     root.mainloop()
     return 0
 
