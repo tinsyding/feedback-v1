@@ -49,7 +49,7 @@ def decide_action(judgment) -> dict:
 
 
 def run_candidate_outcomes(judgments: list) -> dict:
-    """纯函数：按 1→2→3 机械顺序推演整学生结局（供单测与 dry-run）。"""
+    """纯函数：按 1→2→3 机械顺序推演整学生结局（供单测）。"""
     notes = []
     for idx, judgment in enumerate(list(judgments)[:MAX_CANDIDATES], start=1):
         decision = decide_action(judgment)
@@ -68,7 +68,7 @@ def archive_key_for_input(input_path: str) -> str:
 
 
 def load_feedback_inputs(paths) -> tuple:
-    """读取多个 JSON，合并并按学号+姓名去重，给每条数据标上来源存档键。
+    """读取多个 JSON / HTML，合并并按学号+姓名去重，给每条数据标上来源存档键。
 
     返回 (items, file_counts, duplicate_count)：
       items: 合并后的反馈条目
@@ -233,7 +233,7 @@ def judge_candidate(rect, roi, target_id: str, target_name: str, server: str, to
 
 
 def send_student(item: dict, server: str, token=None, config_path: str = None,
-                 parent=None, log=print, dry_run: bool = False) -> dict:
+                 parent=None, log=print) -> dict:
     """单个学生全流程：最多 3 候选机械 1→2→3。返回 {result, notes, ...}（notes 供待回名单）。"""
     try:
         from sender_py import window_utils as wu
@@ -243,22 +243,19 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
     notes = []
 
     def _paced(gaps):
-        if not dry_run:
-            log(f"[{name}] 随机停顿 {pause(*gaps):.1f}s")
+        log(f"[{name}] 随机停顿 {pause(*gaps):.1f}s")
 
     for cand in range(1, MAX_CANDIDATES + 1):
-        if dry_run:
-            rect = wu.get_wecom_rect()  # Linux 下为 None，dry-run 不真用
-        else:  # 所有截图的前提：企微完整可见，否则 mss 截到遮挡物/屏外黑边
-            if not wu.find_and_activate_wecom():
-                return {"result": "error", "reason": "企微唤起失败（最小化或无响应），请手动点开后重试",
-                        "notes": notes}
-            time.sleep(0.3)
-            ok_vis, vis = wu.ensure_fully_visible()
-            if not ok_vis:
-                return {"result": "error", "reason": f"窗口半截在屏幕外且无法自动归位：{vis}",
-                        "notes": notes}
-            rect = vis
+        # 所有截图的前提：企微完整可见，否则 mss 截到遮挡物/屏外黑边
+        if not wu.find_and_activate_wecom():
+            return {"result": "error", "reason": "企微唤起失败（最小化或无响应），请手动点开后重试",
+                    "notes": notes}
+        time.sleep(0.3)
+        ok_vis, vis = wu.ensure_fully_visible()
+        if not ok_vis:
+            return {"result": "error", "reason": f"窗口半截在屏幕外且无法自动归位：{vis}",
+                    "notes": notes}
+        rect = vis
         if not rect:
             return {"result": "error", "reason": "找不到企微窗口", "notes": notes}
         scale = wu.get_dpi_scale()
@@ -266,31 +263,22 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         if roi is None:
             return {"result": "error", "reason": "ROI 校准未完成", "notes": notes}
         entered = search_and_enter(name, cand)
-        if entered and not dry_run:  # 截图前焦点守护：mss 截的是屏幕像素，失焦会被遮挡物污染
+        if entered:  # 截图前焦点守护：mss 截的是屏幕像素，失焦会被遮挡物污染
             if not wu.find_and_activate_wecom():
                 log(f"[{name}] 候选{cand}：企微唤起失败，换下一候选")
                 _paced(CANDIDATE_GAP)
                 continue
             time.sleep(0.3)
-        judgment, chat_title, err = (None, None, "dry-run 跳过截图判定") if dry_run else judge_candidate(
-            rect, roi, sid, sname, server, token)
-        if dry_run:
-            judgment = {"matched": cand == 1, "is_group": False, "title_in_header": True,
-                        "detected_title": name, "last_sender": "parent",
-                        "last_message_text": "（dry-run 桩判定）", "needs_reply": None, "reason": "dry-run"}
-            chat_title, err = name, None
+        judgment, chat_title, err = judge_candidate(rect, roi, sid, sname, server, token)
         if entered and should_record(chat_title, judgment):
             dedupe_add(notes, make_note(name, cand, chat_title, bool((judgment or {}).get("matched")), judgment or {}))
-        if err is not None and not dry_run:
+        if err is not None:
             log(f"[{name}] 候选{cand}：{err}，换下一候选")
             _paced(CANDIDATE_GAP)
             continue
         decision = decide_action(judgment)
         log(f"[{name}] 候选{cand}：{decision['action']}（{decision['reason']}）")
         if decision["action"] == "send":
-            if dry_run:
-                return {"result": "sent", "at_candidate": cand, "reason": "dry-run 未真发",
-                        "notes": notes}
             ok, why = paste_and_send(message)
             _paced(AFTER_SEND_GAP)
             return {"result": "sent" if ok else "error",
@@ -327,16 +315,12 @@ class SenderApp:
         root.title("反馈发送器（mss + ROI 反推）")
         top = tk.Frame(root)
         top.pack(fill="x", padx=10, pady=6)
-        self.dry = tk.BooleanVar(value=False)
-        tk.Checkbutton(top, text="dry-run（不真发）", variable=self.dry).pack(side="left")
-        self.roi_btn = tk.Button(top, text="重新校准 ROI", command=self.recalibrate)
-        self.roi_btn.pack(side="left", padx=6)
         self.reply_btn = tk.Button(top, text="📨 待回名单 (0)", command=self.show_reply_notes_dialog)
         self.reply_btn.pack(side="left", padx=6)
         tk.Button(top, text="开始发送", command=self.run_all).pack(side="right")
         file_frame = tk.Frame(root)
         file_frame.pack(fill="x", padx=10, pady=(0, 6))
-        tk.Button(file_frame, text="选择 JSON 文件（可多选）",
+        tk.Button(file_frame, text="选择 JSON / HTML 文件（可多选）",
                   command=self.choose_input_files).pack(side="left")
         self.input_label = tk.Label(file_frame, text="", anchor="w", justify="left", wraplength=900)
         self.input_label.pack(side="left", padx=8, fill="x", expand=True)
@@ -369,8 +353,13 @@ class SenderApp:
         from tkinter import filedialog, messagebox
         paths = filedialog.askopenfilenames(
             parent=self.log.master,
-            title="选择反馈 JSON 文件（可多选）",
-            filetypes=[("JSON 文件", "*.json"), ("所有文件", "*.*")],
+            title="选择反馈文件（JSON / HTML，可多选）",
+            filetypes=[
+                ("反馈文件（JSON / HTML）", "*.json *.html *.htm"),
+                ("JSON 文件", "*.json"),
+                ("HTML 快照", "*.html *.htm"),
+                ("所有文件", "*.*"),
+            ],
         )
         if not paths:
             return
@@ -398,29 +387,6 @@ class SenderApp:
         self.emit(f"已加载 {len(paths)} 个文件：{details}")
         self.emit(f"合并后共 {len(items)} 个学生" + (f"（去重 {duplicates} 条）" if duplicates else ""))
 
-    def recalibrate(self):
-        try:
-            from sender_py import window_utils as wu
-            from sender_py.capture import capture_wecom_window
-            from sender_py.roi_calibrator import run_calibration
-            from sender_py.roi_manager import save_roi
-        except ModuleNotFoundError:
-            import window_utils as wu
-            from capture import capture_wecom_window
-            from roi_calibrator import run_calibration
-            from roi_manager import save_roi
-        rect = wu.get_wecom_rect()
-        if not rect:
-            self.emit("找不到企微窗口，无法校准")
-            return
-        roi = run_calibration(self.log.master, capture_wecom_window(rect))
-        if roi is None:
-            self.emit("已放弃校准")
-            return
-        save_roi(default_config_path(), signature_key(rect[2], rect[3], wu.get_dpi_scale()),
-                 roi["title"], roi["input"], roi["chat"])
-        self.emit("ROI 已保存")
-
     def show_reply_notes_dialog(self):
         tk, ttk = self.tk, self._ttk
         from tkinter import filedialog, messagebox
@@ -428,16 +394,19 @@ class SenderApp:
             from sender_py.reply_notes import export_csv
         except ModuleNotFoundError:
             from reply_notes import export_csv
+        notes = actionable(self.reply_notes)
         win = tk.Toplevel(self.log.master)
-        win.title("待回消息名单（进会话会清未读角标，此表补回信号）")
+        win.title("待回消息名单（仅显示需回复/待确认）")
         cols = ("student", "chat_title", "identity", "last_sender", "last_message", "verdict", "time")
         tree = ttk.Treeview(win, columns=cols, show="headings", height=15)
         for c in cols:
             tree.heading(c, text=c)
             tree.column(c, width=120 if c != "last_message" else 260)
-        for n in self.reply_notes:
+        for n in notes:
             tree.insert("", "end", values=tuple(n.get(c, "") for c in cols))
         tree.pack(fill="both", expand=True, padx=8, pady=8)
+        if not notes:
+            tk.Label(win, text="当前没有需要回复的学生").pack(pady=(0, 6))
 
         def do_export():
             path = filedialog.asksaveasfilename(
@@ -445,7 +414,7 @@ class SenderApp:
                 initialfile="待回名单.csv", filetypes=[("CSV", "*.csv")])
             if not path:
                 return
-            export_csv(self.reply_notes, path)
+            export_csv(notes, path)
             messagebox.showinfo("导出成功", f"已导出至：\n{path}", parent=win)
         tk.Button(win, text="导出 CSV", command=do_export).pack(pady=(0, 8))
 
@@ -460,7 +429,7 @@ class SenderApp:
         except Exception:
             pass
         if not self.items:
-            self.emit("没有可发送的学生，请先选择 JSON 文件")
+            self.emit("没有可发送的学生，请先选择 JSON / HTML 文件")
             return
         for item in self.items:
             item_key = item.get("_archive_key") or self.archive_key
@@ -468,33 +437,23 @@ class SenderApp:
                 self.emit(f"[{item['studentName']}] 已发送过，跳过")
                 continue
             res = send_student(item, self.server, token, parent=self.log.master,
-                               log=self.emit, dry_run=self.dry.get())
+                               log=self.emit)
             for n in res.get("notes", []):
                 dedupe_add(self.reply_notes, n)
             self.refresh_reply_count()
-            if res["result"] == "sent" and self._history and not self.dry.get():
+            if res["result"] == "sent" and self._history:
                 self._history.mark_status(item_key, item["studentName"], "✅已发送", item["message"])
             self.emit(f"[{item['studentName']}] → {res['result']}：{res.get('reason', '')}")
-            if not self.dry.get():
-                self.emit(f"学生间随机停顿 {pause(*STUDENT_GAP):.1f}s")
+            self.emit(f"学生间随机停顿 {pause(*STUDENT_GAP):.1f}s")
         self.emit("本批处理结束")
 
 
 def main(argv=None):
     import argparse
     ap = argparse.ArgumentParser(description="企业微信反馈发送器（mss + ROI 反推）")
-    ap.add_argument("--input", default="测试.json", help="输入 JSON（数组 {studentName,message}）")
+    ap.add_argument("--input", default="测试.json", help="输入 JSON / HTML 快照（JSON 数组 {studentName,message}）")
     ap.add_argument("--server", default="https://feedback.wxjifang.cn", help="判定服务端")
-    ap.add_argument("--dry-run", action="store_true", help="只走流程不真发")
     args = ap.parse_args(argv)
-    if args.dry_run:  # 无界面干跑：决策链全覆盖，供 Linux/CI 验证
-        items = load_feedback_items(args.input)
-        for item in items:
-            out = run_candidate_outcomes([
-                {"matched": True, "is_group": False, "needs_reply": None},
-            ])
-            print(f"[{item['studentName']}] dry-run 决策：{out['result']}（{out['reason']}）")
-        return 0
     items = []
     key = ""
     input_paths = []
@@ -504,9 +463,9 @@ def main(argv=None):
         key = archive_key_for_input(args.input)
         input_paths = [args.input]
         if not items:
-            load_error = f"启动文件 {args.input} 没有有效学生数据，请点击“选择 JSON 文件（可多选）”重新选择。"
+            load_error = f"启动文件 {args.input} 没有有效学生数据，请点击“选择 JSON / HTML 文件（可多选）”重新选择。"
     except Exception as exc:
-        load_error = f"启动时未能读取 {args.input}：{exc}\n请点击“选择 JSON 文件（可多选）”。"
+        load_error = f"启动时未能读取 {args.input}：{exc}\n请点击“选择 JSON / HTML 文件（可多选）”。"
     import tkinter as tk
     try:
         from sender_py.window_utils import set_per_monitor_dpi_awareness

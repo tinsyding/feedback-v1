@@ -31,7 +31,7 @@ feedback-v1/tools/sender_py/
 ├── reply_notes.py         # 本地待回名单 / CSV 导出
 ├── store.py               # 本地发送历史，兼容旧 feedback_history.json
 ├── pacing.py              # 随机停顿（全部 ≤ 1 秒）
-├── utils.py               # 输入 JSON 解析
+├── utils.py               # 输入 JSON / HTML 解析
 ├── verify_stage2_win.py   # Windows 截图冒烟验证
 ├── verify_stage4_win.py   # Windows ROI 校准验证
 └── tests/                 # 纯函数单测（Linux 可跑）
@@ -95,7 +95,7 @@ setx SENDER_API_TOKEN "你的发送器令牌"
 
 ## 5. 输入格式
 
-输入文件是 JSON 数组，每个元素至少包含：
+输入文件支持 JSON 数组或网站导出的 HTML 快照。JSON 每个元素至少包含：
 
 ```json
 [
@@ -116,6 +116,12 @@ setx SENDER_API_TOKEN "你的发送器令牌"
 - **必须带学号**。服务端判定要求标题同时包含「学号 + 姓名」才返回 `matched: true`；学号缺失会因无法确认身份而不放行（fail-closed）。无学号姓名兜底只存在于家长端历史查询，不适用于发送器身份判定。
 - 真实学生名单、聊天内容、截图都属于 PII，请放在本地或已被 `.gitignore` 排除的文件中，不要提交。
 
+除 JSON 外，也支持网站「导出报告 → HTML 快照」生成的文件：
+
+- 新版快照会优先读取内嵌的 `feedback-data` JSON，换行和特殊字符能原样保留；
+- 旧版快照没有内嵌数据时，会从表格里的 `student-name` / `feedback-content` 提取；
+- 文件选择框可以同时混选 JSON 和 HTML。
+
 运行：
 
 ```powershell
@@ -123,16 +129,15 @@ cd feedback-v1\tools
 python sender_py\sender.py --input 测试.json
 ```
 
-启动 GUI 后，可点「选择 JSON 文件（可多选）」一次选中多个 JSON。发送器会合并这些文件，按「学号 + 姓名」去重，并在界面上显示已选文件数和合并后的学生总数；同一学生在多个文件中重复时只保留第一次出现的那条。
+启动 GUI 后，可点「选择 JSON / HTML 文件（可多选）」一次选中多个 JSON 或网页 HTML 快照。发送器会合并这些文件，按「学号 + 姓名」去重，并在界面上显示已选文件数和合并后的学生总数；同一学生在多个文件中重复时只保留第一次出现的那条。
 
-`--input` 仍然作为启动时预加载的单个文件；之后可以在界面里重新选择。
+`--input` 仍然作为启动时预加载的单个文件，支持 JSON 和 HTML；之后可以在界面里重新选择。
 
 可选参数：
 
 ```text
---input   输入 JSON 路径，默认 测试.json
+--input   输入 JSON / HTML 路径，默认 测试.json
 --server  判定服务端，默认 https://feedback.wxjifang.cn
---dry-run 纯决策链干跑（不打开 GUI，不操作企微）
 ```
 
 ---
@@ -169,6 +174,8 @@ python sender_py\sender.py --input 测试.json
 - 改变窗口大小：签名变化，自动要求重新校准；
 - 换显示器 / 改缩放：DPI 变化，自动要求重新校准；
 - 企业微信 UI 大改版：可能需要重新校准或调整代码。
+
+界面已移除「重新校准 ROI」按钮。需要强制重校准某个窗口时，退出程序后删除 `%USERPROFILE%\.sender_py\roi_config.json`（或只删对应签名），下次运行会自动重新弹出校准窗口。
 
 Windows 冒烟验证：
 
@@ -234,8 +241,9 @@ python sender_py\verify_stage4_win.py
 
 ### 待回名单
 
-- 每次进入候选会话，若聊天区有可读内容，会记录一条本地待回名单；
-- 界面「📨 待回名单」可查看并导出 CSV；
+- 每次进入候选会话，若聊天区有可读内容，会记录候选信息；
+- 界面「📨 待回名单」只展示明确需要回复（`needs_reply=true`）或待人工确认（`needs_reply` 判不出）的人，明确无需回复的不会展示，也不会导出；
+- 数量角标和列表使用同一过滤结果；
 - CSV 带 BOM，Excel 直接打开不乱码；
 - **待回名单只存在本地，不自动上传云端**。
 
@@ -273,9 +281,10 @@ cd feedback-v1/tools
 python3 -m unittest discover -s sender_py/tests -v
 ```
 
-当前覆盖 50 项，包含：
+当前覆盖 52 项，包含：
 
 - 输入契约解析；
+- JSON / HTML 快照解析（内嵌数据 + 旧版表格兜底）；
 - 多文件合并与按学号+姓名去重；
 - ROI 反推与相对比例校验；
 - 两框校准的坐标映射与门槛；
@@ -293,8 +302,8 @@ Windows 真机验收建议至少覆盖：
 4. 同名/相似标题不匹配 → 不发送，换候选；
 5. 群聊 → 拦截；
 6. 3 个候选都不匹配 → `unmatched`，不发送；
-7. 已发送学生 → 跳过；
-8. 待回名单导出 CSV；
+7. 同一文件重复运行 → 当前会再次发送（`SKIP_SENT=False`）；
+8. 待回名单只显示需回/待确认，并能导出 CSV；
 9. 断网/接口失败 → 不发送，换候选；
 10. 真实发送日志、匹配/不匹配日志、学生名单截图归档。
 

@@ -1,4 +1,4 @@
-"""发送 pacing：动作间随机停顿，降机械规律性。纯函数可单测；dry-run 跳过。"""
+"""发送 pacing：动作间随机停顿，降机械规律性。纯函数可单测。"""
 
 import random
 import time

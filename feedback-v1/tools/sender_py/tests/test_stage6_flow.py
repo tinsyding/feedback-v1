@@ -16,6 +16,7 @@ from sender_py.sender import (
     run_candidate_outcomes, search_and_enter,
 )
 from sender_py.store import HistoryManager
+from sender_py.utils import load_feedback_items
 
 
 def _j(**kw):
@@ -119,6 +120,40 @@ class TestStage6(unittest.TestCase):
         self.assertEqual(items[0]["_archive_key"], "a [第 1 周]")
         self.assertEqual(items[1]["_archive_key"], "a [第 1 周]")
         self.assertEqual(items[2]["_archive_key"], "b [第 1 周]")
+
+    def test_load_feedback_html_embedded_data(self):
+        payload = [{"studentName": "90001张三", "message": "第一行\n第二行 </script> & 内容"}]
+        embedded = json.dumps(payload, ensure_ascii=False).replace("</script", "<\\/script")
+        html_text = (
+            '<html><body><script type="application/json" id="feedback-data">'
+            + embedded
+            + "</script></body></html>"
+        )
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "snapshot.html")
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(html_text)
+            items = load_feedback_items(p)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["studentName"], "90001张三")
+        self.assertEqual((items[0]["sid"], items[0]["sname"]), ("90001", "张三"))
+        self.assertEqual(items[0]["message"], "第一行\n第二行 </script> & 内容")
+
+    def test_load_feedback_html_table_fallback(self):
+        html_text = """
+        <html><body><table><tbody><tr>
+        <td><span class="student-name">80001李四</span></td>
+        <td><div class="feedback-content">第一行<br>第二行 &amp; 内容</div></td>
+        </tr></tbody></table></body></html>
+        """
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "old-snapshot.htm")
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(html_text)
+            items = load_feedback_items(p)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["studentName"], "80001李四")
+        self.assertEqual(items[0]["message"], "第一行\n第二行 & 内容")
 
     def test_candidate_search_plan_down_before_enter(self):
         # 先按 Down 选中候选，最后才 Enter；不能先 Enter 进第一个会话
