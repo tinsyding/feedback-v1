@@ -100,7 +100,7 @@ def run_calibration(parent, base_image, example_max_w=EXAMPLE_MAX_W):
             win.transient(parent)
         except Exception:
             pass
-    win.title("ROI 校准：框标题栏 + 输入框")
+    win.title("企业微信窗口校准：框标题栏 + 输入框")
     try:
         win.deiconify()
         win.lift()

@@ -78,10 +78,12 @@ class TestStage6(unittest.TestCase):
     def test_export_csv(self):
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "n.csv")
-            export_csv([make_note("90001张三", 1, "t", True, _j())], p)
+            export_csv([make_note("90001张三", 1, "t", True, _j(needs_reply=True))], p)
             with open(p, encoding="utf-8-sig") as f:
                 rows = list(csv.DictReader(f))
-            self.assertEqual(rows[0]["student"], "90001张三")
+            self.assertEqual(rows[0]["学生"], "90001张三")
+            self.assertEqual(rows[0]["会话"], "t")
+            self.assertEqual(rows[0]["需回"], "需回")
 
     def test_history_mark_and_skip(self):
         with tempfile.TemporaryDirectory() as d:

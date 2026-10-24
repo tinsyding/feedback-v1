@@ -9,6 +9,15 @@ import datetime
 
 _SENDER_CN = {"parent": "家长", "me": "我"}
 
+# 导出给老师看的精简列：内部字段名 -> 中文表头
+EXPORT_FIELDS = [
+    ("student", "学生"),
+    ("chat_title", "会话"),
+    ("last_message", "最后消息"),
+    ("verdict", "需回"),
+    ("time", "时间"),
+]
+
 
 def verdict(needs_reply) -> str:
     if needs_reply is True:
@@ -59,11 +68,10 @@ def actionable(notes: list) -> list:
 
 
 def export_csv(notes: list, path: str) -> str:
-    """导出 CSV（含 BOM，Excel 直接开不乱码）；返回 path。"""
-    fields = ["student", "candidate", "chat_title", "identity", "last_sender",
-              "last_message", "verdict", "time"]
+    """导出 CSV（中文精简表头，含 BOM，Excel 直接开不乱码）；返回 path。"""
     with open(path, "w", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
-        w.writeheader()
-        w.writerows(notes or [])
+        w = csv.writer(f)
+        w.writerow([label for _, label in EXPORT_FIELDS])
+        for note in notes or []:
+            w.writerow([note.get(key, "") for key, _ in EXPORT_FIELDS])
     return path

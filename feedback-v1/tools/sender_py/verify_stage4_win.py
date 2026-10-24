@@ -29,7 +29,7 @@ except Exception:
     pass
 img = capture_wecom_window(rect)
 print("shot=", None if img is None else img.size, flush=True)
-print("已弹出校准窗口（标题“ROI 校准”，任务栏有图标）：先点“知道了，开始框选”，再框两框；控制台在此等你确认/放弃。", flush=True)
+print("已弹出校准窗口（标题“企业微信窗口校准”，任务栏有图标）：先点“知道了，开始框选”，再框两框；控制台在此等你确认/放弃。", flush=True)
 roi = run_calibration(None, img)
 print("roi=", None if roi is None else "got2boxes", flush=True)
 if roi is not None:

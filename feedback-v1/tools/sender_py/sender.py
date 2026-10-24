@@ -312,27 +312,231 @@ class SenderApp:
             self._history = HistoryManager()
         except Exception:
             pass
-        root.title("反馈发送器（mss + ROI 反推）")
+        self.root = root
+        self.log_buffer = []
+        self.log_window = None
+        self.log_text = None
+
+        root.title("反馈发送器")
+        root.minsize(860, 560)
+
         top = tk.Frame(root)
-        top.pack(fill="x", padx=10, pady=6)
-        self.reply_btn = tk.Button(top, text="📨 待回名单 (0)", command=self.show_reply_notes_dialog)
-        self.reply_btn.pack(side="left", padx=6)
-        tk.Button(top, text="开始发送", command=self.run_all).pack(side="right")
-        file_frame = tk.Frame(root)
-        file_frame.pack(fill="x", padx=10, pady=(0, 6))
-        tk.Button(file_frame, text="选择 JSON / HTML 文件（可多选）",
+        top.pack(fill="x", padx=10, pady=(8, 4))
+        tk.Button(top, text="选择 JSON / HTML 文件（可多选）",
                   command=self.choose_input_files).pack(side="left")
-        self.input_label = tk.Label(file_frame, text="", anchor="w", justify="left", wraplength=900)
-        self.input_label.pack(side="left", padx=8, fill="x", expand=True)
+        self.start_btn = tk.Button(top, text="开始发送", command=self.run_all)
+        self.start_btn.pack(side="right", padx=(6, 0))
+        self.reply_btn = tk.Button(top, text="📨 待回名单 (0)", command=self.show_reply_notes_dialog)
+        self.reply_btn.pack(side="right", padx=6)
+        tk.Button(top, text="运行日志", command=self.open_log_window).pack(side="right", padx=6)
+
+        self.input_label = tk.Label(root, text="", anchor="w", justify="left", wraplength=900)
+        self.input_label.pack(fill="x", padx=12, pady=(0, 6))
         self.update_input_label()
-        self.log = tk.Text(root, height=20, width=100)
-        self.log.pack(fill="both", expand=True, padx=10, pady=6)
+
+        summary = tk.Frame(root)
+        summary.pack(fill="x", padx=12, pady=(0, 4))
+        self.summary_var = tk.StringVar(master=root)
+        tk.Label(summary, textvariable=self.summary_var, anchor="w").pack(side="left")
+        tk.Button(summary, text="全不选", command=lambda: self.set_all_selected(False)).pack(side="right", padx=2)
+        tk.Button(summary, text="全选", command=lambda: self.set_all_selected(True)).pack(side="right", padx=2)
+
+        header = tk.Frame(root)
+        header.pack(fill="x", padx=12)
+        tk.Label(header, text="选", width=3, anchor="w").pack(side="left")
+        tk.Label(header, text="学号", width=8, anchor="w").pack(side="left")
+        tk.Label(header, text="姓名", width=12, anchor="w").pack(side="left")
+        tk.Label(header, text="状态", width=18, anchor="w").pack(side="left")
+        tk.Label(header, text="操作", anchor="e").pack(side="right")
+        ttk.Separator(root, orient="horizontal").pack(fill="x", padx=12, pady=(2, 4))
+
+        list_outer = tk.Frame(root)
+        list_outer.pack(fill="both", expand=True, padx=12, pady=(0, 4))
+        self.students_canvas = tk.Canvas(list_outer, highlightthickness=0)
+        scrollbar = tk.Scrollbar(list_outer, orient="vertical", command=self.students_canvas.yview)
+        self.students_inner = tk.Frame(self.students_canvas)
+        self.students_window = self.students_canvas.create_window(
+            (0, 0), window=self.students_inner, anchor="nw")
+        self.students_canvas.configure(yscrollcommand=scrollbar.set)
+        self.students_canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        self.students_inner.bind(
+            "<Configure>",
+            lambda e: self.students_canvas.configure(scrollregion=self.students_canvas.bbox("all")))
+        self.students_canvas.bind(
+            "<Configure>",
+            lambda e: self.students_canvas.itemconfigure(self.students_window, width=e.width))
+
+        self.hint_var = tk.StringVar(master=root, value="勾选要发送的学生，然后点“开始发送”。")
+        tk.Label(root, textvariable=self.hint_var, anchor="w", fg="#555555").pack(
+            fill="x", padx=12, pady=(0, 6))
         self._ttk = ttk
+        self.rebuild_student_list()
+
+    STATUS_COLORS = {
+        "待发送": "#5f6368",
+        "发送中": "#1a73e8",
+        "已发送": "#188038",
+        "发送失败": "#d93025",
+        "已拦截": "#b06000",
+        "未匹配": "#b06000",
+        "已跳过": "#80868b",
+        "已跳过（已发送）": "#80868b",
+    }
+    STATUS_DEFAULT_COLOR = "#202124"
+
+    def open_log_window(self):
+        tk = self.tk
+        if self.log_window is not None:
+            try:
+                if self.log_window.winfo_exists():
+                    self.log_window.deiconify()
+                    self.log_window.lift()
+                    return
+            except tk.TclError:
+                pass
+            self.log_window = None
+            self.log_text = None
+        win = tk.Toplevel(self.root)
+        win.title("运行日志")
+        win.geometry("900x480")
+        body = tk.Frame(win)
+        body.pack(fill="both", expand=True, padx=8, pady=8)
+        text = tk.Text(body, wrap="word")
+        scroll = tk.Scrollbar(body, orient="vertical", command=text.yview)
+        text.configure(yscrollcommand=scroll.set)
+        text.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        if self.log_buffer:
+            text.insert("end", "\n".join(self.log_buffer) + "\n")
+        text.see("end")
+        self.log_window = win
+        self.log_text = text
+
+        def close():
+            self.log_window = None
+            self.log_text = None
+            win.destroy()
+
+        def clear():
+            self.log_buffer.clear()
+            text.delete("1.0", "end")
+
+        win.protocol("WM_DELETE_WINDOW", close)
+        tk.Button(win, text="清空日志", command=clear).pack(pady=(0, 8))
+
+    def rebuild_student_list(self):
+        tk = self.tk
+        for child in self.students_inner.winfo_children():
+            child.destroy()
+        for item in self.items:
+            if "_selected_var" not in item:
+                item["_selected_var"] = tk.BooleanVar(master=self.root, value=True)
+            if "_status_var" not in item:
+                item["_status_var"] = tk.StringVar(master=self.root, value="待发送")
+            row = tk.Frame(self.students_inner)
+            row.pack(fill="x", pady=1)
+            tk.Checkbutton(row, variable=item["_selected_var"], width=3,
+                           command=lambda it=item: self.on_select_change(it)).pack(side="left")
+            sid = item.get("sid") or "-"
+            sname = item.get("sname") or item.get("studentName") or "-"
+            tk.Label(row, text=sid, width=8, anchor="w").pack(side="left")
+            tk.Label(row, text=sname, width=12, anchor="w").pack(side="left")
+            status_lbl = tk.Label(
+                row, textvariable=item["_status_var"], width=18, anchor="w",
+                fg=self.STATUS_COLORS.get(item["_status_var"].get(), self.STATUS_DEFAULT_COLOR))
+            status_lbl.pack(side="left")
+            item["_status_label"] = status_lbl
+            tk.Button(row, text="复制话术", width=9,
+                      command=lambda it=item: self.copy_message(it)).pack(side="right", padx=2)
+            tk.Button(row, text="复制学号姓名", width=14,
+                      command=lambda it=item: self.copy_student(it)).pack(side="right", padx=2)
+        if not self.items:
+            tk.Label(self.students_inner,
+                     text="还没有加载学生，请点击上方“选择 JSON / HTML 文件”。",
+                     fg="#666666").pack(pady=24)
+        self.students_canvas.yview_moveto(0)
+        self.update_summary()
+
+    def set_status(self, item, text):
+        var = item.get("_status_var")
+        if var is not None:
+            var.set(text)
+        label = item.get("_status_label")
+        if label is not None:
+            try:
+                label.configure(fg=self.STATUS_COLORS.get(text, self.STATUS_DEFAULT_COLOR))
+            except self.tk.TclError:
+                pass
+        self.root.update_idletasks()
+
+    def update_summary(self):
+        selected = 0
+        for item in self.items:
+            var = item.get("_selected_var")
+            if var is not None and var.get():
+                selected += 1
+        self.summary_var.set(f"共 {len(self.items)} 人，已勾选 {selected} 人")
+
+    def _apply_selection_status(self, item, selected: bool):
+        status_var = item.get("_status_var")
+        if status_var is None:
+            return
+        status = status_var.get()
+        if selected and status in ("已跳过", "已跳过（已发送）"):
+            self.set_status(item, "待发送")
+        elif not selected and status in ("待发送", "已跳过"):
+            self.set_status(item, "已跳过")
+
+    def on_select_change(self, item):
+        var = item.get("_selected_var")
+        if var is not None:
+            self._apply_selection_status(item, var.get())
+        self.update_summary()
+
+    def set_all_selected(self, value: bool):
+        for item in self.items:
+            var = item.get("_selected_var")
+            if var is not None:
+                var.set(value)
+                self._apply_selection_status(item, value)
+        self.update_summary()
+
+    def _reset_hint(self):
+        self.hint_var.set("勾选要发送的学生，然后点“开始发送”。")
+
+    def copy_to_clipboard(self, text, label):
+        text = str(text or "")
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        self.root.update_idletasks()
+        preview = " ".join(text.split())
+        if len(preview) > 60:
+            preview = preview[:60] + "…"
+        self.hint_var.set(f"已复制{label}：{preview}")
+        self.emit(f"已复制{label}")
+        self.root.after(3000, self._reset_hint)
+
+    def copy_student(self, item):
+        self.copy_to_clipboard(item.get("studentName", ""), "学号姓名")
+
+    def copy_message(self, item):
+        self.copy_to_clipboard(item.get("message", ""), "话术")
 
     def emit(self, msg: str):
-        self.log.insert("end", msg + "\n")
-        self.log.see("end")
-        self.log.update_idletasks()
+        msg = str(msg)
+        self.log_buffer.append(msg)
+        if len(self.log_buffer) > 5000:
+            del self.log_buffer[:1000]
+        if self.log_text is not None:
+            try:
+                self.log_text.insert("end", msg + "\n")
+                self.log_text.see("end")
+                self.log_text.update_idletasks()
+            except self.tk.TclError:
+                self.log_text = None
+                self.log_window = None
+        self.root.update_idletasks()
 
     def refresh_reply_count(self):
         self.reply_btn.config(text=f"📨 待回名单 ({len(actionable(self.reply_notes))})")
@@ -352,7 +556,7 @@ class SenderApp:
     def choose_input_files(self):
         from tkinter import filedialog, messagebox
         paths = filedialog.askopenfilenames(
-            parent=self.log.master,
+            parent=self.root,
             title="选择反馈文件（JSON / HTML，可多选）",
             filetypes=[
                 ("反馈文件（JSON / HTML）", "*.json *.html *.htm"),
@@ -368,12 +572,12 @@ class SenderApp:
         except Exception as exc:
             messagebox.showerror("读取失败",
                                  f"本次选择未生效，仍保留原来的文件列表。\n{exc}",
-                                 parent=self.log.master)
+                                 parent=self.root)
             return
         if not items:
             messagebox.showwarning("没有可用数据",
                                    "选中的文件里没有有效的学生数据，本次选择未生效。",
-                                   parent=self.log.master)
+                                   parent=self.root)
             return
         self.items = items
         self.input_paths = list(paths)
@@ -383,6 +587,7 @@ class SenderApp:
         self.archive_key = (archive_key_for_input(paths[0]) if len(paths) == 1
                             else "多文件 [第 1 周]")
         self.update_input_label()
+        self.rebuild_student_list()
         details = "，".join(f"{os.path.basename(p)} {n} 人" for p, n in file_counts)
         self.emit(f"已加载 {len(paths)} 个文件：{details}")
         self.emit(f"合并后共 {len(items)} 个学生" + (f"（去重 {duplicates} 条）" if duplicates else ""))
@@ -395,28 +600,63 @@ class SenderApp:
         except ModuleNotFoundError:
             from reply_notes import export_csv
         notes = actionable(self.reply_notes)
-        win = tk.Toplevel(self.log.master)
+        win = tk.Toplevel(self.root)
         win.title("待回消息名单（仅显示需回复/待确认）")
-        cols = ("student", "chat_title", "identity", "last_sender", "last_message", "verdict", "time")
-        tree = ttk.Treeview(win, columns=cols, show="headings", height=15)
-        for c in cols:
-            tree.heading(c, text=c)
-            tree.column(c, width=120 if c != "last_message" else 260)
+        win.geometry("900x500")
+        cols = [
+            ("student", "学生", 160),
+            ("chat_title", "会话", 180),
+            ("last_message", "最后消息", 360),
+            ("verdict", "需回", 90),
+            ("time", "时间", 150),
+        ]
+        body = tk.Frame(win)
+        body.pack(fill="both", expand=True, padx=8, pady=8)
+        tree = ttk.Treeview(body, columns=[c for c, _, _ in cols],
+                            show="headings", height=15, selectmode="browse")
+        for c, label, width in cols:
+            tree.heading(c, text=label)
+            tree.column(c, width=width, anchor="w")
         for n in notes:
-            tree.insert("", "end", values=tuple(n.get(c, "") for c in cols))
-        tree.pack(fill="both", expand=True, padx=8, pady=8)
-        if not notes:
-            tk.Label(win, text="当前没有需要回复的学生").pack(pady=(0, 6))
+            tree.insert("", "end", values=tuple(n.get(c, "") for c, _, _ in cols))
+        scroll = ttk.Scrollbar(body, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scroll.set)
+        tree.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+
+        copy_hint = tk.StringVar(master=win, value="选中一行后点“复制学号姓名”，或双击该行。")
+        tk.Label(win, textvariable=copy_hint, anchor="w", fg="#555555").pack(fill="x", padx=10)
+
+        def copy_selected(_event=None):
+            sel = tree.selection()
+            if not sel:
+                copy_hint.set("请先选中一个学生。")
+                return
+            values = tree.item(sel[0], "values")
+            student = values[0] if values else ""
+            if not student:
+                copy_hint.set("这一行没有学生学号姓名。")
+                return
+            self.copy_to_clipboard(student, "学号姓名")
+            copy_hint.set(f"已复制：{student}")
 
         def do_export():
             path = filedialog.asksaveasfilename(
-                title="导出待回消息名单", defaultextension=".csv",
+                parent=win, title="导出待回消息名单", defaultextension=".csv",
                 initialfile="待回名单.csv", filetypes=[("CSV", "*.csv")])
             if not path:
                 return
             export_csv(notes, path)
             messagebox.showinfo("导出成功", f"已导出至：\n{path}", parent=win)
-        tk.Button(win, text="导出 CSV", command=do_export).pack(pady=(0, 8))
+
+        actions = tk.Frame(win)
+        actions.pack(pady=(4, 10))
+        tk.Button(actions, text="复制选中学生学号姓名",
+                  command=copy_selected).pack(side="left", padx=4)
+        tk.Button(actions, text="导出 CSV", command=do_export).pack(side="left", padx=4)
+        tree.bind("<Double-1>", copy_selected)
+        if not notes:
+            tk.Label(win, text="当前没有需要回复的学生", fg="#666666").pack(pady=(0, 6))
 
     def run_all(self):
         token = None
@@ -430,27 +670,64 @@ class SenderApp:
             pass
         if not self.items:
             self.emit("没有可发送的学生，请先选择 JSON / HTML 文件")
+            self.hint_var.set("没有可发送的学生，请先选择文件")
+            return
+        selected_count = sum(
+            1 for item in self.items
+            if item.get("_selected_var") is not None and item["_selected_var"].get())
+        if not selected_count:
+            self.emit("没有勾选任何学生，请先勾选要发送的学生")
+            self.hint_var.set("没有勾选任何学生")
             return
         for item in self.items:
-            item_key = item.get("_archive_key") or self.archive_key
-            if SKIP_SENT and self._history and self._history.is_sent(item_key, item["studentName"]):
-                self.emit(f"[{item['studentName']}] 已发送过，跳过")
-                continue
-            res = send_student(item, self.server, token, parent=self.log.master,
-                               log=self.emit)
-            for n in res.get("notes", []):
-                dedupe_add(self.reply_notes, n)
-            self.refresh_reply_count()
-            if res["result"] == "sent" and self._history:
-                self._history.mark_status(item_key, item["studentName"], "✅已发送", item["message"])
-            self.emit(f"[{item['studentName']}] → {res['result']}：{res.get('reason', '')}")
-            self.emit(f"学生间随机停顿 {pause(*STUDENT_GAP):.1f}s")
+            var = item.get("_selected_var")
+            self.set_status(item, "待发送" if var is not None and var.get() else "已跳过")
+        self.start_btn.config(state="disabled")
+        self.hint_var.set("正在发送...")
+        try:
+            for item in self.items:
+                var = item.get("_selected_var")
+                name = item.get("studentName", "(未知学生)")
+                if var is None or not var.get():
+                    self.emit(f"[{name}] 未勾选，跳过")
+                    continue
+                item_key = item.get("_archive_key") or self.archive_key
+                if SKIP_SENT and self._history and self._history.is_sent(item_key, name):
+                    self.set_status(item, "已跳过（已发送）")
+                    self.emit(f"[{name}] 已发送过，跳过")
+                    continue
+                self.set_status(item, "发送中")
+                self.hint_var.set(f"正在发送：{name}")
+                try:
+                    res = send_student(item, self.server, token, parent=self.root,
+                                       log=self.emit)
+                except Exception as exc:
+                    res = {"result": "error", "reason": f"程序异常：{exc}", "notes": []}
+                for n in res.get("notes", []):
+                    dedupe_add(self.reply_notes, n)
+                self.refresh_reply_count()
+                result = res.get("result", "")
+                if result == "sent" and self._history:
+                    self._history.mark_status(
+                        item_key, name, "✅已发送", item.get("message", ""))
+                status = {
+                    "sent": "已发送",
+                    "error": "发送失败",
+                    "blocked": "已拦截",
+                    "unmatched": "未匹配",
+                }.get(result, result or "未知状态")
+                self.set_status(item, status)
+                self.emit(f"[{name}] → {result}：{res.get('reason', '')}")
+                self.emit(f"学生间随机停顿 {pause(*STUDENT_GAP):.1f}s")
+        finally:
+            self.start_btn.config(state="normal")
+            self.hint_var.set("本批处理结束")
         self.emit("本批处理结束")
 
 
 def main(argv=None):
     import argparse
-    ap = argparse.ArgumentParser(description="企业微信反馈发送器（mss + ROI 反推）")
+    ap = argparse.ArgumentParser(description="企业微信反馈发送器")
     ap.add_argument("--input", default=None,
                     help="输入 JSON / HTML 快照；省略时尝试 测试.json，不存在则启动后选择")
     ap.add_argument("--server", default="https://feedback.wxjifang.cn", help="判定服务端")
@@ -481,6 +758,8 @@ def main(argv=None):
     app = SenderApp(root, items, args.server, key, input_paths=input_paths)
     if load_error:
         app.emit(load_error)
+        from tkinter import messagebox
+        messagebox.showwarning("加载失败", load_error, parent=root)
     root.mainloop()
     return 0
 
