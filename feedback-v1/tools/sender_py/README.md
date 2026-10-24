@@ -2,7 +2,7 @@
 
 基于 **mss 整窗截图 + ROI 相对比例反推 + 云端两图判定** 的企业微信反馈发送器。
 
-当前为源码运行版本，**暂不提供正式 exe / 安装包**；GitHub Actions 可生成未签名的 Windows 构建 Artifact 供内测/验证。真实发送只支持 Windows；Linux 可运行全部纯函数单测。
+当前为源码运行版本；GitHub Actions 会生成未签名的 Windows 构建 Artifact，并可在推送 `sender-*` tag 时自动发布 GitHub Release。真实发送只支持 Windows；Linux 可运行全部纯函数单测。
 
 ---
 
@@ -164,13 +164,15 @@ python sender_py\sender.py --input 测试.json
 --server  判定服务端，默认 https://feedback.wxjifang.cn
 ```
 
-### GitHub Actions 编译
+### GitHub Actions 编译与发布
 
 推送 `feedback-v1/tools/sender_py/**` 到 `main` 或 `feat/**` 分支，或在 Actions 页面手动运行 **Build sender_py (Windows)**：
 
 1. Linux job 先跑 `compileall` 和全部 53 项单测；
 2. Windows job 用 PyInstaller 打包 onedir 版 `FeedbackSender.exe`；
 3. 在该次 Actions run 的 **Artifacts** 下载 `FeedbackSender-windows-x64.zip`。
+
+需要正式发布时，推送 `sender-*` tag（例如 `sender-v1.0.0`）。同一个工作流会在编译成功后创建同名 GitHub Release，并自动挂载 `FeedbackSender-windows-x64.zip`。
 
 产物未签名，仅供内测/验证；正式分发前需做代码签名和杀软回归。
 
