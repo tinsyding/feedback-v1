@@ -1,0 +1,113 @@
+name: Build sender_py (Windows)
+
+# 推送 sender_py 相关改动到 main / feat/** 时：
+#   1) 在 Linux 跑纯函数单测与 compileall；
+#   2) 在 Windows 用 PyInstaller 打包 onedir 产物并上传 Artifact。
+# 也可在 Actions 页面手动 Run workflow。
+# Artifact 未签名，仅供内测/验证；正式分发前请做代码签名与杀软回归。
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'feat/**'
+    paths:
+      - 'feedback-v1/tools/sender_py/**'
+      - '.github/workflows/build-sender.yml'
+  pull_request:
+    paths:
+      - 'feedback-v1/tools/sender_py/**'
+      - '.github/workflows/build-sender.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-sender-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Linux unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: feedback-v1/tools/sender_py/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r feedback-v1/tools/sender_py/requirements.txt
+
+      - name: Compile Python
+        run: python -m compileall -q feedback-v1/tools/sender_py
+
+      - name: Unit tests
+        working-directory: feedback-v1/tools
+        run: python -m unittest discover -s sender_py/tests -v
+
+  build-windows:
+    name: Windows package
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: feedback-v1/tools/sender_py/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r feedback-v1/tools/sender_py/requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Compile Python
+        run: python -m compileall -q feedback-v1/tools/sender_py
+
+      - name: Import smoke test
+        env:
+          PYTHONPATH: ${{ github.workspace }}/feedback-v1/tools
+        run: python -c "import sender_py.sender, sender_py.window_utils; print('imports OK')"
+
+      - name: Build Windows executable
+        env:
+          PYTHONPATH: ${{ github.workspace }}/feedback-v1/tools
+        run: |
+          python -m PyInstaller --noconfirm --clean --noupx --windowed --onedir \
+            --name FeedbackSender \
+            --icon feedback-v1/favicon.ico \
+            --paths feedback-v1/tools \
+            --paths feedback-v1/tools/sender_py \
+            --collect-submodules sender_py \
+            feedback-v1/tools/sender_py/sender.py
+
+      - name: Verify build output
+        run: |
+          test -f dist/FeedbackSender/FeedbackSender.exe
+          ls -lh dist/FeedbackSender/FeedbackSender.exe
+
+      - name: Create zip
+        run: |
+          python -c "import shutil; shutil.make_archive('dist/FeedbackSender-windows-x64', 'zip', 'dist', 'FeedbackSender')"
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: FeedbackSender-windows-x64
+          path: dist/FeedbackSender-windows-x64.zip
+          if-no-files-found: error

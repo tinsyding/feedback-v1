@@ -2,7 +2,7 @@
 
 基于 **mss 整窗截图 + ROI 相对比例反推 + 云端两图判定** 的企业微信反馈发送器。
 
-当前为源码运行版本，**暂不提供 exe / 安装包**。真实发送只支持 Windows；Linux 可运行全部纯函数单测。
+当前为源码运行版本，**暂不提供正式 exe / 安装包**；GitHub Actions 可生成未签名的 Windows 构建 Artifact 供内测/验证。真实发送只支持 Windows；Linux 可运行全部纯函数单测。
 
 ---
 
@@ -163,6 +163,16 @@ python sender_py\sender.py --input 测试.json
 --input   输入 JSON / HTML 路径；省略时尝试 测试.json，不存在则启动后选择
 --server  判定服务端，默认 https://feedback.wxjifang.cn
 ```
+
+### GitHub Actions 编译
+
+推送 `feedback-v1/tools/sender_py/**` 到 `main` 或 `feat/**` 分支，或在 Actions 页面手动运行 **Build sender_py (Windows)**：
+
+1. Linux job 先跑 `compileall` 和全部 53 项单测；
+2. Windows job 用 PyInstaller 打包 onedir 版 `FeedbackSender.exe`；
+3. 在该次 Actions run 的 **Artifacts** 下载 `FeedbackSender-windows-x64.zip`。
+
+产物未签名，仅供内测/验证；正式分发前需做代码签名和杀软回归。
 
 ---
 
@@ -344,7 +354,7 @@ Windows 真机验收建议至少覆盖：
 
 ## 12. 当前限制
 
-- 暂不打包 exe，直接源码运行；
+- 正式分发仍以源码运行为准；GitHub Actions 的 Windows Artifact 未签名，仅供内测/验证；
 - 真实发送依赖 Windows + 企业微信桌面版；
 - 企业微信 UI 改版可能导致搜索/候选定位失效，需要真机回归；
 - 停止发送是安全边界停止：不强行打断正在粘贴/发送的消息，当前学生结束后停止，避免发出半条；
