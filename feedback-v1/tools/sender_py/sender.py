@@ -26,6 +26,8 @@ except ModuleNotFoundError:
     from utils import load_feedback_items
 
 MAX_CANDIDATES = 3
+# 临时关闭“已发送自动跳过”，方便用同一文件反复测试；恢复时改为 True。
+SKIP_SENT = False
 
 
 # ================= 纯决策（无依赖，可单测） =================
@@ -375,7 +377,7 @@ class SenderApp:
         except Exception:
             pass
         for item in self.items:
-            if self._history and self._history.is_sent(self.archive_key, item["studentName"]):
+            if SKIP_SENT and self._history and self._history.is_sent(self.archive_key, item["studentName"]):
                 self.emit(f"[{item['studentName']}] 已发送过，跳过")
                 continue
             res = send_student(item, self.server, token, parent=self.log.master,
