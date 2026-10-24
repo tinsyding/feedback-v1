@@ -451,21 +451,26 @@ class SenderApp:
 def main(argv=None):
     import argparse
     ap = argparse.ArgumentParser(description="企业微信反馈发送器（mss + ROI 反推）")
-    ap.add_argument("--input", default="测试.json", help="输入 JSON / HTML 快照（JSON 数组 {studentName,message}）")
+    ap.add_argument("--input", default=None,
+                    help="输入 JSON / HTML 快照；省略时尝试 测试.json，不存在则启动后选择")
     ap.add_argument("--server", default="https://feedback.wxjifang.cn", help="判定服务端")
     args = ap.parse_args(argv)
+    input_path = args.input or "测试.json"
     items = []
     key = ""
     input_paths = []
     load_error = None
-    try:
-        items = load_feedback_items(args.input)
-        key = archive_key_for_input(args.input)
-        input_paths = [args.input]
-        if not items:
-            load_error = f"启动文件 {args.input} 没有有效学生数据，请点击“选择 JSON / HTML 文件（可多选）”重新选择。"
-    except Exception as exc:
-        load_error = f"启动时未能读取 {args.input}：{exc}\n请点击“选择 JSON / HTML 文件（可多选）”。"
+    if os.path.isfile(input_path):
+        try:
+            items = load_feedback_items(input_path)
+            key = archive_key_for_input(input_path)
+            input_paths = [input_path]
+            if not items:
+                load_error = f"启动文件 {input_path} 没有有效学生数据，请点击“选择 JSON / HTML 文件（可多选）”重新选择。"
+        except Exception as exc:
+            load_error = f"启动时未能读取 {input_path}：{exc}\n请点击“选择 JSON / HTML 文件（可多选）”。"
+    elif args.input:
+        load_error = f"启动时未能读取 {input_path}：文件不存在\n请点击“选择 JSON / HTML 文件（可多选）”。"
     import tkinter as tk
     try:
         from sender_py.window_utils import set_per_monitor_dpi_awareness

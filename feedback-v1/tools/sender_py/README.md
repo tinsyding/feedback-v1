@@ -136,7 +136,7 @@ python sender_py\sender.py --input 测试.json
 可选参数：
 
 ```text
---input   输入 JSON / HTML 路径，默认 测试.json
+--input   输入 JSON / HTML 路径；省略时尝试 测试.json，不存在则启动后选择
 --server  判定服务端，默认 https://feedback.wxjifang.cn
 ```
 
