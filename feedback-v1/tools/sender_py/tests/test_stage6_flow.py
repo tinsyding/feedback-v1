@@ -13,7 +13,8 @@ from sender_py.reply_notes import (
 )
 from sender_py.sender import (
     archive_key_for_input, candidate_search_plan, decide_action, load_feedback_inputs,
-    run_candidate_outcomes, search_and_enter,
+    run_candidate_outcomes, search_and_enter, status_matches_filter,
+    summarize_status_counts,
 )
 from sender_py.store import HistoryManager
 from sender_py.utils import load_feedback_items
@@ -168,6 +169,20 @@ class TestStage6(unittest.TestCase):
             self.assertEqual(plan.count("enter"), 1)
             self.assertEqual(plan[-1], "enter")
             self.assertNotIn("enter", plan[:-1])
+
+    def test_status_filter_and_summary_helpers(self):
+        self.assertTrue(status_matches_filter("发送失败", "失败/未匹配"))
+        self.assertTrue(status_matches_filter("未匹配", "失败/未匹配"))
+        self.assertFalse(status_matches_filter("已发送", "失败/未匹配"))
+        self.assertTrue(status_matches_filter("已跳过（已发送）", "已跳过"))
+        self.assertTrue(status_matches_filter("已发送", "全部"))
+        counts = summarize_status_counts([
+            "已发送", "发送失败", "未匹配", "已拦截", "已跳过（已发送）", "待发送",
+        ])
+        self.assertEqual(counts, {
+            "已发送": 1, "发送失败": 1, "已拦截": 1,
+            "未匹配": 1, "已跳过": 2,
+        })
 
     def test_search_and_enter_down_before_enter(self):
         calls = []

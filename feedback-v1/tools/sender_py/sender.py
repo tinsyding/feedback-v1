@@ -6,6 +6,8 @@ tkinter/requests/PIL/mss 只在 Windows 流程函数内导入；决策纯函数 
 """
 
 import os
+import random
+import threading
 import time
 
 try:  # 仓库结构优先；散装拷贝（文件同目录）兜底
@@ -29,8 +31,36 @@ MAX_CANDIDATES = 3
 # 临时关闭“已发送自动跳过”，方便用同一文件反复测试；恢复时改为 True。
 SKIP_SENT = False
 
+FILTER_ALL = "全部"
+FILTER_FAILED = "失败/未匹配"
+FILTER_VALUES = (FILTER_ALL, "待发送", "已发送", FILTER_FAILED, "已跳过", "已拦截")
+
 
 # ================= 纯决策（无依赖，可单测） =================
+
+def status_matches_filter(status: str, filter_name: str) -> bool:
+    """状态筛选：待发送/已发送/失败/跳过/拦截。"""
+    if not filter_name or filter_name == FILTER_ALL:
+        return True
+    if filter_name == FILTER_FAILED:
+        return status in ("发送失败", "未匹配")
+    if filter_name == "已跳过":
+        return status in ("已跳过", "已跳过（已发送）")
+    return status == filter_name
+
+
+def summarize_status_counts(statuses) -> dict:
+    """把一批学生状态压成结束汇总；未处理状态归入跳过。"""
+    counts = {"已发送": 0, "发送失败": 0, "已拦截": 0, "未匹配": 0, "已跳过": 0}
+    for status in statuses:
+        if status == "已跳过（已发送）":
+            counts["已跳过"] += 1
+        elif status in counts:
+            counts[status] += 1
+        elif status in ("待发送", "发送中"):
+            counts["已跳过"] += 1
+    return counts
+
 
 def decide_action(judgment) -> dict:
     """单候选决策：send=放行发送 / next=换下一候选 / intercept=拦截本学生。
@@ -233,7 +263,7 @@ def judge_candidate(rect, roi, target_id: str, target_name: str, server: str, to
 
 
 def send_student(item: dict, server: str, token=None, config_path: str = None,
-                 parent=None, log=print) -> dict:
+                 parent=None, log=print, should_stop=None) -> dict:
     """单个学生全流程：最多 3 候选机械 1→2→3。返回 {result, notes, ...}（notes 供待回名单）。"""
     try:
         from sender_py import window_utils as wu
@@ -246,6 +276,9 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         log(f"[{name}] 随机停顿 {pause(*gaps):.1f}s")
 
     for cand in range(1, MAX_CANDIDATES + 1):
+        if should_stop is not None and should_stop():
+            log(f"[{name}] 收到停止请求，当前学生未发送")
+            return {"result": "stopped", "reason": "用户停止", "notes": notes}
         # 所有截图的前提：企微完整可见，否则 mss 截到遮挡物/屏外黑边
         if not wu.find_and_activate_wecom():
             return {"result": "error", "reason": "企微唤起失败（最小化或无响应），请手动点开后重试",
@@ -262,6 +295,9 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         roi = ensure_roi(parent, rect, scale, config_path)
         if roi is None:
             return {"result": "error", "reason": "ROI 校准未完成", "notes": notes}
+        if should_stop is not None and should_stop():
+            log(f"[{name}] 收到停止请求，候选{cand}未发送")
+            return {"result": "stopped", "reason": "用户停止", "notes": notes}
         entered = search_and_enter(name, cand)
         if entered:  # 截图前焦点守护：mss 截的是屏幕像素，失焦会被遮挡物污染
             if not wu.find_and_activate_wecom():
@@ -269,6 +305,9 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
                 _paced(CANDIDATE_GAP)
                 continue
             time.sleep(0.3)
+        if should_stop is not None and should_stop():
+            log(f"[{name}] 收到停止请求，候选{cand}未发送")
+            return {"result": "stopped", "reason": "用户停止", "notes": notes}
         judgment, chat_title, err = judge_candidate(rect, roi, sid, sname, server, token)
         if entered and should_record(chat_title, judgment):
             dedupe_add(notes, make_note(name, cand, chat_title, bool((judgment or {}).get("matched")), judgment or {}))
@@ -279,8 +318,12 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         decision = decide_action(judgment)
         log(f"[{name}] 候选{cand}：{decision['action']}（{decision['reason']}）")
         if decision["action"] == "send":
+            if should_stop is not None and should_stop():
+                log(f"[{name}] 收到停止请求，候选{cand}未发送")
+                return {"result": "stopped", "reason": "用户停止", "notes": notes}
             ok, why = paste_and_send(message)
-            _paced(AFTER_SEND_GAP)
+            if should_stop is None or not should_stop():
+                _paced(AFTER_SEND_GAP)
             return {"result": "sent" if ok else "error",
                     "at_candidate": cand, "reason": why, "notes": notes}
         if decision["action"] == "intercept":
@@ -313,33 +356,68 @@ class SenderApp:
         except Exception:
             pass
         self.root = root
+        self._ttk = ttk
         self.log_buffer = []
         self.log_window = None
         self.log_text = None
+        self._running = False
+        self._stop_requested = False
+        self._stop_announced = False
+        self._esc_watch_stop = None
+        self._close_after_stop = False
+        self._search_after = None
+        self._suspend_filter = False
+        self._row_checkbuttons = []
+        self._row_action_buttons = []
 
         root.title("反馈发送器")
-        root.minsize(860, 560)
+        root.minsize(900, 620)
+        root.protocol("WM_DELETE_WINDOW", self.on_close)
+        root.bind("<Escape>", self.request_stop)
 
         top = tk.Frame(root)
         top.pack(fill="x", padx=10, pady=(8, 4))
-        tk.Button(top, text="选择 JSON / HTML 文件（可多选）",
-                  command=self.choose_input_files).pack(side="left")
-        self.start_btn = tk.Button(top, text="开始发送", command=self.run_all)
-        self.start_btn.pack(side="right", padx=(6, 0))
+        self.file_btn = tk.Button(top, text="选择 JSON / HTML 文件（可多选）",
+                                  command=self.choose_input_files)
+        self.file_btn.pack(side="left")
+        self.log_btn = tk.Button(top, text="运行日志", command=self.open_log_window)
+        self.log_btn.pack(side="right", padx=6)
         self.reply_btn = tk.Button(top, text="📨 待回名单 (0)", command=self.show_reply_notes_dialog)
         self.reply_btn.pack(side="right", padx=6)
-        tk.Button(top, text="运行日志", command=self.open_log_window).pack(side="right", padx=6)
 
-        self.input_label = tk.Label(root, text="", anchor="w", justify="left", wraplength=900)
+        self.input_label = tk.Label(root, text="", anchor="w", justify="left", wraplength=860)
         self.input_label.pack(fill="x", padx=12, pady=(0, 6))
         self.update_input_label()
+
+        self.search_var = tk.StringVar(master=root)
+        self.filter_var = tk.StringVar(master=root, value=FILTER_ALL)
+        filters = tk.Frame(root)
+        filters.pack(fill="x", padx=12, pady=(0, 4))
+        tk.Label(filters, text="搜索").pack(side="left")
+        self.search_entry = tk.Entry(filters, textvariable=self.search_var, width=22)
+        self.search_entry.pack(side="left", padx=(4, 8))
+        tk.Label(filters, text="状态").pack(side="left")
+        self.filter_combo = ttk.Combobox(
+            filters, textvariable=self.filter_var, values=FILTER_VALUES,
+            state="readonly", width=12)
+        self.filter_combo.pack(side="left", padx=(4, 8))
+        self.filter_combo.bind("<<ComboboxSelected>>", lambda e: self.rebuild_student_list())
+        self.failed_only_btn = tk.Button(filters, text="只看失败", command=self.show_failed_only)
+        self.failed_only_btn.pack(side="left", padx=2)
+        self.retry_failed_btn = tk.Button(filters, text="重试失败项", command=self.select_failed_only)
+        self.retry_failed_btn.pack(side="left", padx=2)
+        tk.Label(filters, text="双击状态看失败原因", fg="#777777").pack(side="right")
 
         summary = tk.Frame(root)
         summary.pack(fill="x", padx=12, pady=(0, 4))
         self.summary_var = tk.StringVar(master=root)
         tk.Label(summary, textvariable=self.summary_var, anchor="w").pack(side="left")
-        tk.Button(summary, text="全不选", command=lambda: self.set_all_selected(False)).pack(side="right", padx=2)
-        tk.Button(summary, text="全选", command=lambda: self.set_all_selected(True)).pack(side="right", padx=2)
+        self.select_none_btn = tk.Button(summary, text="全不选全部",
+                                         command=lambda: self.set_all_selected(False))
+        self.select_none_btn.pack(side="right", padx=2)
+        self.select_all_btn = tk.Button(summary, text="全选全部",
+                                        command=lambda: self.set_all_selected(True))
+        self.select_all_btn.pack(side="right", padx=2)
 
         header = tk.Frame(root)
         header.pack(fill="x", padx=12)
@@ -367,10 +445,38 @@ class SenderApp:
             "<Configure>",
             lambda e: self.students_canvas.itemconfigure(self.students_window, width=e.width))
 
-        self.hint_var = tk.StringVar(master=root, value="勾选要发送的学生，然后点“开始发送”。")
-        tk.Label(root, textvariable=self.hint_var, anchor="w", fg="#555555").pack(
-            fill="x", padx=12, pady=(0, 6))
-        self._ttk = ttk
+        self.hint_var = tk.StringVar(
+            master=root,
+            value="勾选要发送的学生，然后点“开始发送”；发送中按 Esc 可停止；双击状态列看失败原因。")
+        tk.Label(root, textvariable=self.hint_var, anchor="w", fg="#555555",
+                 wraplength=860, justify="left").pack(fill="x", padx=12, pady=(0, 4))
+
+        bottom = tk.Frame(root)
+        bottom.pack(fill="x", padx=12, pady=(0, 8))
+        progress_box = tk.Frame(bottom)
+        progress_box.pack(side="left", fill="x", expand=True)
+        self.progress_var = tk.StringVar(master=root, value="进度：未开始")
+        tk.Label(progress_box, textvariable=self.progress_var, anchor="w").pack(fill="x")
+        self.progress_bar = ttk.Progressbar(
+            progress_box, orient="horizontal", mode="determinate", maximum=1, value=0)
+        self.progress_bar.pack(fill="x", pady=(2, 2))
+        self.result_var = tk.StringVar(master=root)
+        tk.Label(progress_box, textvariable=self.result_var, anchor="w", fg="#333333",
+                 wraplength=480, justify="left").pack(fill="x")
+
+        actions = tk.Frame(bottom)
+        actions.pack(side="right", padx=(8, 0))
+        self.copy_failed_btn = tk.Button(
+            actions, text="复制失败名单", command=self.copy_failed_list)
+        self.copy_failed_btn.pack(side="left", padx=3)
+        self.stop_btn = tk.Button(
+            actions, text="停止发送 (Esc)", command=self.request_stop,
+            state="disabled", fg="#b00020")
+        self.stop_btn.pack(side="left", padx=3)
+        self.start_btn = tk.Button(actions, text="开始发送", command=self.run_all)
+        self.start_btn.pack(side="left", padx=3)
+
+        self.search_var.trace_add("write", self._on_search_change)
         self.rebuild_student_list()
 
     STATUS_COLORS = {
@@ -384,6 +490,241 @@ class SenderApp:
         "已跳过（已发送）": "#80868b",
     }
     STATUS_DEFAULT_COLOR = "#202124"
+
+    def _status_of(self, item):
+        var = item.get("_status_var")
+        if var is not None:
+            try:
+                return var.get()
+            except self.tk.TclError:
+                pass
+        return item.get("_status", "待发送")
+
+    def _visible_items(self):
+        query = (self.search_var.get() or "").strip().lower()
+        filter_name = self.filter_var.get() or FILTER_ALL
+        result = []
+        for item in self.items:
+            if query:
+                hay = " ".join(
+                    str(item.get(k, "") or "") for k in ("sid", "sname", "studentName")
+                ).lower()
+                if query not in hay:
+                    continue
+            if not status_matches_filter(self._status_of(item), filter_name):
+                continue
+            result.append(item)
+        return result
+
+    def _cancel_search_rebuild(self):
+        if self._search_after is not None:
+            try:
+                self.root.after_cancel(self._search_after)
+            except Exception:
+                pass
+            self._search_after = None
+
+    def _on_search_change(self, *_args):
+        if self._suspend_filter or self._running:
+            return
+        self._cancel_search_rebuild()
+        self._search_after = self.root.after(150, self._run_scheduled_rebuild)
+
+    def _run_scheduled_rebuild(self):
+        self._search_after = None
+        if not self._running:
+            self.rebuild_student_list()
+
+    def show_failed_only(self):
+        self.filter_var.set(FILTER_FAILED)
+        self.rebuild_student_list()
+        if not any(self._status_of(item) in ("发送失败", "未匹配") for item in self.items):
+            self.hint_var.set("没有失败/未匹配学生")
+        else:
+            self.hint_var.set("已筛选失败/未匹配学生")
+
+    def select_failed_only(self):
+        failed_ids = {
+            id(item) for item in self.items
+            if self._status_of(item) in ("发送失败", "未匹配")
+        }
+        if not failed_ids:
+            self.hint_var.set("没有失败/未匹配学生")
+            return
+        self._suspend_filter = True
+        try:
+            self.search_var.set("")
+            self.filter_var.set(FILTER_FAILED)
+        finally:
+            self._suspend_filter = False
+        self._cancel_search_rebuild()
+        for item in self.items:
+            var = item.get("_selected_var")
+            if var is not None:
+                var.set(id(item) in failed_ids)
+                self._apply_selection_status(item, var.get())
+        self.rebuild_student_list()
+        self.hint_var.set(
+            f"已只勾选 {len(failed_ids)} 个失败/未匹配学生，点“开始发送”重试")
+
+    def copy_failed_list(self):
+        lines = []
+        for item in self.items:
+            status = self._status_of(item)
+            if status not in ("发送失败", "未匹配"):
+                continue
+            student = (item.get("studentName")
+                       or f"{item.get('sid', '')}{item.get('sname', '')}")
+            raw_reason = item.get("_last_failure_reason") or item.get("_last_reason") or ""
+            reason = " ".join(raw_reason.split()) or "-"
+            lines.append(f"{student}\t{status}\t{reason}")
+        if not lines:
+            self.hint_var.set("没有失败/未匹配学生")
+            return
+        self.copy_to_clipboard("学生\t状态\t原因\n" + "\n".join(lines), "失败名单")
+
+    def show_row_reason(self, item):
+        if self._running:
+            return
+        last_reason = (item.get("_last_reason") or "").strip()
+        last_failure = (item.get("_last_failure_reason") or "").strip()
+        parts = []
+        if last_reason:
+            parts.append(f"最近一次：{last_reason}")
+        if last_failure and last_failure != last_reason:
+            parts.append(f"上次失败：{last_failure}")
+        if not parts:
+            self.hint_var.set("该学生暂无失败原因")
+            return
+        from tkinter import messagebox
+        name = item.get("studentName", "") or "该学生"
+        messagebox.showinfo(f"{name} 的处理原因", "\n\n".join(parts), parent=self.root)
+
+    def _set_running_ui(self, running: bool):
+        state = "disabled" if running else "normal"
+        for widget in (self.file_btn, self.log_btn, self.reply_btn,
+                       self.select_all_btn, self.select_none_btn,
+                       self.failed_only_btn, self.retry_failed_btn,
+                       self.copy_failed_btn):
+            widget.config(state=state)
+        self.search_entry.config(state=state)
+        self.filter_combo.config(state="disabled" if running else "readonly")
+        self.start_btn.config(state=state)
+        self.stop_btn.config(state="normal" if running else "disabled")
+        for widget in self._row_checkbuttons + self._row_action_buttons:
+            try:
+                widget.config(state=state)
+            except self.tk.TclError:
+                pass
+
+    def _update_progress(self, processed, total, stopped=False):
+        self.progress_bar.config(maximum=max(1, total), value=processed)
+        suffix = "（已停止）" if stopped else ""
+        self.progress_var.set(f"进度：{processed}/{total}{suffix}")
+        self.root.update_idletasks()
+
+    def _reset_progress(self):
+        self.progress_bar.config(maximum=1, value=0)
+        self.progress_var.set("进度：未开始")
+        self.result_var.set("")
+
+    def _announce_stop(self):
+        if self._stop_announced:
+            return
+        self._stop_announced = True
+        self.hint_var.set("正在停止：当前学生处理完后结束...")
+        self.emit("收到停止请求：当前学生处理完后结束")
+
+    def _start_esc_watcher(self):
+        self._stop_esc_watcher()
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            user32.GetAsyncKeyState(0x1B)  # 清掉发送前残留的按键状态
+        except Exception:
+            return
+        stop_event = threading.Event()
+        self._esc_watch_stop = stop_event
+
+        def watch():
+            while not stop_event.is_set() and self._running:
+                try:
+                    state = user32.GetAsyncKeyState(0x1B)
+                except Exception:
+                    return
+                if state & 0x8001:
+                    self._stop_requested = True
+                    return
+                time.sleep(0.05)
+
+        threading.Thread(target=watch, name="sender-esc-watch", daemon=True).start()
+
+    def _stop_esc_watcher(self):
+        event = self._esc_watch_stop
+        self._esc_watch_stop = None
+        if event is not None:
+            event.set()
+
+    def _esc_pressed(self):
+        try:
+            import ctypes
+            return bool(ctypes.windll.user32.GetAsyncKeyState(0x1B) & 0x8001)
+        except Exception:
+            return False
+
+    def _poll_stop(self):
+        if self._stop_requested:
+            self._announce_stop()
+            return True
+        try:
+            self.root.update()
+        except self.tk.TclError:
+            self._stop_requested = True
+            self._announce_stop()
+            return True
+        if self._esc_pressed():
+            self.request_stop()
+        if self._stop_requested:
+            self._announce_stop()
+            return True
+        return False
+
+    def request_stop(self, event=None):
+        if not self._running:
+            return None
+        self._stop_requested = True
+        self._announce_stop()
+        return "break"
+
+    def on_close(self):
+        from tkinter import messagebox
+        if self._running:
+            if not messagebox.askyesno(
+                    "正在发送",
+                    "正在发送，确定停止并退出吗？\n当前学生处理完后退出。",
+                    parent=self.root, default=messagebox.NO):
+                return
+            self._close_after_stop = True
+            self.request_stop()
+            return
+        self.root.destroy()
+
+    def _interruptible_pause(self, seconds):
+        end = time.monotonic() + max(0.0, seconds)
+        while time.monotonic() < end:
+            if self._poll_stop():
+                return False
+            time.sleep(0.05)
+        return not self._poll_stop()
+
+    def _summary_text(self, stopped: bool, selected_count: int):
+        counts = summarize_status_counts(
+            self._status_of(item) for item in self.items)
+        title = "已停止" if stopped else "本批结束"
+        return (f"{title}（共 {len(self.items)} 人，本次勾选 {selected_count} 人）："
+                f"成功 {counts['已发送']}，失败 {counts['发送失败']}，"
+                f"拦截 {counts['已拦截']}，未匹配 {counts['未匹配']}，"
+                f"跳过 {counts['已跳过']}")
 
     def open_log_window(self):
         tk = self.tk
@@ -426,34 +767,50 @@ class SenderApp:
         tk.Button(win, text="清空日志", command=clear).pack(pady=(0, 8))
 
     def rebuild_student_list(self):
+        if self._running:
+            return
+        self._cancel_search_rebuild()
         tk = self.tk
+        self._row_checkbuttons = []
+        self._row_action_buttons = []
         for child in self.students_inner.winfo_children():
             child.destroy()
-        for item in self.items:
+        visible = self._visible_items()
+        for item in visible:
             if "_selected_var" not in item:
                 item["_selected_var"] = tk.BooleanVar(master=self.root, value=True)
             if "_status_var" not in item:
                 item["_status_var"] = tk.StringVar(master=self.root, value="待发送")
             row = tk.Frame(self.students_inner)
             row.pack(fill="x", pady=1)
-            tk.Checkbutton(row, variable=item["_selected_var"], width=3,
-                           command=lambda it=item: self.on_select_change(it)).pack(side="left")
+            check = tk.Checkbutton(row, variable=item["_selected_var"], width=3,
+                                   command=lambda it=item: self.on_select_change(it))
+            check.pack(side="left")
+            self._row_checkbuttons.append(check)
             sid = item.get("sid") or "-"
             sname = item.get("sname") or item.get("studentName") or "-"
             tk.Label(row, text=sid, width=8, anchor="w").pack(side="left")
             tk.Label(row, text=sname, width=12, anchor="w").pack(side="left")
             status_lbl = tk.Label(
-                row, textvariable=item["_status_var"], width=18, anchor="w",
+                row, textvariable=item["_status_var"], width=18, anchor="w", cursor="hand2",
                 fg=self.STATUS_COLORS.get(item["_status_var"].get(), self.STATUS_DEFAULT_COLOR))
             status_lbl.pack(side="left")
+            status_lbl.bind("<Double-1>", lambda _e, it=item: self.show_row_reason(it))
             item["_status_label"] = status_lbl
-            tk.Button(row, text="复制话术", width=9,
-                      command=lambda it=item: self.copy_message(it)).pack(side="right", padx=2)
-            tk.Button(row, text="复制学号姓名", width=14,
-                      command=lambda it=item: self.copy_student(it)).pack(side="right", padx=2)
+            msg_btn = tk.Button(row, text="复制话术", width=9,
+                                command=lambda it=item: self.copy_message(it))
+            msg_btn.pack(side="right", padx=2)
+            name_btn = tk.Button(row, text="复制学号姓名", width=14,
+                                 command=lambda it=item: self.copy_student(it))
+            name_btn.pack(side="right", padx=2)
+            self._row_action_buttons.extend((msg_btn, name_btn))
         if not self.items:
             tk.Label(self.students_inner,
                      text="还没有加载学生，请点击上方“选择 JSON / HTML 文件”。",
+                     fg="#666666").pack(pady=24)
+        elif not visible:
+            tk.Label(self.students_inner,
+                     text="没有符合搜索/筛选条件的学生。",
                      fg="#666666").pack(pady=24)
         self.students_canvas.yview_moveto(0)
         self.update_summary()
@@ -503,9 +860,13 @@ class SenderApp:
         self.update_summary()
 
     def _reset_hint(self):
-        self.hint_var.set("勾选要发送的学生，然后点“开始发送”。")
+        if self._running:
+            return
+        self.hint_var.set("勾选要发送的学生，然后点“开始发送”；发送中按 Esc 可停止；双击状态列看失败原因。")
 
     def copy_to_clipboard(self, text, label):
+        if self._running:
+            return
         text = str(text or "")
         self.root.clipboard_clear()
         self.root.clipboard_append(text)
@@ -587,6 +948,15 @@ class SenderApp:
         self.archive_key = (archive_key_for_input(paths[0]) if len(paths) == 1
                             else "多文件 [第 1 周]")
         self.update_input_label()
+        self._suspend_filter = True
+        try:
+            self.search_var.set("")
+            self.filter_var.set(FILTER_ALL)
+        finally:
+            self._suspend_filter = False
+        self._cancel_search_rebuild()
+        self._reset_progress()
+        self._reset_hint()
         self.rebuild_student_list()
         details = "，".join(f"{os.path.basename(p)} {n} 人" for p, n in file_counts)
         self.emit(f"已加载 {len(paths)} 个文件：{details}")
@@ -628,6 +998,9 @@ class SenderApp:
         tk.Label(win, textvariable=copy_hint, anchor="w", fg="#555555").pack(fill="x", padx=10)
 
         def copy_selected(_event=None):
+            if self._running:
+                copy_hint.set("正在发送，暂不可复制。")
+                return
             sel = tree.selection()
             if not sel:
                 copy_hint.set("请先选中一个学生。")
@@ -641,6 +1014,8 @@ class SenderApp:
             copy_hint.set(f"已复制：{student}")
 
         def do_export():
+            if self._running:
+                return
             path = filedialog.asksaveasfilename(
                 parent=win, title="导出待回消息名单", defaultextension=".csv",
                 initialfile="待回名单.csv", filetypes=[("CSV", "*.csv")])
@@ -659,6 +1034,48 @@ class SenderApp:
             tk.Label(win, text="当前没有需要回复的学生", fg="#666666").pack(pady=(0, 6))
 
     def run_all(self):
+        if self._running:
+            return
+        from tkinter import messagebox
+        if not self.items:
+            self.emit("没有可发送的学生，请先选择 JSON / HTML 文件")
+            self.hint_var.set("没有可发送的学生，请先选择文件")
+            return
+        selected_items = [
+            item for item in self.items
+            if item.get("_selected_var") is not None and item["_selected_var"].get()
+        ]
+        selected_count = len(selected_items)
+        if not selected_count:
+            self.emit("没有勾选任何学生，请先勾选要发送的学生")
+            self.hint_var.set("没有勾选任何学生")
+            return
+        selected_ids = {id(item) for item in selected_items}
+        visible_items = self._visible_items()
+        visible_selected = sum(1 for item in visible_items if id(item) in selected_ids)
+        hidden_selected = selected_count - visible_selected
+        confirm_lines = [
+            f"本次将发送 {selected_count} 人（共 {len(self.items)} 人）。"
+        ]
+        if hidden_selected:
+            confirm_lines.append(
+                f"其中 {hidden_selected} 名已勾选学生因搜索/筛选未显示，仍会发送。")
+        confirm_lines.append(
+            "发送中按 Esc 可停止（企业微信在前台也可）；为防发半条，当前学生处理完后结束。")
+        confirm_lines.extend(("", "是否继续？"))
+        self.start_btn.config(state="disabled")
+        try:
+            confirmed = messagebox.askyesno(
+                "确认发送", "\n".join(confirm_lines), parent=self.root,
+                default=messagebox.NO)
+        except Exception:
+            self.start_btn.config(state="normal")
+            raise
+        if not confirmed:
+            self.start_btn.config(state="normal")
+            self.hint_var.set("已取消发送")
+            return
+
         token = None
         try:
             try:
@@ -668,61 +1085,133 @@ class SenderApp:
             token = load_token() or None
         except Exception:
             pass
-        if not self.items:
-            self.emit("没有可发送的学生，请先选择 JSON / HTML 文件")
-            self.hint_var.set("没有可发送的学生，请先选择文件")
-            return
-        selected_count = sum(
-            1 for item in self.items
-            if item.get("_selected_var") is not None and item["_selected_var"].get())
-        if not selected_count:
-            self.emit("没有勾选任何学生，请先勾选要发送的学生")
-            self.hint_var.set("没有勾选任何学生")
-            return
+
         for item in self.items:
-            var = item.get("_selected_var")
-            self.set_status(item, "待发送" if var is not None and var.get() else "已跳过")
-        self.start_btn.config(state="disabled")
-        self.hint_var.set("正在发送...")
+            if id(item) in selected_ids:
+                self.set_status(item, "待发送")
+                item["_last_result"] = ""
+                item["_last_reason"] = ""
+            else:
+                self.set_status(item, "已跳过")
+                item["_last_result"] = "skipped"
+                item["_last_reason"] = "未勾选"
+
+        self._running = True
+        self._stop_requested = False
+        self._stop_announced = False
+        self._close_after_stop = False
+        self._start_esc_watcher()
+        self._set_running_ui(True)
+        self._update_progress(0, selected_count)
+        self.result_var.set("正在发送...")
+        self.hint_var.set("正在发送...按 Esc 可停止")
+        processed = 0
+        stopped = False
         try:
             for item in self.items:
-                var = item.get("_selected_var")
-                name = item.get("studentName", "(未知学生)")
-                if var is None or not var.get():
-                    self.emit(f"[{name}] 未勾选，跳过")
+                if id(item) not in selected_ids:
+                    self.emit(f"[{item.get('studentName', '(未知学生)')}] 未勾选，跳过")
                     continue
+                if self._poll_stop():
+                    stopped = True
+                    break
+                name = item.get("studentName", "(未知学生)")
                 item_key = item.get("_archive_key") or self.archive_key
                 if SKIP_SENT and self._history and self._history.is_sent(item_key, name):
                     self.set_status(item, "已跳过（已发送）")
+                    item["_last_result"] = "skipped_sent"
+                    item["_last_reason"] = "已发送过，自动跳过"
+                    processed += 1
+                    self._update_progress(processed, selected_count)
                     self.emit(f"[{name}] 已发送过，跳过")
                     continue
                 self.set_status(item, "发送中")
                 self.hint_var.set(f"正在发送：{name}")
                 try:
-                    res = send_student(item, self.server, token, parent=self.root,
-                                       log=self.emit)
+                    res = send_student(
+                        item, self.server, token, parent=self.root,
+                        log=self.emit, should_stop=self._poll_stop)
                 except Exception as exc:
                     res = {"result": "error", "reason": f"程序异常：{exc}", "notes": []}
-                for n in res.get("notes", []):
-                    dedupe_add(self.reply_notes, n)
-                self.refresh_reply_count()
                 result = res.get("result", "")
-                if result == "sent" and self._history:
-                    self._history.mark_status(
-                        item_key, name, "✅已发送", item.get("message", ""))
+                reason = res.get("reason", "") or ""
+                item["_last_result"] = result
                 status = {
                     "sent": "已发送",
                     "error": "发送失败",
                     "blocked": "已拦截",
                     "unmatched": "未匹配",
-                }.get(result, result or "未知状态")
+                    "stopped": "已跳过",
+                }.get(result)
+                if status is None:
+                    status = "发送失败"
+                    reason = reason or f"未知返回：{result or '空'}"
+                item["_last_reason"] = reason
+                if status in ("发送失败", "未匹配"):
+                    item["_last_failure_reason"] = reason or status
                 self.set_status(item, status)
-                self.emit(f"[{name}] → {result}：{res.get('reason', '')}")
-                self.emit(f"学生间随机停顿 {pause(*STUDENT_GAP):.1f}s")
+                processed += 1
+                self._update_progress(processed, selected_count)
+                for note in res.get("notes", []):
+                    dedupe_add(self.reply_notes, note)
+                self.refresh_reply_count()
+                if result == "sent" and self._history:
+                    try:
+                        self._history.mark_status(
+                            item_key, name, "✅已发送", item.get("message", ""))
+                    except Exception as exc:
+                        self.emit(f"[{name}] 历史记录写入失败：{exc}")
+                self.emit(f"[{name}] → {result}：{reason}")
+                if result == "stopped":
+                    stopped = True
+                    break
+                if processed < selected_count and not self._stop_requested:
+                    gap = random.uniform(*STUDENT_GAP)
+                    self.emit(f"学生间随机停顿 {gap:.1f}s")
+                    if not self._interruptible_pause(gap):
+                        stopped = True
+                        break
+        except Exception as exc:
+            self.emit(f"发送流程异常：{exc}")
+            stopped = True
         finally:
-            self.start_btn.config(state="normal")
-            self.hint_var.set("本批处理结束")
-        self.emit("本批处理结束")
+            self._running = False
+            self._stop_esc_watcher()
+            if stopped:
+                for item in self.items:
+                    if (id(item) in selected_ids
+                            and self._status_of(item) in ("待发送", "发送中")):
+                        self.set_status(item, "已跳过")
+                        item["_last_result"] = "stopped"
+                        item["_last_reason"] = "用户停止，未发送"
+            for item in self.items:
+                if self._status_of(item) == "发送中":
+                    self.set_status(item, "发送失败")
+                    item["_last_result"] = "error"
+                    reason = item.get("_last_reason") or "程序异常中断"
+                    item["_last_reason"] = reason
+                    item["_last_failure_reason"] = reason
+            summary = self._summary_text(stopped, selected_count)
+            self.result_var.set(summary)
+            self._update_progress(processed, selected_count, stopped=stopped)
+            self.hint_var.set(
+                "已停止，未发送学生已标记为“已跳过”。" if stopped else "本批处理结束")
+            self._set_running_ui(False)
+            if not self._close_after_stop:
+                if self.filter_var.get() != FILTER_ALL or self.search_var.get().strip():
+                    self.rebuild_student_list()
+                else:
+                    self.update_summary()
+        if self._close_after_stop:
+            self.root.destroy()
+            return
+        self.emit(summary)
+        counts = summarize_status_counts(self._status_of(item) for item in self.items)
+        extra = ""
+        if counts["发送失败"] or counts["未匹配"]:
+            extra = ("\n\n可点主界面的“重试失败项”只勾选失败/未匹配学生，"
+                     "或“复制失败名单”。")
+        messagebox.showinfo("发送结束", summary + extra, parent=self.root)
 
 
 def main(argv=None):
