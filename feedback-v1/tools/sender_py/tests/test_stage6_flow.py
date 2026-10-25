@@ -425,11 +425,18 @@ class TestStage6(unittest.TestCase):
             self.assertEqual(len(app.input_paths), 2)
             self.assertEqual(len(app.items), 2)
 
-            # 6. 清空文件池
+            # 6. 清空文件
             app.clear_input_files()
             self.assertEqual(len(app.input_paths), 0)
             self.assertEqual(len(app.items), 0)
             self.assertEqual(len(app._file_counts), 0)
+
+    def test_calibration_loading_dialog_headless_safe(self):
+        from sender_py.sender import CalibrationLoadingDialog
+        # 在无 Tkinter / Headless 环境下实例化与方法调用应安全回退不抛异常
+        dialog = CalibrationLoadingDialog(None, title="测试加载", message="测试准备中...")
+        dialog.set_status("测试更新状态...", "副标题")
+        dialog.close()
 
 
 if __name__ == "__main__":

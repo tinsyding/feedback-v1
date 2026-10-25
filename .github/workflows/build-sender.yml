@@ -166,14 +166,10 @@ jobs:
         run: |
           python - <<'PY'
           import shutil
-          import zipfile
 
           source = "dist/极方每周反馈程序.exe"
           direct = "dist/JiFangFeedbackSender-windows-x64.exe"
-          archive = "dist/JiFangFeedbackSender-windows-x64.zip"
           shutil.copyfile(source, direct)
-          with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
-              zf.write(source, "极方每周反馈程序.exe")
           PY
 
       - name: Publish release asset
@@ -182,14 +178,5 @@ jobs:
           name: ${{ steps.release_meta.outputs.title }}
           files: |
             dist/JiFangFeedbackSender-windows-x64.exe
-            dist/JiFangFeedbackSender-windows-x64.zip
           fail_on_unmatched_files: true
-          body: |
-            Windows x64 单文件版（onefile），程序名「极方每周反馈程序」。
-
-            GitHub Releases 会改写中文附件名，因此提供两个下载：
-
-            - `JiFangFeedbackSender-windows-x64.exe`：直接运行的单文件 exe；下载名是英文，但程序窗口、图标和文件属性中的名称均为「极方每周反馈程序」。
-            - `JiFangFeedbackSender-windows-x64.zip`：解压后得到 `极方每周反馈程序.exe`，文件名保留中文。
-
-            该产物未签名，Windows 可能提示 SmartScreen；仅供内测/验证。
+          body: ""

@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.7.1"
 
 try:
     import windnd
@@ -233,6 +233,148 @@ def paste_and_send(message: str) -> tuple:
     return (True, "已发送")
 
 
+class CalibrationLoadingDialog:
+    """校准视野准备与智能识别时的平滑加载动画弹窗，避免用户误以为界面卡死。"""
+
+    def __init__(self, parent, title="正在准备校准视野", message="正在定位企业微信窗口..."):
+        self.parent = parent
+        self._closed = False
+        self._dot_idx = 0
+        self._spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        self.top = None
+
+        try:
+            import tkinter as tk
+            from tkinter import ttk
+        except Exception:
+            return
+
+        self.tk = tk
+        self.ttk = ttk
+
+        try:
+            top = tk.Toplevel(parent) if parent else tk.Tk()
+            top.title(title)
+            top.resizable(False, False)
+            try:
+                top.attributes("-topmost", True)
+            except Exception:
+                pass
+            try:
+                if parent:
+                    top.transient(parent)
+            except Exception:
+                pass
+
+            family = "Microsoft YaHei UI" if sys.platform == "win32" else "Arial"
+            card = ttk.Frame(top, style="Card.TFrame", padding=(22, 18))
+            card.pack(fill="both", expand=True)
+
+            header_box = ttk.Frame(card, style="Card.TFrame")
+            header_box.pack(fill="x", pady=(0, 10))
+
+            ttk.Label(header_box, text="🎯 正在准备校准视野", font=(family, 12, "bold")).pack(side="left")
+
+            self.status_var = tk.StringVar(master=top, value=message)
+            ttk.Label(card, textvariable=self.status_var, font=(family, 9), foreground="#374151").pack(anchor="w", pady=(0, 10))
+
+            self.pbar = ttk.Progressbar(card, mode="indeterminate", length=320)
+            self.pbar.pack(fill="x", pady=(0, 10))
+            try:
+                self.pbar.start(12)
+            except Exception:
+                pass
+
+            self.hint_var = tk.StringVar(master=top, value="⠋ 正在检测企业微信窗口并智能分析，请稍候...")
+            ttk.Label(card, textvariable=self.hint_var, font=(family, 8), foreground="#6b7280").pack(anchor="w")
+
+            self.top = top
+            self._center(370, 160)
+            try:
+                top.grab_set()
+            except Exception:
+                pass
+            try:
+                top.update()
+            except Exception:
+                pass
+            self._animate()
+        except Exception:
+            self.top = None
+
+    def _center(self, w, h):
+        if not self.top:
+            return
+        try:
+            self.top.update_idletasks()
+            sw = self.top.winfo_screenwidth()
+            sh = self.top.winfo_screenheight()
+            if self.parent and hasattr(self.parent, "winfo_rootx") and self.parent.winfo_exists():
+                px = self.parent.winfo_rootx()
+                py = self.parent.winfo_rooty()
+                pw = self.parent.winfo_width()
+                ph = self.parent.winfo_height()
+                cx = max(10, px + (pw - w) // 2)
+                cy = max(10, py + (ph - h) // 2)
+            else:
+                cx = max(10, (sw - w) // 2)
+                cy = max(10, (sh - h) // 2)
+            self.top.geometry(f"{int(w)}x{int(h)}+{cx}+{cy}")
+        except Exception:
+            pass
+
+    def _animate(self):
+        if self._closed or not self.top:
+            return
+        try:
+            if not self.top.winfo_exists():
+                return
+            char = self._spinner_chars[self._dot_idx % len(self._spinner_chars)]
+            self._dot_idx += 1
+            curr = self.hint_var.get()
+            if " " in curr:
+                rest = curr.split(" ", 1)[1]
+                self.hint_var.set(f"{char} {rest}")
+            self.top.after(100, self._animate)
+        except Exception:
+            pass
+
+    def set_status(self, text: str, hint: str = None):
+        if self._closed or not self.top:
+            return
+        def _update():
+            try:
+                if self.top and self.top.winfo_exists():
+                    self.status_var.set(text)
+                    if hint:
+                        char = self._spinner_chars[self._dot_idx % len(self._spinner_chars)]
+                        self.hint_var.set(f"{char} {hint}")
+                    self.top.update_idletasks()
+            except Exception:
+                pass
+        try:
+            self.top.after(0, _update)
+        except Exception:
+            pass
+
+    def close(self):
+        self._closed = True
+        if self.top:
+            try:
+                self.pbar.stop()
+            except Exception:
+                pass
+            try:
+                self.top.grab_release()
+            except Exception:
+                pass
+            try:
+                self.top.destroy()
+            except Exception:
+                pass
+            self.top = None
+
+
 def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
                token=None, log=print, force: bool = False):
     """每个候选处理前检查窗口签名；变了先校准再截图。优先 AI 自动框选，失败优雅回退手动校准。返回 rel roi 或 None（放弃）。"""
@@ -240,6 +382,14 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
     key = signature_key(rect[2], rect[3], scale)
     if not force and not needs_calibration(config_path, key):
         return load_roi(config_path, key)
+
+    loading = None
+    if parent and hasattr(parent, "winfo_exists"):
+        try:
+            loading = CalibrationLoadingDialog(parent, title="正在准备校准视野", message="首次打开校准，正在进行窗口捕获与智能定位...")
+        except Exception:
+            loading = None
+
     try:
         from sender_py.capture import capture_wecom_window
         from sender_py.roi_calibrator import run_calibration
@@ -251,6 +401,8 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
             from sender_py import window_utils as wu
         except ModuleNotFoundError:
             import window_utils as wu
+        if loading:
+            loading.set_status("正在激活企业微信窗口...", "请确保企业微信窗口处于正常显示状态")
         wu.find_and_activate_wecom()
         time.sleep(0.4)
         fresh = wu.get_wecom_rect()
@@ -258,8 +410,13 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
             rect = fresh
     except Exception:
         pass
+
+    if loading:
+        loading.set_status("正在截取窗口画面...", "正在准备实拍图像")
     img = capture_wecom_window(rect)
     if img is None:
+        if loading:
+            loading.close()
         return None
 
     # 1. 优先调用 Qwen3.8-Max 多模态旗舰模型智能自动框选
@@ -270,6 +427,8 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
         except ModuleNotFoundError:
             from vision_api import calibrate_roi
         log("正在使用 Qwen3.8-Max 多模态模型自动识别企微窗口区域...")
+        if loading:
+            loading.set_status("正在使用 AI 智能分析视野区域...", "正在使用 Qwen3.8-Max 模型自动框选")
         ai_roi = calibrate_roi(img, server=server or "https://feedback.wxjifang.cn", token=token)
     except Exception as exc:
         log(f"AI 自动识别网络异常：{exc}")
@@ -278,11 +437,16 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
         if all(validate_rel(ai_roi[k]) for k in ("title", "input", "chat")):
             log(f"✓ Qwen3.8-Max 自动框选成功（{ai_roi.get('reason', '')}），已自动生效！")
             save_roi(config_path, key, ai_roi["title"], ai_roi["input"], ai_roi["chat"])
+            if loading:
+                loading.close()
             return {"title": tuple(ai_roi["title"]), "input": tuple(ai_roi["input"]), "chat": tuple(ai_roi["chat"])}
         else:
             log("AI 识别坐标超出有效范围，正在回退至手动校准...")
     else:
         log("AI 自动定位未通过（可能未点进具体聊天），正在弹出手动校准窗口...")
+
+    if loading:
+        loading.close()
 
     # 2. 优雅回退到手动框选（弹出居中大窗口，若有 AI 坐标则自动预填）
     roi = run_calibration(parent, img, initial_roi=ai_roi)
@@ -832,12 +996,7 @@ class SenderApp:
         self.log_btn = ttk.Button(
             header_actions, text="📜 运行日志", style="Toolbar.TButton",
             command=self.open_log_window)
-        self.log_btn.pack(side="left", padx=(0, 6))
-
-        self.file_btn = ttk.Button(
-            header_actions, text="➕ 添加文件", style=self._accent_style,
-            command=self.choose_and_add_files)
-        self.file_btn.pack(side="left")
+        self.log_btn.pack(side="left")
 
         # ================= 2. 统计概览指标卡片组 (Dashboard 风格) =================
         stats_frame = ttk.Frame(main, style="MainBg.TFrame")
@@ -865,27 +1024,26 @@ class SenderApp:
             else:
                 ttk.Label(card, textvariable=val_var, style=val_style, anchor="w").pack(anchor="w", pady=(2, 0))
 
-        # ================= 2.5 反馈文件池 (可多次追加文件，支持直接拖入) =================
+        # ================= 2.5 已选反馈文件区 (可多次追加，支持直接拖入) =================
         file_pool_card = ttk.Frame(main, style="Card.TFrame", padding=(12, 8))
         file_pool_card.pack(fill="x", pady=(0, 10))
 
         pool_top = ttk.Frame(file_pool_card, style="Card.TFrame")
         pool_top.pack(fill="x")
 
-        pool_title_box = ttk.Frame(pool_top, style="Card.TFrame")
-        pool_title_box.pack(side="left", fill="y")
-        ttk.Label(pool_title_box, text="📁 反馈文件池", style="Section.TLabel").pack(side="left", padx=(0, 8))
-        self.file_pool_summary_var = tk.StringVar(master=self.root, value="文件池为空")
-        ttk.Label(pool_title_box, textvariable=self.file_pool_summary_var, style="Hint.TLabel").pack(side="left")
+        pool_left = ttk.Frame(pool_top, style="Card.TFrame")
+        pool_left.pack(side="left", fill="y")
+        self.file_pool_summary_var = tk.StringVar(master=self.root, value="尚未选择文件")
+        ttk.Label(pool_left, textvariable=self.file_pool_summary_var, style="Hint.TLabel").pack(side="left")
 
         pool_actions = ttk.Frame(pool_top, style="Card.TFrame")
         pool_actions.pack(side="right")
         self.add_file_btn = ttk.Button(
-            pool_actions, text="➕ 继续添加文件", style=self._accent_style,
+            pool_actions, text="➕ 添加文件", style=self._accent_style,
             command=self.choose_and_add_files)
         self.add_file_btn.pack(side="left", padx=(0, 6))
         self.clear_pool_btn = ttk.Button(
-            pool_actions, text="🗑️ 清空文件池", style="Toolbar.TButton",
+            pool_actions, text="🗑️ 清空", style="Toolbar.TButton",
             command=self.clear_input_files)
         self.clear_pool_btn.pack(side="left")
 
@@ -952,7 +1110,7 @@ class SenderApp:
         ttk.Label(table_header, text="姓名", width=14, style="HeaderCol.TLabel").pack(side="left", padx=(0, 8))
         ttk.Label(table_header, text="状态", width=13, anchor="center", style="HeaderCol.TLabel").pack(side="left", padx=(0, 10))
         ttk.Label(table_header, text="处理明细 / 最新备注", style="HeaderCol.TLabel").pack(side="left", fill="x", expand=True)
-        ttk.Label(table_header, text="快捷复制", width=18, anchor="e", style="HeaderCol.TLabel").pack(side="right")
+        ttk.Label(table_header, text="快捷复制", width=24, anchor="center", style="HeaderCol.TLabel").pack(side="right")
 
         list_outer = ttk.Frame(list_card, style="Card.TFrame")
         list_outer.pack(fill="both", expand=True)
@@ -1174,7 +1332,7 @@ class SenderApp:
         state = "disabled" if running else "normal"
         # 日志/待回名单在发送中保持可查看；其余编辑类控件锁定。
         widgets_to_toggle = [
-            self.file_btn, self.select_all_btn, self.select_none_btn,
+            self.select_all_btn, self.select_none_btn,
             self.failed_only_btn, self.retry_failed_btn,
             self.copy_failed_btn, self.calib_btn
         ]
@@ -1325,36 +1483,118 @@ class SenderApp:
                 f"跳过 {counts['已跳过']}")
 
     def force_calibrate(self):
-        """手动触发视野校准：优先 Qwen3.8-Max 自动框选，识别失败时弹出居中大手动画布。"""
+        """手动触发视野校准：弹出平滑加载动画，异步定位企微并使用 Qwen3.8-Max 智能分析，避免用户误以为卡顿。"""
+        if self._running:
+            return
         try:
+            from sender_py import window_utils as wu
+        except ModuleNotFoundError:
+            import window_utils as wu
+
+        loading = CalibrationLoadingDialog(self.root, title="正在准备校准视野", message="正在定位并激活企业微信窗口...")
+        try:
+            self.calib_btn.configure(state="disabled")
+        except Exception:
+            pass
+
+        def _worker():
+            err_data = None
+            rect = None
+            scale = 1.0
+            img = None
+            ai_roi = None
+
             try:
-                from sender_py import window_utils as wu
-            except ModuleNotFoundError:
-                import window_utils as wu
-            if not wu.find_and_activate_wecom():
-                from tkinter import messagebox
-                messagebox.showwarning("提示", "未能激活企业微信窗口，请先打开企微并点进任意聊天后重试。", parent=self.root)
-                return
-            time.sleep(0.4)
-            rect = wu.get_wecom_rect()
-            if not rect or rect[2] < 200 or rect[3] < 150:
-                from tkinter import messagebox
-                messagebox.showwarning("提示", "未能获取有效的企业微信窗口尺寸。", parent=self.root)
-                return
-            scale = wu.get_dpi_scale()
-            self.emit("用户点击“校准视野”，准备重新校准窗口...")
-            token = getattr(self, "token", None)
-            roi = ensure_roi(self.root, rect, scale, server=self.server, token=token, log=self.emit, force=True)
-            if roi:
-                self.emit("✓ 企业微信窗口视野校准成功并已保存！")
-                from tkinter import messagebox
-                messagebox.showinfo("校准成功", "企业微信窗口区域已成功校准并保存！", parent=self.root)
-            else:
-                self.emit("校准已取消或未完成。")
-        except Exception as exc:
-            self.emit(f"校准过程异常：{exc}")
-            from tkinter import messagebox
-            messagebox.showerror("校准失败", f"校准异常：{exc}", parent=self.root)
+                loading.set_status("正在定位并激活企业微信窗口...", "请确保企业微信已打开并点进任意聊天")
+                if not wu.find_and_activate_wecom():
+                    err_data = ("未能激活企业微信", "未能激活企业微信窗口，请先打开企微并点进任意聊天后重试。")
+                    return
+
+                time.sleep(0.4)
+                rect = wu.get_wecom_rect()
+                if not rect or rect[2] < 200 or rect[3] < 150:
+                    err_data = ("窗口尺寸异常", "未能获取有效的企业微信窗口尺寸，请确认企业微信未处于最小化。")
+                    return
+
+                scale = wu.get_dpi_scale()
+                loading.set_status("正在截取企微窗口画面...", "正在准备实拍图像")
+
+                try:
+                    from sender_py.capture import capture_wecom_window
+                except ModuleNotFoundError:
+                    from capture import capture_wecom_window
+
+                img = capture_wecom_window(rect)
+                if img is None:
+                    err_data = ("截取失败", "未能捕获企业微信窗口画面，请确认企微未被遮挡。")
+                    return
+
+                loading.set_status("正在智能分析视野区域...", "正在使用 Qwen3.8-Max 多模态模型自动框选")
+                token = getattr(self, "token", None)
+                try:
+                    try:
+                        from sender_py.vision_api import calibrate_roi
+                    except ModuleNotFoundError:
+                        from vision_api import calibrate_roi
+                    ai_roi = calibrate_roi(img, server=self.server, token=token)
+                except Exception as exc:
+                    self.emit(f"AI 自动识别网络异常：{exc}")
+                    ai_roi = None
+
+                loading.set_status("准备就绪", "正在进入校准...")
+            except Exception as exc:
+                err_data = ("校准异常", str(exc))
+            finally:
+                def _finish():
+                    try:
+                        loading.close()
+                    except Exception:
+                        pass
+                    try:
+                        self.calib_btn.configure(state="normal")
+                    except Exception:
+                        pass
+
+                    from tkinter import messagebox
+                    if err_data:
+                        title, msg = err_data
+                        messagebox.showwarning(title, msg, parent=self.root)
+                        self.emit(f"校准未完成：{title} - {msg}")
+                        return
+
+                    config_path = default_config_path()
+                    key = signature_key(rect[2], rect[3], scale)
+
+                    if ai_roi and isinstance(ai_roi, dict) and all(k in ai_roi for k in ("title", "input", "chat")):
+                        if all(validate_rel(ai_roi[k]) for k in ("title", "input", "chat")):
+                            self.emit(f"✓ Qwen3.8-Max 自动框选成功（{ai_roi.get('reason', '')}），已自动生效！")
+                            save_roi(config_path, key, ai_roi["title"], ai_roi["input"], ai_roi["chat"])
+                            messagebox.showinfo("校准成功", "企业微信窗口区域已成功由 AI 智能自动校准并保存！", parent=self.root)
+                            return
+                        else:
+                            self.emit("AI 识别坐标超出有效范围，正在打开手动校准画布...")
+                    else:
+                        self.emit("AI 自动定位未通过（可能未进入具体聊天），正在弹出手动校准窗口...")
+
+                    try:
+                        from sender_py.roi_calibrator import run_calibration
+                    except ModuleNotFoundError:
+                        from roi_calibrator import run_calibration
+
+                    roi = run_calibration(self.root, img, initial_roi=ai_roi)
+                    if roi:
+                        save_roi(config_path, key, roi["title"], roi["input"], roi["chat"])
+                        self.emit("✓ 企业微信窗口视野校准成功并已保存！")
+                        messagebox.showinfo("校准成功", "企业微信窗口区域已成功校准并保存！", parent=self.root)
+                    else:
+                        self.emit("校准已取消或未完成。")
+
+                try:
+                    self.root.after(0, _finish)
+                except Exception:
+                    _finish()
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def open_log_window(self):
         tk, ttk = self.tk, self._ttk
@@ -1458,10 +1698,10 @@ class SenderApp:
             reason_lbl.pack(side="left", fill="x", expand=True, padx=(0, 8))
             reason_lbl.bind("<Double-1>", lambda _e, it=item: self.show_row_reason(it))
 
-            msg_btn = ttk.Button(row, text="📋 话术", style="RowAction.TButton",
+            msg_btn = ttk.Button(row, text="📋 复制话术", style="RowAction.TButton",
                                  command=lambda it=item: self.copy_message(it))
             msg_btn.pack(side="right", padx=(4, 0))
-            name_btn = ttk.Button(row, text="👤 学号姓名", style="RowAction.TButton",
+            name_btn = ttk.Button(row, text="👤 复制学号、姓名", style="RowAction.TButton",
                                   command=lambda it=item: self.copy_student(it))
             name_btn.pack(side="right", padx=(4, 0))
             self._row_action_buttons.extend((msg_btn, name_btn))
@@ -1682,14 +1922,23 @@ class SenderApp:
             child.destroy()
 
         if not self.input_paths:
-            self.file_pool_summary_var.set("文件池为空（0 个文件 · 0 人）")
+            self.file_pool_summary_var.set("尚未选择文件（0 个文件 · 0 人）")
             hint_lbl = self._ttk.Label(
                 self.file_tags_inner,
-                text="💡 文件池为空：点击右侧「➕ 继续添加文件」，或直接从桌面/文件夹拖入 JSON / HTML 文件",
+                text="💡 暂无文件：点击右侧「➕ 添加文件」，或直接从桌面/文件夹拖入 JSON / HTML 文件",
                 style="Hint.TLabel"
             )
             hint_lbl.pack(side="left", padx=4, pady=3)
+            if hasattr(self, "add_file_btn"):
+                self.add_file_btn.configure(text="➕ 添加文件")
+            if hasattr(self, "clear_pool_btn"):
+                self.clear_pool_btn.configure(state="disabled")
             return
+
+        if hasattr(self, "add_file_btn"):
+            self.add_file_btn.configure(text="➕ 继续添加")
+        if hasattr(self, "clear_pool_btn"):
+            self.clear_pool_btn.configure(state="normal")
 
         total_students = len(self.items)
         file_count = len(self.input_paths)
@@ -1735,7 +1984,7 @@ class SenderApp:
                 if ext in (".json", ".html", ".htm"):
                     paths.append(p)
         if paths:
-            self.emit(f"📥 捕获拖入文件 {len(paths)} 个，正在追加并入文件池...")
+            self.emit(f"📥 捕获拖入文件 {len(paths)} 个，正在追加加载...")
             self.add_input_files(paths, replace=False)
         else:
             self.emit("⚠️ 拖入的文件中未找到有效的 .json 或 .html 反馈文件。")
@@ -1747,7 +1996,7 @@ class SenderApp:
         if self._running:
             return
         from tkinter import filedialog
-        title = "选择反馈文件（可单选，可反复多次添加）" if append else "重新选择反馈文件（替换当前文件池）"
+        title = "选择反馈文件（可单选，可反复多次添加）" if append else "重新选择反馈文件"
         paths = filedialog.askopenfilenames(
             parent=self.root,
             title=title,
@@ -1782,7 +2031,7 @@ class SenderApp:
             if not target_paths:
                 return
             if not added_any:
-                self.emit("💡 提示：所选文件均已在文件池中，无需重复添加。")
+                self.emit("💡 提示：所选文件均已在列表中，无需重复添加。")
                 return
 
         try:
@@ -1821,7 +2070,7 @@ class SenderApp:
         self._reset_hint()
         self.rebuild_student_list()
         details = "，".join(f"{os.path.basename(p)} {n}人" for p, n in file_counts)
-        self.emit(f"📁 文件池已更新（当前共 {len(target_paths)} 个文件）：{details}")
+        self.emit(f"📁 已加载反馈文件（当前共 {len(target_paths)} 个文件）：{details}")
         self.emit(f"合并后共 {len(items)} 个学生" + (f"（自动去重 {duplicates} 条）" if duplicates else ""))
         for p in new_paths:
             if self._sent_files and self._sent_files.is_file_sent(p):
@@ -1835,7 +2084,7 @@ class SenderApp:
             self.clear_input_files()
         else:
             self.add_input_files(new_paths, replace=True)
-            self.emit(f"🗑️ 已从文件池移除文件：{os.path.basename(path)}")
+            self.emit(f"🗑️ 已移除文件：{os.path.basename(path)}")
 
     def clear_input_files(self):
         if self._running:
@@ -1853,7 +2102,7 @@ class SenderApp:
         self.update_summary()
         self._reset_progress()
         self.rebuild_student_list()
-        self.emit("🗑️ 已清空文件池。")
+        self.emit("🗑️ 已清空所选文件。")
 
     def show_reply_notes_dialog(self):
         tk, ttk = self.tk, self._ttk
