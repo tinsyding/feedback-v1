@@ -3,7 +3,7 @@
  * 企业微信反馈发送器 - 多模态自动 ROI 视窗校准接口 (api/calibrate_roi.php)
  *
  * 接收：整张企业微信主窗口截图 image（PNG/JPEG，≤10MB）+ 可选 token。
- * 调用 Qwen-VL-Max 多模态旗舰模型智能定位右侧聊天窗口的「标题栏」与「输入框」边界。
+ * 调用 Qwen3.8-Max 多模态旗舰模型智能定位右侧聊天窗口的「标题栏」与「输入框」边界。
  * 返回规范的相对比例坐标 (0.0~1.0)：
  *   {
  *     title: [x, y, w, h],
@@ -89,8 +89,8 @@ if ($apiBase === '') {
 } elseif (substr($apiBase, -17) !== '/chat/completions') {
     $apiBase = rtrim($apiBase, '/') . '/chat/completions';
 }
-// 使用 Qwen 目前最强的旗舰多模态模型 qwen-vl-max
-$model = getenv('IDENTIFY_MODEL') ?: ($localKeys['identifyModel'] ?? '') ?: 'qwen-vl-max';
+// 场景 1 默认使用 Qwen 旗舰多模态模型 qwen3.8-max
+$model = getenv('IDENTIFY_MODEL') ?: ($localKeys['identifyModel'] ?? '') ?: 'qwen3.8-max';
 
 if (!function_exists('curl_init')) {
     sendResponse(false, null, '服务端缺少 curl 扩展', 200);
@@ -145,8 +145,16 @@ if (!is_string($content) || trim($content) === '') {
 }
 
 $text = trim($content);
+// 移除可能存在的思维链 <think>...</think>
+$text = preg_replace('/<think>[\s\S]*?<\/think>/i', '', $text);
+$text = trim($text);
 $text = preg_replace('/^```(?:json)?\s*/i', '', $text);
 $text = preg_replace('/\s*```$/', '', $text);
+if (!str_starts_with(trim($text), '{') || !str_ends_with(trim($text), '}')) {
+    if (preg_match('/\{[\s\S]*\}/', $text, $m)) {
+        $text = $m[0];
+    }
+}
 $parsed = json_decode(trim($text), true);
 if (!is_array($parsed)) {
     sendResponse(false, null, '视觉模型返回非 JSON', 200);
@@ -233,7 +241,7 @@ $out = [
     'title' => $titleRel,
     'input' => $inputRel,
     'chat'  => $chatRel,
-    'reason' => (string)($parsed['reason'] ?? 'Qwen-VL-Max 自动识别成功'),
+    'reason' => (string)($parsed['reason'] ?? 'Qwen3.8-Max 自动识别成功'),
     'duration_ms' => (int)round((microtime(true) - $t0) * 1000),
 ];
 

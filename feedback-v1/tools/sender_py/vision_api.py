@@ -203,7 +203,7 @@ def identify_reply(chat_tail_img, target_id: str, target_name: str,
 
 
 def calibrate_roi(base_image, server: str, token=None, timeout: int = 50) -> dict | None:
-    """调用服务端 Qwen-VL-Max 多模态模型自动框选企业微信窗口区域。
+    """调用服务端 Qwen3.8-Max 多模态模型自动框选企业微信窗口区域。
 
     成功返回相对比例 dict: {"title": tuple, "input": tuple, "chat": tuple, "reason": str}
     识别失败、网络超时或校验未通过时返回 None（供调用方优雅回退至手动框选）。
@@ -256,7 +256,7 @@ def calibrate_roi(base_image, server: str, token=None, timeout: int = 50) -> dic
             "title": t,
             "input": i,
             "chat": c,
-            "reason": str(data.get("reason") or "Qwen-VL-Max 自动框选成功"),
+            "reason": str(data.get("reason") or "Qwen3.8-Max 自动框选成功"),
         }
     except Exception:
         return None

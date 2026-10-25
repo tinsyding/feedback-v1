@@ -17,7 +17,8 @@
  *                     secret_key.local.php 中 'identifyApiBase'；可只写到 …/v1，
  *                     程序自动补 /chat/completions；默认 DashScope 官方地址）
  *   IDENTIFY_MODEL     视觉模型（环境变量或 secret_key.local.php 中 'identifyModel'；
- *                     默认 qwen-vl-max）
+ *                     场景3、4默认 qwen3.8-max）
+ *   IDENTIFY_FAST_MODEL 快速视觉模型（场景2 title 模式默认 qwen3.8-flash）
  *
  * 存档举证：每次判定存 data/identify_archive/YYYYMMDD/uniqid/ 下
  *   title.png + chat.png + request.json + response.json。
@@ -124,12 +125,11 @@ if ($apiBase === '') {
 } elseif (substr($apiBase, -17) !== '/chat/completions') {
     $apiBase = rtrim($apiBase, '/') . '/chat/completions';
 }
-$model = getenv('IDENTIFY_MODEL') ?: ($localKeys['identifyModel'] ?? '') ?: 'qwen-vl-max';
+// 场景 3、4 默认使用 qwen3.8-max；场景 2 (title) 默认使用 qwen3.8-flash
+$model = getenv('IDENTIFY_MODEL') ?: ($localKeys['identifyModel'] ?? '') ?: 'qwen3.8-max';
 if ($mode === 'title') {
-    $fastModel = getenv('IDENTIFY_FAST_MODEL') ?: ($localKeys['identifyFastModel'] ?? '');
-    if ($fastModel !== '') {
-        $model = $fastModel;
-    }
+    $fastModel = getenv('IDENTIFY_FAST_MODEL') ?: ($localKeys['identifyFastModel'] ?? '') ?: 'qwen3.8-flash';
+    $model = $fastModel;
 }
 if (!function_exists('curl_init')) {
     sendResponse(false, null, '服务端缺少 curl 扩展', 200);
@@ -218,8 +218,16 @@ if (!is_string($content) || trim($content) === '') {
     sendResponse(false, null, '视觉模型返回为空：' . $upErr, 200);
 }
 $text = trim($content);
+// 移除可能存在的思维链 <think>...</think>
+$text = preg_replace('/<think>[\s\S]*?<\/think>/i', '', $text);
+$text = trim($text);
 $text = preg_replace('/^```(?:json)?\s*/i', '', $text);
 $text = preg_replace('/\s*```$/', '', $text);
+if (!str_starts_with(trim($text), '{') || !str_ends_with(trim($text), '}')) {
+    if (preg_match('/\{[\s\S]*\}/', $text, $m)) {
+        $text = $m[0];
+    }
+}
 $parsed = json_decode(trim($text), true);
 if (!is_array($parsed)) {
     sendResponse(false, null, '视觉模型返回非 JSON', 200);

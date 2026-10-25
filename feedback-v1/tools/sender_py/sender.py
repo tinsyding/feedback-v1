@@ -252,21 +252,21 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
     if img is None:
         return None
 
-    # 1. 优先调用 Qwen-VL-Max 多模态旗舰模型智能自动框选
+    # 1. 优先调用 Qwen3.8-Max 多模态旗舰模型智能自动框选
     ai_roi = None
     try:
         try:
             from sender_py.vision_api import calibrate_roi
         except ModuleNotFoundError:
             from vision_api import calibrate_roi
-        log("正在使用 Qwen-VL-Max 多模态模型自动识别企微窗口区域...")
+        log("正在使用 Qwen3.8-Max 多模态模型自动识别企微窗口区域...")
         ai_roi = calibrate_roi(img, server=server or "https://feedback.wxjifang.cn", token=token)
     except Exception as exc:
         log(f"AI 自动识别网络异常：{exc}")
 
     if ai_roi and isinstance(ai_roi, dict) and all(k in ai_roi for k in ("title", "input", "chat")):
         if all(validate_rel(ai_roi[k]) for k in ("title", "input", "chat")):
-            log(f"✓ Qwen-VL-Max 自动框选成功（{ai_roi.get('reason', '')}），已自动生效！")
+            log(f"✓ Qwen3.8-Max 自动框选成功（{ai_roi.get('reason', '')}），已自动生效！")
             save_roi(config_path, key, ai_roi["title"], ai_roi["input"], ai_roi["chat"])
             return {"title": tuple(ai_roi["title"]), "input": tuple(ai_roi["input"]), "chat": tuple(ai_roi["chat"])}
         else:
@@ -1119,7 +1119,7 @@ class SenderApp:
                 f"跳过 {counts['已跳过']}")
 
     def force_calibrate(self):
-        """手动触发视野校准：优先 Qwen-VL-Max 自动框选，识别失败时弹出居中大手动画布。"""
+        """手动触发视野校准：优先 Qwen3.8-Max 自动框选，识别失败时弹出居中大手动画布。"""
         try:
             try:
                 from sender_py import window_utils as wu
