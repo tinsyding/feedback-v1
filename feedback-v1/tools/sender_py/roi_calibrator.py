@@ -57,15 +57,19 @@ def validate_boxes(title_abs, input_abs, img_size):
 
 
 def _load_example_photo(tk, max_w=EXAMPLE_MAX_W):
-    """加载 tools/example.png 等比缩到宽≤max_w；找不到返回 None。"""
+    """加载 example.png 等比缩到宽≤max_w；源码与 onefile 都能找到。"""
     import os
+    import sys
 
     here = os.path.dirname(os.path.abspath(__file__))
-    for cand in (os.path.join(here, "..", "example.png"), os.path.join(here, "example.png")):
-        if os.path.isfile(cand):
-            path = cand
-            break
-    else:
+    candidates = []
+    base = getattr(sys, "_MEIPASS", None)
+    if base:
+        candidates.append(os.path.join(base, "example.png"))
+    candidates.extend((os.path.join(here, "..", "example.png"),
+                       os.path.join(here, "example.png")))
+    path = next((p for p in candidates if os.path.isfile(p)), None)
+    if path is None:
         return None
     try:
         from PIL import Image, ImageTk
@@ -83,7 +87,13 @@ def run_calibration(parent, base_image, example_max_w=EXAMPLE_MAX_W):
     parent 为 None 时自建 Tk 主窗口（任务栏有图标，最稳）；传入父窗口时用模态 Toplevel。
     返回 {"title": rel, "input": rel, "chat": rel} 或 None（放弃）。
     """
+    import sys
     import tkinter as tk
+    from tkinter import ttk
+    try:
+        import sv_ttk
+    except Exception:
+        sv_ttk = None
 
     if base_image is None:
         raise ValueError("实拍图为空，无法校准：请先确认企微窗口能被截到。")
@@ -100,6 +110,14 @@ def run_calibration(parent, base_image, example_max_w=EXAMPLE_MAX_W):
             win.transient(parent)
         except Exception:
             pass
+    using_sv_ttk = False
+    if sv_ttk is not None:
+        try:
+            sv_ttk.set_theme("light")
+            using_sv_ttk = True
+        except Exception:
+            pass
+    accent_style = "Accent.TButton" if using_sv_ttk else "TButton"
     win.title("企业微信窗口校准：框标题栏 + 输入框")
     try:
         win.deiconify()
@@ -114,17 +132,29 @@ def run_calibration(parent, base_image, example_max_w=EXAMPLE_MAX_W):
     except Exception:
         pass
 
-    guide = tk.Frame(win)
-    guide.pack(fill="both", expand=True, padx=12, pady=12)
-    tk.Label(guide, text=GUIDE_TEXT, font=("", 11, "bold")).pack(pady=(0, 8))
+    style = ttk.Style(win)
+    family = "Microsoft YaHei UI" if sys.platform == "win32" else "Arial"
+    try:
+        style.configure("CalTitle.TLabel", font=(family, 18, "bold"))
+        style.configure("CalSection.TLabel", font=(family, 11, "bold"))
+        style.configure("CalHint.TLabel", foreground="#6b7280", font=(family, 9))
+    except Exception:
+        pass
+
+    guide = ttk.Frame(win, padding=18)
+    guide.pack(fill="both", expand=True)
+    ttk.Label(guide, text="企业微信窗口校准", style="CalTitle.TLabel").pack(anchor="w")
+    ttk.Label(guide, text=GUIDE_TEXT, style="CalSection.TLabel").pack(anchor="w", pady=(4, 12))
     photo = _load_example_photo(tk, example_max_w)
     if photo is not None:
-        lbl = tk.Label(guide, image=photo)
+        lbl = ttk.Label(guide, image=photo)
         lbl.image = photo  # PhotoImage 引用保持
         lbl.pack()
     else:
-        tk.Label(guide, text="(未找到 example.png，以实拍为准框两框)").pack()
-    tk.Button(guide, text="知道了，开始框选", command=guide.destroy).pack(pady=(10, 0))
+        ttk.Label(guide, text="(未找到 example.png，以实拍为准框两框)",
+                  style="CalHint.TLabel").pack()
+    ttk.Button(guide, text="知道了，开始框选", style=accent_style,
+               command=guide.destroy).pack(pady=(14, 0))
     win.wait_window(guide)
     if result["roi"] is not None:  # 不可能分支，保持形状
         return result["roi"]
@@ -132,10 +162,10 @@ def run_calibration(parent, base_image, example_max_w=EXAMPLE_MAX_W):
     DISP_W, DISP_H = 1000, 640
     s, ox, oy, _, _ = fit_scale(W, H, DISP_W, DISP_H)
 
-    body = tk.Frame(win)
-    body.pack(fill="both", expand=True, padx=12, pady=12)
+    body = ttk.Frame(win, padding=12)
+    body.pack(fill="both", expand=True)
     status = tk.StringVar(value="先拖出标题栏（蓝），再拖出输入框（红）")
-    tk.Label(body, textvariable=status, fg="#B45309").pack(pady=(0, 6))
+    ttk.Label(body, textvariable=status, foreground="#B45309").pack(pady=(0, 6))
     canvas = tk.Canvas(body, width=DISP_W, height=DISP_H, bg="#111827", highlightthickness=1)
     canvas.pack()
 
@@ -247,8 +277,8 @@ def run_calibration(parent, base_image, example_max_w=EXAMPLE_MAX_W):
     canvas.bind("<B1-Motion>", on_move)
     canvas.bind("<ButtonRelease-1>", on_release)
 
-    btns = tk.Frame(body)
-    btns.pack(pady=(8, 0))
+    btns = ttk.Frame(body)
+    btns.pack(pady=(10, 0))
 
     def do_reset():
         state["title"] = None
@@ -283,9 +313,10 @@ def run_calibration(parent, base_image, example_max_w=EXAMPLE_MAX_W):
         result["roi"] = {"title": t_rel, "input": i_rel, "chat": c_rel}
         win.destroy()
 
-    tk.Button(btns, text="重置", command=do_reset).pack(side="left", padx=6)
-    tk.Button(btns, text="放弃", command=do_abort).pack(side="left", padx=6)
-    tk.Button(btns, text="确认并保存", command=do_ok).pack(side="left", padx=6)
+    ttk.Button(btns, text="重置", command=do_reset).pack(side="left", padx=6)
+    ttk.Button(btns, text="放弃", command=do_abort).pack(side="left", padx=6)
+    ttk.Button(btns, text="确认并保存", style=accent_style,
+               command=do_ok).pack(side="left", padx=6)
 
     win.wait_window(win)  # 阻塞到确认/放弃
     return result["roi"]

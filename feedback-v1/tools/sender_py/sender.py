@@ -7,8 +7,27 @@ tkinter/requests/PIL/mss 只在 Windows 流程函数内导入；决策纯函数 
 
 import os
 import random
+import sys
 import threading
 import time
+
+APP_NAME = "极方每周反馈程序"
+APP_VERSION = "1.1.0"
+
+
+def asset_path(filename: str) -> str:
+    """返回运行时资源路径：onefile 解压目录优先，源码运行回退到 feedback-v1/。"""
+    if getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", None):
+        return os.path.join(sys._MEIPASS, filename)
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.normpath(os.path.join(here, "..", "..", filename))
+
+
+def app_icon_path():
+    """网站 favicon 作为程序图标；找不到时返回 None。"""
+    path = asset_path("favicon.ico")
+    return path if os.path.isfile(path) else None
+
 
 try:  # 仓库结构优先；散装拷贝（文件同目录）兜底
     from sender_py.pacing import AFTER_SEND_GAP, CANDIDATE_GAP, STUDENT_GAP, pause
@@ -370,69 +389,208 @@ class SenderApp:
         self._row_checkbuttons = []
         self._row_action_buttons = []
 
-        root.title("反馈发送器")
-        root.minsize(900, 620)
+        self._setup_appearance(root)
+        root.title(APP_NAME)
+        root.geometry("1040x700")
+        root.minsize(920, 620)
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         root.bind("<Escape>", self.request_stop)
 
-        top = tk.Frame(root)
-        top.pack(fill="x", padx=10, pady=(8, 4))
-        self.file_btn = tk.Button(top, text="选择 JSON / HTML 文件（可多选）",
-                                  command=self.choose_input_files)
-        self.file_btn.pack(side="left")
-        self.log_btn = tk.Button(top, text="运行日志", command=self.open_log_window)
-        self.log_btn.pack(side="right", padx=6)
-        self.reply_btn = tk.Button(top, text="📨 待回名单 (0)", command=self.show_reply_notes_dialog)
-        self.reply_btn.pack(side="right", padx=6)
+        self._build_ui()
+        self.search_var.trace_add("write", self._on_search_change)
+        self.rebuild_student_list()
 
-        self.input_label = tk.Label(root, text="", anchor="w", justify="left", wraplength=860)
-        self.input_label.pack(fill="x", padx=12, pady=(0, 6))
+    def _setup_appearance(self, root):
+        """字体、sv-ttk 主题、状态色、网站 logo；避免主界面停留在 Tk 默认外观。"""
+        import tkinter.font as tkfont
+
+        ttk = self._ttk
+        available = set()
+        try:
+            available = set(tkfont.families(root))
+        except Exception:
+            pass
+        family = next(
+            (name for name in ("Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI",
+                               "DejaVu Sans", "Arial") if name in available),
+            "Arial",
+        )
+        self._font_family = family
+        self._using_sv_ttk = False
+        try:
+            import sv_ttk
+            sv_ttk.set_theme("light")
+            self._using_sv_ttk = True
+        except Exception:
+            try:
+                ttk.Style(root).theme_use("vista" if sys.platform == "win32" else "clam")
+            except Exception:
+                pass
+
+        # 主题设置完再覆盖命名字体，确保中文在 Entry/Combobox/Checkbutton 里也一致。
+        for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont"):
+            try:
+                tkfont.nametofont(name).configure(family=family, size=10)
+            except Exception:
+                pass
+
+        style = ttk.Style(root)
+        self._style = style
+        bg = style.lookup("TFrame", "background") or "#f3f4f6"
+        try:
+            root.configure(bg=bg)
+        except Exception:
+            pass
+
+        style.configure("TButton", font=(family, 9))
+        style.configure("Toolbar.TButton", font=(family, 9), padding=(10, 5))
+        style.configure("RowAction.TButton", font=(family, 9), padding=(8, 3))
+        style.configure("Danger.TButton", font=(family, 9, "bold"),
+                        foreground="#b91c1c", padding=(14, 7))
+        style.configure("Title.TLabel", font=(family, 20, "bold"), foreground="#111827")
+        style.configure("Subtitle.TLabel", font=(family, 9), foreground="#6b7280")
+        style.configure("Section.TLabel", font=(family, 11, "bold"), foreground="#111827")
+        style.configure("Stat.TLabel", font=(family, 10, "bold"), foreground="#111827")
+        style.configure("Muted.TLabel", font=(family, 9), foreground="#6b7280")
+        style.configure("Hint.TLabel", font=(family, 9), foreground="#6b7280")
+        style.configure("Logo.TLabel", font=(family, 24, "bold"), foreground="#2563eb")
+        self._accent_style = "Accent.TButton" if self._using_sv_ttk else "TButton"
+        if self._using_sv_ttk:
+            style.configure("Accent.TButton", font=(family, 10, "bold"), padding=(18, 8))
+
+        self._status_styles = {}
+        for idx, (status, color) in enumerate(self.STATUS_COLORS.items()):
+            style_name = f"Status{idx}.TLabel"
+            style.configure(style_name, foreground=color, font=(family, 9, "bold"))
+            self._status_styles[status] = style_name
+        style.configure("StatusDefault.TLabel", foreground="#111827",
+                        font=(family, 9, "bold"))
+        self._status_styles[""] = "StatusDefault.TLabel"
+
+        self._logo_image = None
+        self._window_icon = None
+        icon_path = app_icon_path()
+        if icon_path:
+            try:
+                from PIL import Image, ImageTk
+                source = Image.open(icon_path).convert("RGBA")
+                logo = source.copy()
+                logo.thumbnail((44, 44), Image.LANCZOS)
+                self._logo_image = ImageTk.PhotoImage(logo)
+                window_icon = source.copy()
+                window_icon.thumbnail((64, 64), Image.LANCZOS)
+                self._window_icon = ImageTk.PhotoImage(window_icon)
+                try:
+                    root.iconphoto(True, self._window_icon)
+                except Exception:
+                    pass
+                try:
+                    root.iconbitmap(default=icon_path)
+                except Exception:
+                    pass
+            except Exception:
+                try:
+                    root.iconbitmap(default=icon_path)
+                except Exception:
+                    pass
+
+    def _status_style(self, status):
+        return self._status_styles.get(status, self._status_styles[""])
+
+    def _build_ui(self):
+        tk, ttk = self.tk, self._ttk
+        main = ttk.Frame(self.root, padding=(20, 16, 20, 12))
+        main.pack(fill="both", expand=True)
+
+        header = ttk.Frame(main)
+        header.pack(fill="x")
+        if self._logo_image is not None:
+            ttk.Label(header, image=self._logo_image).pack(side="left", padx=(0, 12))
+        else:
+            ttk.Label(header, text="极", style="Logo.TLabel").pack(side="left", padx=(0, 12))
+        title_box = ttk.Frame(header)
+        title_box.pack(side="left", fill="x", expand=True)
+        ttk.Label(title_box, text=APP_NAME, style="Title.TLabel").pack(anchor="w")
+        ttk.Label(title_box, text=f"企业微信反馈批量发送 · v{APP_VERSION}",
+                  style="Subtitle.TLabel").pack(anchor="w", pady=(2, 0))
+
+        header_actions = ttk.Frame(header)
+        header_actions.pack(side="right")
+        self.reply_btn = ttk.Button(
+            header_actions, text="待回名单 · 0", style="Toolbar.TButton",
+            command=self.show_reply_notes_dialog)
+        self.reply_btn.pack(side="left", padx=(0, 6))
+        self.log_btn = ttk.Button(
+            header_actions, text="运行日志", style="Toolbar.TButton",
+            command=self.open_log_window)
+        self.log_btn.pack(side="left", padx=(0, 6))
+        self.file_btn = ttk.Button(
+            header_actions, text="选择文件", style=self._accent_style,
+            command=self.choose_input_files)
+        self.file_btn.pack(side="left")
+
+        ttk.Separator(main, orient="horizontal").pack(fill="x", pady=(14, 12))
+
+        input_row = ttk.Frame(main)
+        input_row.pack(fill="x", pady=(0, 10))
+        ttk.Label(input_row, text="当前数据", style="Section.TLabel").pack(side="left", padx=(0, 12))
+        self.input_label = ttk.Label(
+            input_row, text="", style="Muted.TLabel", anchor="w",
+            justify="left", wraplength=760)
+        self.input_label.pack(side="left", fill="x", expand=True)
         self.update_input_label()
 
-        self.search_var = tk.StringVar(master=root)
-        self.filter_var = tk.StringVar(master=root, value=FILTER_ALL)
-        filters = tk.Frame(root)
-        filters.pack(fill="x", padx=12, pady=(0, 4))
-        tk.Label(filters, text="搜索").pack(side="left")
-        self.search_entry = tk.Entry(filters, textvariable=self.search_var, width=22)
-        self.search_entry.pack(side="left", padx=(4, 8))
-        tk.Label(filters, text="状态").pack(side="left")
+        self.search_var = tk.StringVar(master=self.root)
+        self.filter_var = tk.StringVar(master=self.root, value=FILTER_ALL)
+        toolbar = ttk.Frame(main)
+        toolbar.pack(fill="x", pady=(0, 6))
+        ttk.Label(toolbar, text="搜索", style="Muted.TLabel").pack(side="left")
+        self.search_entry = ttk.Entry(toolbar, textvariable=self.search_var, width=24)
+        self.search_entry.pack(side="left", padx=(6, 14))
+        ttk.Label(toolbar, text="状态", style="Muted.TLabel").pack(side="left")
         self.filter_combo = ttk.Combobox(
-            filters, textvariable=self.filter_var, values=FILTER_VALUES,
+            toolbar, textvariable=self.filter_var, values=FILTER_VALUES,
             state="readonly", width=12)
-        self.filter_combo.pack(side="left", padx=(4, 8))
+        self.filter_combo.pack(side="left", padx=(6, 10))
         self.filter_combo.bind("<<ComboboxSelected>>", lambda e: self.rebuild_student_list())
-        self.failed_only_btn = tk.Button(filters, text="只看失败", command=self.show_failed_only)
-        self.failed_only_btn.pack(side="left", padx=2)
-        self.retry_failed_btn = tk.Button(filters, text="重试失败项", command=self.select_failed_only)
-        self.retry_failed_btn.pack(side="left", padx=2)
-        tk.Label(filters, text="双击状态看失败原因", fg="#777777").pack(side="right")
+        self.failed_only_btn = ttk.Button(
+            toolbar, text="只看失败", style="Toolbar.TButton", command=self.show_failed_only)
+        self.failed_only_btn.pack(side="left", padx=(0, 6))
+        self.retry_failed_btn = ttk.Button(
+            toolbar, text="重试失败项", style="Toolbar.TButton",
+            command=self.select_failed_only)
+        self.retry_failed_btn.pack(side="left")
+        ttk.Label(toolbar, text="双击状态查看失败原因", style="Hint.TLabel").pack(side="right")
 
-        summary = tk.Frame(root)
-        summary.pack(fill="x", padx=12, pady=(0, 4))
-        self.summary_var = tk.StringVar(master=root)
-        tk.Label(summary, textvariable=self.summary_var, anchor="w").pack(side="left")
-        self.select_none_btn = tk.Button(summary, text="全不选全部",
-                                         command=lambda: self.set_all_selected(False))
-        self.select_none_btn.pack(side="right", padx=2)
-        self.select_all_btn = tk.Button(summary, text="全选全部",
-                                        command=lambda: self.set_all_selected(True))
-        self.select_all_btn.pack(side="right", padx=2)
+        summary = ttk.Frame(main)
+        summary.pack(fill="x", pady=(2, 4))
+        self.summary_var = tk.StringVar(master=self.root)
+        ttk.Label(summary, textvariable=self.summary_var, style="Section.TLabel").pack(side="left")
+        self.select_none_btn = ttk.Button(
+            summary, text="全不选", style="Toolbar.TButton",
+            command=lambda: self.set_all_selected(False))
+        self.select_none_btn.pack(side="right", padx=(6, 0))
+        self.select_all_btn = ttk.Button(
+            summary, text="全选", style="Toolbar.TButton",
+            command=lambda: self.set_all_selected(True))
+        self.select_all_btn.pack(side="right")
 
-        header = tk.Frame(root)
-        header.pack(fill="x", padx=12)
-        tk.Label(header, text="选", width=3, anchor="w").pack(side="left")
-        tk.Label(header, text="学号", width=8, anchor="w").pack(side="left")
-        tk.Label(header, text="姓名", width=12, anchor="w").pack(side="left")
-        tk.Label(header, text="状态", width=18, anchor="w").pack(side="left")
-        tk.Label(header, text="操作", anchor="e").pack(side="right")
-        ttk.Separator(root, orient="horizontal").pack(fill="x", padx=12, pady=(2, 4))
+        header_row = ttk.Frame(main, padding=(10, 6, 10, 4))
+        header_row.pack(fill="x")
+        ttk.Label(header_row, text="选", width=4, style="Muted.TLabel").pack(side="left")
+        ttk.Label(header_row, text="学号", width=9, style="Muted.TLabel").pack(side="left")
+        ttk.Label(header_row, text="姓名", width=14, style="Muted.TLabel").pack(side="left")
+        ttk.Label(header_row, text="状态", width=18, style="Muted.TLabel").pack(side="left")
+        ttk.Label(header_row, text="操作", style="Muted.TLabel").pack(side="right")
+        ttk.Separator(main, orient="horizontal").pack(fill="x", padx=4, pady=(0, 2))
 
-        list_outer = tk.Frame(root)
-        list_outer.pack(fill="both", expand=True, padx=12, pady=(0, 4))
-        self.students_canvas = tk.Canvas(list_outer, highlightthickness=0)
-        scrollbar = tk.Scrollbar(list_outer, orient="vertical", command=self.students_canvas.yview)
-        self.students_inner = tk.Frame(self.students_canvas)
+        list_outer = ttk.Frame(main)
+        list_outer.pack(fill="both", expand=True)
+        bg = self._style.lookup("TFrame", "background") or "#f3f4f6"
+        self.students_canvas = tk.Canvas(list_outer, highlightthickness=0, bg=bg)
+        scrollbar = ttk.Scrollbar(
+            list_outer, orient="vertical", command=self.students_canvas.yview)
+        self.students_inner = ttk.Frame(self.students_canvas)
         self.students_window = self.students_canvas.create_window(
             (0, 0), window=self.students_inner, anchor="nw")
         self.students_canvas.configure(yscrollcommand=scrollbar.set)
@@ -446,38 +604,39 @@ class SenderApp:
             lambda e: self.students_canvas.itemconfigure(self.students_window, width=e.width))
 
         self.hint_var = tk.StringVar(
-            master=root,
-            value="勾选要发送的学生，然后点“开始发送”；发送中按 Esc 可停止；双击状态列看失败原因。")
-        tk.Label(root, textvariable=self.hint_var, anchor="w", fg="#555555",
-                 wraplength=860, justify="left").pack(fill="x", padx=12, pady=(0, 4))
+            master=self.root,
+            value="勾选学生后点击“开始发送”；发送中按 Esc 停止；双击状态列查看失败原因。")
+        ttk.Label(main, textvariable=self.hint_var, style="Hint.TLabel", anchor="w",
+                  justify="left", wraplength=1000).pack(fill="x", pady=(8, 4))
 
-        bottom = tk.Frame(root)
-        bottom.pack(fill="x", padx=12, pady=(0, 8))
-        progress_box = tk.Frame(bottom)
+        footer = ttk.Frame(main)
+        footer.pack(fill="x", pady=(4, 0))
+        ttk.Separator(footer, orient="horizontal").pack(fill="x", pady=(0, 10))
+        progress_box = ttk.Frame(footer)
         progress_box.pack(side="left", fill="x", expand=True)
-        self.progress_var = tk.StringVar(master=root, value="进度：未开始")
-        tk.Label(progress_box, textvariable=self.progress_var, anchor="w").pack(fill="x")
+        self.progress_var = tk.StringVar(master=self.root, value="进度：未开始")
+        ttk.Label(progress_box, textvariable=self.progress_var,
+                  style="Stat.TLabel", anchor="w").pack(fill="x")
         self.progress_bar = ttk.Progressbar(
             progress_box, orient="horizontal", mode="determinate", maximum=1, value=0)
-        self.progress_bar.pack(fill="x", pady=(2, 2))
-        self.result_var = tk.StringVar(master=root)
-        tk.Label(progress_box, textvariable=self.result_var, anchor="w", fg="#333333",
-                 wraplength=480, justify="left").pack(fill="x")
+        self.progress_bar.pack(fill="x", pady=(4, 4))
+        self.result_var = tk.StringVar(master=self.root)
+        ttk.Label(progress_box, textvariable=self.result_var, style="Hint.TLabel",
+                  anchor="w", wraplength=620, justify="left").pack(fill="x")
 
-        actions = tk.Frame(bottom)
-        actions.pack(side="right", padx=(8, 0))
-        self.copy_failed_btn = tk.Button(
-            actions, text="复制失败名单", command=self.copy_failed_list)
-        self.copy_failed_btn.pack(side="left", padx=3)
-        self.stop_btn = tk.Button(
-            actions, text="停止发送 (Esc)", command=self.request_stop,
-            state="disabled", fg="#b00020")
-        self.stop_btn.pack(side="left", padx=3)
-        self.start_btn = tk.Button(actions, text="开始发送", command=self.run_all)
-        self.start_btn.pack(side="left", padx=3)
-
-        self.search_var.trace_add("write", self._on_search_change)
-        self.rebuild_student_list()
+        actions = ttk.Frame(footer)
+        actions.pack(side="right", padx=(12, 0), anchor="s")
+        self.copy_failed_btn = ttk.Button(
+            actions, text="复制失败名单", style="Toolbar.TButton",
+            command=self.copy_failed_list)
+        self.copy_failed_btn.pack(side="left", padx=(0, 6))
+        self.stop_btn = ttk.Button(
+            actions, text="停止 (Esc)", style="Danger.TButton",
+            command=self.request_stop, state="disabled")
+        self.stop_btn.pack(side="left", padx=(0, 6))
+        self.start_btn = ttk.Button(
+            actions, text="开始发送", style=self._accent_style, command=self.run_all)
+        self.start_btn.pack(side="left")
 
     STATUS_COLORS = {
         "待发送": "#5f6368",
@@ -602,8 +761,8 @@ class SenderApp:
 
     def _set_running_ui(self, running: bool):
         state = "disabled" if running else "normal"
-        for widget in (self.file_btn, self.log_btn, self.reply_btn,
-                       self.select_all_btn, self.select_none_btn,
+        # 日志/待回名单在发送中保持可查看；其余编辑类控件锁定。
+        for widget in (self.file_btn, self.select_all_btn, self.select_none_btn,
                        self.failed_only_btn, self.retry_failed_btn,
                        self.copy_failed_btn):
             widget.config(state=state)
@@ -727,7 +886,7 @@ class SenderApp:
                 f"跳过 {counts['已跳过']}")
 
     def open_log_window(self):
-        tk = self.tk
+        tk, ttk = self.tk, self._ttk
         if self.log_window is not None:
             try:
                 if self.log_window.winfo_exists():
@@ -739,12 +898,24 @@ class SenderApp:
             self.log_window = None
             self.log_text = None
         win = tk.Toplevel(self.root)
-        win.title("运行日志")
-        win.geometry("900x480")
-        body = tk.Frame(win)
-        body.pack(fill="both", expand=True, padx=8, pady=8)
-        text = tk.Text(body, wrap="word")
-        scroll = tk.Scrollbar(body, orient="vertical", command=text.yview)
+        win.title(f"{APP_NAME} · 运行日志")
+        win.geometry("920x520")
+        try:
+            win.transient(self.root)
+        except Exception:
+            pass
+        body = ttk.Frame(win, padding=14)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="运行日志", style="Section.TLabel").pack(anchor="w")
+        ttk.Label(body, text="发送过程、失败原因与停止记录", style="Hint.TLabel").pack(
+            anchor="w", pady=(2, 10))
+        text_frame = ttk.Frame(body)
+        text_frame.pack(fill="both", expand=True)
+        text = tk.Text(
+            text_frame, wrap="word", font=("Consolas", 10), bg="#ffffff", fg="#111827",
+            insertbackground="#111827", relief="flat", borderwidth=0,
+            highlightthickness=1, highlightbackground="#d1d5db")
+        scroll = ttk.Scrollbar(text_frame, orient="vertical", command=text.yview)
         text.configure(yscrollcommand=scroll.set)
         text.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
@@ -764,13 +935,16 @@ class SenderApp:
             text.delete("1.0", "end")
 
         win.protocol("WM_DELETE_WINDOW", close)
-        tk.Button(win, text="清空日志", command=clear).pack(pady=(0, 8))
+        footer = ttk.Frame(body)
+        footer.pack(fill="x", pady=(10, 0))
+        ttk.Button(footer, text="清空日志", style="Toolbar.TButton",
+                   command=clear).pack(side="right")
 
     def rebuild_student_list(self):
         if self._running:
             return
         self._cancel_search_rebuild()
-        tk = self.tk
+        tk, ttk = self.tk, self._ttk
         self._row_checkbuttons = []
         self._row_action_buttons = []
         for child in self.students_inner.winfo_children():
@@ -781,37 +955,39 @@ class SenderApp:
                 item["_selected_var"] = tk.BooleanVar(master=self.root, value=True)
             if "_status_var" not in item:
                 item["_status_var"] = tk.StringVar(master=self.root, value="待发送")
-            row = tk.Frame(self.students_inner)
-            row.pack(fill="x", pady=1)
-            check = tk.Checkbutton(row, variable=item["_selected_var"], width=3,
-                                   command=lambda it=item: self.on_select_change(it))
-            check.pack(side="left")
+            row = ttk.Frame(self.students_inner, padding=(10, 5))
+            row.pack(fill="x")
+            check = ttk.Checkbutton(row, variable=item["_selected_var"],
+                                    command=lambda it=item: self.on_select_change(it))
+            check.pack(side="left", padx=(0, 4))
             self._row_checkbuttons.append(check)
             sid = item.get("sid") or "-"
             sname = item.get("sname") or item.get("studentName") or "-"
-            tk.Label(row, text=sid, width=8, anchor="w").pack(side="left")
-            tk.Label(row, text=sname, width=12, anchor="w").pack(side="left")
-            status_lbl = tk.Label(
-                row, textvariable=item["_status_var"], width=18, anchor="w", cursor="hand2",
-                fg=self.STATUS_COLORS.get(item["_status_var"].get(), self.STATUS_DEFAULT_COLOR))
+            ttk.Label(row, text=sid, width=9, anchor="w",
+                      style="Muted.TLabel").pack(side="left")
+            ttk.Label(row, text=sname, width=14, anchor="w").pack(side="left")
+            status_lbl = ttk.Label(
+                row, textvariable=item["_status_var"], width=18, anchor="w",
+                cursor="hand2", style=self._status_style(item["_status_var"].get()))
             status_lbl.pack(side="left")
             status_lbl.bind("<Double-1>", lambda _e, it=item: self.show_row_reason(it))
             item["_status_label"] = status_lbl
-            msg_btn = tk.Button(row, text="复制话术", width=9,
-                                command=lambda it=item: self.copy_message(it))
-            msg_btn.pack(side="right", padx=2)
-            name_btn = tk.Button(row, text="复制学号姓名", width=14,
-                                 command=lambda it=item: self.copy_student(it))
-            name_btn.pack(side="right", padx=2)
+            msg_btn = ttk.Button(row, text="复制话术", style="RowAction.TButton",
+                                 command=lambda it=item: self.copy_message(it))
+            msg_btn.pack(side="right", padx=(6, 0))
+            name_btn = ttk.Button(row, text="复制学号姓名", style="RowAction.TButton",
+                                  command=lambda it=item: self.copy_student(it))
+            name_btn.pack(side="right", padx=(6, 0))
             self._row_action_buttons.extend((msg_btn, name_btn))
+            ttk.Separator(self.students_inner, orient="horizontal").pack(fill="x", padx=10)
         if not self.items:
-            tk.Label(self.students_inner,
-                     text="还没有加载学生，请点击上方“选择 JSON / HTML 文件”。",
-                     fg="#666666").pack(pady=24)
+            ttk.Label(self.students_inner,
+                      text="还没有加载学生，请点击右上角“选择文件”。",
+                      style="Hint.TLabel").pack(pady=32)
         elif not visible:
-            tk.Label(self.students_inner,
-                     text="没有符合搜索/筛选条件的学生。",
-                     fg="#666666").pack(pady=24)
+            ttk.Label(self.students_inner,
+                      text="没有符合搜索/筛选条件的学生。",
+                      style="Hint.TLabel").pack(pady=32)
         self.students_canvas.yview_moveto(0)
         self.update_summary()
 
@@ -822,7 +998,7 @@ class SenderApp:
         label = item.get("_status_label")
         if label is not None:
             try:
-                label.configure(fg=self.STATUS_COLORS.get(text, self.STATUS_DEFAULT_COLOR))
+                label.configure(style=self._status_style(text))
             except self.tk.TclError:
                 pass
         self.root.update_idletasks()
@@ -833,7 +1009,7 @@ class SenderApp:
             var = item.get("_selected_var")
             if var is not None and var.get():
                 selected += 1
-        self.summary_var.set(f"共 {len(self.items)} 人，已勾选 {selected} 人")
+        self.summary_var.set(f"共 {len(self.items)} 人 · 已勾选 {selected} 人")
 
     def _apply_selection_status(self, item, selected: bool):
         status_var = item.get("_status_var")
@@ -862,7 +1038,7 @@ class SenderApp:
     def _reset_hint(self):
         if self._running:
             return
-        self.hint_var.set("勾选要发送的学生，然后点“开始发送”；发送中按 Esc 可停止；双击状态列看失败原因。")
+        self.hint_var.set("勾选学生后点击“开始发送”；发送中按 Esc 停止；双击状态列查看失败原因。")
 
     def copy_to_clipboard(self, text, label):
         if self._running:
@@ -900,7 +1076,7 @@ class SenderApp:
         self.root.update_idletasks()
 
     def refresh_reply_count(self):
-        self.reply_btn.config(text=f"📨 待回名单 ({len(actionable(self.reply_notes))})")
+        self.reply_btn.config(text=f"待回名单 · {len(actionable(self.reply_notes))}")
 
     def update_input_label(self):
         if not self.input_paths:
@@ -971,8 +1147,12 @@ class SenderApp:
             from reply_notes import export_csv
         notes = actionable(self.reply_notes)
         win = tk.Toplevel(self.root)
-        win.title("待回消息名单（仅显示需回复/待确认）")
-        win.geometry("900x500")
+        win.title(f"{APP_NAME} · 待回名单")
+        win.geometry("940x540")
+        try:
+            win.transient(self.root)
+        except Exception:
+            pass
         cols = [
             ("student", "学生", 160),
             ("chat_title", "会话", 180),
@@ -980,22 +1160,28 @@ class SenderApp:
             ("verdict", "需回", 90),
             ("time", "时间", 150),
         ]
-        body = tk.Frame(win)
-        body.pack(fill="both", expand=True, padx=8, pady=8)
-        tree = ttk.Treeview(body, columns=[c for c, _, _ in cols],
+        body = ttk.Frame(win, padding=14)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="待回消息名单", style="Section.TLabel").pack(anchor="w")
+        ttk.Label(body, text="仅显示需回复/待确认的会话", style="Hint.TLabel").pack(
+            anchor="w", pady=(2, 10))
+        tree_frame = ttk.Frame(body)
+        tree_frame.pack(fill="both", expand=True)
+        tree = ttk.Treeview(tree_frame, columns=[c for c, _, _ in cols],
                             show="headings", height=15, selectmode="browse")
         for c, label, width in cols:
             tree.heading(c, text=label)
             tree.column(c, width=width, anchor="w")
         for n in notes:
             tree.insert("", "end", values=tuple(n.get(c, "") for c, _, _ in cols))
-        scroll = ttk.Scrollbar(body, orient="vertical", command=tree.yview)
+        scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=scroll.set)
         tree.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
 
         copy_hint = tk.StringVar(master=win, value="选中一行后点“复制学号姓名”，或双击该行。")
-        tk.Label(win, textvariable=copy_hint, anchor="w", fg="#555555").pack(fill="x", padx=10)
+        ttk.Label(body, textvariable=copy_hint, style="Hint.TLabel",
+                  anchor="w").pack(fill="x", pady=(8, 4))
 
         def copy_selected(_event=None):
             if self._running:
@@ -1024,14 +1210,16 @@ class SenderApp:
             export_csv(notes, path)
             messagebox.showinfo("导出成功", f"已导出至：\n{path}", parent=win)
 
-        actions = tk.Frame(win)
-        actions.pack(pady=(4, 10))
-        tk.Button(actions, text="复制选中学生学号姓名",
-                  command=copy_selected).pack(side="left", padx=4)
-        tk.Button(actions, text="导出 CSV", command=do_export).pack(side="left", padx=4)
+        actions = ttk.Frame(body)
+        actions.pack(fill="x", pady=(4, 0))
+        ttk.Button(actions, text="复制选中学生学号姓名", style="Toolbar.TButton",
+                   command=copy_selected).pack(side="left", padx=(0, 6))
+        ttk.Button(actions, text="导出 CSV", style="Toolbar.TButton",
+                   command=do_export).pack(side="left")
         tree.bind("<Double-1>", copy_selected)
         if not notes:
-            tk.Label(win, text="当前没有需要回复的学生", fg="#666666").pack(pady=(0, 6))
+            ttk.Label(body, text="当前没有需要回复的学生",
+                      style="Hint.TLabel").pack(pady=(8, 0))
 
     def run_all(self):
         if self._running:
@@ -1216,10 +1404,12 @@ class SenderApp:
 
 def main(argv=None):
     import argparse
-    ap = argparse.ArgumentParser(description="企业微信反馈发送器")
+    ap = argparse.ArgumentParser(description=APP_NAME)
+    ap.add_argument("--version", action="version", version=f"{APP_NAME} {APP_VERSION}")
     ap.add_argument("--input", default=None,
                     help="输入 JSON / HTML 快照；省略时尝试 测试.json，不存在则启动后选择")
     ap.add_argument("--server", default="https://feedback.wxjifang.cn", help="判定服务端")
+    ap.add_argument("--smoke-test", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
     input_path = args.input or "测试.json"
     items = []
@@ -1232,11 +1422,11 @@ def main(argv=None):
             key = archive_key_for_input(input_path)
             input_paths = [input_path]
             if not items:
-                load_error = f"启动文件 {input_path} 没有有效学生数据，请点击“选择 JSON / HTML 文件（可多选）”重新选择。"
+                load_error = f"启动文件 {input_path} 没有有效学生数据，请点击“选择文件”重新选择。"
         except Exception as exc:
-            load_error = f"启动时未能读取 {input_path}：{exc}\n请点击“选择 JSON / HTML 文件（可多选）”。"
+            load_error = f"启动时未能读取 {input_path}：{exc}\n请点击“选择文件”。"
     elif args.input:
-        load_error = f"启动时未能读取 {input_path}：文件不存在\n请点击“选择 JSON / HTML 文件（可多选）”。"
+        load_error = f"启动时未能读取 {input_path}：文件不存在\n请点击“选择文件”。"
     import tkinter as tk
     try:
         from sender_py.window_utils import set_per_monitor_dpi_awareness
@@ -1244,7 +1434,22 @@ def main(argv=None):
         from window_utils import set_per_monitor_dpi_awareness
     set_per_monitor_dpi_awareness()
     root = tk.Tk()
+    if args.smoke_test:
+        root.withdraw()
     app = SenderApp(root, items, args.server, key, input_paths=input_paths)
+    if args.smoke_test:
+        if not app._using_sv_ttk:
+            if sys.stderr is not None:
+                print("smoke test failed: sv-ttk not loaded", file=sys.stderr)
+            return 2
+        if app._logo_image is None:
+            if sys.stderr is not None:
+                print("smoke test failed: favicon not loaded", file=sys.stderr)
+            return 2
+        root.update_idletasks()
+        root.update()
+        root.destroy()
+        return 0
     if load_error:
         app.emit(load_error)
         from tkinter import messagebox

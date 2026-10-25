@@ -1,8 +1,8 @@
-# sender_py（企业微信反馈发送器）
+# 极方每周反馈程序（sender_py）
 
-基于 **mss 整窗截图 + ROI 相对比例反推 + 云端两图判定** 的企业微信反馈发送器。
+基于 **mss 整窗截图 + ROI 相对比例反推 + 云端两图判定** 的企业微信反馈发送器。主界面使用 sv-ttk 浅色主题、网站 favicon 作为程序图标，GitHub Actions 可打包单文件 Windows exe。
 
-当前为源码运行版本；GitHub Actions 会生成未签名的 Windows 构建 Artifact，并可在推送 `sender-*` tag 时自动发布 GitHub Release。真实发送只支持 Windows；Linux 可运行全部纯函数单测。
+支持源码运行；GitHub Actions 会生成未签名的单文件 `极方每周反馈程序.exe`，并在推送 `sender-*` tag 时自动发布 GitHub Release。真实发送只支持 Windows；Linux 可运行全部纯函数单测。
 
 ---
 
@@ -22,7 +22,8 @@
 
 ```text
 feedback-v1/tools/sender_py/
-├── sender.py              # 主流程 + Tk 界面 + CLI
+├── sender.py              # 主流程 + sv-ttk 界面 + CLI
+├── version_info.txt       # Windows exe 属性页的中文产品名/版本
 ├── window_utils.py        # 企微窗口查找、DPI、键鼠、窗口归位（Windows）
 ├── capture.py             # mss 整窗截图 + 相对比例裁剪
 ├── roi_manager.py         # ROI 签名、相对比例存取、聊天区反推
@@ -160,19 +161,20 @@ python sender_py\sender.py --input 测试.json
 可选参数：
 
 ```text
---input   输入 JSON / HTML 路径；省略时尝试 测试.json，不存在则启动后选择
---server  判定服务端，默认 https://feedback.wxjifang.cn
+--input    输入 JSON / HTML 路径；省略时尝试 测试.json，不存在则启动后选择
+--server   判定服务端，默认 https://feedback.wxjifang.cn
+--version  打印程序名与版本后退出
 ```
 
 ### GitHub Actions 编译与发布
 
 推送 `feedback-v1/tools/sender_py/**` 到 `main` 或 `feat/**` 分支，或在 Actions 页面手动运行 **Build sender_py (Windows)**：
 
-1. Linux job 先跑 `compileall` 和全部 53 项单测；
-2. Windows job 用 PyInstaller 打包 onedir 版 `FeedbackSender.exe`；
-3. 在该次 Actions run 的 **Artifacts** 下载 `FeedbackSender-windows-x64.zip`。
+1. Linux job 先跑 `compileall` 和全部 55 项单测；
+2. Windows job 先做导入与界面冒烟检查，再用 PyInstaller 打包单文件 `极方每周反馈程序.exe`，最后用 `--smoke-test` 验证单文件能启动并加载 sv-ttk/图标；
+3. 在该次 Actions run 的 **Artifacts** 下载 `JiFangFeedbackSender-windows-x64`。
 
-需要正式发布时，推送 `sender-*` tag（例如 `sender-v1.0.0`）。同一个工作流会在编译成功后创建同名 GitHub Release，并自动挂载 `FeedbackSender-windows-x64.zip`。
+需要正式发布时，推送 `sender-*` tag（例如 `sender-v1.1.0`）。同一个工作流会在编译成功后创建对应 tag 的 GitHub Release，并自动挂载 `极方每周反馈程序.exe`。
 
 产物未签名，仅供内测/验证；正式分发前需做代码签名和杀软回归。
 
@@ -321,7 +323,7 @@ cd feedback-v1/tools
 python3 -m unittest discover -s sender_py/tests -v
 ```
 
-当前覆盖 53 项，包含：
+当前覆盖 55 项，包含：
 
 - 输入契约解析；
 - JSON / HTML 快照解析（内嵌数据 + 旧版表格兜底）；
@@ -356,7 +358,7 @@ Windows 真机验收建议至少覆盖：
 
 ## 12. 当前限制
 
-- 正式分发仍以源码运行为准；GitHub Actions 的 Windows Artifact 未签名，仅供内测/验证；
+- GitHub Actions 的 Windows Artifact/Release 未签名，仅供内测/验证；onefile 首次启动会解压到临时目录，可能触发杀软启发式拦截；
 - 真实发送依赖 Windows + 企业微信桌面版；
 - 企业微信 UI 改版可能导致搜索/候选定位失效，需要真机回归；
 - 停止发送是安全边界停止：不强行打断正在粘贴/发送的消息，当前学生结束后停止，避免发出半条；

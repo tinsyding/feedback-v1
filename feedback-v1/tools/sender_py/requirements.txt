@@ -3,3 +3,4 @@ Pillow>=10.0.0
 pywin32>=306; sys_platform == "win32"
 pyperclip
 requests
+sv-ttk>=2.6.0

@@ -43,5 +43,6 @@ feedback/
   首次配置需在仓库 Secrets 中填入 `DEPLOY_HOST/DEPLOY_PORT/DEPLOY_USER/DEPLOY_SSH_KEY`
  （详见 workflow 文件头注释）。
 - 桌面工具：旧 `desktop-sender` 及其云端打包工作流已移除（历史版本可从 git 历史取回）；
-  重写版源码位于 `feedback-v1/tools/sender_py/`，当前不提供打包产物，按该目录 README
-  从源码运行。
+  重写版源码位于 `feedback-v1/tools/sender_py/`，由 `.github/workflows/build-sender.yml`
+  构建单文件 `极方每周反馈程序.exe`，推送 `sender-*` tag 自动发布 GitHub Release，
+  详见该目录 README。
