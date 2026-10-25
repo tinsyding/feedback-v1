@@ -113,6 +113,95 @@ def identify(title_img, chat_tail_img, target_id: str, target_name: str,
     return map_response(payload.get("data"))
 
 
+def identify_title(title_img, target_id: str, target_name: str,
+                   server: str, token=None, timeout: int = 35) -> dict:
+    """快速同步通道（方案 A）：仅上传极小的标题栏截图，秒级核验会话身份与是否群聊。"""
+    try:
+        import io
+        from PIL import Image  # noqa: F401
+        import requests
+    except Exception as e:
+        raise RuntimeError(f"缺少依赖（requests/Pillow）：{e}")
+
+    server = (server or "").strip().rstrip("/")
+    if not server.startswith(("http://", "https://")):
+        raise RuntimeError("服务器地址必须以 http(s):// 开头")
+    tok = load_token(token) or DEFAULT_SENDER_TOKEN
+
+    buf = io.BytesIO()
+    title_img.save(buf, format="PNG")
+
+    try:
+        resp = requests.post(
+            server + IDENTIFY_PATH,
+            data={
+                "mode": "title",
+                "target_id": target_id or "",
+                "target_name": target_name or "",
+                "token": tok,
+            },
+            files={
+                "image_title": ("title.png", buf.getvalue(), "image/png"),
+            },
+            timeout=timeout,
+        )
+    except Exception as e:
+        raise RuntimeError(f"标题核验请求失败：{e}")
+    try:
+        payload = resp.json()
+    except Exception:
+        raise RuntimeError(f"标题核验返回非 JSON（HTTP {resp.status_code}）")
+    if not isinstance(payload, dict) or not payload.get("success"):
+        err = payload.get("error") if isinstance(payload, dict) else None
+        raise RuntimeError(f"标题核验被拒绝：{err or resp.status_code}")
+    return map_response(payload.get("data"))
+
+
+def identify_reply(chat_tail_img, target_id: str, target_name: str,
+                   detected_title: str, server: str, token=None, timeout: int = 50) -> dict:
+    """后台异步通道（方案 A）：上传聊天区尾部截图，深度分析家长最后一条消息及是否需要回复。"""
+    try:
+        import io
+        from PIL import Image  # noqa: F401
+        import requests
+    except Exception as e:
+        raise RuntimeError(f"缺少依赖（requests/Pillow）：{e}")
+
+    server = (server or "").strip().rstrip("/")
+    if not server.startswith(("http://", "https://")):
+        raise RuntimeError("服务器地址必须以 http(s):// 开头")
+    tok = load_token(token) or DEFAULT_SENDER_TOKEN
+
+    buf = io.BytesIO()
+    chat_tail_img.save(buf, format="PNG")
+
+    try:
+        resp = requests.post(
+            server + IDENTIFY_PATH,
+            data={
+                "mode": "reply",
+                "target_id": target_id or "",
+                "target_name": target_name or "",
+                "detected_title": detected_title or "",
+                "token": tok,
+            },
+            files={
+                "image_chat": ("chat.png", buf.getvalue(), "image/png"),
+            },
+            timeout=timeout,
+        )
+    except Exception as e:
+        raise RuntimeError(f"留言分析请求失败：{e}")
+    try:
+        payload = resp.json()
+    except Exception:
+        raise RuntimeError(f"留言分析返回非 JSON（HTTP {resp.status_code}）")
+    if not isinstance(payload, dict) or not payload.get("success"):
+        err = payload.get("error") if isinstance(payload, dict) else None
+        raise RuntimeError(f"留言分析被拒绝：{err or resp.status_code}")
+    return map_response(payload.get("data"))
+
+
 def calibrate_roi(base_image, server: str, token=None, timeout: int = 50) -> dict | None:
     """调用服务端 Qwen-VL-Max 多模态模型自动框选企业微信窗口区域。
 

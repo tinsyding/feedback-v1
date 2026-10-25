@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 
 
 def asset_path(filename: str) -> str:
@@ -282,23 +282,112 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
     return {"title": tuple(roi["title"]), "input": tuple(roi["input"]), "chat": tuple(roi["chat"])}
 
 
-def judge_candidate(rect, roi, target_id: str, target_name: str, server: str, token=None) -> tuple:
-    """整窗截图→裁 title/chat_tail→identify 一次判定。返回 (judgment|None, chat_title|None, error|None)。"""
+class AsyncReplyAnalyzer:
+    """方案 A 后台异步留言分析线程池：主流程秒验标题后立即发作业，将留言截图交由后台并发判定。"""
+
+    def __init__(self, server: str, token: str = None, max_workers: int = 3, event_queue=None):
+        from concurrent.futures import ThreadPoolExecutor
+        self.server = server
+        self.token = token
+        self.event_queue = event_queue
+        self._lock = threading.Lock()
+        self._pending = 0
+        self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ReplyWorker")
+
+    @property
+    def pending_count(self) -> int:
+        with self._lock:
+            return self._pending
+
+    def _emit_event(self, event):
+        if self.event_queue is not None:
+            try:
+                self.event_queue.put_nowait(event)
+            except Exception:
+                pass
+
+    def submit(self, student_name: str, cand: int, sid: str, sname: str,
+               chat_title: str, matched: bool, chat_img):
+        if chat_img is None:
+            return
+        with self._lock:
+            self._pending += 1
+            pending = self._pending
+        self._emit_event(("progress", pending))
+        self._executor.submit(
+            self._worker, student_name, cand, sid, sname, chat_title, matched, chat_img
+        )
+
+    def _worker(self, student_name: str, cand: int, sid: str, sname: str,
+                chat_title: str, matched: bool, chat_img):
+        try:
+            try:
+                from sender_py.vision_api import identify_reply
+            except ModuleNotFoundError:
+                from vision_api import identify_reply
+            reply_res = identify_reply(
+                chat_img, sid, sname, chat_title, self.server, self.token
+            )
+            judgment = {
+                "matched": matched,
+                "detected_title": chat_title,
+                "last_sender": reply_res.get("last_sender"),
+                "last_message_text": reply_res.get("last_message_text", ""),
+                "needs_reply": reply_res.get("needs_reply"),
+                "reason": reply_res.get("reason", ""),
+            }
+        except Exception as exc:
+            # 异常时遵循 fail-open 原则：needs_reply=None（记“待人工确认”），绝不漏掉家长留言
+            judgment = {
+                "matched": matched,
+                "detected_title": chat_title,
+                "last_sender": "unknown",
+                "last_message_text": f"(后台分析异常: {exc})",
+                "needs_reply": None,
+                "reason": str(exc),
+            }
+        try:
+            if should_record(chat_title, judgment):
+                note = make_note(student_name, cand, chat_title, matched, judgment)
+                self._emit_event(("note", note, judgment))
+        finally:
+            with self._lock:
+                self._pending = max(0, self._pending - 1)
+                pending = self._pending
+            self._emit_event(("progress", pending))
+
+
+def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
+                    token=None, fast_title_only: bool = False) -> tuple:
+    """整窗截图→裁 title/chat_tail→判定。
+
+    fast_title_only=True（方案 A 异步加速）：
+      仅上传极小的 title_img 秒验身份与群聊，同时把发送前截好的 chat_img 一并返回供后台线程异步分析。
+      返回 (judgment|None, chat_title|None, error|None, chat_img|None)。
+    fast_title_only=False（传统同步模式）：
+      返回 (judgment|None, chat_title|None, error|None)。
+    """
     try:
         from sender_py.capture import capture_wecom_window, crop_by_rel
-        from sender_py.vision_api import identify
+        from sender_py.vision_api import identify, identify_title
     except ModuleNotFoundError:
         from capture import capture_wecom_window, crop_by_rel
-        from vision_api import identify
+        from vision_api import identify, identify_title
     img = capture_wecom_window(rect)
     if img is None:
-        return (None, None, "整窗截图失败")
+        return (None, None, "整窗截图失败", None) if fast_title_only else (None, None, "整窗截图失败")
     W, H = img.size
     title_abs = to_abs(roi["title"], (W, H))
     chat_abs = to_abs(roi["chat"], (W, H))
     title_img = crop_by_rel(img, roi["title"])
     chat_img = crop_chat_tail(crop_by_rel(img, roi["chat"]))
     _ = (title_abs, chat_abs)
+    if fast_title_only:
+        try:
+            judgment = identify_title(title_img, target_id, target_name, server, token)
+        except Exception as e:
+            return (None, None, str(e), None)
+        return (judgment, judgment.get("detected_title"), None, chat_img)
     try:
         judgment = identify(title_img, chat_img, target_id, target_name, server, token)
     except Exception as e:
@@ -307,7 +396,7 @@ def judge_candidate(rect, roi, target_id: str, target_name: str, server: str, to
 
 
 def send_student(item: dict, server: str, token=None, config_path: str = None,
-                 parent=None, log=print, should_stop=None) -> dict:
+                 parent=None, log=print, should_stop=None, reply_analyzer=None) -> dict:
     """单个学生全流程：最多 3 候选机械 1→2→3。返回 {result, notes, ...}（notes 供待回名单）。"""
     try:
         from sender_py import window_utils as wu
@@ -352,9 +441,15 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         if should_stop is not None and should_stop():
             log(f"[{name}] 收到停止请求，候选{cand}未发送")
             return {"result": "stopped", "reason": "用户停止", "notes": notes}
-        judgment, chat_title, err = judge_candidate(rect, roi, sid, sname, server, token)
-        if entered and should_record(chat_title, judgment):
-            dedupe_add(notes, make_note(name, cand, chat_title, bool((judgment or {}).get("matched")), judgment or {}))
+        if reply_analyzer is not None:
+            judgment, chat_title, err, chat_img = judge_candidate(
+                rect, roi, sid, sname, server, token, fast_title_only=True
+            )
+        else:
+            judgment, chat_title, err = judge_candidate(rect, roi, sid, sname, server, token)
+            chat_img = None
+            if entered and should_record(chat_title, judgment):
+                dedupe_add(notes, make_note(name, cand, chat_title, bool((judgment or {}).get("matched")), judgment or {}))
         if err is not None:
             log(f"[{name}] 候选{cand}：{err}，换下一候选")
             _paced(CANDIDATE_GAP)
@@ -365,6 +460,9 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
             if should_stop is not None and should_stop():
                 log(f"[{name}] 收到停止请求，候选{cand}未发送")
                 return {"result": "stopped", "reason": "用户停止", "notes": notes}
+            if reply_analyzer is not None and chat_img is not None:
+                reply_analyzer.submit(name, cand, sid, sname, chat_title, True, chat_img)
+                log(f"[{name}] 已投递后台异步分析家长留言，立即发送反馈")
             ok, why = paste_and_send(message)
             if should_stop is None or not should_stop():
                 _paced(AFTER_SEND_GAP)
@@ -413,6 +511,10 @@ class SenderApp:
         self._suspend_filter = False
         self._row_checkbuttons = []
         self._row_action_buttons = []
+        import queue
+        self._reply_event_queue = queue.Queue()
+        self._pending_reply_tasks = 0
+        self._reply_analyzer = None
 
         self._setup_appearance(root)
         root.title(APP_NAME)
@@ -424,6 +526,7 @@ class SenderApp:
         self._build_ui()
         self.search_var.trace_add("write", self._on_search_change)
         self.rebuild_student_list()
+        self._schedule_reply_drain()
 
     def _setup_appearance(self, root):
         """字体、sv-ttk 主题、状态色、网站 logo；避免主界面停留在 Tk 默认外观。"""
@@ -961,6 +1064,7 @@ class SenderApp:
             return False
 
     def _poll_stop(self):
+        self._drain_reply_events()
         if self._stop_requested:
             self._announce_stop()
             return True
@@ -1265,7 +1369,47 @@ class SenderApp:
     def copy_message(self, item):
         self.copy_to_clipboard(item.get("message", ""), "话术")
 
-    def emit(self, msg: str):
+    def _schedule_reply_drain(self):
+        self._drain_reply_events()
+        try:
+            if self.root.winfo_exists():
+                self.root.after(250, self._schedule_reply_drain)
+        except Exception:
+            pass
+
+    def _drain_reply_events(self):
+        q = getattr(self, "_reply_event_queue", None)
+        if q is None:
+            return
+        updated = False
+        while True:
+            try:
+                event = q.get_nowait()
+            except Exception:
+                break
+            kind = event[0]
+            if kind == "progress":
+                self._pending_reply_tasks = int(event[1] or 0)
+                updated = True
+            elif kind == "note":
+                note = event[1]
+                dedupe_add(self.reply_notes, note)
+                updated = True
+                student = note.get("student", "")
+                verdict_str = note.get("verdict", "")
+                last_msg = note.get("last_message", "")
+                if note.get("needs_reply") is True:
+                    self.emit(f"🔔 [{student}] 后台留言分析：{verdict_str}（最后消息：{last_msg or '无'}）", _drain=False)
+                elif note.get("needs_reply") is None:
+                    self.emit(f"⚠️ [{student}] 后台留言分析：{verdict_str}（{last_msg or '无'}）", _drain=False)
+                else:
+                    self.emit(f"✓ [{student}] 后台留言分析：无需回复", _drain=False)
+        if updated:
+            self.refresh_reply_count()
+
+    def emit(self, msg: str, _drain: bool = True):
+        if _drain:
+            self._drain_reply_events()
         msg = str(msg)
         self.log_buffer.append(msg)
         if len(self.log_buffer) > 5000:
@@ -1281,7 +1425,12 @@ class SenderApp:
         self.root.update_idletasks()
 
     def refresh_reply_count(self):
-        self.reply_btn.config(text=f"待回名单 · {len(actionable(self.reply_notes))}")
+        count = len(actionable(self.reply_notes))
+        pending = getattr(self, "_pending_reply_tasks", 0)
+        if pending > 0:
+            self.reply_btn.config(text=f"📨 待回名单 · {count} (分析中 {pending})")
+        else:
+            self.reply_btn.config(text=f"📨 待回名单 · {count}")
 
     def update_input_label(self):
         if not self.input_paths:
@@ -1487,6 +1636,15 @@ class SenderApp:
         except Exception:
             pass
 
+        if self._reply_analyzer is None:
+            self._reply_analyzer = AsyncReplyAnalyzer(
+                server=self.server, token=token, max_workers=3,
+                event_queue=self._reply_event_queue
+            )
+        else:
+            self._reply_analyzer.server = self.server
+            self._reply_analyzer.token = token
+
         for item in self.items:
             if id(item) in selected_ids:
                 self.set_status(item, "待发送")
@@ -1531,7 +1689,8 @@ class SenderApp:
                 try:
                     res = send_student(
                         item, self.server, token, parent=self.root,
-                        log=self.emit, should_stop=self._poll_stop)
+                        log=self.emit, should_stop=self._poll_stop,
+                        reply_analyzer=self._reply_analyzer)
                 except Exception as exc:
                     res = {"result": "error", "reason": f"程序异常：{exc}", "notes": []}
                 result = res.get("result", "")
@@ -1606,12 +1765,16 @@ class SenderApp:
         if self._close_after_stop:
             self.root.destroy()
             return
+        self._drain_reply_events()
         self.emit(summary)
         counts = summarize_status_counts(self._status_of(item) for item in self.items)
         extra = ""
         if counts["发送失败"] or counts["未匹配"]:
             extra = ("\n\n可点主界面的“重试失败项”只勾选失败/未匹配学生，"
                      "或“复制失败名单”。")
+        if self._pending_reply_tasks > 0:
+            extra += (f"\n\n后台仍有 {self._pending_reply_tasks} 条家长留言正在异步分析中，"
+                      "完成后将自动更新右上角“待回名单”。")
         messagebox.showinfo("发送结束", summary + extra, parent=self.root)
 
 

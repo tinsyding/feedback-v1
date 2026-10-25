@@ -209,6 +209,54 @@ class TestStage6(unittest.TestCase):
         self.assertLess(key_calls.index(("key", wu.VK_DOWN)),
                         key_calls.index(("key", wu.VK_RETURN)))
 
+    def test_async_reply_analyzer_pipeline_and_fail_open(self):
+        import queue
+        import time
+        from sender_py.sender import AsyncReplyAnalyzer
+        from sender_py import vision_api
+
+        q = queue.Queue()
+        analyzer = AsyncReplyAnalyzer("https://feedback.wxjifang.cn", "tok", max_workers=2, event_queue=q)
+
+        # 1. 正常返回需回
+        with mock.patch.object(vision_api, "identify_reply", return_value={
+            "last_sender": "parent",
+            "last_message_text": "老师请问这道题怎么做？",
+            "needs_reply": True,
+            "reason": "家长提问",
+        }):
+            analyzer.submit("90001张三", 1, "90001", "张三", "90001张三", True, object())
+            deadline = time.monotonic() + 3.0
+            while analyzer.pending_count > 0 and time.monotonic() < deadline:
+                time.sleep(0.02)
+
+        events = []
+        while not q.empty():
+            events.append(q.get_nowait())
+        note_events = [e for e in events if e[0] == "note"]
+        self.assertEqual(len(note_events), 1)
+        note = note_events[0][1]
+        self.assertEqual(note["student"], "90001张三")
+        self.assertEqual(note["verdict"], "需回")
+        self.assertEqual(note["last_message"], "老师请问这道题怎么做？")
+
+        # 2. 网络异常时 fail-open 记为“待人工确认”
+        with mock.patch.object(vision_api, "identify_reply", side_effect=RuntimeError("timeout")):
+            analyzer.submit("80001李四", 1, "80001", "李四", "80001李四", True, object())
+            deadline = time.monotonic() + 3.0
+            while analyzer.pending_count > 0 and time.monotonic() < deadline:
+                time.sleep(0.02)
+
+        events2 = []
+        while not q.empty():
+            events2.append(q.get_nowait())
+        note_events2 = [e for e in events2 if e[0] == "note"]
+        self.assertEqual(len(note_events2), 1)
+        note2 = note_events2[0][1]
+        self.assertEqual(note2["student"], "80001李四")
+        self.assertIsNone(note2["needs_reply"])
+        self.assertEqual(note2["verdict"], "待人工确认")
+
 
 if __name__ == "__main__":
     unittest.main()

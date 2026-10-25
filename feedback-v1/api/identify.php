@@ -81,10 +81,24 @@ function _clip_text($v, $max = 64) {
 }
 $targetId = _clip_text($_POST['target_id'] ?? '');
 $targetName = _clip_text($_POST['target_name'] ?? '');
+$mode = _clip_text($_POST['mode'] ?? 'full', 16);
+if (!in_array($mode, ['full', 'title', 'reply'], true)) {
+    $mode = 'full';
+}
+$detectedTitleIn = _clip_text($_POST['detected_title'] ?? '', 128);
+
 if ($targetId === '' && $targetName === '') {
     sendResponse(false, null, 'target_id 与 target_name 不能同时为空', 400);
 }
-foreach (['image_title', 'image_chat'] as $field) {
+
+$requiredFields = ['image_title', 'image_chat'];
+if ($mode === 'title') {
+    $requiredFields = ['image_title'];
+} elseif ($mode === 'reply') {
+    $requiredFields = ['image_chat'];
+}
+
+foreach ($requiredFields as $field) {
     if (!isset($_FILES[$field]) || ($_FILES[$field]['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
         sendResponse(false, null, '缺少上传图：' . $field, 400);
     }
@@ -111,21 +125,15 @@ if ($apiBase === '') {
     $apiBase = rtrim($apiBase, '/') . '/chat/completions';
 }
 $model = getenv('IDENTIFY_MODEL') ?: ($localKeys['identifyModel'] ?? '') ?: 'qwen-vl-max';
+if ($mode === 'title') {
+    $fastModel = getenv('IDENTIFY_FAST_MODEL') ?: ($localKeys['identifyFastModel'] ?? '');
+    if ($fastModel !== '') {
+        $model = $fastModel;
+    }
+}
 if (!function_exists('curl_init')) {
     sendResponse(false, null, '服务端缺少 curl 扩展', 200);
 }
-
-$prompt = '你是企业微信窗口核验器。看两张图：图1是聊天窗口顶部标题栏截图，图2是同一窗口聊天区末尾截图。'
-    . '目标学生学号为“' . $targetId . '”，姓名为“' . $targetName . '”。'
-    . '只输出 JSON（无 markdown、无多余文字），字段：'
-    . '{"matched":bool(标题同时包含学号与姓名才为true，任一缺失/是群聊则false),'
-    . '"is_group":bool(是群聊/多人会话为true),'
-    . '"title_in_header":bool(标题栏能读到有效标题),'
-    . '"detected_title":string(标题栏读到的原文，读不到为空字符串),'
-    . '"last_sender":"me"|"parent"|"unknown"|null(聊天末尾最后一条是谁发的：我/家长/无法判断/无消息),'
-    . '"last_message_text":string(最后一条文本内容，无则为空字符串),'
-    . '"needs_reply":bool|null(家长最后一条需要老师回复为true，明确无需回为false，判不出为null),'
-    . '"reason":string(一句话理由)}';
 
 function _img_data_url($tmpPath) {
     $info = getimagesize($tmpPath);
@@ -133,15 +141,55 @@ function _img_data_url($tmpPath) {
     return 'data:' . $mime . ';base64,' . base64_encode(file_get_contents($tmpPath));
 }
 
+if ($mode === 'title') {
+    $prompt = '你是企业微信窗口核验器。看聊天窗口顶部标题栏截图。'
+        . '目标学生学号为“' . $targetId . '”，姓名为“' . $targetName . '”。'
+        . '只输出 JSON（无 markdown、无多余文字），字段：'
+        . '{"matched":bool(标题同时包含学号与姓名才为true，任一缺失/是群聊则false),'
+        . '"is_group":bool(是群聊/多人会话为true),'
+        . '"title_in_header":bool(标题栏能读到有效标题),'
+        . '"detected_title":string(标题栏读到的原文，读不到为空字符串),'
+        . '"reason":string(一句话理由)}';
+    $userContent = [
+        ['type' => 'text', 'text' => $prompt],
+        ['type' => 'image_url', 'image_url' => ['url' => _img_data_url($_FILES['image_title']['tmp_name'])]],
+    ];
+} elseif ($mode === 'reply') {
+    $titleCtx = $detectedTitleIn !== '' ? $detectedTitleIn : ($targetId . $targetName);
+    $prompt = '你是企业微信家长留言分析器。看聊天窗口消息区末尾截图（当前会话：“' . $titleCtx . '”）。'
+        . '只输出 JSON（无 markdown、无多余文字），字段：'
+        . '{"last_sender":"me"|"parent"|"unknown"|null(聊天末尾最后一条是谁发的：我(右侧气泡)/家长(左侧气泡)/无法判断/无消息),'
+        . '"last_message_text":string(最后一条文本内容，无则为空字符串),'
+        . '"needs_reply":bool|null(家长最后一条需要老师回复为true，明确无需回或最后一条是我发的为false，判不出为null),'
+        . '"reason":string(一句话理由)}';
+    $userContent = [
+        ['type' => 'text', 'text' => $prompt],
+        ['type' => 'image_url', 'image_url' => ['url' => _img_data_url($_FILES['image_chat']['tmp_name'])]],
+    ];
+} else {
+    $prompt = '你是企业微信窗口核验器。看两张图：图1是聊天窗口顶部标题栏截图，图2是同一窗口聊天区末尾截图。'
+        . '目标学生学号为“' . $targetId . '”，姓名为“' . $targetName . '”。'
+        . '只输出 JSON（无 markdown、无多余文字），字段：'
+        . '{"matched":bool(标题同时包含学号与姓名才为true，任一缺失/是群聊则false),'
+        . '"is_group":bool(是群聊/多人会话为true),'
+        . '"title_in_header":bool(标题栏能读到有效标题),'
+        . '"detected_title":string(标题栏读到的原文，读不到为空字符串),'
+        . '"last_sender":"me"|"parent"|"unknown"|null(聊天末尾最后一条是谁发的：我/家长/无法判断/无消息),'
+        . '"last_message_text":string(最后一条文本内容，无则为空字符串),'
+        . '"needs_reply":bool|null(家长最后一条需要老师回复为true，明确无需回为false，判不出为null),'
+        . '"reason":string(一句话理由)}';
+    $userContent = [
+        ['type' => 'text', 'text' => $prompt],
+        ['type' => 'image_url', 'image_url' => ['url' => _img_data_url($_FILES['image_title']['tmp_name'])]],
+        ['type' => 'image_url', 'image_url' => ['url' => _img_data_url($_FILES['image_chat']['tmp_name'])]],
+    ];
+}
+
 $payload = [
     'model' => $model,
     'messages' => [[
         'role' => 'user',
-        'content' => [
-            ['type' => 'text', 'text' => $prompt],
-            ['type' => 'image_url', 'image_url' => ['url' => _img_data_url($_FILES['image_title']['tmp_name'])]],
-            ['type' => 'image_url', 'image_url' => ['url' => _img_data_url($_FILES['image_chat']['tmp_name'])]],
-        ],
+        'content' => $userContent,
     ]],
     'temperature' => 0,
 ];
@@ -200,14 +248,19 @@ $out = [
     'duration_ms' => (int)round((microtime(true) - $t0) * 1000),
 ];
 
-// ---- 存档：两图 + 请求 JSON + 返回 JSON（保留 14 天）----
+// ---- 存档：上传图 + 请求 JSON + 返回 JSON（保留 14 天）----
 $archiveRoot = __DIR__ . '/../data/identify_archive';
-$dayDir = $archiveRoot . '/' . date('Ymd') . '/' . date('His') . '_' . bin2hex(random_bytes(4));
+$dayDir = $archiveRoot . '/' . date('Ymd') . '/' . date('His') . '_' . $mode . '_' . bin2hex(random_bytes(4));
 @mkdir($dayDir, 0755, true);
-@move_uploaded_file($_FILES['image_title']['tmp_name'], $dayDir . '/title.png');
-@move_uploaded_file($_FILES['image_chat']['tmp_name'], $dayDir . '/chat.png');
+if (isset($_FILES['image_title']['tmp_name']) && is_file($_FILES['image_title']['tmp_name'])) {
+    @move_uploaded_file($_FILES['image_title']['tmp_name'], $dayDir . '/title.png');
+}
+if (isset($_FILES['image_chat']['tmp_name']) && is_file($_FILES['image_chat']['tmp_name'])) {
+    @move_uploaded_file($_FILES['image_chat']['tmp_name'], $dayDir . '/chat.png');
+}
 @file_put_contents($dayDir . '/request.json', json_encode([
-    'target_id' => $targetId, 'target_name' => $targetName,
+    'mode' => $mode, 'target_id' => $targetId, 'target_name' => $targetName,
+    'detected_title' => $detectedTitleIn,
     'model' => $model, 'ip' => getClientIp(), 'time' => date('Y-m-d H:i:s'),
 ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
 @file_put_contents($dayDir . '/response.json', json_encode([
