@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.7.1"
+APP_VERSION = "1.7.2"
 
 try:
     import windnd
@@ -673,15 +673,16 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         if should_stop is not None and should_stop():
             log(f"[{name}] 收到停止请求，候选{cand}未发送")
             return {"result": "stopped", "reason": "用户停止", "notes": notes}
+        log(f"  └ 正在通过企业微信快捷键 (Ctrl+F) 聚焦搜索候选 {cand}/{MAX_CANDIDATES}...")
         entered = search_and_enter(name, cand)
         if entered:  # 截图前焦点守护：mss 截的是屏幕像素，失焦会被遮挡物污染
             if not wu.find_and_activate_wecom():
-                log(f"[{name}] 候选{cand}：企微唤起失败，换下一候选")
+                log(f"  └ 候选 {cand}：企微唤起失败，尝试下一候选")
                 _paced(CANDIDATE_GAP)
                 continue
             time.sleep(0.3)
         if should_stop is not None and should_stop():
-            log(f"[{name}] 收到停止请求，候选{cand}未发送")
+            log(f"  └ 收到停止请求，候选 {cand} 未发送")
             return {"result": "stopped", "reason": "用户停止", "notes": notes}
         if reply_analyzer is not None:
             judgment, chat_title, err, chat_img = judge_candidate(
@@ -696,29 +697,36 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
             if entered and should_record(chat_title, judgment):
                 dedupe_add(notes, make_note(name, cand, chat_title, bool((judgment or {}).get("matched")), judgment or {}))
         if err is not None:
-            log(f"[{name}] 候选{cand}：{err}，换下一候选")
+            log(f"  └ 候选 {cand} 校验异常：{err}，换下一候选")
             _paced(CANDIDATE_GAP)
             continue
         if judgment and ("[备选方案: 本地OCR]" in str(judgment.get("reason", "")) or "[本地OCR模式]" in str(judgment.get("reason", ""))):
-            log(f"[{name}] 💡 采用本地OCR核验：{judgment.get('reason')}")
+            log(f"  └ 💡 采用本地 OCR 备用通道核验：{judgment.get('reason')}")
         decision = decide_action(judgment)
-        log(f"[{name}] 候选{cand}：{decision['action']}（{decision['reason']}）")
         if decision["action"] == "send":
+            log(f"  ✓ 候选 {cand} 核验通过 (窗口标题: [{chat_title or '未知'}])，符合发送条件")
             if should_stop is not None and should_stop():
-                log(f"[{name}] 收到停止请求，候选{cand}未发送")
+                log(f"  └ 收到停止请求，候选 {cand} 未发送")
                 return {"result": "stopped", "reason": "用户停止", "notes": notes}
             if reply_analyzer is not None and chat_img is not None:
                 reply_analyzer.submit(name, cand, sid, sname, chat_title, True, chat_img)
-                log(f"[{name}] 已投递后台异步分析家长留言，立即发送反馈")
+                log("  └ 已将聊天区截图投递至后台分析家长留言，立即开始发送反馈话术...")
             ok, why = paste_and_send(message)
+            if ok:
+                log(f"  ✅ [{name}] 反馈话术已成功粘贴并回车发送！")
+            else:
+                log(f"  ❌ [{name}] 反馈话术发送失败：{why}")
             if should_stop is None or not should_stop():
                 _paced(AFTER_SEND_GAP)
             return {"result": "sent" if ok else "error",
                     "at_candidate": cand, "reason": why, "notes": notes}
         if decision["action"] == "intercept":
+            log(f"  🛑 候选 {cand} 命中安全红线拦截：检测为群聊 (窗口标题: [{chat_title or '未知'}])，安全拦截！")
             return {"result": "blocked", "at_candidate": cand,
                     "reason": decision["reason"], "notes": notes}
+        log(f"  ✗ 候选 {cand} 核验未通过：学号或姓名不匹配 (实际窗口标题: [{chat_title or '未检测到'}])")
         _paced(CANDIDATE_GAP)
+    log(f"  ⚠️ [{name}] 前 {MAX_CANDIDATES} 个候选均未匹配到对应的私聊窗口")
     return {"result": "unmatched", "reason": "3 候选均未 MATCH", "notes": notes}
 
 
@@ -801,6 +809,28 @@ class SenderApp:
         self.update_file_pool_ui()
         self.rebuild_student_list()
         self._schedule_reply_drain()
+
+    def _center_window(self, win, w, h):
+        try:
+            win.update_idletasks()
+            sw = win.winfo_screenwidth()
+            sh = win.winfo_screenheight()
+            if self.root and self.root.winfo_exists():
+                px = self.root.winfo_rootx()
+                py = self.root.winfo_rooty()
+                pw = self.root.winfo_width()
+                ph = self.root.winfo_height()
+                cx = max(10, px + (pw - w) // 2)
+                cy = max(10, py + (ph - h) // 2)
+            else:
+                cx = max(10, (sw - w) // 2)
+                cy = max(10, (sh - h) // 2)
+            win.geometry(f"{int(w)}x{int(h)}+{cx}+{cy}")
+        except Exception:
+            try:
+                win.geometry(f"{int(w)}x{int(h)}")
+            except Exception:
+                pass
 
     def _setup_appearance(self, root):
         """字体、sv-ttk 主题、状态色、网站 logo；避免主界面停留在 Tk 默认外观。"""
@@ -1081,7 +1111,12 @@ class SenderApp:
         self.retry_failed_btn = ttk.Button(
             tb_left, text="🔄 重试失败项", style="Toolbar.TButton",
             command=self.select_failed_only)
-        self.retry_failed_btn.pack(side="left")
+        self.retry_failed_btn.pack(side="left", padx=(0, 4))
+
+        self.copy_failed_btn = ttk.Button(
+            tb_left, text="📋 复制失败名单", style="Toolbar.TButton",
+            command=self.copy_failed_list)
+        self.copy_failed_btn.pack(side="left")
 
         tb_right = ttk.Frame(toolbar_card, style="Card.TFrame")
         tb_right.pack(side="right", fill="y")
@@ -1103,14 +1138,29 @@ class SenderApp:
         list_card = ttk.Frame(main, style="Card.TFrame")
         list_card.pack(fill="both", expand=True, pady=(0, 8))
 
-        table_header = ttk.Frame(list_card, style="TableHeader.TFrame", padding=(12, 6))
-        table_header.pack(fill="x")
-        ttk.Label(table_header, text="选", width=3, style="HeaderCol.TLabel").pack(side="left", padx=(0, 6))
-        ttk.Label(table_header, text="学号", width=9, style="HeaderCol.TLabel").pack(side="left", padx=(0, 8))
-        ttk.Label(table_header, text="姓名", width=14, style="HeaderCol.TLabel").pack(side="left", padx=(0, 8))
-        ttk.Label(table_header, text="状态", width=13, anchor="center", style="HeaderCol.TLabel").pack(side="left", padx=(0, 10))
-        ttk.Label(table_header, text="处理明细 / 最新备注", style="HeaderCol.TLabel").pack(side="left", fill="x", expand=True)
-        ttk.Label(table_header, text="快捷复制", width=24, anchor="center", style="HeaderCol.TLabel").pack(side="right")
+        table_header_container = ttk.Frame(list_card, style="TableHeader.TFrame")
+        table_header_container.pack(fill="x")
+
+        table_header = ttk.Frame(table_header_container, style="TableHeader.TFrame", padding=(12, 6))
+        table_header.pack(side="left", fill="both", expand=True)
+
+        header_sb_spacer = tk.Frame(table_header_container, bg="#f1f5f9", width=16)
+        header_sb_spacer.pack(side="right", fill="y")
+        header_sb_spacer.pack_propagate(False)
+
+        table_header.grid_columnconfigure(0, minsize=32)
+        table_header.grid_columnconfigure(1, minsize=80)
+        table_header.grid_columnconfigure(2, minsize=100)
+        table_header.grid_columnconfigure(3, minsize=100)
+        table_header.grid_columnconfigure(4, weight=1)
+        table_header.grid_columnconfigure(5, minsize=210)
+
+        ttk.Label(table_header, text="选", anchor="center", style="HeaderCol.TLabel").grid(row=0, column=0, sticky="ew")
+        ttk.Label(table_header, text="学号", anchor="w", style="HeaderCol.TLabel").grid(row=0, column=1, sticky="ew", padx=(4, 0))
+        ttk.Label(table_header, text="姓名", anchor="w", style="HeaderCol.TLabel").grid(row=0, column=2, sticky="ew", padx=(4, 0))
+        ttk.Label(table_header, text="状态", anchor="center", style="HeaderCol.TLabel").grid(row=0, column=3, sticky="ew")
+        ttk.Label(table_header, text="处理明细 / 最新备注", anchor="w", style="HeaderCol.TLabel").grid(row=0, column=4, sticky="ew", padx=(8, 0))
+        ttk.Label(table_header, text="快捷复制", anchor="center", style="HeaderCol.TLabel").grid(row=0, column=5, sticky="ew")
 
         list_outer = ttk.Frame(list_card, style="Card.TFrame")
         list_outer.pack(fill="both", expand=True)
@@ -1191,11 +1241,6 @@ class SenderApp:
 
         actions = ttk.Frame(footer, style="Card.TFrame")
         actions.pack(side="right", padx=(14, 0), anchor="center")
-
-        self.copy_failed_btn = ttk.Button(
-            actions, text="📋 复制失败名单", style="Secondary.TButton",
-            command=self.copy_failed_list)
-        self.copy_failed_btn.pack(side="left", padx=(0, 6))
 
         self.stop_btn = ttk.Button(
             actions, text="⏹ 停止 (Esc)", style="Danger.TButton",
@@ -1610,16 +1655,15 @@ class SenderApp:
             self.log_text = None
         win = tk.Toplevel(self.root)
         win.title(f"{APP_NAME} · 运行调试日志")
-        win.geometry("940x540")
+        self._center_window(win, 1020, 660)
+        win.minsize(880, 520)
         try:
             win.transient(self.root)
         except Exception:
             pass
         body = ttk.Frame(win, style="Card.TFrame", padding=16)
         body.pack(fill="both", expand=True)
-        ttk.Label(body, text="📜 运行调试日志", style="Section.TLabel").pack(anchor="w")
-        ttk.Label(body, text="实时记录会话搜索、整窗截图分析、大模型视觉判定、发送进度与异常堆栈", style="Hint.TLabel").pack(
-            anchor="w", pady=(2, 10))
+        ttk.Label(body, text="📜 运行调试日志", style="Section.TLabel").pack(anchor="w", pady=(0, 10))
         text_frame = ttk.Frame(body, style="Card.TFrame")
         text_frame.pack(fill="both", expand=True)
         text = tk.Text(
@@ -1645,10 +1689,33 @@ class SenderApp:
             self.log_buffer.clear()
             text.delete("1.0", "end")
 
+        def export_logs():
+            from tkinter import filedialog, messagebox
+            import datetime
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            path = filedialog.asksaveasfilename(
+                parent=win,
+                title="保存运行日志",
+                defaultextension=".txt",
+                initialfile=f"极方反馈运行日志_{ts}.txt",
+                filetypes=[("文本日志", "*.txt"), ("所有文件", "*.*")]
+            )
+            if not path:
+                return
+            try:
+                content = text.get("1.0", "end-1c")
+                with open(path, "w", encoding="utf-8") as fp:
+                    fp.write(content)
+                messagebox.showinfo("导出成功", f"运行日志已成功导出至：\n{path}", parent=win)
+            except Exception as exc:
+                messagebox.showerror("导出失败", f"保存日志文件失败：\n{exc}", parent=win)
+
         win.protocol("WM_DELETE_WINDOW", close)
         footer = ttk.Frame(body, style="Card.TFrame")
         footer.pack(fill="x", pady=(10, 0))
-        ttk.Button(footer, text="清空日志", style="Toolbar.TButton",
+        ttk.Button(footer, text="💾 下载运行日志", style=self._accent_style,
+                   command=export_logs).pack(side="left")
+        ttk.Button(footer, text="🗑️ 清空日志", style="Toolbar.TButton",
                    command=clear).pack(side="right")
 
     def rebuild_student_list(self):
@@ -1669,25 +1736,32 @@ class SenderApp:
             if "_status_var" not in item:
                 item["_status_var"] = tk.StringVar(master=self.root, value="待发送")
 
-            row = ttk.Frame(self.students_inner, style="Card.TFrame", padding=(12, 6))
+            row = ttk.Frame(self.students_inner, style="Card.TFrame", padding=(12, 5))
             row.pack(fill="x")
+
+            row.grid_columnconfigure(0, minsize=32)
+            row.grid_columnconfigure(1, minsize=80)
+            row.grid_columnconfigure(2, minsize=100)
+            row.grid_columnconfigure(3, minsize=100)
+            row.grid_columnconfigure(4, weight=1)
+            row.grid_columnconfigure(5, minsize=210)
 
             check = ttk.Checkbutton(row, variable=item["_selected_var"],
                                     command=lambda it=item: self.on_select_change(it))
-            check.pack(side="left", padx=(0, 6))
+            check.grid(row=0, column=0, sticky="w")
             self._row_checkbuttons.append(check)
 
             sid = item.get("sid") or "-"
-            ttk.Label(row, text=sid, width=9, anchor="w", style="IdBadge.TLabel").pack(side="left", padx=(0, 8))
+            ttk.Label(row, text=sid, anchor="w", style="IdBadge.TLabel").grid(row=0, column=1, sticky="w", padx=(4, 0))
 
             sname = item.get("sname") or item.get("studentName") or "-"
-            ttk.Label(row, text=sname, width=14, anchor="w", style="RowName.TLabel").pack(side="left", padx=(0, 8))
+            ttk.Label(row, text=sname, anchor="w", style="RowName.TLabel").grid(row=0, column=2, sticky="w", padx=(4, 0))
 
             st = item["_status_var"].get()
             status_lbl = ttk.Label(
-                row, textvariable=item["_status_var"], width=13, anchor="center",
+                row, textvariable=item["_status_var"], anchor="center",
                 cursor="hand2", style=self._status_style(st))
-            status_lbl.pack(side="left", padx=(0, 10))
+            status_lbl.grid(row=0, column=3, sticky="ew", padx=(6, 6))
             status_lbl.bind("<Double-1>", lambda _e, it=item: self.show_row_reason(it))
             item["_status_label"] = status_lbl
 
@@ -1695,15 +1769,20 @@ class SenderApp:
             reason_var = item.setdefault("_reason_var", tk.StringVar(master=self.root, value=reason))
             reason_var.set(reason)
             reason_lbl = ttk.Label(row, textvariable=reason_var, style="RowReason.TLabel", anchor="w", cursor="hand2")
-            reason_lbl.pack(side="left", fill="x", expand=True, padx=(0, 8))
+            reason_lbl.grid(row=0, column=4, sticky="ew", padx=(8, 8))
             reason_lbl.bind("<Double-1>", lambda _e, it=item: self.show_row_reason(it))
 
-            msg_btn = ttk.Button(row, text="📋 复制话术", style="RowAction.TButton",
-                                 command=lambda it=item: self.copy_message(it))
-            msg_btn.pack(side="right", padx=(4, 0))
-            name_btn = ttk.Button(row, text="👤 复制学号、姓名", style="RowAction.TButton",
+            btn_box = ttk.Frame(row, style="Card.TFrame")
+            btn_box.grid(row=0, column=5, sticky="e")
+
+            name_btn = ttk.Button(btn_box, text="👤 复制学号、姓名", style="RowAction.TButton",
                                   command=lambda it=item: self.copy_student(it))
-            name_btn.pack(side="right", padx=(4, 0))
+            name_btn.pack(side="left", padx=(0, 4))
+
+            msg_btn = ttk.Button(btn_box, text="📋 复制话术", style="RowAction.TButton",
+                                 command=lambda it=item: self.copy_message(it))
+            msg_btn.pack(side="left")
+
             self._row_action_buttons.extend((msg_btn, name_btn))
 
         if not self.items:
@@ -1861,6 +1940,10 @@ class SenderApp:
 
     def emit(self, msg: str, _drain: bool = True):
         msg = str(msg)
+        if not (len(msg) >= 10 and msg.startswith("[") and msg[3] == ":" and msg[6] == ":"):
+            import datetime
+            ts = datetime.datetime.now().strftime("%H:%M:%S")
+            msg = f"[{ts}] {msg}"
         self.log_buffer.append(msg)
         if len(self.log_buffer) > 5000:
             del self.log_buffer[:1000]
@@ -2114,7 +2197,8 @@ class SenderApp:
         notes = actionable(self.reply_notes)
         win = tk.Toplevel(self.root)
         win.title(f"{APP_NAME} · 待回学员名单")
-        win.geometry("560x520")
+        self._center_window(win, 780, 560)
+        win.minsize(680, 480)
         try:
             win.transient(self.root)
         except Exception:
@@ -2126,15 +2210,13 @@ class SenderApp:
         header_box = ttk.Frame(body, style="Card.TFrame")
         header_box.pack(fill="x", pady=(0, 10))
         ttk.Label(header_box, text=f"📨 待回学员名单（共 {len(notes)} 人）", style="Section.TLabel").pack(anchor="w")
-        ttk.Label(header_box, text="仅展示需要跟进回复或人工确认的学员学号与姓名", style="Hint.TLabel").pack(
-            anchor="w", pady=(2, 0))
 
         tree_frame = ttk.Frame(body, style="Card.TFrame")
         tree_frame.pack(fill="both", expand=True)
 
         cols = [
-            ("sid", "学号", 160),
-            ("sname", "姓名", 260),
+            ("sid", "学号", 200),
+            ("sname", "姓名", 460),
         ]
 
         style = ttk.Style(win)
@@ -2171,13 +2253,9 @@ class SenderApp:
         tree.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
 
-        copy_hint = tk.StringVar(master=win, value="💡 可直接点击下方“复制全部名单”一键复制所有待回学员，或双击单行复制。")
-        ttk.Label(body, textvariable=copy_hint, style="Hint.TLabel",
-                  anchor="w").pack(fill="x", pady=(8, 4))
-
         def copy_all():
             if not student_rows:
-                copy_hint.set("当前没有需要回复的学生。")
+                messagebox.showinfo("提示", "当前没有需要回复的学生。", parent=win)
                 return
             lines = []
             for sid, sname in student_rows:
@@ -2187,12 +2265,11 @@ class SenderApp:
                     lines.append(sname)
             content = "\n".join(lines)
             self.copy_to_clipboard(content, "待回学员名单")
-            copy_hint.set(f"✅ 已复制全部 {len(lines)} 位待回学员名单（学号 姓名）！")
+            messagebox.showinfo("复制成功", f"已复制全部 {len(lines)} 位待回学员名单（学号 姓名）！", parent=win)
 
         def copy_selected(_event=None):
             sel = tree.selection()
             if not sel:
-                copy_hint.set("请先在列表中选中一个学员。")
                 return
             values = tree.item(sel[0], "values")
             if not values:
@@ -2200,7 +2277,6 @@ class SenderApp:
             sid, sname = values[0], values[1]
             text = f"{sid} {sname}".strip() if sid != "-" else sname
             self.copy_to_clipboard(text, "学号姓名")
-            copy_hint.set(f"✅ 已复制：{text}")
 
         def do_export():
             path = filedialog.asksaveasfilename(
@@ -2212,7 +2288,7 @@ class SenderApp:
             messagebox.showinfo("导出成功", f"已导出至：\n{path}", parent=win)
 
         actions = ttk.Frame(body, style="Card.TFrame")
-        actions.pack(fill="x", pady=(4, 0))
+        actions.pack(fill="x", pady=(12, 0))
         ttk.Button(actions, text="📋 复制全部名单", style=self._accent_style,
                    command=copy_all).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="📋 复制选中学生", style="Toolbar.TButton",
@@ -2233,7 +2309,8 @@ class SenderApp:
 
         win = tk.Toplevel(self.root)
         win.title(f"{APP_NAME} · 已发送文件记录")
-        win.geometry("900x520")
+        self._center_window(win, 1060, 640)
+        win.minsize(920, 520)
         try:
             win.transient(self.root)
         except Exception:
@@ -2244,20 +2321,18 @@ class SenderApp:
 
         header_box = ttk.Frame(body, style="Card.TFrame")
         header_box.pack(fill="x", pady=(0, 10))
-        ttk.Label(header_box, text="📁 已发送文件记录（保存在本地）", style="Section.TLabel").pack(anchor="w")
+        ttk.Label(header_box, text="📁 已发送文件记录", style="Section.TLabel").pack(anchor="w")
         records_dir = getattr(self._sent_files, "records_dir", "") if self._sent_files else ""
-        ttk.Label(header_box, text=f"系统已自动保存已发送的 JSON / HTML 记录至：{records_dir}", style="Hint.TLabel").pack(
-            anchor="w", pady=(2, 0))
 
         tree_frame = ttk.Frame(body, style="Card.TFrame")
         tree_frame.pack(fill="both", expand=True)
 
         cols = [
-            ("file_name", "文件名", 220),
+            ("file_name", "文件名", 240),
             ("sent_time", "最近发送时间", 160),
             ("counts", "发送情况", 140),
-            ("file_type", "格式", 60),
-            ("file_path", "源文件路径", 240),
+            ("file_type", "格式", 70),
+            ("file_path", "源文件路径", 380),
         ]
 
         style = ttk.Style(win)
@@ -2295,13 +2370,9 @@ class SenderApp:
         tree.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
 
-        hint_var = tk.StringVar(master=win, value="💡 双击可直接在浏览器中打开该次发送的 HTML 报告，或点击“打开本地保存目录”。")
-        ttk.Label(body, textvariable=hint_var, style="Hint.TLabel", anchor="w").pack(fill="x", pady=(8, 4))
-
         def open_folder():
             if records_dir:
                 open_directory(records_dir)
-                hint_var.set("✅ 已在文件资源管理器中打开本地保存目录")
 
         def open_report(_event=None):
             sel = tree.selection()
@@ -2314,23 +2385,20 @@ class SenderApp:
                 if html_path and os.path.isfile(html_path):
                     import webbrowser
                     webbrowser.open(f"file://{os.path.abspath(html_path)}")
-                    hint_var.set(f"✅ 已在浏览器中打开发送报告：{os.path.basename(html_path)}")
                     return
             open_folder()
 
         def copy_path():
             sel = tree.selection()
             if not sel:
-                hint_var.set("请先在列表中选中一个文件。")
                 return
             values = tree.item(sel[0], "values")
             if values:
                 p = values[4] or values[0]
                 self.copy_to_clipboard(p, "文件路径")
-                hint_var.set(f"已复制路径：{p}")
 
         actions = ttk.Frame(body, style="Card.TFrame")
-        actions.pack(fill="x", pady=(4, 0))
+        actions.pack(fill="x", pady=(12, 0))
         ttk.Button(actions, text="📂 打开本地保存目录", style=self._accent_style,
                    command=open_folder).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="🌐 打开HTML报告", style="Toolbar.TButton",
@@ -2386,24 +2454,13 @@ class SenderApp:
             self.emit("没有勾选任何学生，请先勾选要发送的学生")
             self.hint_var.set("没有勾选任何学生")
             return
-        selected_ids = {id(item) for item in selected_items}
-        visible_items = self._visible_items()
-        visible_selected = sum(1 for item in visible_items if id(item) in selected_ids)
-        hidden_selected = selected_count - visible_selected
-        confirm_lines = [
-            f"本次将发送 {selected_count} 人（共 {len(self.items)} 人）。"
-        ]
-        if hidden_selected:
-            confirm_lines.append(
-                f"其中 {hidden_selected} 名已勾选学生因搜索/筛选未显示，仍会发送。")
-        confirm_lines.append(
-            "发送中按 Esc 可停止（企业微信在前台也可）；为防发半条，当前学生处理完后结束。")
-        confirm_lines.extend(("", "是否继续？"))
+        total_count = len(self.items)
+        prompt_text = f"3秒后即将开始发送，本次将发送{selected_count}人，共{total_count}人，发送中按ESC可停止。"
         self.start_btn.config(state="disabled")
         try:
             confirmed = messagebox.askyesno(
-                "确认发送", "\n".join(confirm_lines), parent=self.root,
-                default=messagebox.NO)
+                "确认发送", prompt_text, parent=self.root,
+                default=messagebox.YES)
         except Exception:
             self.start_btn.config(state="normal")
             raise
@@ -2451,7 +2508,6 @@ class SenderApp:
         self.result_var.set("正在发送...")
         self.hint_var.set("正在发送...按 Esc 可停止")
         verify_mode = self._current_verify_mode()
-        self.emit("🚀 开始执行发送任务（标题核验：云端API优先，异常自动降级本地OCR）")
 
         # 启动后台工作线程执行实际发送，彻底避免 UI 假死与主线程阻塞
         self._worker_thread = threading.Thread(
@@ -2465,15 +2521,35 @@ class SenderApp:
     def _run_all_worker(self, selected_ids, selected_count, token, verify_mode):
         processed = 0
         stopped = False
+        self.emit("=================== 开始执行发送任务 ===================")
+        self.emit(f"📋 任务概览：待发勾选 {selected_count} 人（名单总计 {len(self.items)} 人）")
+        self.emit("🔍 标题核验：Qwen3.8-Max 云端多模态大模型优先，网络异常自动降级本地 OCR")
+        self.emit("🛡️ 安全机制：严格拦截群聊、学号姓名双重比对校验、按 ESC 随时安全停止")
+        self.emit("-------------------------------------------------------")
+
+        # 3 秒倒计时，给用户准备与按 ESC 取消的机会
+        for c in (3, 2, 1):
+            if self._stop_requested:
+                self.emit("⏹ 用户已按 Esc 取消发送。")
+                stopped = True
+                break
+            self.emit(f"⏳ {c} 秒后即将开始发送...（发送中按 ESC 可停止）")
+            self.root.after(0, lambda cnt=c: self.hint_var.set(f"⏳ {cnt} 秒后即将开始发送...（按 ESC 取消）"))
+            time.sleep(1.0)
+
+        if not stopped:
+            self.emit("🚀 倒计时结束，正式开始逐位处理学员！")
+
         try:
             for item in self.items:
                 if id(item) not in selected_ids:
-                    self.emit(f"[{item.get('studentName', '(未知学生)')}] 未勾选，跳过")
                     continue
                 if self._poll_stop():
                     stopped = True
                     break
                 name = item.get("studentName", "(未知学生)")
+                sid = item.get("sid", "-")
+                msg_len = len(item.get("message", ""))
                 item_key = item.get("_archive_key") or self.archive_key
                 if SKIP_SENT and self._history and self._history.is_sent(item_key, name):
                     self.set_status(item, "已跳过（已发送）")
@@ -2481,10 +2557,11 @@ class SenderApp:
                     item["_last_reason"] = "已发送过，自动跳过"
                     processed += 1
                     self._update_progress(processed, selected_count)
-                    self.emit(f"[{name}] 已发送过，跳过")
+                    self.emit(f"⏭ [{processed}/{selected_count}] [{name}] 本周历史记录已标记发送，自动跳过")
                     continue
                 self.set_status(item, "发送中")
-                self.hint_var.set(f"正在发送：{name}")
+                self.hint_var.set(f"正在发送：{name} ({processed+1}/{selected_count})")
+                self.emit(f"▶ 正在处理 [{processed+1}/{selected_count}]: {name} (学号: {sid}) | 话术字数: {msg_len} 字")
                 try:
                     res = send_student(
                         item, self.server, token, parent=self.root,
@@ -2520,14 +2597,24 @@ class SenderApp:
                         self._history.mark_status(
                             item_key, name, "✅已发送", item.get("message", ""))
                     except Exception as exc:
-                        self.emit(f"[{name}] 历史记录写入失败：{exc}")
-                self.emit(f"[{name}] → {result}：{reason}")
+                        self.emit(f"  ⚠️ [{name}] 历史记录写入失败：{exc}")
+                if result == "sent":
+                    self.emit(f"  ✅ [{name}] 状态更新：已发送")
+                elif result == "blocked":
+                    self.emit(f"  🛑 [{name}] 状态更新：已拦截（{reason}）")
+                elif result == "unmatched":
+                    self.emit(f"  ⚠️ [{name}] 状态更新：未匹配（{reason}）")
+                elif result == "stopped":
+                    self.emit(f"  ⏹ [{name}] 状态更新：已停止（{reason}）")
+                else:
+                    self.emit(f"  ❌ [{name}] 状态更新：发送失败（{reason}）")
+
                 if result == "stopped":
                     stopped = True
                     break
                 if processed < selected_count and not self._stop_requested:
                     gap = random.uniform(*STUDENT_GAP)
-                    self.emit(f"学生间随机停顿 {gap:.1f}s")
+                    self.emit(f"  ⏳ 随机停顿 {gap:.1f} 秒，模拟人工打字节奏...")
                     if not self._interruptible_pause(gap):
                         stopped = True
                         break
