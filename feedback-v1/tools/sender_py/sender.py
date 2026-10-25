@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.6.1"
 
 
 def asset_path(filename: str) -> str:
@@ -912,22 +912,43 @@ class SenderApp:
         self.students_canvas.configure(yscrollcommand=scrollbar.set)
         self.students_canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
+        self._canvas_resize_after = None
+        def _on_canvas_configure(e):
+            if self._canvas_resize_after is not None:
+                try:
+                    self.root.after_cancel(self._canvas_resize_after)
+                except Exception:
+                    pass
+            w = e.width
+            self._canvas_resize_after = self.root.after(
+                25, lambda: self.students_canvas.itemconfigure(self.students_window, width=w)
+            )
+
         self.students_inner.bind(
             "<Configure>",
             lambda e: self.students_canvas.configure(scrollregion=self.students_canvas.bbox("all")))
-        self.students_canvas.bind(
-            "<Configure>",
-            lambda e: self.students_canvas.itemconfigure(self.students_window, width=e.width))
+        self.students_canvas.bind("<Configure>", _on_canvas_configure)
 
         def _on_mousewheel(event):
-            delta = event.delta
-            if sys.platform != "win32":
-                delta = -120 if event.num == 5 else 120
+            delta = getattr(event, "delta", 0)
+            if not delta:
+                delta = -120 if getattr(event, "num", None) == 5 else 120
             self.students_canvas.yview_scroll(int(-1 * (delta / 120)), "units")
 
-        self.students_canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        self.students_canvas.bind_all("<Button-4>", _on_mousewheel)
-        self.students_canvas.bind_all("<Button-5>", _on_mousewheel)
+        def _bind_mousewheel(_event=None):
+            self.students_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            self.students_canvas.bind_all("<Button-4>", _on_mousewheel)
+            self.students_canvas.bind_all("<Button-5>", _on_mousewheel)
+
+        def _unbind_mousewheel(_event=None):
+            self.students_canvas.unbind_all("<MouseWheel>")
+            self.students_canvas.unbind_all("<Button-4>")
+            self.students_canvas.unbind_all("<Button-5>")
+
+        self.students_canvas.bind("<Enter>", _bind_mousewheel)
+        self.students_canvas.bind("<Leave>", _unbind_mousewheel)
+        self.students_inner.bind("<Enter>", _bind_mousewheel)
+        self.students_inner.bind("<Leave>", _unbind_mousewheel)
 
         # ================= 5. 底部控制与进度栏 (Floating Dock) =================
         footer = ttk.Frame(main, style="Card.TFrame", padding=(14, 9))
@@ -1116,10 +1137,21 @@ class SenderApp:
                 pass
 
     def _update_progress(self, processed, total, stopped=False):
-        self.progress_bar.config(maximum=max(1, total), value=processed)
-        suffix = "（已停止）" if stopped else ""
-        self.progress_var.set(f"进度：{processed}/{total}{suffix}")
-        self.root.update_idletasks()
+        if threading.current_thread() is not threading.main_thread():
+            try:
+                self.root.after(0, self._do_update_progress, processed, total, stopped)
+            except Exception:
+                pass
+        else:
+            self._do_update_progress(processed, total, stopped)
+
+    def _do_update_progress(self, processed, total, stopped=False):
+        try:
+            self.progress_bar.config(maximum=max(1, total), value=processed)
+            suffix = "（已停止）" if stopped else ""
+            self.progress_var.set(f"进度：{processed}/{total}{suffix}")
+        except Exception:
+            pass
 
     def _reset_progress(self):
         self.progress_bar.config(maximum=1, value=0)
@@ -1373,9 +1405,6 @@ class SenderApp:
             name_btn.pack(side="right", padx=(4, 0))
             self._row_action_buttons.extend((msg_btn, name_btn))
 
-            sep = ttk.Separator(self.students_inner, orient="horizontal")
-            sep.pack(fill="x", padx=8)
-
         if not self.items:
             empty_box = ttk.Frame(self.students_inner, style="Card.TFrame", padding=(20, 48))
             empty_box.pack(fill="both", expand=True)
@@ -1394,6 +1423,15 @@ class SenderApp:
         self.update_summary()
 
     def set_status(self, item, text):
+        if threading.current_thread() is not threading.main_thread():
+            try:
+                self.root.after(0, self._do_set_status, item, text)
+            except Exception:
+                pass
+        else:
+            self._do_set_status(item, text)
+
+    def _do_set_status(self, item, text):
         var = item.get("_status_var")
         if var is not None:
             var.set(text)
@@ -1401,16 +1439,15 @@ class SenderApp:
         if label is not None:
             try:
                 label.configure(style=self._status_style(text))
-            except self.tk.TclError:
+            except Exception:
                 pass
         reason_var = item.get("_reason_var")
         if reason_var is not None:
             try:
                 reason_var.set(item.get("_last_reason", ""))
-            except self.tk.TclError:
+            except Exception:
                 pass
         self.update_summary()
-        self.root.update_idletasks()
 
     def update_summary(self):
         selected = 0
@@ -1522,29 +1559,48 @@ class SenderApp:
             self.refresh_reply_count()
 
     def emit(self, msg: str, _drain: bool = True):
-        if _drain:
-            self._drain_reply_events()
         msg = str(msg)
         self.log_buffer.append(msg)
         if len(self.log_buffer) > 5000:
             del self.log_buffer[:1000]
+        if threading.current_thread() is not threading.main_thread():
+            try:
+                self.root.after(0, self._do_emit, msg, _drain)
+            except Exception:
+                pass
+        else:
+            self._do_emit(msg, _drain)
+
+    def _do_emit(self, msg: str, _drain: bool = True):
+        if _drain:
+            self._drain_reply_events()
         if self.log_text is not None:
             try:
                 self.log_text.insert("end", msg + "\n")
                 self.log_text.see("end")
-                self.log_text.update_idletasks()
-            except self.tk.TclError:
+            except Exception:
                 self.log_text = None
                 self.log_window = None
-        self.root.update_idletasks()
 
     def refresh_reply_count(self):
+        if threading.current_thread() is not threading.main_thread():
+            try:
+                self.root.after(0, self._do_refresh_reply_count)
+            except Exception:
+                pass
+        else:
+            self._do_refresh_reply_count()
+
+    def _do_refresh_reply_count(self):
         count = len(actionable(self.reply_notes))
         pending = getattr(self, "_pending_reply_tasks", 0)
-        if pending > 0:
-            self.reply_btn.config(text=f"📨 待回名单 · {count} (分析中 {pending})")
-        else:
-            self.reply_btn.config(text=f"📨 待回名单 · {count}")
+        try:
+            if pending > 0:
+                self.reply_btn.config(text=f"📨 待回名单 · {count} (分析中 {pending})")
+            else:
+                self.reply_btn.config(text=f"📨 待回名单 · {count}")
+        except Exception:
+            pass
 
     def update_input_label(self):
         if not self.input_paths:
@@ -1957,6 +2013,17 @@ class SenderApp:
         self.hint_var.set("正在发送...按 Esc 可停止")
         verify_mode = self._current_verify_mode()
         self.emit("🚀 开始执行发送任务（标题核验：云端API优先，异常自动降级本地OCR）")
+
+        # 启动后台工作线程执行实际发送，彻底避免 UI 假死与主线程阻塞
+        self._worker_thread = threading.Thread(
+            target=self._run_all_worker,
+            args=(selected_ids, selected_count, token, verify_mode),
+            daemon=True,
+            name="SenderWorkerThread"
+        )
+        self._worker_thread.start()
+
+    def _run_all_worker(self, selected_ids, selected_count, token, verify_mode):
         processed = 0
         stopped = False
         try:
@@ -2050,16 +2117,31 @@ class SenderApp:
             self._update_progress(processed, selected_count, stopped=stopped)
             self.hint_var.set(
                 "已停止，未发送学生已标记为“已跳过”。" if stopped else "本批处理结束")
-            self._set_running_ui(False)
+
             if not self._close_after_stop:
                 try:
                     self._record_sent_files()
                 except Exception as exc:
                     self.emit(f"⚠️ 保存已发送文件记录异常: {exc}")
-                if self.filter_var.get() != FILTER_ALL or self.search_var.get().strip():
-                    self.rebuild_student_list()
-                else:
-                    self.update_summary()
+
+            # 优雅等待后台留言分析收尾（最多 3.5 秒）
+            if self._pending_reply_tasks > 0 and not stopped:
+                self.hint_var.set(f"所有学生已发送完毕，正在等待最后 {self._pending_reply_tasks} 位家长留言分析收尾...")
+                deadline = time.monotonic() + 3.5
+                while self._pending_reply_tasks > 0 and time.monotonic() < deadline:
+                    time.sleep(0.1)
+
+            self.emit(summary)
+            counts = summarize_status_counts(self._status_of(item) for item in self.items)
+
+            # 调度回主线程更新 UI、恢复按键状态并弹出提示
+            try:
+                self.root.after(0, self._on_worker_finished, stopped, selected_count, counts, summary)
+            except Exception:
+                pass
+
+    def _on_worker_finished(self, stopped: bool, selected_count: int, counts: dict, summary: str):
+        self._set_running_ui(False)
         if self._close_after_stop:
             self._stop_esc_watcher()
             if self._reply_analyzer is not None:
@@ -2070,21 +2152,11 @@ class SenderApp:
             self.root.destroy()
             return
 
-        self._drain_reply_events()
-        # 若仍有后台分析中的留言，优雅等待收尾（最多 3.5 秒），让待回名单统计准确完整
-        if self._pending_reply_tasks > 0 and not stopped:
-            self.hint_var.set(f"所有学生已发送完毕，正在等待最后 {self._pending_reply_tasks} 位家长留言分析收尾...")
-            deadline = time.monotonic() + 3.5
-            while self._pending_reply_tasks > 0 and time.monotonic() < deadline:
-                self._drain_reply_events()
-                try:
-                    self.root.update()
-                except Exception:
-                    break
-                time.sleep(0.05)
-            self._drain_reply_events()
-        self.emit(summary)
-        counts = summarize_status_counts(self._status_of(item) for item in self.items)
+        if self.filter_var.get() != FILTER_ALL or self.search_var.get().strip():
+            self.rebuild_student_list()
+        else:
+            self.update_summary()
+
         extra = ""
         if counts["发送失败"] or counts["未匹配"]:
             extra = ("\n\n可点主界面的“重试失败项”只勾选失败/未匹配学生，"
@@ -2093,6 +2165,7 @@ class SenderApp:
             extra += (f"\n\n后台仍有 {self._pending_reply_tasks} 条家长留言正在异步分析中，"
                       "完成后将自动更新右上角“待回名单”。")
         saved_hint = "\n\n📁 本次发送记录（JSON与HTML快照）已自动保存在本地，可在右上角“已发文件”中查看与打开。"
+        from tkinter import messagebox
         messagebox.showinfo("发送结束", summary + extra + saved_hint, parent=self.root)
 
 
