@@ -60,6 +60,12 @@ class TestStage5(unittest.TestCase):
             del os.environ["SENDER_API_TOKEN"]
         self.assertEqual(load_token(), DEFAULT_SENDER_TOKEN)
 
+    def test_calibrate_roi_path_and_guards(self):
+        from sender_py.vision_api import CALIBRATE_ROI_PATH, calibrate_roi
+        self.assertEqual(CALIBRATE_ROI_PATH, "/api/calibrate_roi.php")
+        self.assertIsNone(calibrate_roi(None, "https://feedback.wxjifang.cn"))
+        self.assertIsNone(calibrate_roi("invalid", "not-a-valid-url"))
+
 
 if __name__ == "__main__":
     unittest.main()

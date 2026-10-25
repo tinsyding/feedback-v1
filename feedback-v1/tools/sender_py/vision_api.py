@@ -12,6 +12,7 @@ import json
 import os
 
 IDENTIFY_PATH = "/api/identify.php"
+CALIBRATE_ROI_PATH = "/api/calibrate_roi.php"
 
 # 内置默认访问令牌（小范围内部使用，开箱即用免配置）
 DEFAULT_SENDER_TOKEN = "jf_feedback_sender_internal_token_2026"
@@ -110,3 +111,64 @@ def identify(title_img, chat_tail_img, target_id: str, target_name: str,
         err = payload.get("error") if isinstance(payload, dict) else None
         raise RuntimeError(f"判定被拒绝：{err or resp.status_code}")
     return map_response(payload.get("data"))
+
+
+def calibrate_roi(base_image, server: str, token=None, timeout: int = 50) -> dict | None:
+    """调用服务端 Qwen-VL-Max 多模态模型自动框选企业微信窗口区域。
+
+    成功返回相对比例 dict: {"title": tuple, "input": tuple, "chat": tuple, "reason": str}
+    识别失败、网络超时或校验未通过时返回 None（供调用方优雅回退至手动框选）。
+    """
+    if base_image is None:
+        return None
+    try:
+        import io
+        from PIL import Image  # noqa: F401
+        import requests
+    except Exception:
+        return None
+
+    server = (server or "").strip().rstrip("/")
+    if not server.startswith(("http://", "https://")):
+        return None
+    tok = load_token(token) or DEFAULT_SENDER_TOKEN
+
+    try:
+        buf = io.BytesIO()
+        # 如果尺寸极大，保持原图纵横比适当压缩，减少传输延时
+        img_to_send = base_image
+        if hasattr(base_image, "size") and (base_image.size[0] > 1920 or base_image.size[1] > 1080):
+            scale = min(1920 / base_image.size[0], 1080 / base_image.size[1])
+            new_size = (max(1, int(base_image.size[0] * scale)), max(1, int(base_image.size[1] * scale)))
+            img_to_send = base_image.resize(new_size, Image.LANCZOS)
+        img_to_send.save(buf, format="PNG")
+        raw_bytes = buf.getvalue()
+
+        resp = requests.post(
+            server + CALIBRATE_ROI_PATH,
+            data={"token": tok},
+            files={"image": ("window.png", raw_bytes, "image/png")},
+            timeout=timeout,
+        )
+        if resp.status_code != 200:
+            return None
+        payload = resp.json()
+        if not isinstance(payload, dict) or not payload.get("success"):
+            return None
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            return None
+        t = tuple(float(x) for x in data.get("title", []))
+        i = tuple(float(x) for x in data.get("input", []))
+        c = tuple(float(x) for x in data.get("chat", []))
+        if len(t) != 4 or len(i) != 4 or len(c) != 4:
+            return None
+        return {
+            "title": t,
+            "input": i,
+            "chat": c,
+            "reason": str(data.get("reason") or "Qwen-VL-Max 自动框选成功"),
+        }
+    except Exception:
+        return None
+

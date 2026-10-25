@@ -81,7 +81,7 @@ def _load_example_photo(tk, max_w=EXAMPLE_MAX_W):
         return None
 
 
-def run_calibration(parent, base_image, example_max_w=EXAMPLE_MAX_W):
+def run_calibration(parent, base_image, example_max_w=EXAMPLE_MAX_W, initial_roi=None):
     """模态校准：先展示 example.png 指引 → 点确认进 Canvas → 阻塞到确认/放弃。
 
     parent 为 None 时自建 Tk 主窗口（任务栏有图标，最稳）；传入父窗口时用模态 Toplevel。
@@ -119,6 +119,19 @@ def run_calibration(parent, base_image, example_max_w=EXAMPLE_MAX_W):
             pass
     accent_style = "Accent.TButton" if using_sv_ttk else "TButton"
     win.title("企业微信窗口校准：框标题栏 + 输入框")
+
+    sw = win.winfo_screenwidth()
+    sh = win.winfo_screenheight()
+
+    def _center_win(w, h):
+        try:
+            win.update_idletasks()
+            cx = max(10, (sw - int(w)) // 2)
+            cy = max(10, (sh - int(h)) // 2)
+            win.geometry(f"{int(w)}x{int(h)}+{cx}+{cy}")
+        except Exception:
+            pass
+
     try:
         win.deiconify()
         win.lift()
@@ -141,7 +154,7 @@ def run_calibration(parent, base_image, example_max_w=EXAMPLE_MAX_W):
     except Exception:
         pass
 
-    guide = ttk.Frame(win, padding=18)
+    guide = ttk.Frame(win, padding=20)
     guide.pack(fill="both", expand=True)
     ttk.Label(guide, text="企业微信窗口校准", style="CalTitle.TLabel").pack(anchor="w")
     ttk.Label(guide, text=GUIDE_TEXT, style="CalSection.TLabel").pack(anchor="w", pady=(4, 12))
@@ -154,20 +167,27 @@ def run_calibration(parent, base_image, example_max_w=EXAMPLE_MAX_W):
         ttk.Label(guide, text="(未找到 example.png，以实拍为准框两框)",
                   style="CalHint.TLabel").pack()
     ttk.Button(guide, text="知道了，开始框选", style=accent_style,
-               command=guide.destroy).pack(pady=(14, 0))
+               command=guide.destroy).pack(pady=(16, 0))
+
+    _center_win(580, 540)
+
     win.wait_window(guide)
     if result["roi"] is not None:  # 不可能分支，保持形状
         return result["roi"]
 
-    DISP_W, DISP_H = 1000, 640
+    # 动态适应屏幕分辨率（占据约 82%~86% 视野，大而清晰，杜绝过小）
+    DISP_W = max(1020, min(1440, int(sw * 0.85)))
+    DISP_H = max(660, min(920, int(sh * 0.80)))
     s, ox, oy, _, _ = fit_scale(W, H, DISP_W, DISP_H)
 
     body = ttk.Frame(win, padding=12)
     body.pack(fill="both", expand=True)
     status = tk.StringVar(value="先拖出标题栏（蓝），再拖出输入框（红）")
-    ttk.Label(body, textvariable=status, foreground="#B45309").pack(pady=(0, 6))
+    ttk.Label(body, textvariable=status, foreground="#B45309", font=(family, 10, "bold")).pack(pady=(0, 6))
     canvas = tk.Canvas(body, width=DISP_W, height=DISP_H, bg="#111827", highlightthickness=1)
     canvas.pack()
+
+    _center_win(DISP_W + 36, DISP_H + 115)
 
     try:
         from PIL import ImageTk
@@ -214,6 +234,21 @@ def run_calibration(parent, base_image, example_max_w=EXAMPLE_MAX_W):
                 status.set("✓ 可确认保存" if ok else msg)
             except ValueError as e:
                 status.set(str(e))
+
+    if initial_roi and isinstance(initial_roi, dict) and "title" in initial_roi and "input" in initial_roi:
+        try:
+            t_box = to_abs(initial_roi["title"], (W, H))
+            i_box = to_abs(initial_roi["input"], (W, H))
+            tx0, ty0 = orig_to_canvas(t_box[0], t_box[1], s, ox, oy)
+            tx1, ty1 = orig_to_canvas(t_box[0] + t_box[2], t_box[1] + t_box[3], s, ox, oy)
+            ix0, iy0 = orig_to_canvas(i_box[0], i_box[1], s, ox, oy)
+            ix1, iy1 = orig_to_canvas(i_box[0] + i_box[2], i_box[1] + i_box[3], s, ox, oy)
+            state["title"] = (min(tx0, tx1), min(ty0, ty1), abs(tx1 - tx0), abs(ty1 - ty0))
+            state["input"] = (min(ix0, ix1), min(iy0, iy1), abs(ix1 - ix0), abs(iy1 - iy0))
+            _redraw()
+            status.set("💡 已预填推荐框选，请核对；确认无误可直接保存，也可拖动调整。")
+        except Exception:
+            pass
 
     def _hit_handle(r, px, py):
         x, y, w, h = r

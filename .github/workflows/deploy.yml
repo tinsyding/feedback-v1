@@ -87,6 +87,7 @@ jobs:
           check "https://feedback.wxjifang.cn/admin.html"
           check "https://feedback.wxjifang.cn/api/auth.php?action=check"
           check "https://feedback.wxjifang.cn/api/public_config.php"
+          check "https://feedback.wxjifang.cn/api/calibrate_roi.php"
           check "https://feedback.wxjifang.cn/css/tokens.css"
           check "https://feedback.wxjifang.cn/js/upload.js"
           check "https://vip.wxjifang.cn/retest.html"

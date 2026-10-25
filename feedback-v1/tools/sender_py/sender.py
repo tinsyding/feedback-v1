@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 
 
 def asset_path(filename: str) -> str:
@@ -223,11 +223,12 @@ def paste_and_send(message: str) -> tuple:
     return (True, "已发送")
 
 
-def ensure_roi(parent, rect, scale, config_path: str = None):
-    """每个候选处理前检查窗口签名；变了先校准再截图。返回 rel roi 或 None（放弃）。"""
+def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
+               token=None, log=print, force: bool = False):
+    """每个候选处理前检查窗口签名；变了先校准再截图。优先 AI 自动框选，失败优雅回退手动校准。返回 rel roi 或 None（放弃）。"""
     config_path = config_path or default_config_path()
     key = signature_key(rect[2], rect[3], scale)
-    if not needs_calibration(config_path, key):
+    if not force and not needs_calibration(config_path, key):
         return load_roi(config_path, key)
     try:
         from sender_py.capture import capture_wecom_window
@@ -250,7 +251,31 @@ def ensure_roi(parent, rect, scale, config_path: str = None):
     img = capture_wecom_window(rect)
     if img is None:
         return None
-    roi = run_calibration(parent, img)
+
+    # 1. 优先调用 Qwen-VL-Max 多模态旗舰模型智能自动框选
+    ai_roi = None
+    try:
+        try:
+            from sender_py.vision_api import calibrate_roi
+        except ModuleNotFoundError:
+            from vision_api import calibrate_roi
+        log("正在使用 Qwen-VL-Max 多模态模型自动识别企微窗口区域...")
+        ai_roi = calibrate_roi(img, server=server or "https://feedback.wxjifang.cn", token=token)
+    except Exception as exc:
+        log(f"AI 自动识别网络异常：{exc}")
+
+    if ai_roi and isinstance(ai_roi, dict) and all(k in ai_roi for k in ("title", "input", "chat")):
+        if all(validate_rel(ai_roi[k]) for k in ("title", "input", "chat")):
+            log(f"✓ Qwen-VL-Max 自动框选成功（{ai_roi.get('reason', '')}），已自动生效！")
+            save_roi(config_path, key, ai_roi["title"], ai_roi["input"], ai_roi["chat"])
+            return {"title": tuple(ai_roi["title"]), "input": tuple(ai_roi["input"]), "chat": tuple(ai_roi["chat"])}
+        else:
+            log("AI 识别坐标超出有效范围，正在回退至手动校准...")
+    else:
+        log("AI 自动定位未通过（可能未点进具体聊天），正在弹出手动校准窗口...")
+
+    # 2. 优雅回退到手动框选（弹出居中大窗口，若有 AI 坐标则自动预填）
+    roi = run_calibration(parent, img, initial_roi=ai_roi)
     if roi is None:
         return None
     save_roi(config_path, key, roi["title"], roi["input"], roi["chat"])
@@ -311,7 +336,7 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         if not rect:
             return {"result": "error", "reason": "找不到企微窗口", "notes": notes}
         scale = wu.get_dpi_scale()
-        roi = ensure_roi(parent, rect, scale, config_path)
+        roi = ensure_roi(parent, rect, scale, config_path, server=server, token=token, log=log)
         if roi is None:
             return {"result": "error", "reason": "ROI 校准未完成", "notes": notes}
         if should_stop is not None and should_stop():
@@ -559,11 +584,13 @@ class SenderApp:
         ttk.Label(title_line, text=APP_NAME, style="AppTitle.TLabel").pack(side="left", padx=(0, 8))
         ttk.Label(title_line, text=f"v{APP_VERSION}", style="VersionBadge.TLabel").pack(side="left")
 
-        ttk.Label(title_box, text="企业微信专属作业反馈发送器 · 智能会话判定 · 全电脑免配置",
-                  style="AppSubtitle.TLabel").pack(anchor="w", pady=(2, 0))
-
         header_actions = ttk.Frame(header_card, style="Card.TFrame")
         header_actions.pack(side="right", anchor="center")
+
+        self.calib_btn = ttk.Button(
+            header_actions, text="🎯 校准视野", style="Toolbar.TButton",
+            command=self.force_calibrate)
+        self.calib_btn.pack(side="left", padx=(0, 6))
 
         self.reply_btn = ttk.Button(
             header_actions, text="📨 待回名单 · 0", style="Toolbar.TButton",
@@ -986,6 +1013,38 @@ class SenderApp:
                 f"成功 {counts['已发送']}，失败 {counts['发送失败']}，"
                 f"拦截 {counts['已拦截']}，未匹配 {counts['未匹配']}，"
                 f"跳过 {counts['已跳过']}")
+
+    def force_calibrate(self):
+        """手动触发视野校准：优先 Qwen-VL-Max 自动框选，识别失败时弹出居中大手动画布。"""
+        try:
+            try:
+                from sender_py import window_utils as wu
+            except ModuleNotFoundError:
+                import window_utils as wu
+            if not wu.find_and_activate_wecom():
+                from tkinter import messagebox
+                messagebox.showwarning("提示", "未能激活企业微信窗口，请先打开企微并点进任意聊天后重试。", parent=self.root)
+                return
+            time.sleep(0.4)
+            rect = wu.get_wecom_rect()
+            if not rect or rect[2] < 200 or rect[3] < 150:
+                from tkinter import messagebox
+                messagebox.showwarning("提示", "未能获取有效的企业微信窗口尺寸。", parent=self.root)
+                return
+            scale = wu.get_dpi_scale()
+            self.emit("用户点击“校准视野”，准备重新校准窗口...")
+            token = getattr(self, "token", None)
+            roi = ensure_roi(self.root, rect, scale, server=self.server, token=token, log=self.emit, force=True)
+            if roi:
+                self.emit("✓ 企业微信窗口视野校准成功并已保存！")
+                from tkinter import messagebox
+                messagebox.showinfo("校准成功", "企业微信窗口区域已成功校准并保存！", parent=self.root)
+            else:
+                self.emit("校准已取消或未完成。")
+        except Exception as exc:
+            self.emit(f"校准过程异常：{exc}")
+            from tkinter import messagebox
+            messagebox.showerror("校准失败", f"校准异常：{exc}", parent=self.root)
 
     def open_log_window(self):
         tk, ttk = self.tk, self._ttk
