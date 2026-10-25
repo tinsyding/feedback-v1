@@ -174,7 +174,12 @@ python sender_py\sender.py --input 测试.json
 2. Windows job 先做导入与界面冒烟检查，再用 PyInstaller 打包单文件 `极方每周反馈程序.exe`，最后用 `--smoke-test` 验证单文件能启动并加载 sv-ttk/图标；
 3. 在该次 Actions run 的 **Artifacts** 下载 `JiFangFeedbackSender-windows-x64`。
 
-需要正式发布时，推送 `sender-*` tag（例如 `sender-v1.1.0`）。同一个工作流会在编译成功后创建对应 tag 的 GitHub Release，并自动挂载 `极方每周反馈程序.exe`。
+需要正式发布时，推送 `sender-*` tag（例如 `sender-v1.1.0`）。同一个工作流会在编译成功后创建对应 tag 的 GitHub Release，并挂载：
+
+- `JiFangFeedbackSender-windows-x64.exe`：直接运行的单文件 exe；
+- `JiFangFeedbackSender-windows-x64.zip`：解压后得到中文文件名 `极方每周反馈程序.exe`。
+
+GitHub Releases 会改写中文附件名，所以直接下载的 exe 使用英文名；程序窗口、任务栏图标和 Windows 文件属性里的产品名仍是「极方每周反馈程序」。
 
 产物未签名，仅供内测/验证；正式分发前需做代码签名和杀软回归。
 
@@ -359,6 +364,7 @@ Windows 真机验收建议至少覆盖：
 ## 12. 当前限制
 
 - GitHub Actions 的 Windows Artifact/Release 未签名，仅供内测/验证；onefile 首次启动会解压到临时目录，可能触发杀软启发式拦截；
+- GitHub Releases 会自动改写中文附件名，因此 Release 同时提供英文名 exe 与内含中文名 exe 的 zip；
 - 真实发送依赖 Windows + 企业微信桌面版；
 - 企业微信 UI 改版可能导致搜索/候选定位失效，需要真机回归；
 - 停止发送是安全边界停止：不强行打断正在粘贴/发送的消息，当前学生结束后停止，避免发出半条；
