@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.5.1"
+APP_VERSION = "1.5.2"
 
 
 def asset_path(filename: str) -> str:
@@ -596,8 +596,19 @@ class SenderApp:
 
         self._setup_appearance(root)
         root.title(APP_NAME)
-        root.geometry("1040x700")
-        root.minsize(920, 620)
+        # 默认大视窗居中启动，让表格与明细视野开阔，无需手动反复拉大
+        sw = root.winfo_screenwidth() or 1920
+        sh = root.winfo_screenheight() or 1080
+        target_w = min(1360, max(1080, int(sw * 0.78)))
+        target_h = min(880, max(720, int(sh * 0.82)))
+        if target_w >= sw:
+            target_w = max(960, sw - 50)
+        if target_h >= sh:
+            target_h = max(620, sh - 70)
+        x = max(0, (sw - target_w) // 2)
+        y = max(0, (sh - target_h) // 2 - 25)
+        root.geometry(f"{target_w}x{target_h}+{x}+{y}")
+        root.minsize(1040, 660)
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         root.bind("<Escape>", self.request_stop)
 
@@ -672,7 +683,8 @@ class SenderApp:
         style.configure("Hint.TLabel", font=(family, 9), foreground="#64748b", background=card_bg)
         style.configure("Muted.TLabel", font=(family, 9), foreground="#64748b", background=card_bg)
         style.configure("Section.TLabel", font=(family, 10, "bold"), foreground="#111827", background=card_bg)
-        style.configure("Logo.TLabel", font=(family, 22, "bold"), foreground="#2563eb", background=card_bg)
+        style.configure("Logo.TLabel", font=(family, 18, "bold"), foreground="#ffffff", background="#2563eb", padding=(7, 2))
+        style.configure("LogoImg.TLabel", background=card_bg)
 
         # Button Styles
         style.configure("TButton", font=(family, 9))
@@ -717,10 +729,10 @@ class SenderApp:
                 source = Image.open(icon_path).convert("RGBA")
                 logo = source.copy()
                 logo.thumbnail((44, 44), Image.LANCZOS)
-                self._logo_image = ImageTk.PhotoImage(logo)
+                self._logo_image = ImageTk.PhotoImage(logo, master=root)
                 window_icon = source.copy()
                 window_icon.thumbnail((64, 64), Image.LANCZOS)
-                self._window_icon = ImageTk.PhotoImage(window_icon)
+                self._window_icon = ImageTk.PhotoImage(window_icon, master=root)
                 try:
                     root.iconphoto(True, self._window_icon)
                 except Exception:
@@ -736,12 +748,7 @@ class SenderApp:
                     pass
 
     def _current_verify_mode(self) -> str:
-        var = getattr(self, "verify_mode_var", None)
-        raw = var.get() if var is not None else ""
-        if "仅本地OCR" in raw:
-            return "local"
-        if "仅云端API" in raw:
-            return "api"
+        """默认走 API（Qwen3.8-Flash），API 异常时自动无缝降级走本地 OCR 兜底。"""
         return "auto"
 
     def _status_style(self, status):
@@ -761,10 +768,13 @@ class SenderApp:
 
         header_left = ttk.Frame(header_card, style="Card.TFrame")
         header_left.pack(side="left", fill="y")
+        self.logo_label = ttk.Label(header_left, style="LogoImg.TLabel")
         if self._logo_image is not None:
-            ttk.Label(header_left, image=self._logo_image, style="Card.TFrame").pack(side="left", padx=(0, 10))
+            self.logo_label.config(image=self._logo_image)
+            self.logo_label.image = self._logo_image
         else:
-            ttk.Label(header_left, text="极", style="Logo.TLabel").pack(side="left", padx=(0, 10))
+            self.logo_label.config(text="极", style="Logo.TLabel")
+        self.logo_label.pack(side="left", padx=(0, 12))
 
         title_box = ttk.Frame(header_left, style="Card.TFrame")
         title_box.pack(side="left", fill="y")
@@ -852,15 +862,7 @@ class SenderApp:
         self.retry_failed_btn = ttk.Button(
             tb_left, text="🔄 重试失败项", style="Toolbar.TButton",
             command=self.select_failed_only)
-        self.retry_failed_btn.pack(side="left", padx=(0, 10))
-
-        # ---- 核验通道（默认 API 优先 + 自动降级本地 OCR 兜底）----
-        self.verify_mode_var = tk.StringVar(master=self.root, value=VERIFY_MODE_AUTO)
-        ttk.Label(tb_left, text="核验:", font=(family, 9), foreground="#64748b", background=card_bg).pack(side="left", padx=(0, 4))
-        self.verify_mode_combo = ttk.Combobox(
-            tb_left, textvariable=self.verify_mode_var, values=VERIFY_MODES,
-            state="readonly", width=25)
-        self.verify_mode_combo.pack(side="left")
+        self.retry_failed_btn.pack(side="left")
 
         tb_right = ttk.Frame(toolbar_card, style="Card.TFrame")
         tb_right.pack(side="right", fill="y")
@@ -1098,8 +1100,6 @@ class SenderApp:
                 pass
         self.search_entry.config(state=state)
         self.filter_combo.config(state="disabled" if running else "readonly")
-        if hasattr(self, "verify_mode_combo"):
-            self.verify_mode_combo.config(state="disabled" if running else "readonly")
         self.start_btn.config(state=state)
         self.stop_btn.config(state="normal" if running else "disabled")
         for widget in self._row_checkbuttons + self._row_action_buttons:
@@ -1772,7 +1772,7 @@ class SenderApp:
         self.result_var.set("正在发送...")
         self.hint_var.set("正在发送...按 Esc 可停止")
         verify_mode = self._current_verify_mode()
-        self.emit(f"🚀 开始执行发送任务，核验通道：{getattr(self, 'verify_mode_var', None) and self.verify_mode_var.get() or 'API优先'}")
+        self.emit("🚀 开始执行发送任务（标题核验：云端API优先，异常自动降级本地OCR）")
         processed = 0
         stopped = False
         try:
