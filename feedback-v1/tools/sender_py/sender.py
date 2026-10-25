@@ -451,26 +451,26 @@ class SenderApp:
 
         # Typography & Labels
         style.configure("AppTitle.TLabel", font=(family, 15, "bold"), foreground="#0f172a", background=card_bg)
-        style.configure("AppSubtitle.TLabel", font=(family, 8.5), foreground="#64748b", background=card_bg)
+        style.configure("AppSubtitle.TLabel", font=(family, 9), foreground="#64748b", background=card_bg)
         style.configure("VersionBadge.TLabel", font=(family, 8, "bold"), foreground="#0284c7", background="#e0f2fe", padding=(5, 1))
-        style.configure("StatTitle.TLabel", font=(family, 8.5), foreground="#64748b", background=card_bg)
+        style.configure("StatTitle.TLabel", font=(family, 9), foreground="#64748b", background=card_bg)
         style.configure("StatNum.TLabel", font=(family, 12, "bold"), foreground="#0f172a", background=card_bg)
         style.configure("StatNumGreen.TLabel", font=(family, 12, "bold"), foreground="#15803d", background=card_bg)
         style.configure("StatNumRed.TLabel", font=(family, 12, "bold"), foreground="#b91c1c", background=card_bg)
-        style.configure("HeaderCol.TLabel", font=(family, 8.5, "bold"), foreground="#475569", background="#f1f5f9")
+        style.configure("HeaderCol.TLabel", font=(family, 9, "bold"), foreground="#475569", background="#f1f5f9")
         style.configure("IdBadge.TLabel", font=("Consolas", 9), foreground="#475569", background="#f1f5f9", padding=(4, 1))
-        style.configure("RowName.TLabel", font=(family, 9.5, "bold"), foreground="#1e293b", background=card_bg)
-        style.configure("RowReason.TLabel", font=(family, 8.5), foreground="#64748b", background=card_bg)
+        style.configure("RowName.TLabel", font=(family, 10, "bold"), foreground="#1e293b", background=card_bg)
+        style.configure("RowReason.TLabel", font=(family, 9), foreground="#64748b", background=card_bg)
         style.configure("EmptyTitle.TLabel", font=(family, 12, "bold"), foreground="#334155", background=card_bg)
         style.configure("EmptyDesc.TLabel", font=(family, 9), foreground="#94a3b8", background=card_bg)
-        style.configure("Hint.TLabel", font=(family, 8.5), foreground="#64748b", background=card_bg)
+        style.configure("Hint.TLabel", font=(family, 9), foreground="#64748b", background=card_bg)
         style.configure("Muted.TLabel", font=(family, 9), foreground="#64748b", background=card_bg)
         style.configure("Section.TLabel", font=(family, 10, "bold"), foreground="#111827", background=card_bg)
         style.configure("Logo.TLabel", font=(family, 22, "bold"), foreground="#2563eb", background=card_bg)
 
         # Button Styles
         style.configure("TButton", font=(family, 9))
-        style.configure("Toolbar.TButton", font=(family, 8.5), padding=(7, 3))
+        style.configure("Toolbar.TButton", font=(family, 9), padding=(7, 3))
         style.configure("Secondary.TButton", font=(family, 9), padding=(8, 4))
         style.configure("RowAction.TButton", font=(family, 8), padding=(5, 2))
         style.configure("PrimaryLarge.TButton", font=(family, 10, "bold"), padding=(14, 6))
@@ -478,7 +478,7 @@ class SenderApp:
 
         self._accent_style = "Accent.TButton" if self._using_sv_ttk else "TButton"
         if self._using_sv_ttk:
-            style.configure("Accent.TButton", font=(family, 9.5, "bold"), padding=(12, 5))
+            style.configure("Accent.TButton", font=(family, 10, "bold"), padding=(12, 5))
 
         self._status_styles = {}
         for idx, (status, pal) in enumerate(self.STATUS_PALETTE.items()):
@@ -487,7 +487,7 @@ class SenderApp:
                 style_name,
                 foreground=pal["fg"],
                 background=pal["bg"],
-                font=(family, 8.5, "bold"),
+                font=(family, 8, "bold"),
                 padding=(5, 2),
                 anchor="center",
             )
@@ -496,7 +496,7 @@ class SenderApp:
             "StatusDefault.TLabel",
             foreground="#475569",
             background="#f1f5f9",
-            font=(family, 8.5, "bold"),
+            font=(family, 8, "bold"),
             padding=(5, 2),
             anchor="center",
         )
@@ -621,7 +621,7 @@ class SenderApp:
         self.search_entry = ttk.Entry(tb_left, textvariable=self.search_var, width=20)
         self.search_entry.pack(side="left", padx=(0, 10))
 
-        ttk.Label(tb_left, text="状态:", font=(family, 8.5), foreground="#64748b", background=card_bg).pack(side="left", padx=(0, 4))
+        ttk.Label(tb_left, text="状态:", font=(family, 9), foreground="#64748b", background=card_bg).pack(side="left", padx=(0, 4))
         self.filter_combo = ttk.Combobox(
             tb_left, textvariable=self.filter_var, values=FILTER_VALUES,
             state="readonly", width=11)
@@ -640,7 +640,7 @@ class SenderApp:
         tb_right = ttk.Frame(toolbar_card, style="Card.TFrame")
         tb_right.pack(side="right", fill="y")
 
-        ttk.Label(tb_right, textvariable=self.summary_var, font=(family, 8.5, "bold"),
+        ttk.Label(tb_right, textvariable=self.summary_var, font=(family, 9, "bold"),
                   foreground="#334155", background=card_bg).pack(side="left", padx=(0, 8))
 
         self.select_all_btn = ttk.Button(
@@ -706,11 +706,11 @@ class SenderApp:
         prog_title_row.pack(fill="x")
         self.progress_var = tk.StringVar(master=self.root, value="进度：等待开始")
         ttk.Label(prog_title_row, textvariable=self.progress_var,
-                  font=(family, 9.5, "bold"), foreground="#1e293b", background=card_bg).pack(side="left")
+                  font=(family, 10, "bold"), foreground="#1e293b", background=card_bg).pack(side="left")
 
         self.result_var = tk.StringVar(master=self.root)
         ttk.Label(prog_title_row, textvariable=self.result_var,
-                  font=(family, 8.5), foreground="#64748b", background=card_bg).pack(side="right")
+                  font=(family, 9), foreground="#64748b", background=card_bg).pack(side="right")
 
         self.progress_bar = ttk.Progressbar(
             progress_box, orient="horizontal", mode="determinate", maximum=1, value=0)
