@@ -13,11 +13,14 @@ import os
 
 IDENTIFY_PATH = "/api/identify.php"
 
+# 内置默认访问令牌（小范围内部使用，开箱即用免配置）
+DEFAULT_SENDER_TOKEN = "jf_feedback_sender_internal_token_2026"
+
 _VALID_SENDERS = ("me", "parent", "unknown", None)
 
 
 def load_token(explicit=None) -> str:
-    """发送器访问令牌：显式参数 → 环境变量 SENDER_API_TOKEN → ~/.sender_py/config.json。"""
+    """发送器访问令牌：显式参数 → 环境变量 SENDER_API_TOKEN → ~/.sender_py/config.json → 内置默认令牌。"""
     if explicit:
         return explicit
     env = (os.environ.get("SENDER_API_TOKEN") or "").strip()
@@ -31,7 +34,7 @@ def load_token(explicit=None) -> str:
                 return token
     except Exception:
         pass
-    return ""
+    return DEFAULT_SENDER_TOKEN
 
 
 def _as_bool_or_none(v):
@@ -80,9 +83,7 @@ def identify(title_img, chat_tail_img, target_id: str, target_name: str,
     server = (server or "").strip().rstrip("/")
     if not server.startswith(("http://", "https://")):
         raise RuntimeError("服务器地址必须以 http(s):// 开头")
-    tok = load_token(token)
-    if not tok:
-        raise RuntimeError("缺少发送器令牌：设置 SENDER_API_TOKEN 环境变量或写入 ~/.sender_py/config.json")
+    tok = load_token(token) or DEFAULT_SENDER_TOKEN
 
     def _png_bytes(img):
         buf = io.BytesIO()

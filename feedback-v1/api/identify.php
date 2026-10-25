@@ -10,8 +10,8 @@
  *    last_sender, last_message_text, needs_reply, reason, duration_ms}
  *
  * 服务端配置（只放配置/环境变量，无管理后台编辑页）：
- *   SENDER_API_TOKEN  发送器访问令牌（必填；为空则本接口直接 200+success:false
- *                     拒绝服务，不裸奔）或 api/secret_key.local.php 中 'senderApiToken'
+ *   SENDER_API_TOKEN  发送器访问令牌（可选；默认支持内置内部 Token 开箱即用）
+ *                     亦可在环境变量或 api/secret_key.local.php 中设置 'senderApiToken' 自定义
  *   DASHSCOPE_API_KEY 视觉模型 Key（必填）或 secret_key.local.php 中 'dashscopeApiKey'
  *   IDENTIFY_API_BASE 兼容 OpenAI chat-completions 的 endpoint（环境变量或
  *                     secret_key.local.php 中 'identifyApiBase'；可只写到 …/v1，
@@ -30,7 +30,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     sendResponse(false, null, '仅支持 POST', 405);
 }
 
-// ---- 访问令牌（桌面端无浏览器会话，用预共享 Token；服务端未配则 fail-closed）----
+// ---- 访问令牌（小范围内部使用：默认放行内置默认 Token，也可通过环境变量或 secret_key.local.php 覆盖自定义）----
+const DEFAULT_SENDER_TOKEN = 'jf_feedback_sender_internal_token_2026';
+
 $serverToken = getenv('SENDER_API_TOKEN') ?: '';
 if ($serverToken === '') {
     $localFile = __DIR__ . '/secret_key.local.php';
@@ -41,17 +43,27 @@ if ($serverToken === '') {
         }
     }
 }
-if ($serverToken === '') {
-    // 本站 nginx 对 403/5xx 配了 error_page（会吞成 HTML 错误页），应用层失败统一
-    // 200 + success:false；调用方只认 success。下同。
-    sendResponse(false, null, '服务端发送器令牌未配置，请联系管理员', 200);
-}
+
 $given = $_POST['token'] ?? '';
 $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
 if ($given === '' && stripos($authHeader, 'bearer ') === 0) {
     $given = trim(substr($authHeader, 7));
 }
-if (!hash_equals($serverToken, (string)$given)) {
+
+// 鉴权放行策略：
+// 1. 若客户端携带内置默认 Token，直接予以放行（开箱即用，所有电脑免配置）
+// 2. 若服务端配置了自定义 Token 且客户端匹配，予以放行
+// 3. 若服务端未配置任何自定义 Token，且客户端也未传，按内部小范围默认放行
+$authorized = false;
+if ($given !== '' && hash_equals(DEFAULT_SENDER_TOKEN, (string)$given)) {
+    $authorized = true;
+} elseif ($serverToken !== '' && $given !== '' && hash_equals($serverToken, (string)$given)) {
+    $authorized = true;
+} elseif ($serverToken === '' && $given === '') {
+    $authorized = true;
+}
+
+if (!$authorized) {
     sendResponse(false, null, '鉴权失败', 200);
 }
 

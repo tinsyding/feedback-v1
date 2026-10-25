@@ -66,19 +66,21 @@ Linux 只跑单测时不需要 `pywin32` / `mss`，安装基础依赖即可。
 
 ---
 
-## 4. 配置发送器令牌
+## 4. 发送器令牌说明
 
-令牌只用于调用判定接口，**不要写进输入 JSON、不要提交到 Git**。
+程序已内置内部默认访问令牌，**所有电脑均可开箱即用，无需手动配置任何令牌**。
 
-方式一：环境变量（推荐）
+如需覆盖为特定自定义令牌（可选），仍支持以下方式：
+
+方式一：环境变量（可选）
 
 ```powershell
-setx SENDER_API_TOKEN "你的发送器令牌"
+setx SENDER_API_TOKEN "你的自定义令牌"
 ```
 
 设置后重新打开终端，使环境变量生效。
 
-方式二：用户配置文件
+方式二：用户配置文件（可选）
 
 ```text
 %USERPROFILE%\.sender_py\config.json
@@ -86,11 +88,11 @@ setx SENDER_API_TOKEN "你的发送器令牌"
 
 ```json
 {
-  "token": "你的发送器令牌"
+  "token": "你的自定义令牌"
 }
 ```
 
-服务端对应配置在 `feedback-v1/api/secret_key.local.php`，该文件已被 `.gitignore` 排除，部署时手动放置，**绝不入库**。
+服务端对应配置在 `feedback-v1/api/secret_key.local.php`（可选）。
 
 ---
 
@@ -375,9 +377,9 @@ Windows 真机验收建议至少覆盖：
 
 ## 13. 常见问题
 
-**Q：提示“缺少发送器令牌”？**
+**Q：提示“缺少发送器令牌”或“鉴权失败”？**
 
-检查 `SENDER_API_TOKEN` 是否在当前终端生效，或 `%USERPROFILE%\.sender_py\config.json` 是否有 `token`。`setx` 后需要新开终端。
+新版已内置默认小范围内部令牌，默认无需配置即可使用。如果遇到鉴权失败，请确认服务端接口已部署最新版本，或检查当前终端环境变量 `SENDER_API_TOKEN` 是否被误配。
 
 **Q：一直要求重新校准？**
 

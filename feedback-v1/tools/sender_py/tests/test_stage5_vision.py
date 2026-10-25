@@ -2,7 +2,9 @@
 
 import unittest
 
-from sender_py.vision_api import IDENTIFY_PATH, load_token, map_response
+from sender_py.vision_api import (
+    DEFAULT_SENDER_TOKEN, IDENTIFY_PATH, load_token, map_response,
+)
 
 
 class TestStage5(unittest.TestCase):
@@ -56,7 +58,7 @@ class TestStage5(unittest.TestCase):
             self.assertEqual(load_token("zzz"), "zzz")
         finally:
             del os.environ["SENDER_API_TOKEN"]
-        self.assertEqual(load_token(), "")
+        self.assertEqual(load_token(), DEFAULT_SENDER_TOKEN)
 
 
 if __name__ == "__main__":
