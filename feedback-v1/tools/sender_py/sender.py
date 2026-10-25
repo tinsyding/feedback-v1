@@ -12,12 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.7.2"
-
-try:
-    import windnd
-except Exception:
-    windnd = None
+APP_VERSION = "1.7.3"
 
 
 def asset_path(filename: str) -> str:
@@ -234,13 +229,11 @@ def paste_and_send(message: str) -> tuple:
 
 
 class CalibrationLoadingDialog:
-    """校准视野准备与智能识别时的平滑加载动画弹窗，避免用户误以为界面卡死。"""
+    """校准视野时的极简加载动画弹窗。"""
 
-    def __init__(self, parent, title="正在准备校准视野", message="正在定位企业微信窗口..."):
+    def __init__(self, parent, title="正在加载，请稍候", message="正在加载，请稍候..."):
         self.parent = parent
         self._closed = False
-        self._dot_idx = 0
-        self._spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
         self.top = None
 
         try:
@@ -254,7 +247,7 @@ class CalibrationLoadingDialog:
 
         try:
             top = tk.Toplevel(parent) if parent else tk.Tk()
-            top.title(title)
+            top.title("正在加载，请稍候")
             top.resizable(False, False)
             try:
                 top.attributes("-topmost", True)
@@ -267,29 +260,21 @@ class CalibrationLoadingDialog:
                 pass
 
             family = "Microsoft YaHei UI" if sys.platform == "win32" else "Arial"
-            card = ttk.Frame(top, style="Card.TFrame", padding=(22, 18))
+            card = ttk.Frame(top, style="Card.TFrame", padding=(26, 20))
             card.pack(fill="both", expand=True)
 
-            header_box = ttk.Frame(card, style="Card.TFrame")
-            header_box.pack(fill="x", pady=(0, 10))
+            self.status_var = tk.StringVar(master=top, value="正在加载，请稍候...")
+            ttk.Label(card, textvariable=self.status_var, font=(family, 10, "bold"), foreground="#1e293b").pack(pady=(4, 12))
 
-            ttk.Label(header_box, text="🎯 正在准备校准视野", font=(family, 12, "bold")).pack(side="left")
-
-            self.status_var = tk.StringVar(master=top, value=message)
-            ttk.Label(card, textvariable=self.status_var, font=(family, 9), foreground="#374151").pack(anchor="w", pady=(0, 10))
-
-            self.pbar = ttk.Progressbar(card, mode="indeterminate", length=320)
-            self.pbar.pack(fill="x", pady=(0, 10))
+            self.pbar = ttk.Progressbar(card, mode="indeterminate", length=260)
+            self.pbar.pack(fill="x", pady=(0, 4))
             try:
                 self.pbar.start(12)
             except Exception:
                 pass
 
-            self.hint_var = tk.StringVar(master=top, value="⠋ 正在检测企业微信窗口并智能分析，请稍候...")
-            ttk.Label(card, textvariable=self.hint_var, font=(family, 8), foreground="#6b7280").pack(anchor="w")
-
             self.top = top
-            self._center(370, 160)
+            self._center(320, 105)
             try:
                 top.grab_set()
             except Exception:
@@ -298,7 +283,6 @@ class CalibrationLoadingDialog:
                 top.update()
             except Exception:
                 pass
-            self._animate()
         except Exception:
             self.top = None
 
@@ -323,39 +307,9 @@ class CalibrationLoadingDialog:
         except Exception:
             pass
 
-    def _animate(self):
-        if self._closed or not self.top:
-            return
-        try:
-            if not self.top.winfo_exists():
-                return
-            char = self._spinner_chars[self._dot_idx % len(self._spinner_chars)]
-            self._dot_idx += 1
-            curr = self.hint_var.get()
-            if " " in curr:
-                rest = curr.split(" ", 1)[1]
-                self.hint_var.set(f"{char} {rest}")
-            self.top.after(100, self._animate)
-        except Exception:
-            pass
-
-    def set_status(self, text: str, hint: str = None):
-        if self._closed or not self.top:
-            return
-        def _update():
-            try:
-                if self.top and self.top.winfo_exists():
-                    self.status_var.set(text)
-                    if hint:
-                        char = self._spinner_chars[self._dot_idx % len(self._spinner_chars)]
-                        self.hint_var.set(f"{char} {hint}")
-                    self.top.update_idletasks()
-            except Exception:
-                pass
-        try:
-            self.top.after(0, _update)
-        except Exception:
-            pass
+    def set_status(self, text: str = "", hint: str = None):
+        """保持极简纯净，不展示冗长过程说明。"""
+        pass
 
     def close(self):
         self._closed = True
@@ -386,7 +340,7 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
     loading = None
     if parent and hasattr(parent, "winfo_exists"):
         try:
-            loading = CalibrationLoadingDialog(parent, title="正在准备校准视野", message="首次打开校准，正在进行窗口捕获与智能定位...")
+            loading = CalibrationLoadingDialog(parent, title="正在加载，请稍候", message="正在加载，请稍候...")
         except Exception:
             loading = None
 
@@ -401,8 +355,6 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
             from sender_py import window_utils as wu
         except ModuleNotFoundError:
             import window_utils as wu
-        if loading:
-            loading.set_status("正在激活企业微信窗口...", "请确保企业微信窗口处于正常显示状态")
         wu.find_and_activate_wecom()
         time.sleep(0.4)
         fresh = wu.get_wecom_rect()
@@ -411,8 +363,6 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
     except Exception:
         pass
 
-    if loading:
-        loading.set_status("正在截取窗口画面...", "正在准备实拍图像")
     img = capture_wecom_window(rect)
     if img is None:
         if loading:
@@ -800,11 +750,6 @@ class SenderApp:
         root.bind("<Escape>", self.request_stop)
 
         self._build_ui()
-        if windnd is not None:
-            try:
-                windnd.hook_dropfiles(self.root, func=self._on_drop_files)
-            except Exception:
-                pass
         self.search_var.trace_add("write", self._on_search_change)
         self.update_file_pool_ui()
         self.rebuild_student_list()
@@ -1536,7 +1481,7 @@ class SenderApp:
         except ModuleNotFoundError:
             import window_utils as wu
 
-        loading = CalibrationLoadingDialog(self.root, title="正在准备校准视野", message="正在定位并激活企业微信窗口...")
+        loading = CalibrationLoadingDialog(self.root, title="正在加载，请稍候", message="正在加载，请稍候...")
         try:
             self.calib_btn.configure(state="disabled")
         except Exception:
@@ -1550,7 +1495,6 @@ class SenderApp:
             ai_roi = None
 
             try:
-                loading.set_status("正在定位并激活企业微信窗口...", "请确保企业微信已打开并点进任意聊天")
                 if not wu.find_and_activate_wecom():
                     err_data = ("未能激活企业微信", "未能激活企业微信窗口，请先打开企微并点进任意聊天后重试。")
                     return
@@ -1562,7 +1506,6 @@ class SenderApp:
                     return
 
                 scale = wu.get_dpi_scale()
-                loading.set_status("正在截取企微窗口画面...", "正在准备实拍图像")
 
                 try:
                     from sender_py.capture import capture_wecom_window
@@ -1574,7 +1517,6 @@ class SenderApp:
                     err_data = ("截取失败", "未能捕获企业微信窗口画面，请确认企微未被遮挡。")
                     return
 
-                loading.set_status("正在智能分析视野区域...", "正在使用 Qwen3.8-Max 多模态模型自动框选")
                 token = getattr(self, "token", None)
                 try:
                     try:
@@ -1585,8 +1527,6 @@ class SenderApp:
                 except Exception as exc:
                     self.emit(f"AI 自动识别网络异常：{exc}")
                     ai_roi = None
-
-                loading.set_status("准备就绪", "正在进入校准...")
             except Exception as exc:
                 err_data = ("校准异常", str(exc))
             finally:
@@ -1786,12 +1726,10 @@ class SenderApp:
             self._row_action_buttons.extend((msg_btn, name_btn))
 
         if not self.items:
-            empty_box = ttk.Frame(self.students_inner, style="Card.TFrame", padding=(20, 48))
+            empty_box = ttk.Frame(self.students_inner, style="Card.TFrame", padding=(20, 56))
             empty_box.pack(fill="both", expand=True)
-            ttk.Label(empty_box, text="📂", font=(self._font_family, 36), background=card_bg).pack()
-            ttk.Label(empty_box, text="暂未加载任何学生反馈数据", style="EmptyTitle.TLabel").pack(pady=(8, 4))
-            ttk.Label(empty_box, text="支持同时多选网站导出的 HTML 快照与 JSON 结果文件", style="EmptyDesc.TLabel").pack(pady=(0, 16))
-            ttk.Button(empty_box, text="立即选择文件导入", style=self._accent_style, command=self.choose_input_files).pack()
+            ttk.Label(empty_box, text="📂", font=(self._font_family, 32), background=card_bg).pack()
+            ttk.Label(empty_box, text="暂无学员反馈数据", style="EmptyTitle.TLabel").pack(pady=(8, 4))
         elif not visible:
             empty_box = ttk.Frame(self.students_inner, style="Card.TFrame", padding=(20, 40))
             empty_box.pack(fill="both", expand=True)
@@ -2006,17 +1944,16 @@ class SenderApp:
 
         if not self.input_paths:
             self.file_pool_summary_var.set("尚未选择文件（0 个文件 · 0 人）")
-            hint_lbl = self._ttk.Label(
-                self.file_tags_inner,
-                text="💡 暂无文件：点击右侧「➕ 添加文件」，或直接从桌面/文件夹拖入 JSON / HTML 文件",
-                style="Hint.TLabel"
-            )
-            hint_lbl.pack(side="left", padx=4, pady=3)
+            if hasattr(self, "file_tags_container"):
+                self.file_tags_container.pack_forget()
             if hasattr(self, "add_file_btn"):
                 self.add_file_btn.configure(text="➕ 添加文件")
             if hasattr(self, "clear_pool_btn"):
                 self.clear_pool_btn.configure(state="disabled")
             return
+
+        if hasattr(self, "file_tags_container"):
+            self.file_tags_container.pack(fill="x", pady=(6, 0))
 
         if hasattr(self, "add_file_btn"):
             self.add_file_btn.configure(text="➕ 继续添加")
@@ -2045,32 +1982,6 @@ class SenderApp:
             del_btn = self._ttk.Label(tag_frame, text=" ✖", style="FileTagDel.TLabel", cursor="hand2")
             del_btn.pack(side="left")
             del_btn.bind("<Button-1>", lambda _e, p=path: self.remove_input_file(p))
-
-    def _on_drop_files(self, files):
-        if self._running:
-            self.emit("⚠️ 正在发送中，无法添加新文件。")
-            return
-        paths = []
-        for f in files or ():
-            if isinstance(f, bytes):
-                decoded = None
-                for enc in ("utf-8", "gbk", "cp936", "mbcs"):
-                    try:
-                        decoded = f.decode(enc)
-                        break
-                    except Exception:
-                        pass
-                f = decoded if decoded is not None else str(f)
-            p = str(f).strip()
-            if os.path.isfile(p):
-                ext = os.path.splitext(p)[1].lower()
-                if ext in (".json", ".html", ".htm"):
-                    paths.append(p)
-        if paths:
-            self.emit(f"📥 捕获拖入文件 {len(paths)} 个，正在追加加载...")
-            self.add_input_files(paths, replace=False)
-        else:
-            self.emit("⚠️ 拖入的文件中未找到有效的 .json 或 .html 反馈文件。")
 
     def choose_and_add_files(self):
         self.choose_input_files(append=True)

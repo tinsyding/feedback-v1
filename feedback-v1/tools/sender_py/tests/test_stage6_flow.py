@@ -388,7 +388,6 @@ class TestStage6(unittest.TestCase):
                 add_input_files = SenderApp.add_input_files
                 remove_input_file = SenderApp.remove_input_file
                 clear_input_files = SenderApp.clear_input_files
-                _on_drop_files = SenderApp._on_drop_files
 
             app = DummyFilePoolApp()
 
@@ -420,12 +419,7 @@ class TestStage6(unittest.TestCase):
             self.assertEqual(len(app.items), 1)
             self.assertEqual(app.items[0]["studentName"], "90002李四")
 
-            # 5. 模拟拖入文件 (bytes utf-8)
-            app._on_drop_files([f1.encode("utf-8")])
-            self.assertEqual(len(app.input_paths), 2)
-            self.assertEqual(len(app.items), 2)
-
-            # 6. 清空文件
+            # 5. 清空文件
             app.clear_input_files()
             self.assertEqual(len(app.input_paths), 0)
             self.assertEqual(len(app.items), 0)
