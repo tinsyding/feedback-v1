@@ -257,6 +257,71 @@ class TestStage6(unittest.TestCase):
         self.assertIsNone(note2["needs_reply"])
         self.assertEqual(note2["verdict"], "待人工确认")
 
+    def test_judge_candidate_local_ocr_fallback(self):
+        """测试场景2在 API 异常时自动降级到本地 OCR 备选方案。"""
+        from sender_py import capture, vision_api
+        from sender_py.local_ocr import set_ocr_hook_for_testing
+        from sender_py.sender import judge_candidate
+
+        class _StubImg:
+            def __init__(self, w=400, h=300):
+                self.size = (w, h)
+
+            def crop(self, box):
+                return _StubImg(100, 50)
+
+        dummy_img = _StubImg(400, 300)
+        roi = {
+            "title": (0.2, 0.0, 0.8, 0.1),
+            "input": (0.2, 0.8, 0.8, 0.2),
+            "chat": (0.2, 0.1, 0.8, 0.7),
+        }
+        rect = (0, 0, 400, 300)
+
+        # 1. 模拟 API 报错，自动降级至本地 OCR 并成功核验
+        set_ocr_hook_for_testing(lambda img: "202401-张三 (极方学员)")
+        with mock.patch.object(capture, "capture_wecom_window", return_value=dummy_img), \
+             mock.patch.object(vision_api, "identify_title", side_effect=RuntimeError("503 Service Unavailable")):
+            judgment, chat_title, err, chat_img = judge_candidate(
+                rect, roi, "202401", "张三", "https://mock.server", None,
+                fast_title_only=True, verify_mode="auto"
+            )
+            self.assertIsNone(err)
+            self.assertIsNotNone(judgment)
+            self.assertTrue(judgment["matched"])
+            self.assertFalse(judgment["is_group"])
+            self.assertIn("[备选方案: 本地OCR]", judgment["reason"])
+            self.assertEqual(chat_title, "202401-张三 (极方学员)")
+
+        # 2. 模拟本地 OCR 识别到群聊，即使 API 挂了也严格拦截群聊
+        set_ocr_hook_for_testing(lambda img: "202401班级交流群 (38)")
+        with mock.patch.object(capture, "capture_wecom_window", return_value=dummy_img), \
+             mock.patch.object(vision_api, "identify_title", side_effect=RuntimeError("Network Timeout")):
+            judgment, chat_title, err, chat_img = judge_candidate(
+                rect, roi, "202401", "张三", "https://mock.server", None,
+                fast_title_only=True, verify_mode="auto"
+            )
+            self.assertIsNone(err)
+            self.assertIsNotNone(judgment)
+            self.assertFalse(judgment["matched"])
+            self.assertTrue(judgment["is_group"])
+            self.assertIn("群聊", judgment["reason"])
+
+        # 3. 强制本地模式（verify_mode='local'）：不调用 API，直接由本地 OCR 秒级核验
+        set_ocr_hook_for_testing(lambda img: "202401-张三")
+        with mock.patch.object(capture, "capture_wecom_window", return_value=dummy_img), \
+             mock.patch.object(vision_api, "identify_title") as mock_api:
+            judgment, chat_title, err, chat_img = judge_candidate(
+                rect, roi, "202401", "张三", "https://mock.server", None,
+                fast_title_only=True, verify_mode="local"
+            )
+            mock_api.assert_not_called()
+            self.assertIsNone(err)
+            self.assertTrue(judgment["matched"])
+            self.assertIn("[本地OCR模式]", judgment["reason"])
+
+        set_ocr_hook_for_testing(None)
+
 
 if __name__ == "__main__":
     unittest.main()

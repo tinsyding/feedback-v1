@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 
 
 def asset_path(filename: str) -> str:
@@ -53,6 +53,11 @@ SKIP_SENT = False
 FILTER_ALL = "全部"
 FILTER_FAILED = "失败/未匹配"
 FILTER_VALUES = (FILTER_ALL, "待发送", "已发送", FILTER_FAILED, "已跳过", "已拦截")
+
+VERIFY_MODE_AUTO = "⚡ API优先 (故障自动降级本地OCR)"
+VERIFY_MODE_LOCAL = "💻 仅本地OCR (离线免网络)"
+VERIFY_MODE_API = "☁️ 仅云端API (Qwen3.8)"
+VERIFY_MODES = (VERIFY_MODE_AUTO, VERIFY_MODE_LOCAL, VERIFY_MODE_API)
 
 
 # ================= 纯决策（无依赖，可单测） =================
@@ -358,8 +363,14 @@ class AsyncReplyAnalyzer:
 
 
 def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
-                    token=None, fast_title_only: bool = False) -> tuple:
+                    token=None, fast_title_only: bool = False,
+                    verify_mode: str = "auto") -> tuple:
     """整窗截图→裁 title/chat_tail→判定。
+
+    verify_mode:
+      - 'auto': 优先调用云端 API（qwen3.8-flash 秒验），API 异常时自动无缝降级到本地 OCR 备选方案；
+      - 'local': 强制离线使用本地 OCR 核验（无需网络请求）；
+      - 'api': 仅使用云端 API，不降级。
 
     fast_title_only=True（方案 A 异步加速）：
       仅上传极小的 title_img 秒验身份与群聊，同时把发送前截好的 chat_img 一并返回供后台线程异步分析。
@@ -382,21 +393,74 @@ def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
     title_img = crop_by_rel(img, roi["title"])
     chat_img = crop_chat_tail(crop_by_rel(img, roi["chat"]))
     _ = (title_abs, chat_abs)
-    if fast_title_only:
+
+    def _fallback_local(err_msg: str):
         try:
-            judgment = identify_title(title_img, target_id, target_name, server, token)
-        except Exception as e:
-            return (None, None, str(e), None)
-        return (judgment, judgment.get("detected_title"), None, chat_img)
+            try:
+                from sender_py.local_ocr import identify_title_local
+            except ModuleNotFoundError:
+                from local_ocr import identify_title_local
+            local_res = identify_title_local(title_img, target_id, target_name)
+            if local_res and local_res.get("title_in_header"):
+                local_res["reason"] = f"[备选方案: 本地OCR] {local_res.get('reason', '')} (API异常: {err_msg})"
+                return local_res
+        except Exception:
+            pass
+        return None
+
+    if fast_title_only:
+        judgment = None
+        err = None
+        if verify_mode == "local":
+            try:
+                from sender_py.local_ocr import identify_title_local
+            except ModuleNotFoundError:
+                from local_ocr import identify_title_local
+            judgment = identify_title_local(title_img, target_id, target_name)
+            judgment["reason"] = f"[本地OCR模式] {judgment.get('reason', '')}"
+        else:
+            try:
+                judgment = identify_title(title_img, target_id, target_name, server, token)
+            except Exception as e:
+                if verify_mode == "auto":
+                    judgment = _fallback_local(str(e))
+                    if judgment is None:
+                        err = f"API核验失败且本地OCR无法识别文字（API错误: {e}）"
+                else:
+                    err = str(e)
+        if judgment is not None:
+            return (judgment, judgment.get("detected_title"), None, chat_img)
+        return (None, None, err, chat_img)
+
+    if verify_mode == "local":
+        try:
+            from sender_py.local_ocr import identify_title_local
+        except ModuleNotFoundError:
+            from local_ocr import identify_title_local
+        judgment = identify_title_local(title_img, target_id, target_name)
+        judgment["last_sender"] = "unknown"
+        judgment["last_message_text"] = "(本地OCR模式)"
+        judgment["needs_reply"] = None
+        judgment["reason"] = f"[本地OCR模式] {judgment.get('reason', '')}"
+        return (judgment, judgment.get("detected_title"), None)
+
     try:
         judgment = identify(title_img, chat_img, target_id, target_name, server, token)
     except Exception as e:
+        if verify_mode == "auto":
+            local_res = _fallback_local(str(e))
+            if local_res is not None:
+                local_res["last_sender"] = "unknown"
+                local_res["last_message_text"] = "(API异常，本地OCR备用通道)"
+                local_res["needs_reply"] = None
+                return (local_res, local_res.get("detected_title"), None)
         return (None, None, str(e))
     return (judgment, judgment.get("detected_title"), None)
 
 
 def send_student(item: dict, server: str, token=None, config_path: str = None,
-                 parent=None, log=print, should_stop=None, reply_analyzer=None) -> dict:
+                 parent=None, log=print, should_stop=None, reply_analyzer=None,
+                 verify_mode: str = "auto") -> dict:
     """单个学生全流程：最多 3 候选机械 1→2→3。返回 {result, notes, ...}（notes 供待回名单）。"""
     try:
         from sender_py import window_utils as wu
@@ -443,10 +507,13 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
             return {"result": "stopped", "reason": "用户停止", "notes": notes}
         if reply_analyzer is not None:
             judgment, chat_title, err, chat_img = judge_candidate(
-                rect, roi, sid, sname, server, token, fast_title_only=True
+                rect, roi, sid, sname, server, token, fast_title_only=True,
+                verify_mode=verify_mode
             )
         else:
-            judgment, chat_title, err = judge_candidate(rect, roi, sid, sname, server, token)
+            judgment, chat_title, err = judge_candidate(
+                rect, roi, sid, sname, server, token, verify_mode=verify_mode
+            )
             chat_img = None
             if entered and should_record(chat_title, judgment):
                 dedupe_add(notes, make_note(name, cand, chat_title, bool((judgment or {}).get("matched")), judgment or {}))
@@ -454,6 +521,8 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
             log(f"[{name}] 候选{cand}：{err}，换下一候选")
             _paced(CANDIDATE_GAP)
             continue
+        if judgment and ("[备选方案: 本地OCR]" in str(judgment.get("reason", "")) or "[本地OCR模式]" in str(judgment.get("reason", ""))):
+            log(f"[{name}] 💡 采用本地OCR核验：{judgment.get('reason')}")
         decision = decide_action(judgment)
         log(f"[{name}] 候选{cand}：{decision['action']}（{decision['reason']}）")
         if decision["action"] == "send":
@@ -657,6 +726,15 @@ class SenderApp:
                 except Exception:
                     pass
 
+    def _current_verify_mode(self) -> str:
+        var = getattr(self, "verify_mode_var", None)
+        raw = var.get() if var is not None else ""
+        if "仅本地OCR" in raw:
+            return "local"
+        if "仅云端API" in raw:
+            return "api"
+        return "auto"
+
     def _status_style(self, status):
         return self._status_styles.get(status, self._status_styles[""])
 
@@ -765,7 +843,15 @@ class SenderApp:
         self.retry_failed_btn = ttk.Button(
             tb_left, text="🔄 重试失败项", style="Toolbar.TButton",
             command=self.select_failed_only)
-        self.retry_failed_btn.pack(side="left")
+        self.retry_failed_btn.pack(side="left", padx=(0, 10))
+
+        # ---- 核验通道（默认 API 优先 + 自动降级本地 OCR 兜底）----
+        self.verify_mode_var = tk.StringVar(master=self.root, value=VERIFY_MODE_AUTO)
+        ttk.Label(tb_left, text="核验:", font=(family, 9), foreground="#64748b", background=card_bg).pack(side="left", padx=(0, 4))
+        self.verify_mode_combo = ttk.Combobox(
+            tb_left, textvariable=self.verify_mode_var, values=VERIFY_MODES,
+            state="readonly", width=25)
+        self.verify_mode_combo.pack(side="left")
 
         tb_right = ttk.Frame(toolbar_card, style="Card.TFrame")
         tb_right.pack(side="right", fill="y")
@@ -1664,6 +1750,8 @@ class SenderApp:
         self._update_progress(0, selected_count)
         self.result_var.set("正在发送...")
         self.hint_var.set("正在发送...按 Esc 可停止")
+        verify_mode = self._current_verify_mode()
+        self.emit(f"🚀 开始执行发送任务，核验通道：{getattr(self, 'verify_mode_var', None) and self.verify_mode_var.get() or 'API优先'}")
         processed = 0
         stopped = False
         try:
@@ -1690,7 +1778,8 @@ class SenderApp:
                     res = send_student(
                         item, self.server, token, parent=self.root,
                         log=self.emit, should_stop=self._poll_stop,
-                        reply_analyzer=self._reply_analyzer)
+                        reply_analyzer=self._reply_analyzer,
+                        verify_mode=verify_mode)
                 except Exception as exc:
                     res = {"result": "error", "reason": f"程序异常：{exc}", "notes": []}
                 result = res.get("result", "")
