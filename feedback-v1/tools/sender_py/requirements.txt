@@ -4,3 +4,4 @@ pywin32>=306; sys_platform == "win32"
 pyperclip
 requests
 sv-ttk>=2.6.0
+windnd>=1.0.6; sys_platform == "win32"

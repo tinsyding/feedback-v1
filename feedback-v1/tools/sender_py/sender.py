@@ -12,7 +12,12 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.6.1"
+APP_VERSION = "1.7.0"
+
+try:
+    import windnd
+except Exception:
+    windnd = None
 
 
 def asset_path(filename: str) -> str:
@@ -565,6 +570,14 @@ class SenderApp:
         self.archive_key = archive_key
         self.input_paths = list(input_paths or [])
         self.duplicate_count = 0
+        self._file_counts = {}
+        if self.input_paths:
+            for p in self.input_paths:
+                try:
+                    loaded = load_feedback_items(p)
+                    self._file_counts[p] = len(loaded)
+                except Exception:
+                    self._file_counts[p] = 0
         self.reply_notes = []
         self._history = None
         self._sent_files = None
@@ -615,7 +628,13 @@ class SenderApp:
         root.bind("<Escape>", self.request_stop)
 
         self._build_ui()
+        if windnd is not None:
+            try:
+                windnd.hook_dropfiles(self.root, func=self._on_drop_files)
+            except Exception:
+                pass
         self.search_var.trace_add("write", self._on_search_change)
+        self.update_file_pool_ui()
         self.rebuild_student_list()
         self._schedule_reply_drain()
 
@@ -687,6 +706,12 @@ class SenderApp:
         style.configure("Section.TLabel", font=(family, 10, "bold"), foreground="#111827", background=card_bg)
         style.configure("Logo.TLabel", font=(family, 18, "bold"), foreground="#ffffff", background="#2563eb", padding=(7, 2))
         style.configure("LogoImg.TLabel", background=card_bg)
+
+        # File Pool Tag Styles
+        style.configure("FileTag.TFrame", background="#eff6ff")
+        style.configure("FileTag.TLabel", font=(family, 9), foreground="#1d4ed8", background="#eff6ff")
+        style.configure("FileTagDel.TLabel", font=(family, 9, "bold"), foreground="#94a3b8", background="#eff6ff", padding=(2, 0))
+        style.map("FileTagDel.TLabel", foreground=[("active", "#ef4444")])
 
         # Button Styles
         style.configure("TButton", font=(family, 9))
@@ -810,8 +835,8 @@ class SenderApp:
         self.log_btn.pack(side="left", padx=(0, 6))
 
         self.file_btn = ttk.Button(
-            header_actions, text="📁 导入文件", style=self._accent_style,
-            command=self.choose_input_files)
+            header_actions, text="➕ 添加文件", style=self._accent_style,
+            command=self.choose_and_add_files)
         self.file_btn.pack(side="left")
 
         # ================= 2. 统计概览指标卡片组 (Dashboard 风格) =================
@@ -839,6 +864,35 @@ class SenderApp:
                 self.input_label.pack(anchor="w", pady=(2, 0))
             else:
                 ttk.Label(card, textvariable=val_var, style=val_style, anchor="w").pack(anchor="w", pady=(2, 0))
+
+        # ================= 2.5 反馈文件池 (可多次追加文件，支持直接拖入) =================
+        file_pool_card = ttk.Frame(main, style="Card.TFrame", padding=(12, 8))
+        file_pool_card.pack(fill="x", pady=(0, 10))
+
+        pool_top = ttk.Frame(file_pool_card, style="Card.TFrame")
+        pool_top.pack(fill="x")
+
+        pool_title_box = ttk.Frame(pool_top, style="Card.TFrame")
+        pool_title_box.pack(side="left", fill="y")
+        ttk.Label(pool_title_box, text="📁 反馈文件池", style="Section.TLabel").pack(side="left", padx=(0, 8))
+        self.file_pool_summary_var = tk.StringVar(master=self.root, value="文件池为空")
+        ttk.Label(pool_title_box, textvariable=self.file_pool_summary_var, style="Hint.TLabel").pack(side="left")
+
+        pool_actions = ttk.Frame(pool_top, style="Card.TFrame")
+        pool_actions.pack(side="right")
+        self.add_file_btn = ttk.Button(
+            pool_actions, text="➕ 继续添加文件", style=self._accent_style,
+            command=self.choose_and_add_files)
+        self.add_file_btn.pack(side="left", padx=(0, 6))
+        self.clear_pool_btn = ttk.Button(
+            pool_actions, text="🗑️ 清空文件池", style="Toolbar.TButton",
+            command=self.clear_input_files)
+        self.clear_pool_btn.pack(side="left")
+
+        self.file_tags_container = ttk.Frame(file_pool_card, style="Card.TFrame")
+        self.file_tags_container.pack(fill="x", pady=(6, 0))
+        self.file_tags_inner = ttk.Frame(self.file_tags_container, style="Card.TFrame")
+        self.file_tags_inner.pack(fill="x")
 
         # ================= 3. 控制工具栏 (搜索、筛选与批量操作) =================
         self.search_var = tk.StringVar(master=self.root)
@@ -1119,9 +1173,16 @@ class SenderApp:
     def _set_running_ui(self, running: bool):
         state = "disabled" if running else "normal"
         # 日志/待回名单在发送中保持可查看；其余编辑类控件锁定。
-        for widget in (self.file_btn, self.select_all_btn, self.select_none_btn,
-                       self.failed_only_btn, self.retry_failed_btn,
-                       self.copy_failed_btn, self.calib_btn):
+        widgets_to_toggle = [
+            self.file_btn, self.select_all_btn, self.select_none_btn,
+            self.failed_only_btn, self.retry_failed_btn,
+            self.copy_failed_btn, self.calib_btn
+        ]
+        if hasattr(self, "add_file_btn"):
+            widgets_to_toggle.append(self.add_file_btn)
+        if hasattr(self, "clear_pool_btn"):
+            widgets_to_toggle.append(self.clear_pool_btn)
+        for widget in widgets_to_toggle:
             try:
                 widget.config(state=state)
             except Exception:
@@ -1614,11 +1675,82 @@ class SenderApp:
             text += f"（已去重 {self.duplicate_count} 条）"
         self.input_label.config(text=text)
 
-    def choose_input_files(self):
-        from tkinter import filedialog, messagebox
+    def update_file_pool_ui(self):
+        if not hasattr(self, "file_tags_inner"):
+            return
+        for child in self.file_tags_inner.winfo_children():
+            child.destroy()
+
+        if not self.input_paths:
+            self.file_pool_summary_var.set("文件池为空（0 个文件 · 0 人）")
+            hint_lbl = self._ttk.Label(
+                self.file_tags_inner,
+                text="💡 文件池为空：点击右侧「➕ 继续添加文件」，或直接从桌面/文件夹拖入 JSON / HTML 文件",
+                style="Hint.TLabel"
+            )
+            hint_lbl.pack(side="left", padx=4, pady=3)
+            return
+
+        total_students = len(self.items)
+        file_count = len(self.input_paths)
+        summary_text = f"已载入 {file_count} 个文件 · 共 {total_students} 人"
+        if self.duplicate_count:
+            summary_text += f"（去重 {self.duplicate_count} 人）"
+        self.file_pool_summary_var.set(summary_text)
+
+        counts_map = getattr(self, "_file_counts", {})
+        for path in self.input_paths:
+            base = os.path.basename(path)
+            ext = os.path.splitext(base)[1].lower()
+            icon = "📄" if ext == ".json" else "🌐"
+            count = counts_map.get(path, 0)
+            tag_text = f"{icon} {base} ({count}人)"
+
+            tag_frame = self._ttk.Frame(self.file_tags_inner, style="FileTag.TFrame", padding=(7, 2))
+            tag_frame.pack(side="left", padx=(0, 6), pady=2)
+
+            self._ttk.Label(tag_frame, text=tag_text, style="FileTag.TLabel").pack(side="left")
+            del_btn = self._ttk.Label(tag_frame, text=" ✖", style="FileTagDel.TLabel", cursor="hand2")
+            del_btn.pack(side="left")
+            del_btn.bind("<Button-1>", lambda _e, p=path: self.remove_input_file(p))
+
+    def _on_drop_files(self, files):
+        if self._running:
+            self.emit("⚠️ 正在发送中，无法添加新文件。")
+            return
+        paths = []
+        for f in files or ():
+            if isinstance(f, bytes):
+                decoded = None
+                for enc in ("utf-8", "gbk", "cp936", "mbcs"):
+                    try:
+                        decoded = f.decode(enc)
+                        break
+                    except Exception:
+                        pass
+                f = decoded if decoded is not None else str(f)
+            p = str(f).strip()
+            if os.path.isfile(p):
+                ext = os.path.splitext(p)[1].lower()
+                if ext in (".json", ".html", ".htm"):
+                    paths.append(p)
+        if paths:
+            self.emit(f"📥 捕获拖入文件 {len(paths)} 个，正在追加并入文件池...")
+            self.add_input_files(paths, replace=False)
+        else:
+            self.emit("⚠️ 拖入的文件中未找到有效的 .json 或 .html 反馈文件。")
+
+    def choose_and_add_files(self):
+        self.choose_input_files(append=True)
+
+    def choose_input_files(self, append: bool = True):
+        if self._running:
+            return
+        from tkinter import filedialog
+        title = "选择反馈文件（可单选，可反复多次添加）" if append else "重新选择反馈文件（替换当前文件池）"
         paths = filedialog.askopenfilenames(
             parent=self.root,
-            title="选择反馈文件（JSON / HTML，可多选）",
+            title=title,
             filetypes=[
                 ("反馈文件（JSON / HTML）", "*.json *.html *.htm"),
                 ("JSON 文件", "*.json"),
@@ -1628,26 +1760,56 @@ class SenderApp:
         )
         if not paths:
             return
+        self.add_input_files(paths, replace=not append)
+
+    def add_input_files(self, new_paths: list, replace: bool = False):
+        if self._running:
+            return
         try:
-            items, file_counts, duplicates = load_feedback_inputs(paths)
+            from tkinter import messagebox
+        except Exception:
+            messagebox = None
+        if replace:
+            target_paths = [p for p in new_paths if os.path.isfile(p)]
+        else:
+            target_paths = list(self.input_paths)
+            added_any = False
+            for p in new_paths:
+                p_norm = os.path.normpath(p)
+                if not any(os.path.normpath(ep) == p_norm for ep in target_paths) and os.path.isfile(p):
+                    target_paths.append(p)
+                    added_any = True
+            if not target_paths:
+                return
+            if not added_any:
+                self.emit("💡 提示：所选文件均已在文件池中，无需重复添加。")
+                return
+
+        try:
+            items, file_counts, duplicates = load_feedback_inputs(target_paths)
         except Exception as exc:
-            messagebox.showerror("读取失败",
-                                 f"本次选择未生效，仍保留原来的文件列表。\n{exc}",
-                                 parent=self.root)
+            if messagebox:
+                messagebox.showerror("读取失败", f"文件解析异常：\n{exc}", parent=self.root)
+            self.emit(f"❌ 文件解析异常：{exc}")
             return
+
         if not items:
-            messagebox.showwarning("没有可用数据",
-                                   "选中的文件里没有有效的学生数据，本次选择未生效。",
-                                   parent=self.root)
+            if messagebox:
+                messagebox.showwarning("没有可用数据", "所选文件里没有有效的学生数据。", parent=self.root)
+            self.emit("⚠️ 所选文件里没有有效的学生数据。")
             return
+
         self.items = items
-        self.input_paths = list(paths)
+        self.input_paths = target_paths
         self.duplicate_count = duplicates
+        self._file_counts = dict(file_counts)
         self.reply_notes = []
         self.refresh_reply_count()
-        self.archive_key = (archive_key_for_input(paths[0]) if len(paths) == 1
+        self.archive_key = (archive_key_for_input(target_paths[0]) if len(target_paths) == 1
                             else "多文件 [第 1 周]")
+        self.update_file_pool_ui()
         self.update_input_label()
+        self.update_summary()
         self._suspend_filter = True
         try:
             self.search_var.set("")
@@ -1658,12 +1820,40 @@ class SenderApp:
         self._reset_progress()
         self._reset_hint()
         self.rebuild_student_list()
-        details = "，".join(f"{os.path.basename(p)} {n} 人" for p, n in file_counts)
-        self.emit(f"已加载 {len(paths)} 个文件：{details}")
-        self.emit(f"合并后共 {len(items)} 个学生" + (f"（去重 {duplicates} 条）" if duplicates else ""))
-        for p in paths:
+        details = "，".join(f"{os.path.basename(p)} {n}人" for p, n in file_counts)
+        self.emit(f"📁 文件池已更新（当前共 {len(target_paths)} 个文件）：{details}")
+        self.emit(f"合并后共 {len(items)} 个学生" + (f"（自动去重 {duplicates} 条）" if duplicates else ""))
+        for p in new_paths:
             if self._sent_files and self._sent_files.is_file_sent(p):
                 self.emit(f"💡 提示：文件 [{os.path.basename(p)}] 在本地已有发送记录（可在右上角“已发文件”中查看）")
+
+    def remove_input_file(self, path: str):
+        if self._running:
+            return
+        new_paths = [p for p in self.input_paths if os.path.normpath(p) != os.path.normpath(path)]
+        if not new_paths:
+            self.clear_input_files()
+        else:
+            self.add_input_files(new_paths, replace=True)
+            self.emit(f"🗑️ 已从文件池移除文件：{os.path.basename(path)}")
+
+    def clear_input_files(self):
+        if self._running:
+            return
+        if not self.input_paths and not self.items:
+            return
+        self.input_paths = []
+        self.items = []
+        self.duplicate_count = 0
+        self._file_counts = {}
+        self.reply_notes = []
+        self.refresh_reply_count()
+        self.update_file_pool_ui()
+        self.update_input_label()
+        self.update_summary()
+        self._reset_progress()
+        self.rebuild_student_list()
+        self.emit("🗑️ 已清空文件池。")
 
     def show_reply_notes_dialog(self):
         tk, ttk = self.tk, self._ttk

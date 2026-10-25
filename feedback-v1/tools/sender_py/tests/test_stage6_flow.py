@@ -342,6 +342,95 @@ class TestStage6(unittest.TestCase):
             self.assertEqual(rec["sent_count"], 1)
             self.assertEqual(rec["total_count"], 2)
 
+    def test_file_pool_operations(self):
+        from sender_py.sender import SenderApp
+
+        with tempfile.TemporaryDirectory() as d:
+            f1 = os.path.join(d, "class1.json")
+            f2 = os.path.join(d, "class2.json")
+            with open(f1, "w", encoding="utf-8") as fp:
+                json.dump([{"studentName": "90001张三", "message": "张三评语"}], fp)
+            with open(f2, "w", encoding="utf-8") as fp:
+                json.dump([{"studentName": "90002李四", "message": "李四评语"}], fp)
+
+            class DummyVar:
+                def __init__(self, val=""):
+                    self.val = val
+                def set(self, v):
+                    self.val = v
+
+            class DummyFilePoolApp:
+                def __init__(self):
+                    self._running = False
+                    self.input_paths = []
+                    self.items = []
+                    self.duplicate_count = 0
+                    self._file_counts = {}
+                    self.reply_notes = []
+                    self._sent_files = None
+                    self.root = None
+                    self.search_var = DummyVar()
+                    self.filter_var = DummyVar()
+                    self.emitted = []
+
+                def emit(self, msg):
+                    self.emitted.append(msg)
+
+                def refresh_reply_count(self): pass
+                def update_file_pool_ui(self): pass
+                def update_input_label(self): pass
+                def update_summary(self): pass
+                def _reset_progress(self): pass
+                def _reset_hint(self): pass
+                def _cancel_search_rebuild(self): pass
+                def rebuild_student_list(self): pass
+
+                add_input_files = SenderApp.add_input_files
+                remove_input_file = SenderApp.remove_input_file
+                clear_input_files = SenderApp.clear_input_files
+                _on_drop_files = SenderApp._on_drop_files
+
+            app = DummyFilePoolApp()
+
+            # 1. 添加第一个文件
+            app.add_input_files([f1], replace=False)
+            self.assertEqual(len(app.input_paths), 1)
+            self.assertEqual(len(app.items), 1)
+            self.assertEqual(app.items[0]["studentName"], "90001张三")
+            self.assertEqual(app._file_counts[f1], 1)
+
+            # 2. 追加第二个文件（不覆盖第一个文件）
+            app.add_input_files([f2], replace=False)
+            self.assertEqual(len(app.input_paths), 2)
+            self.assertEqual(len(app.items), 2)
+            names = [it["studentName"] for it in app.items]
+            self.assertIn("90001张三", names)
+            self.assertIn("90002李四", names)
+
+            # 3. 重复添加已存在的文件 -> 提示无需重复添加
+            prev_emitted_len = len(app.emitted)
+            app.add_input_files([f1], replace=False)
+            self.assertEqual(len(app.input_paths), 2)
+            self.assertTrue(any("无需重复添加" in msg for msg in app.emitted[prev_emitted_len:]))
+
+            # 4. 从文件池移除一个文件
+            app.remove_input_file(f1)
+            self.assertEqual(len(app.input_paths), 1)
+            self.assertEqual(app.input_paths[0], f2)
+            self.assertEqual(len(app.items), 1)
+            self.assertEqual(app.items[0]["studentName"], "90002李四")
+
+            # 5. 模拟拖入文件 (bytes utf-8)
+            app._on_drop_files([f1.encode("utf-8")])
+            self.assertEqual(len(app.input_paths), 2)
+            self.assertEqual(len(app.items), 2)
+
+            # 6. 清空文件池
+            app.clear_input_files()
+            self.assertEqual(len(app.input_paths), 0)
+            self.assertEqual(len(app.items), 0)
+            self.assertEqual(len(app._file_counts), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
