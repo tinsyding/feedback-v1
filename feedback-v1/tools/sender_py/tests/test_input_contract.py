@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 from sender_py.utils import load_feedback_items, parse_student_identifier
-from sender_py.store import HistoryManager
+from sender_py.store import HistoryManager, SentFilesManager
 from sender_py.reply_notes import verdict
 
 
@@ -60,6 +60,40 @@ class TestInputContract(unittest.TestCase):
         self.assertEqual(verdict(None), "待人工确认")
         self.assertEqual(verdict(True), "需回")
         self.assertEqual(verdict(False), "无需回")
+
+    def test_sent_files_manager(self):
+        with tempfile.TemporaryDirectory() as d:
+            sfm = SentFilesManager(base_dir=d)
+            self.assertEqual(len(sfm.get_records()), 0)
+            self.assertFalse(sfm.is_file_sent("test.json"))
+
+            fake_items = [
+                {"studentName": "90001张三", "sid": "90001", "sname": "张三", "_status": "已发送", "message": "msg1"},
+                {"studentName": "90002李四", "sid": "90002", "sname": "李四", "_status": "发送失败", "message": "msg2"},
+            ]
+            rec = sfm.record_sent_file("/path/to/test.json", fake_items, sent_time="2026-10-26 10:00:00")
+            self.assertEqual(rec["file_name"], "test.json")
+            self.assertEqual(rec["sent_count"], 1)
+            self.assertEqual(rec["total_count"], 2)
+            self.assertTrue(sfm.is_file_sent("test.json"))
+            self.assertTrue(sfm.is_file_sent("/path/to/test.json"))
+
+            # 验证生成的本地 JSON 和 HTML 记录文件真实存在且内容正确
+            self.assertTrue(os.path.isfile(rec["json_record"]))
+            self.assertTrue(os.path.isfile(rec["html_record"]))
+            with open(rec["json_record"], "r", encoding="utf-8") as f:
+                data = json.load(f)
+                self.assertEqual(data["sent_count"], 1)
+                self.assertEqual(len(data["students"]), 2)
+            with open(rec["html_record"], "r", encoding="utf-8") as f:
+                html_text = f.read()
+                self.assertIn("90001张三", html_text)
+                self.assertIn("极方反馈发送记录", html_text)
+
+            # 测试重新加载
+            sfm2 = SentFilesManager(base_dir=d)
+            self.assertEqual(len(sfm2.get_records()), 1)
+            self.assertTrue(sfm2.is_file_sent("test.json"))
 
 
 if __name__ == "__main__":

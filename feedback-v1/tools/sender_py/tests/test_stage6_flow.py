@@ -16,7 +16,7 @@ from sender_py.sender import (
     run_candidate_outcomes, search_and_enter, status_matches_filter,
     summarize_status_counts,
 )
-from sender_py.store import HistoryManager
+from sender_py.store import HistoryManager, SentFilesManager
 from sender_py.utils import load_feedback_items
 
 
@@ -321,6 +321,26 @@ class TestStage6(unittest.TestCase):
             self.assertIn("[本地OCR模式]", judgment["reason"])
 
         set_ocr_hook_for_testing(None)
+
+    def test_record_sent_files_flow(self):
+        from sender_py.sender import SenderApp
+        with tempfile.TemporaryDirectory() as d:
+            sfm = SentFilesManager(base_dir=d)
+            class DummyApp:
+                input_paths = ["test1.json"]
+                items = [
+                    {"studentName": "90001张三", "sid": "90001", "sname": "张三", "_status": "已发送", "_archive_key": "test1 [第 1 周]"},
+                    {"studentName": "90002李四", "sid": "90002", "sname": "李四", "_status": "待发送", "_archive_key": "test1 [第 1 周]"},
+                ]
+                _sent_files = sfm
+                def emit(self, msg): pass
+
+            SenderApp._record_sent_files(DummyApp())
+            self.assertEqual(len(sfm.get_records()), 1)
+            self.assertTrue(sfm.is_file_sent("test1.json"))
+            rec = sfm.get_records()[0]
+            self.assertEqual(rec["sent_count"], 1)
+            self.assertEqual(rec["total_count"], 2)
 
 
 if __name__ == "__main__":

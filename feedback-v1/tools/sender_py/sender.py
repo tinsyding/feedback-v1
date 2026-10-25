@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.5.2"
+APP_VERSION = "1.6.0"
 
 
 def asset_path(filename: str) -> str:
@@ -36,7 +36,7 @@ try:  # 仓库结构优先；散装拷贝（文件同目录）兜底
         crop_chat_tail, default_config_path, derive_chat, load_roi, needs_calibration,
         save_roi, signature_key, to_abs, to_rel, validate_rel, window_signature,
     )
-    from sender_py.utils import load_feedback_items
+    from sender_py.utils import load_feedback_items, parse_student_identifier
 except ModuleNotFoundError:
     from pacing import AFTER_SEND_GAP, CANDIDATE_GAP, STUDENT_GAP, pause
     from reply_notes import actionable, dedupe_add, make_note, should_record
@@ -44,7 +44,7 @@ except ModuleNotFoundError:
         crop_chat_tail, default_config_path, derive_chat, load_roi, needs_calibration,
         save_roi, signature_key, to_abs, to_rel, validate_rel, window_signature,
     )
-    from utils import load_feedback_items
+    from utils import load_feedback_items, parse_student_identifier
 
 MAX_CANDIDATES = 3
 # 临时关闭“已发送自动跳过”，方便用同一文件反复测试；恢复时改为 True。
@@ -567,12 +567,14 @@ class SenderApp:
         self.duplicate_count = 0
         self.reply_notes = []
         self._history = None
+        self._sent_files = None
         try:
             try:
-                from sender_py.store import HistoryManager
+                from sender_py.store import HistoryManager, SentFilesManager
             except ModuleNotFoundError:
-                from store import HistoryManager
+                from store import HistoryManager, SentFilesManager
             self._history = HistoryManager()
+            self._sent_files = SentFilesManager()
         except Exception:
             pass
         self.root = root
@@ -796,6 +798,11 @@ class SenderApp:
             header_actions, text="📨 待回名单 · 0", style="Toolbar.TButton",
             command=self.show_reply_notes_dialog)
         self.reply_btn.pack(side="left", padx=(0, 6))
+
+        self.sent_files_btn = ttk.Button(
+            header_actions, text="📁 已发文件", style="Toolbar.TButton",
+            command=self.show_sent_files_dialog)
+        self.sent_files_btn.pack(side="left", padx=(0, 6))
 
         self.log_btn = ttk.Button(
             header_actions, text="📜 运行日志", style="Toolbar.TButton",
@@ -1598,6 +1605,9 @@ class SenderApp:
         details = "，".join(f"{os.path.basename(p)} {n} 人" for p, n in file_counts)
         self.emit(f"已加载 {len(paths)} 个文件：{details}")
         self.emit(f"合并后共 {len(items)} 个学生" + (f"（去重 {duplicates} 条）" if duplicates else ""))
+        for p in paths:
+            if self._sent_files and self._sent_files.is_file_sent(p):
+                self.emit(f"💡 提示：文件 [{os.path.basename(p)}] 在本地已有发送记录（可在右上角“已发文件”中查看）")
 
     def show_reply_notes_dialog(self):
         tk, ttk = self.tk, self._ttk
@@ -1608,26 +1618,29 @@ class SenderApp:
             from reply_notes import export_csv
         notes = actionable(self.reply_notes)
         win = tk.Toplevel(self.root)
-        win.title(f"{APP_NAME} · 待回名单")
-        win.geometry("960x560")
+        win.title(f"{APP_NAME} · 待回学员名单")
+        win.geometry("560x520")
         try:
             win.transient(self.root)
         except Exception:
             pass
-        cols = [
-            ("student", "学生", 160),
-            ("chat_title", "会话", 180),
-            ("last_message", "最后消息", 380),
-            ("verdict", "需回", 90),
-            ("time", "时间", 150),
-        ]
+
         body = ttk.Frame(win, style="Card.TFrame", padding=16)
         body.pack(fill="both", expand=True)
-        ttk.Label(body, text="📨 待回消息名单", style="Section.TLabel").pack(anchor="w")
-        ttk.Label(body, text="自动过滤出家长留言中明确需要老师跟进回复或存疑待确认的会话", style="Hint.TLabel").pack(
-            anchor="w", pady=(2, 10))
+
+        header_box = ttk.Frame(body, style="Card.TFrame")
+        header_box.pack(fill="x", pady=(0, 10))
+        ttk.Label(header_box, text=f"📨 待回学员名单（共 {len(notes)} 人）", style="Section.TLabel").pack(anchor="w")
+        ttk.Label(header_box, text="仅展示需要跟进回复或人工确认的学员学号与姓名", style="Hint.TLabel").pack(
+            anchor="w", pady=(2, 0))
+
         tree_frame = ttk.Frame(body, style="Card.TFrame")
         tree_frame.pack(fill="both", expand=True)
+
+        cols = [
+            ("sid", "学号", 160),
+            ("sname", "姓名", 260),
+        ]
 
         style = ttk.Style(win)
         try:
@@ -1637,40 +1650,64 @@ class SenderApp:
             pass
 
         tree = ttk.Treeview(tree_frame, columns=[c for c, _, _ in cols],
-                            show="headings", height=15, selectmode="browse")
+                            show="headings", height=12, selectmode="browse")
         for c, label, width in cols:
             tree.heading(c, text=label)
             tree.column(c, width=width, anchor="w")
+
+        seen_students = set()
+        student_rows = []
         for n in notes:
-            tree.insert("", "end", values=tuple(n.get(c, "") for c, _, _ in cols))
+            raw = n.get("student", "")
+            sid, sname = parse_student_identifier(raw)
+            if not sid and not sname:
+                sid, sname = "-", raw
+            elif not sid:
+                sid = "-"
+            key = (sid, sname)
+            if key in seen_students:
+                continue
+            seen_students.add(key)
+            student_rows.append((sid, sname))
+            tree.insert("", "end", values=(sid, sname))
+
         scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=scroll.set)
         tree.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
 
-        copy_hint = tk.StringVar(master=win, value="选中一行后点“复制学号姓名”，或双击该行。")
+        copy_hint = tk.StringVar(master=win, value="💡 可直接点击下方“复制全部名单”一键复制所有待回学员，或双击单行复制。")
         ttk.Label(body, textvariable=copy_hint, style="Hint.TLabel",
                   anchor="w").pack(fill="x", pady=(8, 4))
 
-        def copy_selected(_event=None):
-            if self._running:
-                copy_hint.set("正在发送，暂不可复制。")
+        def copy_all():
+            if not student_rows:
+                copy_hint.set("当前没有需要回复的学生。")
                 return
+            lines = []
+            for sid, sname in student_rows:
+                if sid and sid != "-":
+                    lines.append(f"{sid} {sname}".strip())
+                else:
+                    lines.append(sname)
+            content = "\n".join(lines)
+            self.copy_to_clipboard(content, "待回学员名单")
+            copy_hint.set(f"✅ 已复制全部 {len(lines)} 位待回学员名单（学号 姓名）！")
+
+        def copy_selected(_event=None):
             sel = tree.selection()
             if not sel:
-                copy_hint.set("请先选中一个学生。")
+                copy_hint.set("请先在列表中选中一个学员。")
                 return
             values = tree.item(sel[0], "values")
-            student = values[0] if values else ""
-            if not student:
-                copy_hint.set("这一行没有学生学号姓名。")
+            if not values:
                 return
-            self.copy_to_clipboard(student, "学号姓名")
-            copy_hint.set(f"已复制：{student}")
+            sid, sname = values[0], values[1]
+            text = f"{sid} {sname}".strip() if sid != "-" else sname
+            self.copy_to_clipboard(text, "学号姓名")
+            copy_hint.set(f"✅ 已复制：{text}")
 
         def do_export():
-            if self._running:
-                return
             path = filedialog.asksaveasfilename(
                 parent=win, title="导出待回消息名单", defaultextension=".csv",
                 initialfile="待回名单.csv", filetypes=[("CSV", "*.csv")])
@@ -1679,16 +1716,163 @@ class SenderApp:
             export_csv(notes, path)
             messagebox.showinfo("导出成功", f"已导出至：\n{path}", parent=win)
 
-        actions = ttk.Frame(body)
+        actions = ttk.Frame(body, style="Card.TFrame")
         actions.pack(fill="x", pady=(4, 0))
-        ttk.Button(actions, text="复制选中学生学号姓名", style="Toolbar.TButton",
-                   command=copy_selected).pack(side="left", padx=(0, 6))
+        ttk.Button(actions, text="📋 复制全部名单", style=self._accent_style,
+                   command=copy_all).pack(side="left", padx=(0, 8))
+        ttk.Button(actions, text="📋 复制选中学生", style="Toolbar.TButton",
+                   command=copy_selected).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="导出 CSV", style="Toolbar.TButton",
                    command=do_export).pack(side="left")
         tree.bind("<Double-1>", copy_selected)
         if not notes:
             ttk.Label(body, text="当前没有需要回复的学生",
-                      style="Hint.TLabel").pack(pady=(8, 0))
+                      style="Hint.TLabel").pack(pady=(12, 0))
+
+    def show_sent_files_dialog(self):
+        tk, ttk = self.tk, self._ttk
+        try:
+            from sender_py.store import open_directory
+        except ModuleNotFoundError:
+            from store import open_directory
+
+        win = tk.Toplevel(self.root)
+        win.title(f"{APP_NAME} · 已发送文件记录")
+        win.geometry("900x520")
+        try:
+            win.transient(self.root)
+        except Exception:
+            pass
+
+        body = ttk.Frame(win, style="Card.TFrame", padding=16)
+        body.pack(fill="both", expand=True)
+
+        header_box = ttk.Frame(body, style="Card.TFrame")
+        header_box.pack(fill="x", pady=(0, 10))
+        ttk.Label(header_box, text="📁 已发送文件记录（保存在本地）", style="Section.TLabel").pack(anchor="w")
+        records_dir = getattr(self._sent_files, "records_dir", "") if self._sent_files else ""
+        ttk.Label(header_box, text=f"系统已自动保存已发送的 JSON / HTML 记录至：{records_dir}", style="Hint.TLabel").pack(
+            anchor="w", pady=(2, 0))
+
+        tree_frame = ttk.Frame(body, style="Card.TFrame")
+        tree_frame.pack(fill="both", expand=True)
+
+        cols = [
+            ("file_name", "文件名", 220),
+            ("sent_time", "最近发送时间", 160),
+            ("counts", "发送情况", 140),
+            ("file_type", "格式", 60),
+            ("file_path", "源文件路径", 240),
+        ]
+
+        style = ttk.Style(win)
+        try:
+            style.configure("Treeview", font=(self._font_family, 9), rowheight=28)
+            style.configure("Treeview.Heading", font=(self._font_family, 9, "bold"), padding=(6, 4))
+        except Exception:
+            pass
+
+        tree = ttk.Treeview(tree_frame, columns=[c for c, _, _ in cols],
+                            show="headings", height=12, selectmode="browse")
+        for c, label, width in cols:
+            tree.heading(c, text=label)
+            tree.column(c, width=width, anchor="w")
+
+        def populate_tree():
+            for item in tree.get_children():
+                tree.delete(item)
+            records = self._sent_files.get_records() if self._sent_files else []
+            for r in records:
+                fname = r.get("file_name", "")
+                stime = r.get("sent_time", "")
+                sent = r.get("sent_count", 0)
+                tot = r.get("total_count", 0)
+                fail = r.get("failed_count", 0)
+                ftype = r.get("file_type", "").upper()
+                fpath = r.get("file_path", "")
+                counts_str = f"已发 {sent}/{tot} 人" + (f" (失败{fail})" if fail else "")
+                tree.insert("", "end", values=(fname, stime, counts_str, ftype, fpath))
+
+        populate_tree()
+
+        scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scroll.set)
+        tree.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+
+        hint_var = tk.StringVar(master=win, value="💡 双击可直接在浏览器中打开该次发送的 HTML 报告，或点击“打开本地保存目录”。")
+        ttk.Label(body, textvariable=hint_var, style="Hint.TLabel", anchor="w").pack(fill="x", pady=(8, 4))
+
+        def open_folder():
+            if records_dir:
+                open_directory(records_dir)
+                hint_var.set("✅ 已在文件资源管理器中打开本地保存目录")
+
+        def open_report(_event=None):
+            sel = tree.selection()
+            if not sel:
+                return
+            idx = tree.index(sel[0])
+            records = self._sent_files.get_records() if self._sent_files else []
+            if 0 <= idx < len(records):
+                html_path = records[idx].get("html_record", "")
+                if html_path and os.path.isfile(html_path):
+                    import webbrowser
+                    webbrowser.open(f"file://{os.path.abspath(html_path)}")
+                    hint_var.set(f"✅ 已在浏览器中打开发送报告：{os.path.basename(html_path)}")
+                    return
+            open_folder()
+
+        def copy_path():
+            sel = tree.selection()
+            if not sel:
+                hint_var.set("请先在列表中选中一个文件。")
+                return
+            values = tree.item(sel[0], "values")
+            if values:
+                p = values[4] or values[0]
+                self.copy_to_clipboard(p, "文件路径")
+                hint_var.set(f"已复制路径：{p}")
+
+        actions = ttk.Frame(body, style="Card.TFrame")
+        actions.pack(fill="x", pady=(4, 0))
+        ttk.Button(actions, text="📂 打开本地保存目录", style=self._accent_style,
+                   command=open_folder).pack(side="left", padx=(0, 8))
+        ttk.Button(actions, text="🌐 打开HTML报告", style="Toolbar.TButton",
+                   command=open_report).pack(side="left", padx=(0, 8))
+        ttk.Button(actions, text="📋 复制源文件路径", style="Toolbar.TButton",
+                   command=copy_path).pack(side="left", padx=(0, 8))
+        ttk.Button(actions, text="🔄 刷新", style="Toolbar.TButton",
+                   command=populate_tree).pack(side="left")
+        tree.bind("<Double-1>", open_report)
+
+    def _record_sent_files(self):
+        """记录已经发送过的 JSON / HTML 文件，生成快照并保存在本地。"""
+        if not self._sent_files:
+            return
+        if self.input_paths:
+            for path in self.input_paths:
+                key = archive_key_for_input(path)
+                file_items = [it for it in self.items if it.get("_archive_key") == key]
+                if not file_items:
+                    file_items = self.items
+                any_sent = any(
+                    "已发送" in str(it.get("_status") or it.get("status") or "") or
+                    str(it.get("_last_result") or "") == "sent"
+                    for it in file_items
+                )
+                if any_sent:
+                    rec = self._sent_files.record_sent_file(path, file_items)
+                    self.emit(f"💾 已将文件 [{os.path.basename(path)}] 发送记录保存至本地：{os.path.basename(rec.get('html_record', ''))}")
+        elif self.items:
+            any_sent = any(
+                "已发送" in str(it.get("_status") or it.get("status") or "") or
+                str(it.get("_last_result") or "") == "sent"
+                for it in self.items
+            )
+            if any_sent:
+                rec = self._sent_files.record_sent_file("已发学生反馈.json", self.items)
+                self.emit(f"💾 已将本次发送记录保存至本地：{os.path.basename(rec.get('html_record', ''))}")
 
     def run_all(self):
         if self._running:
@@ -1868,6 +2052,10 @@ class SenderApp:
                 "已停止，未发送学生已标记为“已跳过”。" if stopped else "本批处理结束")
             self._set_running_ui(False)
             if not self._close_after_stop:
+                try:
+                    self._record_sent_files()
+                except Exception as exc:
+                    self.emit(f"⚠️ 保存已发送文件记录异常: {exc}")
                 if self.filter_var.get() != FILTER_ALL or self.search_var.get().strip():
                     self.rebuild_student_list()
                 else:
@@ -1904,7 +2092,8 @@ class SenderApp:
         if self._pending_reply_tasks > 0:
             extra += (f"\n\n后台仍有 {self._pending_reply_tasks} 条家长留言正在异步分析中，"
                       "完成后将自动更新右上角“待回名单”。")
-        messagebox.showinfo("发送结束", summary + extra, parent=self.root)
+        saved_hint = "\n\n📁 本次发送记录（JSON与HTML快照）已自动保存在本地，可在右上角“已发文件”中查看与打开。"
+        messagebox.showinfo("发送结束", summary + extra + saved_hint, parent=self.root)
 
 
 def main(argv=None):
