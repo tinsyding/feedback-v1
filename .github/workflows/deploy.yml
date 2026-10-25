@@ -78,7 +78,7 @@ jobs:
           echo "version OK: $REMOTE_SHA"
           # 2. 关键页面与接口必须 200
           check() {
-            code=$(curl -sk -m 20 -o /dev/null -w "%{http_code}" "$1")
+            code=$(curl -4 -sk --retry 3 --retry-delay 2 --retry-connrefused --connect-timeout 10 -m 30 -o /dev/null -w "%{http_code}" "$1")
             if [ "$code" = "200" ]; then echo "PASS $1"; else echo "FAIL $1 => $code"; exit 1; fi
           }
           check "https://feedback.wxjifang.cn/upload.html"
