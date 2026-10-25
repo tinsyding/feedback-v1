@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.5.1"
 
 
 def asset_path(filename: str) -> str:
@@ -360,6 +360,15 @@ class AsyncReplyAnalyzer:
                 self._pending = max(0, self._pending - 1)
                 pending = self._pending
             self._emit_event(("progress", pending))
+
+    def shutdown(self, wait: bool = False):
+        try:
+            self._executor.shutdown(wait=wait, cancel_futures=True)
+        except Exception:
+            try:
+                self._executor.shutdown(wait=wait)
+            except Exception:
+                pass
 
 
 def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
@@ -1082,10 +1091,15 @@ class SenderApp:
         # 日志/待回名单在发送中保持可查看；其余编辑类控件锁定。
         for widget in (self.file_btn, self.select_all_btn, self.select_none_btn,
                        self.failed_only_btn, self.retry_failed_btn,
-                       self.copy_failed_btn):
-            widget.config(state=state)
+                       self.copy_failed_btn, self.calib_btn):
+            try:
+                widget.config(state=state)
+            except Exception:
+                pass
         self.search_entry.config(state=state)
         self.filter_combo.config(state="disabled" if running else "readonly")
+        if hasattr(self, "verify_mode_combo"):
+            self.verify_mode_combo.config(state="disabled" if running else "readonly")
         self.start_btn.config(state=state)
         self.stop_btn.config(state="normal" if running else "disabled")
         for widget in self._row_checkbuttons + self._row_action_buttons:
@@ -1185,6 +1199,12 @@ class SenderApp:
             self._close_after_stop = True
             self.request_stop()
             return
+        self._stop_esc_watcher()
+        if self._reply_analyzer is not None:
+            try:
+                self._reply_analyzer.shutdown(wait=False)
+            except Exception:
+                pass
         self.root.destroy()
 
     def _interruptible_pause(self, seconds):
@@ -1334,8 +1354,9 @@ class SenderApp:
             reason = item.get("_last_reason") or ""
             reason_var = item.setdefault("_reason_var", tk.StringVar(master=self.root, value=reason))
             reason_var.set(reason)
-            reason_lbl = ttk.Label(row, textvariable=reason_var, style="RowReason.TLabel", anchor="w")
+            reason_lbl = ttk.Label(row, textvariable=reason_var, style="RowReason.TLabel", anchor="w", cursor="hand2")
             reason_lbl.pack(side="left", fill="x", expand=True, padx=(0, 8))
+            reason_lbl.bind("<Double-1>", lambda _e, it=item: self.show_row_reason(it))
 
             msg_btn = ttk.Button(row, text="📋 话术", style="RowAction.TButton",
                                  command=lambda it=item: self.copy_message(it))
@@ -1852,9 +1873,28 @@ class SenderApp:
                 else:
                     self.update_summary()
         if self._close_after_stop:
+            self._stop_esc_watcher()
+            if self._reply_analyzer is not None:
+                try:
+                    self._reply_analyzer.shutdown(wait=False)
+                except Exception:
+                    pass
             self.root.destroy()
             return
+
         self._drain_reply_events()
+        # 若仍有后台分析中的留言，优雅等待收尾（最多 3.5 秒），让待回名单统计准确完整
+        if self._pending_reply_tasks > 0 and not stopped:
+            self.hint_var.set(f"所有学生已发送完毕，正在等待最后 {self._pending_reply_tasks} 位家长留言分析收尾...")
+            deadline = time.monotonic() + 3.5
+            while self._pending_reply_tasks > 0 and time.monotonic() < deadline:
+                self._drain_reply_events()
+                try:
+                    self.root.update()
+                except Exception:
+                    break
+                time.sleep(0.05)
+            self._drain_reply_events()
         self.emit(summary)
         counts = summarize_status_counts(self._status_of(item) for item in self.items)
         extra = ""
