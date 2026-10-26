@@ -74,11 +74,13 @@ CREATE TABLE IF NOT EXISTS `student_records` (
   `student_name` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '姓名',
   `student_key` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT '' COMMENT '唯一标识：学号_姓名_年级_学科（无学号则纯姓名）',
   `week_num` int(11) NOT NULL COMMENT '专题周次/讲次',
+  `preview_week_num` int(11) DEFAULT NULL COMMENT '预习作业对应周次/讲次，可与课后巩固不同',
   `homework_score` decimal(6,2) DEFAULT '0.00' COMMENT '课后巩固得分',
   `preview_score` decimal(6,2) DEFAULT NULL COMMENT '预习得分',
   `total_score` decimal(6,2) DEFAULT NULL COMMENT '作业满分',
   `error_count` int(11) NOT NULL DEFAULT '0' COMMENT '错题总道数',
-  `error_questions` json NOT NULL COMMENT '错题具体题号数组，如 [1, 3, 5]',
+  `error_questions` json NOT NULL COMMENT '课后巩固错题具体题号数组，如 [1, 3, 5]',
+  `preview_error_questions` json DEFAULT NULL COMMENT '预习错题具体题号数组，如 [2, 4]',
   `source_files` text COLLATE utf8mb4_unicode_ci COMMENT '上传来源文件名列表(JSON)',
   `teacher_comment` text COLLATE utf8mb4_unicode_ci COMMENT '教师针对性评语',
   `retest_token` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '专属错题本短Token(10位)',
@@ -104,11 +106,13 @@ CREATE TABLE IF NOT EXISTS `student_record_history` (
   `student_name` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
   `student_key` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT '',
   `week_num` int(11) NOT NULL DEFAULT '0',
+  `preview_week_num` int(11) DEFAULT NULL,
   `homework_score` decimal(6,2) DEFAULT NULL,
   `preview_score` decimal(6,2) DEFAULT NULL,
   `total_score` decimal(6,2) DEFAULT NULL,
   `error_count` int(11) NOT NULL DEFAULT '0',
   `error_questions` json DEFAULT NULL,
+  `preview_error_questions` json DEFAULT NULL,
   `teacher_comment` text COLLATE utf8mb4_unicode_ci,
   `source_files` text COLLATE utf8mb4_unicode_ci,
   `retest_token` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -146,6 +150,7 @@ CREATE TABLE IF NOT EXISTS `generation_batches` (
 -- ---------- 题库专题期次 ----------
 CREATE TABLE IF NOT EXISTS `qbank_weeks` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
+  `bank_type` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'homework' COMMENT '题库类型：homework=课后巩固，preview=预习',
   `year` int(11) NOT NULL DEFAULT '2026' COMMENT '年份，如2026',
   `season` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '秋' COMMENT '学期：春/暑/秋/寒',
   `subject` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '学科',
@@ -158,8 +163,8 @@ CREATE TABLE IF NOT EXISTS `qbank_weeks` (
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_week` (`year`,`season`,`subject`,`grade`,`tier`,`week`),
-  KEY `idx_list` (`year`,`season`,`subject`,`grade`),
+  UNIQUE KEY `uk_week` (`year`,`season`,`subject`,`grade`,`tier`,`week`,`bank_type`),
+  KEY `idx_list` (`year`,`season`,`subject`,`grade`,`bank_type`),
   KEY `idx_updated` (`updated_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='题库专题主表';
 
@@ -167,6 +172,7 @@ CREATE TABLE IF NOT EXISTS `qbank_weeks` (
 CREATE TABLE IF NOT EXISTS `qbank_questions` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
   `qbank_id` int(11) NOT NULL COMMENT '关联 qbank_weeks.id',
+  `bank_type` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'homework' COMMENT '题库类型：homework=课后巩固，preview=预习',
   `year` int(11) NOT NULL DEFAULT '2026',
   `season` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '秋' COMMENT '学期：春/暑/秋/寒',
   `subject` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -188,7 +194,7 @@ CREATE TABLE IF NOT EXISTS `qbank_questions` (
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_qbank_qnum` (`qbank_id`,`question_num`),
-  KEY `idx_lookup` (`year`,`season`,`subject`,`grade`,`tier`,`week`,`question_num`),
+  KEY `idx_lookup` (`bank_type`,`year`,`season`,`subject`,`grade`,`tier`,`week`,`question_num`),
   KEY `idx_topic_search` (`subject`,`grade`,`topic`(100))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='题库题目与考点明细表';
 

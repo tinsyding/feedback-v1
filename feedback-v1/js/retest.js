@@ -299,6 +299,9 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             gridListContainer.innerHTML = '';
 
             const weeksData = result.weeksData || {};
+            const hasAnyPreview = availableWeeks.some(w => getWeekErrorCounts(weeksData[String(w)]).preview > 0);
+            const mergeAllLabel = mergeAllSection ? mergeAllSection.querySelector('span') : null;
+            if (mergeAllLabel) mergeAllLabel.textContent = hasAnyPreview ? '合并下载全部专题（含预习） (PDF)' : '合并下载全部专题 (PDF)';
             const totalCount = availableWeeks.length;
             const gridBtnText = document.getElementById('topic-grid-btn-text');
             if (gridBtnText) gridBtnText.textContent = '全部 (' + totalCount + ') ▾';
@@ -307,13 +310,14 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
             const totalErrors = availableWeeks.reduce((sum, w) => {
                 const wd = weeksData[String(w)];
-                return sum + (wd ? (wd.errors || []).length : 0);
+                return sum + getWeekErrorCounts(wd).total;
             }, 0);
 
             availableWeeks.forEach(w => {
                 const isCurrent = (w === currentWeek);
                 const wData = weeksData[String(w)];
-                const errCount = wData ? (wData.errors || []).length : 0;
+                const counts = getWeekErrorCounts(wData);
+                const errCount = counts.total;
                 const label = getTopicLabel(w);
 
                 const cm = (wData && wData.comment) ? String(wData.comment) : '';
@@ -349,8 +353,12 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                     tileInner += '<span class="topic-tile-count unsubmitted">未交作业</span>';
                 } else if (errCount === 0) {
                     tileInner += '<span class="topic-tile-count perfect">全对 0 错题</span>';
+                } else if (counts.homework > 0 && counts.preview > 0) {
+                    tileInner += '<span class="topic-tile-count">巩固' + counts.homework + '道 · 预习' + counts.preview + '道</span>';
+                } else if (counts.preview > 0) {
+                    tileInner += '<span class="topic-tile-count">预习' + counts.preview + '道错题</span>';
                 } else {
-                    tileInner += '<span class="topic-tile-count">' + errCount + '道错题</span>';
+                    tileInner += '<span class="topic-tile-count">' + counts.homework + '道错题</span>';
                 }
                 tile.innerHTML = tileInner;
                 gridListContainer.appendChild(tile);
@@ -380,6 +388,19 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         return '专题' + numToChinese(w);
     }
 
+    function getWeekErrorCounts(wd) {
+        const homework = wd && Array.isArray(wd.errors) ? wd.errors.length : 0;
+        const preview = wd && Array.isArray(wd.previewErrors) ? wd.previewErrors.length : 0;
+        return { homework, preview, total: homework + preview };
+    }
+
+    function getWeekPdfLists(wd) {
+        return {
+            homework: (wd && Array.isArray(wd.pdfs)) ? wd.pdfs : [],
+            preview: (wd && Array.isArray(wd.previewPdfs)) ? wd.previewPdfs : []
+        };
+    }
+
     // Switch between topics (smooth scroll and grid update)
     function switchWeek(week) {
         activeWeek = week;
@@ -404,8 +425,9 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         const weekDisplayEl = document.getElementById('info-week-display');
         if (weekDisplayEl) weekDisplayEl.textContent = label;
 
-        // 待练错题
-        const errorCount = weekData ? (weekData.errors || []).length : 0;
+        // 待练错题（课后巩固 + 预习合并统计）
+        const weekErrorCounts = getWeekErrorCounts(weekData);
+        const errorCount = weekErrorCounts.total;
         const countEl = document.getElementById('info-count');
         if (countEl) countEl.textContent = errorCount;
 
@@ -441,9 +463,11 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
         // Update button label
         const btnTopicLabel = document.getElementById('btn-topic-label');
-        if (btnTopicLabel) btnTopicLabel.textContent = '下载' + label + '错题本 (PDF)';
+        const previewLabelSuffix = weekErrorCounts.preview > 0 ? '（含预习）' : '';
+        if (btnTopicLabel) btnTopicLabel.textContent = '下载' + label + '错题本' + previewLabelSuffix + ' (PDF)';
 
-        const pdfs = weekData ? (weekData.pdfs || []) : [];
+        const weekPdfLists = getWeekPdfLists(weekData);
+        const pdfs = weekPdfLists.homework.concat(weekPdfLists.preview);
         const hasPdfs = pdfs.length > 0;
         const noPdfHint = document.getElementById('no-pdf-hint');
         const btnTopicDownload = document.getElementById('btn-topic-download');
@@ -504,7 +528,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         } else {
             if (noPdfHint) noPdfHint.style.display = 'none';
             if (btnTopicDownload) btnTopicDownload.disabled = false;
-            if (btnTopicLabel) btnTopicLabel.textContent = '下载' + label + '错题本 (PDF)';
+            if (btnTopicLabel) btnTopicLabel.textContent = '下载' + label + '错题本' + previewLabelSuffix + ' (PDF)';
         }
     }
 
@@ -675,9 +699,10 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
     }
 
     // 错题本每道题前的标题：优先显示“专题五：勾股定理”，没有专题时退回知识点。
-    function formatQuestionTopicLabel(week, topic) {
+    function formatQuestionTopicLabel(week, topic, sourceType) {
         const weekNum = parseInt(week, 10);
-        const weekLabel = weekNum > 0 ? ('专题' + numToChinese(weekNum)) : '';
+        let weekLabel = weekNum > 0 ? ('专题' + numToChinese(weekNum)) : '';
+        if (weekLabel && sourceType === 'preview') weekLabel = '预习·' + weekLabel;
         const topicText = String(topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
         if (weekLabel && topicText) return weekLabel + '：' + topicText;
         if (weekLabel) return weekLabel;
@@ -753,24 +778,32 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         let pdfsToMerge = [];
         let fileLabel = '';
 
+        const appendWeekPdfs = (wd, fallbackWeek) => {
+            if (!wd) return;
+            const appendList = (list, sourceType, headerWeek) => {
+                (list || []).forEach(p => {
+                    const url = type === 'exercise' ? p.exercisePdf : p.answerPdf;
+                    if (url) {
+                        pdfsToMerge.push({
+                            url: url,
+                            errorNum: p.errorNum,
+                            videoUrl: p.videoUrl || p.video_url || '',
+                            topic: p.topic || '',
+                            week: headerWeek,
+                            sourceType: sourceType
+                        });
+                    }
+                });
+            };
+            appendList(wd.previewPdfs, 'preview', wd.previewWeek || fallbackWeek);
+            appendList(wd.pdfs, 'homework', fallbackWeek);
+        };
+
         if (allWeeks) {
             const sortedWeeks = Object.keys(weeksData).map(Number).sort((a, b) => a - b);
             sortedWeeks.forEach(w => {
                 const wd = weeksData[String(w)];
-                if (wd && wd.pdfs) {
-                    wd.pdfs.forEach(p => {
-                        const url = type === 'exercise' ? p.exercisePdf : p.answerPdf;
-                        if (url) {
-                            pdfsToMerge.push({
-                                url: url,
-                                errorNum: p.errorNum,
-                                videoUrl: p.videoUrl || p.video_url || '',
-                                topic: p.topic || '',
-                                week: w
-                            });
-                        }
-                    });
-                }
+                appendWeekPdfs(wd, w);
             });
             if (sortedWeeks.length > 3) {
                 fileLabel = getTopicLabel(sortedWeeks[0]) + '至' + getTopicLabel(sortedWeeks[sortedWeeks.length - 1]) + '_全' + sortedWeeks.length + '讲合辑_' + typeLabel;
@@ -779,19 +812,8 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             }
         } else {
             const weekData = weeksData[String(activeWeek)];
-            if (!weekData || !weekData.pdfs) return;
-            weekData.pdfs.forEach(p => {
-                const url = type === 'exercise' ? p.exercisePdf : p.answerPdf;
-                if (url) {
-                    pdfsToMerge.push({
-                        url: url,
-                        errorNum: p.errorNum,
-                        videoUrl: p.videoUrl || p.video_url || '',
-                        topic: p.topic || '',
-                        week: activeWeek
-                    });
-                }
-            });
+            if (!weekData) return;
+            appendWeekPdfs(weekData, activeWeek);
             fileLabel = getTopicLabel(activeWeek) + '_' + typeLabel;
         }
 
@@ -1036,7 +1058,8 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 const videoUrl = (typeof qItem === 'object' && qItem.videoUrl) ? String(qItem.videoUrl).trim() : '';
                 const qWeek = (typeof qItem === 'object' && qItem.week) ? qItem.week : activeWeek;
                 const qTopic = (typeof qItem === 'object' && qItem.topic) ? String(qItem.topic).trim() : '';
-                const qTopicLabel = formatQuestionTopicLabel(qWeek, qTopic);
+                const qSourceType = (typeof qItem === 'object' && qItem.sourceType) ? qItem.sourceType : 'homework';
+                const qTopicLabel = formatQuestionTopicLabel(qWeek, qTopic, qSourceType);
                 const qNum = typeof qItem === 'object' ? (qItem.errorNum || (i + 1)) : (i + 1);
 
                 try {
