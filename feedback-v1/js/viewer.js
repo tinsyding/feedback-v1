@@ -8,6 +8,18 @@ function hideViewerLoadingScreen() {
     }, 350);
 }
 
+// 错题本基础链接：生产站默认走 vip.wxjifang.cn，预览/测试站（feedbackbackup / feedbacktest）自适应走当前站点
+function getRetestBaseUrl() {
+    const host = window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') {
+        return `${window.location.origin}${window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/'))}/retest.html`;
+    }
+    if (/feedback(backup|test)\.wxjifang\.cn$/.test(host)) {
+        return `https://${host}/retest.html`;
+    }
+    return 'https://vip.wxjifang.cn/retest.html';
+}
+
 // ========== Spring/Autumn Semester Viewer Logic ==========
 window.defaultSeason = 'autumn';
 fetch('api/public_config.php').then(r=>r.json()).then(c=>{ 
@@ -1398,10 +1410,7 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                     || plusTokens[legacyStudentKey]
                     || (!studentId ? (plusTokens[fullName] || plusTokens[studentName]) : '');
                 if (previewToken) {
-                    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-                    const retestBase = isLocal
-                        ? `${window.location.origin}${window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/'))}/retest.html`
-                        : 'https://vip.wxjifang.cn/retest.html';
+                    const retestBase = getRetestBaseUrl();
                     feedback += `${retestBase}?token=${previewToken}\n`;
                 } else {
                     feedback += `(生成链接失败，请联系老师)\n`;
@@ -1485,10 +1494,7 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                         || plusTokens[legacyStudentKey]
                         || (!studentId ? (plusTokens[fullName] || plusTokens[studentName]) : '');
                     if (token) {
-                        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-                        const retestBase = isLocal
-                            ? `${window.location.origin}${window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/'))}/retest.html`
-                            : 'https://vip.wxjifang.cn/retest.html';
+                        const retestBase = getRetestBaseUrl();
                         plusFeedbackPart += `${retestBase}?token=${token}\n`;
                     } else {
                         plusFeedbackPart += `(生成链接失败，请联系老师)\n`;
@@ -2120,10 +2126,7 @@ async function doGeneratePreviewOnlyFeedback() {
             const token = previewOnlyPlusTokens[tokenStudentKey] || previewOnlyPlusTokens[tokenLegacyKey] || '';
             feedback += `【错题本】：本次预习错题已生成，点击链接查看\n`;
             if (token) {
-                const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-                const retestBase = isLocal
-                    ? `${window.location.origin}${window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/'))}/retest.html`
-                    : 'https://vip.wxjifang.cn/retest.html';
+                const retestBase = getRetestBaseUrl();
                 feedback += `${retestBase}?token=${token}\n`;
             } else {
                 feedback += `(生成链接失败，请联系老师)\n`;

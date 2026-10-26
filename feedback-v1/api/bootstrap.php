@@ -30,7 +30,14 @@ $allowedOrigins = [
     'https://vip.jokerx.top'
 ];
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-if (in_array($origin, $allowedOrigins, true)) {
+$isAllowedOrigin = in_array($origin, $allowedOrigins, true);
+if (!$isAllowedOrigin && !empty($origin)) {
+    // 自动适配所有 wxjifang.cn 子域名（如 feedbackbackup / feedbacktest 等测试与预览站）
+    if (preg_match('#^https?://([a-zA-Z0-9-]+\.)*wxjifang\.cn(:\d+)?$#', $origin)) {
+        $isAllowedOrigin = true;
+    }
+}
+if ($isAllowedOrigin) {
     header('Access-Control-Allow-Origin: ' . $origin);
     header('Access-Control-Allow-Credentials: true');
 }
