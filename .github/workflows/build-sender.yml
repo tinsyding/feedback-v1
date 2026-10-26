@@ -110,7 +110,7 @@ jobs:
           print("UI smoke OK")
           PY
 
-      - name: Build Windows executable
+      - name: Build Windows executable (Tkinter Edition)
         env:
           PYTHONPATH: ${{ github.workspace }}/feedback-v1/tools
         run: |
@@ -127,20 +127,41 @@ jobs:
             feedback-v1/tools/sender_py/sender.py
           mv dist/JiFangFeedbackSender.exe "dist/极方每周反馈程序.exe"
 
+      - name: Build Windows executable (Web Edition)
+        env:
+          PYTHONPATH: ${{ github.workspace }}/feedback-v1/tools
+        run: |
+          python -m PyInstaller --noconfirm --clean --noupx --windowed --onefile \
+            --name JiFangFeedbackWeb \
+            --icon feedback-v1/favicon.ico \
+            --version-file feedback-v1/tools/sender_py/version_info.txt \
+            --add-data "feedback-v1/favicon.ico;." \
+            --add-data "feedback-v1/tools/example.png;." \
+            --add-data "feedback-v1/tools/sender_py/web_ui.html;sender_py" \
+            --paths feedback-v1/tools \
+            --paths feedback-v1/tools/sender_py \
+            --collect-submodules sender_py \
+            feedback-v1/tools/sender_py/web_main.py
+          mv dist/JiFangFeedbackWeb.exe "dist/极方每周反馈程序-Web版.exe"
+
       - name: Verify build output
         run: |
           test -f "dist/极方每周反馈程序.exe"
-          ls -lh "dist/极方每周反馈程序.exe"
+          test -f "dist/极方每周反馈程序-Web版.exe"
+          ls -lh dist/*.exe
 
       - name: Frozen exe smoke test
         run: |
           python -c "import subprocess, sys; p = subprocess.run(['dist/极方每周反馈程序.exe', '--smoke-test'], timeout=120); sys.exit(p.returncode)"
+          python -c "import subprocess, sys; p = subprocess.run(['dist/极方每周反馈程序-Web版.exe', '--smoke-test'], timeout=120); sys.exit(p.returncode)"
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v5
         with:
           name: JiFangFeedbackSender-windows-x64
-          path: dist/极方每周反馈程序.exe
+          path: |
+            dist/极方每周反馈程序.exe
+            dist/极方每周反馈程序-Web版.exe
           if-no-files-found: error
 
   release:
@@ -167,9 +188,8 @@ jobs:
           python - <<'PY'
           import shutil
 
-          source = "dist/极方每周反馈程序.exe"
-          direct = "dist/JiFangFeedbackSender-windows-x64.exe"
-          shutil.copyfile(source, direct)
+          shutil.copyfile("dist/极方每周反馈程序.exe", "dist/JiFangFeedbackSender-windows-x64.exe")
+          shutil.copyfile("dist/极方每周反馈程序-Web版.exe", "dist/JiFangFeedbackWeb-windows-x64.exe")
           PY
 
       - name: Publish release asset
@@ -178,5 +198,6 @@ jobs:
           name: ${{ steps.release_meta.outputs.title }}
           files: |
             dist/JiFangFeedbackSender-windows-x64.exe
+            dist/JiFangFeedbackWeb-windows-x64.exe
           fail_on_unmatched_files: true
           body: ""

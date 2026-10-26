@@ -1,0 +1,1274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>极方每周反馈程序 · Web版</title>
+  <link rel="icon" href="/favicon.ico">
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --success: #16a34a;
+      --warning: #d97706;
+      --danger: #dc2626;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --header-bg: #f1f5f9;
+      --row-hover: #f8fafc;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    /* 顶部导航 */
+    header {
+      background: var(--card-bg);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .logo-badge {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 16px;
+    }
+    .brand-title {
+      font-size: 17px;
+      font-weight: 700;
+      color: #1e293b;
+    }
+    .brand-badge {
+      font-size: 11px;
+      background: #eff6ff;
+      color: #2563eb;
+      padding: 2px 7px;
+      border-radius: 12px;
+      font-weight: 600;
+      border: 1px solid #bfdbfe;
+    }
+    .nav-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    /* 主体布局 */
+    main {
+      flex: 1;
+      max-width: 1440px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 16px 24px 88px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    /* 卡片通用 */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 18px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    }
+    /* 按钮通用 */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: white;
+      color: #334155;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+    .btn:hover { background: #f8fafc; border-color: #cbd5e1; }
+    .btn:active { transform: translateY(1px); }
+    .btn-primary { background: var(--primary); color: white; border-color: var(--primary); }
+    .btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+    .btn-danger { background: #fee2e2; color: #b91c1c; border-color: #fca5a5; }
+    .btn-danger:hover { background: #fecaca; }
+    .btn-success { background: #dcfce7; color: #15803d; border-color: #86efac; }
+    .btn-success:hover { background: #bbf7d0; }
+    .btn-sm { padding: 4px 8px; font-size: 12px; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    /* 文件池卡片 */
+    .file-pool {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .file-pool-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .drop-zone {
+      border: 2px dashed #cbd5e1;
+      border-radius: 8px;
+      padding: 16px;
+      text-align: center;
+      background: #fafafa;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .drop-zone.dragover {
+      border-color: var(--primary);
+      background: #eff6ff;
+    }
+    .file-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .file-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 12px;
+      color: #334155;
+    }
+    .chip-del {
+      color: #94a3b8;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    .chip-del:hover { color: var(--danger); }
+    /* 工具栏卡片 */
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      padding: 10px 16px;
+    }
+    .toolbar-left, .toolbar-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .search-input {
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      font-size: 13px;
+      width: 220px;
+      outline: none;
+    }
+    .search-input:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(37,99,235,0.12); }
+    select.filter-select {
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      font-size: 13px;
+      background: white;
+      outline: none;
+      cursor: pointer;
+    }
+    .summary-text {
+      font-size: 13px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+    /* 表格容器 */
+    .table-card {
+      padding: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .table-container {
+      max-height: calc(100vh - 350px);
+      min-height: 380px;
+      overflow-y: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 13px;
+    }
+    thead th {
+      background: var(--header-bg);
+      color: #475569;
+      font-weight: 600;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    tbody td {
+      padding: 10px 14px;
+      border-bottom: 1px solid #f1f5f9;
+      vertical-align: middle;
+    }
+    tbody tr:hover { background: var(--row-hover); }
+    .col-check { width: 44px; text-align: center; }
+    .col-sid { width: 90px; font-family: monospace; font-weight: 600; color: #3b82f6; }
+    .col-name { width: 110px; font-weight: 600; color: #1e293b; }
+    .col-status { width: 105px; }
+    .col-msg { max-width: 450px; }
+    .col-actions { width: 220px; text-align: right; }
+    /* 状态徽章 */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 500;
+      border: 1px solid transparent;
+    }
+    .badge-pending { background: #f1f5f9; color: #475569; border-color: #e2e8f0; }
+    .badge-sending { background: #eff6ff; color: #2563eb; border-color: #bfdbfe; animation: pulse 1.5s infinite; }
+    .badge-sent { background: #ecfdf5; color: #16a34a; border-color: #bbf7d0; }
+    .badge-failed { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
+    .badge-unmatched { background: #fffbeb; color: #d97706; border-color: #fde68a; }
+    .badge-blocked { background: #fff7ed; color: #ea580c; border-color: #fed7aa; }
+    .badge-skipped { background: #f3f4f6; color: #9ca3af; border-color: #e5e7eb; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+    .msg-preview {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      color: #475569;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .msg-preview:hover { color: var(--primary); }
+    /* 空白状态 */
+    .empty-state {
+      padding: 60px 20px;
+      text-align: center;
+      color: #94a3b8;
+    }
+    .empty-icon { font-size: 44px; margin-bottom: 8px; }
+    /* 底部悬浮控制栏 */
+    .bottom-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--card-bg);
+      border-top: 1px solid var(--border);
+      padding: 10px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 -4px 10px rgba(0,0,0,0.04);
+      z-index: 30;
+    }
+    .bottom-status {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex: 1;
+      max-width: 650px;
+    }
+    .status-text {
+      font-size: 13px;
+      font-weight: 600;
+      color: #1e293b;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .progress-bar-wrap {
+      width: 100%;
+      height: 7px;
+      background: #e2e8f0;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #3b82f6, #2563eb);
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+    .bottom-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    /* 弹窗通用样式 */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(15,23,42,0.45);
+      backdrop-filter: blur(3px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+    .modal-overlay.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .modal-card {
+      background: white;
+      border-radius: 12px;
+      width: 90%;
+      max-width: 780px;
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+      animation: modalIn 0.2s ease;
+    }
+    @keyframes modalIn {
+      from { transform: scale(0.96); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+    .modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #f8fafc;
+    }
+    .modal-header h3 { font-size: 16px; font-weight: 700; color: #1e293b; }
+    .modal-close {
+      font-size: 20px;
+      cursor: pointer;
+      color: #94a3b8;
+      border: none;
+      background: none;
+    }
+    .modal-close:hover { color: #0f172a; }
+    .modal-body {
+      padding: 18px 20px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .modal-footer {
+      padding: 12px 20px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      background: #f8fafc;
+    }
+    /* 日志控制台 */
+    .log-terminal {
+      background: #0f172a;
+      color: #f8fafc;
+      font-family: Consolas, Monaco, monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      padding: 14px;
+      border-radius: 8px;
+      height: 480px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+    /* 气泡轻提示 Toast */
+    #toast {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-20px);
+      background: #1e293b;
+      color: white;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      box-shadow: 0 10px 15px -3px rgba(0,0,0,0.2);
+      opacity: 0;
+      transition: all 0.25s ease;
+      z-index: 200;
+      pointer-events: none;
+    }
+    #toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 顶部导航 -->
+  <header>
+    <div class="brand">
+      <div class="logo-badge">极</div>
+      <div class="brand-title">极方每周反馈程序</div>
+      <div class="brand-badge">Web版 v1.8.0</div>
+    </div>
+    <div class="nav-actions">
+      <button class="btn btn-sm" onclick="copyAllStudentInfo()">📋 复制学号姓名</button>
+      <button class="btn btn-sm" onclick="copyAllMessages()">📋 复制话术</button>
+      <button class="btn btn-sm" onclick="openReplyNotesModal()">📨 待回名单 <span id="navReplyCount" class="brand-badge" style="display:none">0</span></button>
+      <button class="btn btn-sm" onclick="openSentFilesModal()">📂 已发文件</button>
+      <button class="btn btn-sm" onclick="openLogModal()">📜 运行日志</button>
+      <button class="btn btn-sm btn-danger" onclick="shutdownApp()">退出程序</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- 1. 反馈文件池卡片 (支持拖拽 & 按钮添加) -->
+    <section class="card file-pool">
+      <div class="file-pool-header">
+        <span class="summary-text" id="filePoolSummary">尚未选择文件（0 个文件 · 0 人）</span>
+        <div style="display:flex; gap:8px;">
+          <input type="file" id="filePicker" multiple accept=".json,.html,.htm" style="display:none" onchange="handleFileSelect(event)">
+          <button class="btn btn-primary btn-sm" onclick="document.getElementById('filePicker').click()">➕ 添加文件</button>
+          <button class="btn btn-sm" id="clearFilesBtn" onclick="clearAllFiles()" disabled>🗑️ 清空</button>
+        </div>
+      </div>
+      <div class="drop-zone" id="dropZone" onclick="document.getElementById('filePicker').click()">
+        <span style="font-size:13px; color:#64748b;">💡 支持同时多选或直接将 JSON / HTML 反馈文件拖拽到此处追加载入</span>
+      </div>
+      <div class="file-chips" id="fileChipsContainer" style="display:none;"></div>
+    </section>
+
+    <!-- 2. 控制与筛选工具栏 -->
+    <section class="card toolbar">
+      <div class="toolbar-left">
+        <input type="text" class="search-input" id="searchInput" placeholder="🔍 搜索姓名或学号..." oninput="handleSearchFilter()">
+        <select class="filter-select" id="statusFilter" onchange="handleSearchFilter()">
+          <option value="全部">全部状态</option>
+          <option value="待发送">待发送</option>
+          <option value="发送中">发送中</option>
+          <option value="已发送">已发送</option>
+          <option value="发送失败">发送失败</option>
+          <option value="未匹配">未匹配</option>
+          <option value="已拦截">已拦截</option>
+          <option value="已跳过">已跳过</option>
+        </select>
+        <button class="btn btn-sm" onclick="setSelectAction('all')">☑ 全选</button>
+        <button class="btn btn-sm" onclick="setSelectAction('none')">☐ 全不选</button>
+        <button class="btn btn-sm" onclick="retryFailedStudents()">🔄 重发失败</button>
+        <button class="btn btn-sm" onclick="copyFailedList()">📋 复制失败名单</button>
+      </div>
+      <div class="toolbar-right">
+        <span class="summary-text" id="toolbarSummary">共 0 人</span>
+      </div>
+    </section>
+
+    <!-- 3. 学员反馈主表格 -->
+    <section class="card table-card">
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th class="col-check"><input type="checkbox" id="masterCheckbox" onchange="handleMasterCheck(event)"></th>
+              <th class="col-sid">学号</th>
+              <th class="col-name">姓名</th>
+              <th class="col-status">状态</th>
+              <th class="col-msg">反馈话术</th>
+              <th class="col-actions">操作</th>
+            </tr>
+          </thead>
+          <tbody id="studentTableBody">
+            <tr>
+              <td colspan="6">
+                <div class="empty-state">
+                  <div class="empty-icon">📂</div>
+                  <div>暂未加载任何学员反馈数据</div>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- 底部悬浮控制台 -->
+  <footer class="bottom-bar">
+    <div class="bottom-status">
+      <div class="status-text">
+        <span id="stepStatusText">就绪</span>
+        <span id="progressPercent" style="font-size:12px; color:var(--text-muted); font-weight:normal;"></span>
+      </div>
+      <div class="progress-bar-wrap">
+        <div class="progress-bar-fill" id="progressBarFill"></div>
+      </div>
+    </div>
+    <div class="bottom-actions">
+      <button class="btn btn-primary" id="startSendBtn" onclick="confirmStartSend()" style="font-size:14px; padding:8px 18px;">🚀 开始发送</button>
+      <button class="btn" id="calibrateBtn" onclick="triggerCalibrate()">🎯 校准视野</button>
+      <button class="btn btn-danger" id="stopSendBtn" onclick="triggerStop()" disabled>⏹ 停止 (ESC)</button>
+    </div>
+  </footer>
+
+  <!-- 弹窗 1：待回学员名单 -->
+  <div class="modal-overlay" id="replyNotesModal">
+    <div class="modal-card" style="max-width:820px;">
+      <div class="modal-header">
+        <h3>📨 待回学员名单</h3>
+        <button class="modal-close" onclick="closeModal('replyNotesModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <table style="width:100%;">
+          <thead>
+            <tr>
+              <th style="width:100px;">学号</th>
+              <th style="width:110px;">姓名</th>
+              <th style="width:160px;">企微窗口标题</th>
+              <th>最新家长留言</th>
+            </tr>
+          </thead>
+          <tbody id="replyNotesTableBody">
+            <tr><td colspan="4" style="text-align:center; color:#94a3b8; padding:30px;">暂无待回学员记录</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="copyReplyNotesList()">📋 复制待回名单</button>
+        <button class="btn" onclick="closeModal('replyNotesModal')">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 弹窗 2：已发文件记录 -->
+  <div class="modal-overlay" id="sentFilesModal">
+    <div class="modal-card" style="max-width:980px;">
+      <div class="modal-header">
+        <h3>📂 已发送文件记录</h3>
+        <button class="modal-close" onclick="closeModal('sentFilesModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <table style="width:100%;">
+          <thead>
+            <tr>
+              <th style="width:160px;">发送时间</th>
+              <th>文件名称</th>
+              <th style="width:90px;">已发人数</th>
+              <th style="width:120px;">操作</th>
+            </tr>
+          </thead>
+          <tbody id="sentFilesTableBody">
+            <tr><td colspan="4" style="text-align:center; color:#94a3b8; padding:30px;">暂无本地已发文件记录</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal('sentFilesModal')">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 弹窗 3：运行日志 -->
+  <div class="modal-overlay" id="logModal">
+    <div class="modal-card" style="max-width:920px;">
+      <div class="modal-header">
+        <h3>📜 运行日志</h3>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <label style="font-size:12px; color:#64748b; cursor:pointer;"><input type="checkbox" id="autoScrollLog" checked> 自动滚屏</label>
+          <button class="modal-close" onclick="closeModal('logModal')">&times;</button>
+        </div>
+      </div>
+      <div class="modal-body" style="padding:10px;">
+        <div class="log-terminal" id="logTerminal"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="downloadLogFile()">💾 下载运行日志</button>
+        <button class="btn" onclick="clearLogConsole()">清空当前日志</button>
+        <button class="btn" onclick="closeModal('logModal')">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 弹窗 4：话术全文预览 -->
+  <div class="modal-overlay" id="msgPreviewModal">
+    <div class="modal-card" style="max-width:600px;">
+      <div class="modal-header">
+        <h3 id="msgPreviewTitle">反馈话术详情</h3>
+        <button class="modal-close" onclick="closeModal('msgPreviewModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="msgPreviewContent" style="white-space:pre-wrap; line-height:1.7; font-size:13px; color:#334155;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="copyCurrentModalMessage()">📋 复制话术</button>
+        <button class="btn" onclick="closeModal('msgPreviewModal')">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 弹窗 5：视野校准加载提示 -->
+  <div class="modal-overlay" id="calibratingModal">
+    <div class="modal-card" style="max-width:340px; text-align:center; padding:24px 20px;">
+      <div style="font-size:15px; font-weight:700; color:#1e293b; margin-bottom:12px;">正在加载，请稍候...</div>
+      <div class="progress-bar-wrap" style="height:6px; margin-bottom:6px;">
+        <div class="progress-bar-fill" style="width:100%; animation:pulse 1s infinite;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 轻量气泡通知 Toast -->
+  <div id="toast">已复制到剪贴板</div>
+
+  <script>
+    // 全局状态缓存
+    let appState = {
+      running: false,
+      stop_requested: false,
+      progress: {},
+      summary: {},
+      files: [],
+      students: [],
+      reply_notes_count: 0
+    };
+    let currentModalMessage = "";
+
+    // 页面初始化
+    document.addEventListener("DOMContentLoaded", () => {
+      initDragAndDrop();
+      initKeyboardEsc();
+      fetchState();
+      initSSE();
+      setInterval(fetchState, 1500); // 兜底定期轮询
+    });
+
+    // Toast 提示
+    function showToast(msg) {
+      const t = document.getElementById("toast");
+      t.innerText = msg;
+      t.classList.add("show");
+      setTimeout(() => t.classList.remove("show"), 2000);
+    }
+
+    // 全局 ESC 按键支持
+    function initKeyboardEsc() {
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          // 如果正在发送，触发停止
+          if (appState.running) {
+            triggerStop();
+          }
+          // 关闭所有弹窗
+          document.querySelectorAll(".modal-overlay.active").forEach(m => m.classList.remove("active"));
+        }
+      });
+    }
+
+    // 拖拽文件支持
+    function initDragAndDrop() {
+      const dropZone = document.getElementById("dropZone");
+      ['dragenter', 'dragover'].forEach(name => {
+        dropZone.addEventListener(name, (e) => {
+          e.preventDefault();
+          dropZone.classList.add("dragover");
+        });
+      });
+      ['dragleave', 'drop'].forEach(name => {
+        dropZone.addEventListener(name, (e) => {
+          e.preventDefault();
+          dropZone.classList.remove("dragover");
+        });
+      });
+      dropZone.addEventListener("drop", (e) => {
+        const dt = e.dataTransfer;
+        if (dt && dt.files && dt.files.length > 0) {
+          uploadFileList(dt.files);
+        }
+      });
+    }
+
+    function handleFileSelect(event) {
+      const files = event.target.files;
+      if (files && files.length > 0) {
+        uploadFileList(files);
+      }
+      event.target.value = "";
+    }
+
+    // 上传文件列表
+    async function uploadFileList(fileList) {
+      const filesPayload = [];
+      for (let i = 0; i < fileList.length; i++) {
+        const f = fileList[i];
+        const text = await f.text();
+        filesPayload.push({ name: f.name, content: text });
+      }
+      try {
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ files: filesPayload })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(`✓ 成功载入 ${data.count || 0} 位学员数据！`);
+          fetchState();
+        } else {
+          alert(`上传失败: ${data.message || '未知异常'}`);
+        }
+      } catch (err) {
+        alert(`网络异常: ${err}`);
+      }
+    }
+
+    // 移除单个文件
+    async function removeFile(path) {
+      try {
+        const res = await fetch("/api/files/remove", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: path })
+        });
+        fetchState();
+      } catch (err) {
+        alert(`操作失败: ${err}`);
+      }
+    }
+
+    // 清空文件池
+    async function clearAllFiles() {
+      if (!confirm("确认清空当前已导入的所有反馈文件与学员数据？")) return;
+      try {
+        await fetch("/api/files/clear", { method: "POST" });
+        fetchState();
+      } catch (err) {
+        alert(`清空失败: ${err}`);
+      }
+    }
+
+    // 获取完整状态
+    async function fetchState() {
+      try {
+        const res = await fetch("/api/state");
+        if (res.ok) {
+          appState = await res.json();
+          renderUI();
+        }
+      } catch (err) {
+        console.error("fetchState error", err);
+      }
+    }
+
+    // SSE 实时通道
+    function initSSE() {
+      const evtSource = new EventSource("/api/events");
+      evtSource.onmessage = (e) => {
+        try {
+          const payload = JSON.parse(e.data);
+          if (payload.type === "init") {
+            appState = payload.state;
+            renderUI();
+          } else if (payload.type === "log") {
+            appendLogLine(payload.line);
+          } else if (payload.type === "state_change") {
+            fetchState();
+          }
+        } catch (err) {}
+      };
+      evtSource.onerror = () => {
+        evtSource.close();
+        setTimeout(initSSE, 3000);
+      };
+    }
+
+    // 渲染主界面
+    function renderUI() {
+      // 1. 文件池
+      const poolSummary = document.getElementById("filePoolSummary");
+      const chips = document.getElementById("fileChipsContainer");
+      const clearBtn = document.getElementById("clearFilesBtn");
+
+      if (!appState.files || appState.files.length === 0) {
+        poolSummary.innerText = "尚未选择文件（0 个文件 · 0 人）";
+        chips.style.display = "none";
+        chips.innerHTML = "";
+        clearBtn.disabled = true;
+      } else {
+        const totalPeople = appState.summary ? appState.summary.total : 0;
+        let s = `已载入 ${appState.files.length} 个文件 · 共 ${totalPeople} 人`;
+        if (appState.duplicate_count) s += `（去重 ${appState.duplicate_count} 人）`;
+        poolSummary.innerText = s;
+        clearBtn.disabled = appState.running;
+
+        chips.style.display = "flex";
+        chips.innerHTML = appState.files.map(f => {
+          const icon = f.ext === ".json" ? "📄" : "🌐";
+          return `
+            <div class="file-chip">
+              <span>${icon} ${f.name} (${f.count}人)</span>
+              ${!appState.running ? `<span class="chip-del" onclick="removeFile('${escapeJs(f.path)}')">&times;</span>` : ''}
+            </div>
+          `;
+        }).join("");
+      }
+
+      // 2. 待回角标
+      const replyBadge = document.getElementById("navReplyCount");
+      if (appState.reply_notes_count > 0) {
+        replyBadge.innerText = appState.reply_notes_count;
+        replyBadge.style.display = "inline";
+      } else {
+        replyBadge.style.display = "none";
+      }
+
+      // 3. 表格渲染
+      renderTable();
+
+      // 4. 底部控制器
+      renderBottomBar();
+    }
+
+    // 表格筛选与渲染
+    function renderTable() {
+      const q = (document.getElementById("searchInput").value || "").trim().toLowerCase();
+      const statusFilter = document.getElementById("statusFilter").value;
+      const tbody = document.getElementById("studentTableBody");
+
+      if (!appState.students || appState.students.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="6">
+              <div class="empty-state">
+                <div class="empty-icon">📂</div>
+                <div>暂未加载任何学员反馈数据</div>
+              </div>
+            </td>
+          </tr>
+        `;
+        document.getElementById("toolbarSummary").innerText = "共 0 人";
+        return;
+      }
+
+      const filtered = appState.students.filter(st => {
+        if (statusFilter !== "全部" && st.status !== statusFilter) return false;
+        if (q) {
+          const matchName = (st.sname || "").toLowerCase().includes(q) || (st.studentName || "").toLowerCase().includes(q);
+          const matchSid = (st.sid || "").toLowerCase().includes(q);
+          if (!matchName && !matchSid) return false;
+        }
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="6">
+              <div class="empty-state">
+                <div class="empty-icon">🔍</div>
+                <div>未找到符合条件的学员</div>
+              </div>
+            </td>
+          </tr>
+        `;
+      } else {
+        tbody.innerHTML = filtered.map(st => {
+          const badgeClass = getBadgeClass(st.status);
+          return `
+            <tr>
+              <td class="col-check">
+                <input type="checkbox" ${st.selected ? 'checked' : ''} ${appState.running ? 'disabled' : ''} onchange="toggleStudentCheck('${st.id}')">
+              </td>
+              <td class="col-sid">${st.sid || '-'}</td>
+              <td class="col-name">${st.sname || st.studentName || '-'}</td>
+              <td class="col-status"><span class="badge ${badgeClass}">${st.status}</span></td>
+              <td class="col-msg">
+                <div class="msg-preview" title="点击查看全文" onclick="openMsgPreviewModal('${escapeJs(st.studentName)}', '${escapeJs(st.message)}')">${st.message || ''}</div>
+              </td>
+              <td class="col-actions">
+                <button class="btn btn-sm" onclick="sendSingleStudent('${st.id}')" ${appState.running ? 'disabled' : ''}>发送</button>
+                <button class="btn btn-sm" onclick="copyText('${escapeJs(st.sid)} ${escapeJs(st.sname)}')">复制姓名</button>
+                <button class="btn btn-sm" onclick="copyText('${escapeJs(st.message)}')">复制话术</button>
+              </td>
+            </tr>
+          `;
+        }).join("");
+      }
+
+      const sum = appState.summary || {};
+      document.getElementById("toolbarSummary").innerText =
+        `共 ${sum.total || 0} 人 · 勾选 ${sum.selected || 0} 人 (成功: ${sum.sent || 0}, 失败: ${sum.failed || 0}, 未匹配: ${sum.unmatched || 0}, 拦截: ${sum.blocked || 0})`;
+    }
+
+    function getBadgeClass(status) {
+      if (status === "已发送") return "badge-sent";
+      if (status === "发送中") return "badge-sending";
+      if (status === "发送失败") return "badge-failed";
+      if (status === "未匹配") return "badge-unmatched";
+      if (status === "已拦截") return "badge-blocked";
+      if (status === "已跳过") return "badge-skipped";
+      return "badge-pending";
+    }
+
+    // 渲染底部控制器
+    function renderBottomBar() {
+      const p = appState.progress || {};
+      const stepText = document.getElementById("stepStatusText");
+      const progressFill = document.getElementById("progressBarFill");
+      const percentLabel = document.getElementById("progressPercent");
+      const startBtn = document.getElementById("startSendBtn");
+      const stopBtn = document.getElementById("stopSendBtn");
+      const calibBtn = document.getElementById("calibrateBtn");
+
+      if (appState.running) {
+        stepText.innerText = p.step_text || "正在发送中...";
+        const processed = p.processed || 0;
+        const total = p.total || 1;
+        const pct = Math.min(100, Math.round((processed / total) * 100));
+        progressFill.style.width = pct + "%";
+        percentLabel.innerText = `${processed}/${total} (${pct}%)`;
+
+        startBtn.disabled = true;
+        calibBtn.disabled = true;
+        stopBtn.disabled = false;
+      } else {
+        stepText.innerText = p.step_text || "就绪";
+        progressFill.style.width = "0%";
+        percentLabel.innerText = "";
+
+        startBtn.disabled = !appState.students || appState.students.length === 0;
+        calibBtn.disabled = false;
+        stopBtn.disabled = true;
+      }
+    }
+
+    // 勾选操作
+    async function setSelectAction(action) {
+      try {
+        await fetch("/api/students/toggle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: action })
+        });
+        fetchState();
+      } catch (err) {}
+    }
+
+    async function toggleStudentCheck(id) {
+      try {
+        await fetch("/api/students/toggle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "toggle_specific", ids: [id] })
+        });
+        fetchState();
+      } catch (err) {}
+    }
+
+    function handleMasterCheck(event) {
+      setSelectAction(event.target.checked ? "all" : "none");
+    }
+
+    function handleSearchFilter() {
+      renderTable();
+    }
+
+    function retryFailedStudents() {
+      setSelectAction("failed");
+    }
+
+    function copyFailedList() {
+      if (!appState.students) return;
+      const failed = appState.students.filter(st => ["发送失败", "未匹配", "已拦截"].includes(st.status));
+      if (failed.length === 0) {
+        showToast("当前暂无发送失败或未匹配的学员。");
+        return;
+      }
+      const text = failed.map(st => `${st.sid} ${st.sname} (${st.status}: ${st.last_reason || '未知'})`).join("\n");
+      copyText(text, `✓ 已复制 ${failed.length} 位失败学员名单！`);
+    }
+
+    // 发送与停止控制
+    function confirmStartSend() {
+      const sum = appState.summary || {};
+      const selected = sum.selected || 0;
+      const total = sum.total || 0;
+      if (selected <= 0) {
+        alert("请先勾选需要发送的学员！");
+        return;
+      }
+      const promptMsg = `3秒后即将开始发送，本次将发送${selected}人，共${total}人，发送中按ESC可停止。是否继续？`;
+      if (!confirm(promptMsg)) return;
+
+      doStartSend();
+    }
+
+    async function doStartSend() {
+      try {
+        const res = await fetch("/api/send", { method: "POST" });
+        const data = await res.json();
+        if (!data.success) {
+          alert(data.message || "启动失败");
+        }
+        fetchState();
+      } catch (err) {
+        alert(`启动异常: ${err}`);
+      }
+    }
+
+    async function sendSingleStudent(id) {
+      if (appState.running) return;
+      try {
+        await fetch("/api/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ target_ids: [id] })
+        });
+        fetchState();
+      } catch (err) {
+        alert(`发送异常: ${err}`);
+      }
+    }
+
+    async function triggerStop() {
+      try {
+        await fetch("/api/stop", { method: "POST" });
+        showToast("⏹ 正在停止发送任务...");
+        fetchState();
+      } catch (err) {}
+    }
+
+    async function triggerCalibrate() {
+      openModal("calibratingModal");
+      try {
+        const res = await fetch("/api/calibrate", { method: "POST" });
+        const data = await res.json();
+        setTimeout(() => {
+          closeModal("calibratingModal");
+          if (data.success) {
+            showToast("✓ 视野校准完成！");
+          } else {
+            alert(data.message || "校准未完成");
+          }
+        }, 1500);
+      } catch (err) {
+        closeModal("calibratingModal");
+        alert(`校准异常: ${err}`);
+      }
+    }
+
+    async function shutdownApp() {
+      if (!confirm("确认退出极方反馈程序？退出后后台自动化服务将停止运行。")) return;
+      try {
+        await fetch("/api/shutdown", { method: "POST" });
+        document.body.innerHTML = `
+          <div style="display:flex; height:100vh; align-items:center; justify-content:center; flex-direction:column; color:#475569;">
+            <div style="font-size:36px; margin-bottom:12px;">👋</div>
+            <div style="font-size:18px; font-weight:bold;">程序已安全退出</div>
+            <div style="font-size:13px; margin-top:6px; color:#94a3b8;">您可以直接关闭本浏览器标签页</div>
+          </div>
+        `;
+      } catch (err) {}
+    }
+
+    // 快捷复制
+    function copyAllStudentInfo() {
+      if (!appState.students || appState.students.length === 0) return;
+      const text = appState.students.map(st => `${st.sid} ${st.sname}`).join("\n");
+      copyText(text, "✓ 已复制全部学员学号姓名！");
+    }
+
+    function copyAllMessages() {
+      if (!appState.students || appState.students.length === 0) return;
+      const text = appState.students.map(st => `【${st.studentName}】\n${st.message}\n`).join("\n");
+      copyText(text, "✓ 已复制全部学员反馈话术！");
+    }
+
+    function copyText(text, successMsg = "✓ 已复制到剪贴板！") {
+      if (!text) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => showToast(successMsg)).catch(() => fallbackCopy(text, successMsg));
+      } else {
+        fallbackCopy(text, successMsg);
+      }
+    }
+
+    function fallbackCopy(text, successMsg) {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      try {
+        document.execCommand("copy");
+        showToast(successMsg);
+      } catch (e) {}
+      document.body.removeChild(ta);
+    }
+
+    // 弹窗控制
+    function openModal(id) {
+      document.getElementById(id).classList.add("active");
+    }
+    function closeModal(id) {
+      document.getElementById(id).classList.remove("active");
+    }
+
+    // 弹窗：话术预览
+    function openMsgPreviewModal(name, msg) {
+      currentModalMessage = msg;
+      document.getElementById("msgPreviewTitle").innerText = `${name} - 反馈话术`;
+      document.getElementById("msgPreviewContent").innerText = msg;
+      openModal("msgPreviewModal");
+    }
+    function copyCurrentModalMessage() {
+      copyText(currentModalMessage, "✓ 话术已复制到剪贴板！");
+    }
+
+    // 弹窗：待回学员
+    async function openReplyNotesModal() {
+      try {
+        const res = await fetch("/api/reply_notes");
+        const data = await res.json();
+        const tbody = document.getElementById("replyNotesTableBody");
+        const notes = data.notes || [];
+        if (notes.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:#94a3b8; padding:30px;">暂无待回学员记录</td></tr>`;
+        } else {
+          tbody.innerHTML = notes.map(n => `
+            <tr>
+              <td style="font-family:monospace; font-weight:600; color:#3b82f6;">${n.sid || '-'}</td>
+              <td style="font-weight:600;">${n.sname || '-'}</td>
+              <td style="color:#64748b; font-size:12px;">${n.chat_title || '-'}</td>
+              <td style="color:#0f172a; line-height:1.6;">${n.parent_reply || '-'}</td>
+            </tr>
+          `).join("");
+        }
+        openModal("replyNotesModal");
+      } catch (err) {
+        alert(`加载待回名单失败: ${err}`);
+      }
+    }
+
+    function copyReplyNotesList() {
+      const rows = document.querySelectorAll("#replyNotesTableBody tr");
+      const lines = [];
+      rows.forEach(r => {
+        const cells = r.querySelectorAll("td");
+        if (cells.length === 4 && cells[0].innerText !== '-') {
+          lines.push(`${cells[0].innerText} ${cells[1].innerText}：${cells[3].innerText}`);
+        }
+      });
+      if (lines.length === 0) {
+        showToast("暂无可复制的待回学员记录。");
+        return;
+      }
+      copyText(lines.join("\n"), `✓ 已复制 ${lines.length} 条待回学员记录！`);
+    }
+
+    // 弹窗：已发文件
+    async function openSentFilesModal() {
+      try {
+        const res = await fetch("/api/sent_files");
+        const data = await res.json();
+        const tbody = document.getElementById("sentFilesTableBody");
+        const recs = data.records || [];
+        if (recs.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:#94a3b8; padding:30px;">暂无本地已发文件记录</td></tr>`;
+        } else {
+          tbody.innerHTML = recs.map(r => `
+            <tr>
+              <td style="color:#64748b; font-size:12px;">${r.sent_time || '-'}</td>
+              <td style="font-weight:600; color:#1e293b;">${r.original_filename || '-'}</td>
+              <td style="font-weight:600; color:#16a34a;">${r.student_count || 0} 人</td>
+              <td>
+                <button class="btn btn-sm" onclick="copyText('${escapeJs(r.html_record || r.json_record || '')}', '✓ 记录路径已复制')">复制路径</button>
+              </td>
+            </tr>
+          `).join("");
+        }
+        openModal("sentFilesModal");
+      } catch (err) {
+        alert(`加载已发文件记录失败: ${err}`);
+      }
+    }
+
+    // 弹窗：日志终端
+    async function openLogModal() {
+      openModal("logModal");
+      try {
+        const res = await fetch("/api/logs?since=0");
+        const data = await res.json();
+        const term = document.getElementById("logTerminal");
+        term.innerText = (data.logs || []).join("\n");
+        term.scrollTop = term.scrollHeight;
+      } catch (err) {}
+    }
+
+    function appendLogLine(line) {
+      const term = document.getElementById("logTerminal");
+      term.innerText += (term.innerText ? "\n" : "") + line;
+      if (document.getElementById("autoScrollLog").checked) {
+        term.scrollTop = term.scrollHeight;
+      }
+    }
+
+    function clearLogConsole() {
+      document.getElementById("logTerminal").innerText = "";
+    }
+
+    function downloadLogFile() {
+      const term = document.getElementById("logTerminal");
+      const text = term.innerText || "（暂无运行日志）";
+      const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+      const now = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `极方反馈运行日志_${now}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function escapeJs(str) {
+      if (!str) return "";
+      return String(str).replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "");
+    }
+  </script>
+</body>
+</html>
