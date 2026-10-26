@@ -24,6 +24,7 @@ try:
     )
     from sender_py.store import HistoryManager, SentFilesManager
     from sender_py.utils import parse_student_identifier
+    from sender_py.window_utils import GlobalEscWatcher
 except ModuleNotFoundError:
     from pacing import (
         AFTER_SEND_GAP, BATCH_BREAK_EVERY, BATCH_BREAK_GAP,
@@ -37,6 +38,10 @@ except ModuleNotFoundError:
     )
     from store import HistoryManager, SentFilesManager
     from utils import parse_student_identifier
+    try:
+        from window_utils import GlobalEscWatcher
+    except Exception:
+        GlobalEscWatcher = None
 
 
 class WebController:
@@ -66,6 +71,7 @@ class WebController:
 
         self._reply_analyzer = None
         self._reply_event_queue = queue.Queue()
+        self._esc_watcher = None
 
         self.progress = {
             "running": False,
@@ -75,6 +81,28 @@ class WebController:
             "step_text": "就绪",
             "countdown": 0,
         }
+
+    def _start_esc_watcher(self):
+        self._stop_esc_watcher()
+        if GlobalEscWatcher is None:
+            return
+        try:
+            self._esc_watcher = GlobalEscWatcher(on_stop_callback=self._on_emergency_esc)
+            self._esc_watcher.start()
+        except Exception:
+            self._esc_watcher = None
+
+    def _stop_esc_watcher(self):
+        if self._esc_watcher:
+            try:
+                self._esc_watcher.stop()
+            except Exception:
+                pass
+            self._esc_watcher = None
+
+    def _on_emergency_esc(self):
+        self._stop_requested = True
+        self.emit("⏹ 监听到全局 ESC 按键（已阻止企微最小化），正在安全停止任务并保持断点...")
 
     def _load_token(self):
         try:
@@ -268,7 +296,7 @@ class WebController:
     # ================= 发送流程控制 =================
 
     def start_send(self, target_ids: list = None) -> dict:
-        """开始批量执行发送任务（含 3 秒安全倒计时缓冲）。"""
+        """开始批量执行发送任务（含 3 秒安全倒计时缓冲与断点续发）。"""
         if self._running:
             return {"success": False, "message": "发送任务已在运行中"}
 
@@ -283,15 +311,26 @@ class WebController:
             if not selected_ids:
                 return {"success": False, "message": "当前未勾选任何学员，请先勾选需要发送的条目"}
 
-            selected_count = len(selected_ids)
+            selected_items = [it for it in self.items if it["_id"] in selected_ids]
+            unsent_items = [it for it in selected_items if it.get("_status") != "已发送"]
+            already_sent_items = [it for it in selected_items if it.get("_status") == "已发送"]
+
+            # 如果勾选的既有已发送又有未发送 -> 仅发送未发送学生，已发送学生保留并保护
+            if unsent_items and already_sent_items:
+                target_items = unsent_items
+            else:
+                target_items = selected_items
+
+            effective_ids = {it["_id"] for it in target_items}
+            effective_count = len(target_items)
             total_count = len(self.items)
 
             for it in self.items:
-                if it["_id"] in selected_ids:
+                if it["_id"] in effective_ids:
                     it["_status"] = "待发送"
                     it["_last_result"] = ""
                     it["_last_reason"] = ""
-                else:
+                elif it.get("_status") != "已发送":
                     it["_status"] = "已跳过"
                     it["_last_result"] = "skipped"
                     it["_last_reason"] = "未勾选"
@@ -300,10 +339,11 @@ class WebController:
             self._stop_requested = False
             self.progress["running"] = True
             self.progress["processed"] = 0
-            self.progress["total"] = selected_count
+            self.progress["total"] = effective_count
             self.progress["current_name"] = ""
             self.progress["step_text"] = "准备发送..."
 
+        self._start_esc_watcher()
         self._load_token()
         if self._reply_analyzer is None:
             self._reply_analyzer = AsyncReplyAnalyzer(
@@ -313,18 +353,18 @@ class WebController:
 
         self._worker_thread = threading.Thread(
             target=self._run_worker,
-            args=(selected_ids, selected_count, total_count),
+            args=(effective_ids, effective_count, total_count),
             daemon=True
         )
         self._worker_thread.start()
-        return {"success": True, "selected_count": selected_count, "total_count": total_count}
+        return {"success": True, "selected_count": effective_count, "total_count": total_count}
 
     def stop_send(self) -> dict:
         """请求停止正在运行的发送任务。"""
         if not self._running:
             return {"success": False, "message": "当前没有正在运行的发送任务"}
         self._stop_requested = True
-        self.emit("⏹ 用户请求停止发送任务，正在安全退出...")
+        self.emit("⏹ 用户请求停止发送任务（保持断点），正在安全退出...")
         return {"success": True}
 
     def _interruptible_pause(self, seconds: float) -> bool:
@@ -388,6 +428,11 @@ class WebController:
                 sid = item.get("sid", "")
                 msg_len = len(item.get("message", ""))
 
+                # 保护机制：如果当前学生已被标记为已发送，安全跳过
+                if item.get("_status") == "已发送":
+                    self.emit(f"⏭ [{name}] 该学生已发送成功，安全跳过，防止重复打扰家长")
+                    continue
+
                 with self._lock:
                     item["_status"] = "发送中"
                     self.progress["current_name"] = name
@@ -418,7 +463,7 @@ class WebController:
                     "sent": "已发送",
                     "blocked": "已拦截",
                     "unmatched": "未匹配",
-                    "stopped": "已跳过",
+                    "stopped": "待发送",
                     "error": "发送失败",
                 }
                 status = status_map.get(result, "发送失败")
@@ -427,6 +472,9 @@ class WebController:
                     item["_status"] = status
                     item["_last_result"] = result
                     item["_last_reason"] = reason
+                    if result == "sent":
+                        # 成功发送后自动取消勾选
+                        item["_selected"] = False
                     processed += 1
                     self.progress["processed"] = processed
 
@@ -442,7 +490,7 @@ class WebController:
                 elif result == "unmatched":
                     self.emit(f"  ⚠️ [{name}] 状态更新：未匹配（{reason}）")
                 elif result == "stopped":
-                    self.emit(f"  ⏹ [{name}] 状态更新：已停止（{reason}）")
+                    self.emit(f"  ⏹ [{name}] 状态保持：已暂停（{reason}）")
                 else:
                     self.emit(f"  ❌ [{name}] 状态更新：发送失败（{reason}）")
 
@@ -474,19 +522,34 @@ class WebController:
             self._finish_run(stopped=stopped, selected_ids=selected_ids)
 
     def _finish_run(self, stopped: bool, selected_ids: set):
+        self._stop_esc_watcher()
         with self._lock:
             self._running = False
             self.progress["running"] = False
             self.progress["countdown"] = 0
             if stopped:
-                self.progress["step_text"] = "已停止发送"
+                self.progress["step_text"] = "已暂停发送，可点击“继续发送”继续"
                 for it in self.items:
                     if it["_id"] in selected_ids and it.get("_status") in ("待发送", "发送中"):
-                        it["_status"] = "已跳过"
-                        it["_last_result"] = "stopped"
-                        it["_last_reason"] = "用户停止，未发送"
+                        it["_status"] = "待发送"
+                        it["_last_result"] = "paused"
+                        it["_last_reason"] = "已暂停，可继续发送"
+                        it["_selected"] = True
             else:
                 self.progress["step_text"] = "发送完成"
+
+        self._record_sent_files_summary()
+
+        counts = summarize_status_counts(it.get("_status", "") for it in self.items)
+        title = "已暂停" if stopped else "本批发送结束"
+        summary_msg = (
+            f"🏁 {title}（共 {len(self.items)} 人）："
+            f"成功 {counts['已发送']}，失败 {counts['发送失败']}，"
+            f"拦截 {counts['已拦截']}，未匹配 {counts['未匹配']}，"
+            f"跳过 {counts['已跳过']}"
+        )
+        self.emit(summary_msg)
+        self._notify_state_change()
 
         self._record_sent_files_summary()
 

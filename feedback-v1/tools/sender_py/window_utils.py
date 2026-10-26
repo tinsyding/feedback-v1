@@ -231,3 +231,105 @@ def ensure_fully_visible() -> tuple:
         return (True, (l, t, r - l, b - t))
     except Exception as e:
         return (False, f"窗口归位失败：{e}")
+
+
+import sys
+import threading
+import time
+
+
+class GlobalEscWatcher:
+    """Windows 全局 ESC 紧急停止监听器。
+
+    双重拦截机制：
+    1. 底层键盘钩子 (WH_KEYBOARD_LL = 13)：
+       - 全局捕获物理 ESC 按键；
+       - 拦截并吞掉 ESC 击键（return 1），阻止 Windows 将 ESC 发送给前台企业微信，彻底解决“按ESC导致企微最小化”的问题！
+       - 立即触发停止回调（0ms 响应）。
+    2. 高频 GetAsyncKeyState (15ms) 异步轮询兜底：
+       - 当系统安全软件或受限权限阻止全局钩子注入时，自动提供 15ms 级灵敏轮询，确保 100% 捕获 ESC。
+    """
+    def __init__(self, on_stop_callback=None):
+        self.on_stop = on_stop_callback
+        self._stop_event = threading.Event()
+        self._thread = None
+        self._hook = None
+        self._hook_proc_ref = None
+
+    def start(self):
+        if sys.platform != "win32":
+            return
+        self.stop()
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._worker, name="GlobalEscWatcher", daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop_event.set()
+        if self._hook:
+            try:
+                import ctypes
+                ctypes.windll.user32.UnhookWindowsHookEx(self._hook)
+            except Exception:
+                pass
+            self._hook = None
+
+    def _trigger_stop(self):
+        if callable(self.on_stop):
+            try:
+                self.on_stop()
+            except Exception:
+                pass
+
+    def _worker(self):
+        try:
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+
+            # 清掉启动前残留的 ESC 击键状态
+            user32.GetAsyncKeyState(0x1B)
+
+            HOOKPROC = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
+
+            def _py_hook_proc(nCode, wParam, lParam):
+                if nCode >= 0 and wParam in (0x0100, 0x0104):  # WM_KEYDOWN, WM_SYSKEYDOWN
+                    try:
+                        vk = ctypes.cast(lParam, ctypes.POINTER(wintypes.DWORD))[0]
+                        if vk == 0x1B:  # VK_ESCAPE
+                            self._trigger_stop()
+                            return 1  # 拦截该按键，不让 Windows 传递给前台的企微，防止企微意外最小化
+                    except Exception:
+                        pass
+                return user32.CallNextHookEx(self._hook, nCode, wParam, lParam)
+
+            self._hook_proc_ref = HOOKPROC(_py_hook_proc)
+            self._hook = user32.SetWindowsHookExW(13, self._hook_proc_ref, kernel32.GetModuleHandleW(None), 0)
+
+            msg = wintypes.MSG()
+            while not self._stop_event.is_set():
+                while user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1):
+                    user32.TranslateMessage(ctypes.byref(msg))
+                    user32.DispatchMessageW(ctypes.byref(msg))
+                # 轮询双保险
+                if user32.GetAsyncKeyState(0x1B) & 0x8000:
+                    self._trigger_stop()
+                time.sleep(0.015)
+        except Exception:
+            while not self._stop_event.is_set():
+                try:
+                    import ctypes
+                    if ctypes.windll.user32.GetAsyncKeyState(0x1B) & 0x8000:
+                        self._trigger_stop()
+                except Exception:
+                    pass
+                time.sleep(0.02)
+        finally:
+            if self._hook:
+                try:
+                    import ctypes
+                    ctypes.windll.user32.UnhookWindowsHookEx(self._hook)
+                except Exception:
+                    pass
+                self._hook = None

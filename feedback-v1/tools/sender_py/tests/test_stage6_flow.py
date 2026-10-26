@@ -472,6 +472,8 @@ class TestStage6(unittest.TestCase):
             def _update_progress(self, *a, **k): pass
             def _current_verify_mode(self): return "hybrid"
             def _run_all_worker(self, *a, **k): pass
+            def _status_of(self, item):
+                return item.get("_status", "待发送")
             def set_status(self, item, st): item["_status"] = st
 
         inst = DummySender()
@@ -494,6 +496,75 @@ class TestStage6(unittest.TestCase):
                 self.assertEqual(selected_count, 1)
                 self.assertIn(id(inst.items[0]), selected_ids)
                 self.assertNotIn(id(inst.items[1]), selected_ids)
+
+    def test_breakpoint_resume_skips_already_sent_students(self):
+        from sender_py.sender import SenderApp
+        from sender_py.window_utils import GlobalEscWatcher
+        import unittest.mock
+        import sys
+
+        class DummyVar:
+            def __init__(self, val=True): self.val = val
+            def get(self): return self.val
+            def set(self, v): self.val = v
+
+        class DummyBtn:
+            def __init__(self): self.state = "normal"
+            def config(self, **kwargs):
+                if "state" in kwargs: self.state = kwargs["state"]
+
+        class DummySender:
+            items = [
+                {"sid": "001", "sname": "张三", "_selected_var": DummyVar(True), "_status": "已发送"},
+                {"sid": "002", "sname": "李四", "_selected_var": DummyVar(True), "_status": "待发送"},
+            ]
+            _running = False
+            start_btn = DummyBtn()
+            hint_var = DummyVar("")
+            result_var = DummyVar("")
+            server = "https://mock"
+            _reply_analyzer = None
+            _reply_event_queue = None
+            root = None
+            def emit(self, msg): pass
+            def _start_esc_watcher(self): pass
+            def _set_running_ui(self, v): pass
+            def _update_progress(self, *a, **k): pass
+            def _current_verify_mode(self): return "hybrid"
+            def _run_all_worker(self, *a, **k): pass
+            def _status_of(self, item): return item.get("_status", "待发送")
+            def set_status(self, item, st): item["_status"] = st
+
+        inst = DummySender()
+        mock_tk = unittest.mock.MagicMock()
+        mock_mb = unittest.mock.MagicMock()
+        mock_tk.messagebox = mock_mb
+        with unittest.mock.patch.dict(sys.modules, {"tkinter": mock_tk, "tkinter.messagebox": mock_mb}):
+            mock_mb.askyesno.return_value = True
+            with unittest.mock.patch("threading.Thread") as mock_thread:
+                SenderApp.run_all(inst)
+                self.assertTrue(inst._running)
+                mock_thread.assert_called_once()
+                called_args = mock_thread.call_args[1]["args"]
+                target_ids = called_args[0]
+                effective_count = called_args[1]
+                # 只有未发送的“李四”被纳入本次发送名单，已发送的“张三”被自动跳过保护
+                self.assertEqual(effective_count, 1)
+                self.assertNotIn(id(inst.items[0]), target_ids)
+                self.assertIn(id(inst.items[1]), target_ids)
+                self.assertEqual(inst.items[0]["_status"], "已发送")
+
+    def test_global_esc_watcher_cross_platform_safe(self):
+        from sender_py.window_utils import GlobalEscWatcher
+        callback_called = [False]
+        def on_stop():
+            callback_called[0] = True
+
+        watcher = GlobalEscWatcher(on_stop_callback=on_stop)
+        watcher.start()
+        watcher._trigger_stop()
+        self.assertTrue(callback_called[0])
+        watcher.stop()
 
 
 if __name__ == "__main__":

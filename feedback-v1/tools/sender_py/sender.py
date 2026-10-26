@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.8.1"
+APP_VERSION = "1.8.2"
 
 
 def asset_path(filename: str) -> str:
@@ -53,8 +53,8 @@ except ModuleNotFoundError:
     from utils import load_feedback_items, parse_student_identifier
 
 MAX_CANDIDATES = 3
-# 临时关闭“已发送自动跳过”，方便用同一文件反复测试；恢复时改为 True。
-SKIP_SENT = False
+# 默认启用“已发送自动跳过”，避免对同一批次或本周已发学生重复打扰家长
+SKIP_SENT = True
 
 FILTER_ALL = "全部"
 FILTER_FAILED = "失败/未匹配"
@@ -604,7 +604,14 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
     notes = []
 
     def _paced(gaps):
-        log(f"[{name}] 随机停顿 {pause(*gaps):.1f}s")
+        import random
+        secs = random.uniform(*gaps)
+        log(f"[{name}] 随机停顿 {secs:.1f}s")
+        deadline = time.monotonic() + secs
+        while time.monotonic() < deadline:
+            if should_stop is not None and should_stop():
+                break
+            time.sleep(min(0.04, max(0.0, deadline - time.monotonic())))
 
     for cand in range(1, MAX_CANDIDATES + 1):
         if should_stop is not None and should_stop():
@@ -612,6 +619,9 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
             return {"result": "stopped", "reason": "用户停止", "notes": notes}
         # 所有截图的前提：企微完整可见，否则 mss 截到遮挡物/屏外黑边
         if not wu.find_and_activate_wecom():
+            if should_stop is not None and should_stop():
+                log(f"[{name}] 收到停止请求，当前学生未发送")
+                return {"result": "stopped", "reason": "用户停止", "notes": notes}
             return {"result": "error", "reason": "企微唤起失败（最小化或无响应），请手动点开后重试",
                     "notes": notes}
         time.sleep(0.3)
@@ -632,12 +642,24 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         log(f"  └ 正在通过企业微信快捷键 (Ctrl+F) 聚焦搜索候选 {cand}/{MAX_CANDIDATES}...")
         entered = search_and_enter(name, cand)
         if entered:  # 截图前焦点守护：mss 截的是屏幕像素，失焦会被遮挡物污染
+            if should_stop is not None and should_stop():
+                log(f"[{name}] 收到停止请求，候选 {cand} 未发送")
+                return {"result": "stopped", "reason": "用户停止", "notes": notes}
             if not wu.find_and_activate_wecom():
+                if should_stop is not None and should_stop():
+                    log(f"[{name}] 收到停止请求，候选 {cand} 未发送")
+                    return {"result": "stopped", "reason": "用户停止", "notes": notes}
                 log(f"  └ 候选 {cand}：企微唤起失败，尝试下一候选")
                 _paced(CANDIDATE_GAP)
                 continue
-            search_delay = pause(*SEARCH_GAP)
+            import random
+            search_delay = random.uniform(*SEARCH_GAP)
             log(f"  └ 搜索完成，随机停顿 {search_delay:.2f} 秒...")
+            deadline = time.monotonic() + search_delay
+            while time.monotonic() < deadline:
+                if should_stop is not None and should_stop():
+                    break
+                time.sleep(min(0.04, max(0.0, deadline - time.monotonic())))
         if should_stop is not None and should_stop():
             log(f"  └ 收到停止请求，候选 {cand} 未发送")
             return {"result": "stopped", "reason": "用户停止", "notes": notes}
@@ -653,6 +675,9 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
             chat_img = None
             if entered and should_record(chat_title, judgment):
                 dedupe_add(notes, make_note(name, cand, chat_title, bool((judgment or {}).get("matched")), judgment or {}))
+        if should_stop is not None and should_stop():
+            log(f"  └ 收到停止请求，候选 {cand} 未发送")
+            return {"result": "stopped", "reason": "用户停止", "notes": notes}
         if err is not None:
             log(f"  └ 候选 {cand} 校验异常：{err}，换下一候选")
             _paced(CANDIDATE_GAP)
@@ -1378,43 +1403,40 @@ class SenderApp:
         if self._stop_announced:
             return
         self._stop_announced = True
-        self.hint_var.set("正在停止：当前学生处理完后结束...")
-        self.emit("收到停止请求：当前学生处理完后结束")
+        self.hint_var.set("⏹ 正在停止：已收到停止指令，正在安全停止...")
+        self.emit("⏹ 已收到停止请求（按ESC或停止按钮），正在安全停止并保持断点...")
 
     def _start_esc_watcher(self):
         self._stop_esc_watcher()
         try:
-            import ctypes
-            user32 = ctypes.windll.user32
-            user32.GetAsyncKeyState(0x1B)  # 清掉发送前残留的按键状态
+            try:
+                from sender_py.window_utils import GlobalEscWatcher
+            except ModuleNotFoundError:
+                from window_utils import GlobalEscWatcher
+            self._esc_watcher = GlobalEscWatcher(on_stop_callback=self._on_emergency_esc)
+            self._esc_watcher.start()
         except Exception:
-            return
-        stop_event = threading.Event()
-        self._esc_watch_stop = stop_event
-
-        def watch():
-            while not stop_event.is_set() and self._running:
-                try:
-                    state = user32.GetAsyncKeyState(0x1B)
-                except Exception:
-                    return
-                if state & 0x8001:
-                    self._stop_requested = True
-                    return
-                time.sleep(0.05)
-
-        threading.Thread(target=watch, name="sender-esc-watch", daemon=True).start()
+            pass
 
     def _stop_esc_watcher(self):
-        event = self._esc_watch_stop
-        self._esc_watch_stop = None
-        if event is not None:
-            event.set()
+        if hasattr(self, "_esc_watcher") and self._esc_watcher:
+            try:
+                self._esc_watcher.stop()
+            except Exception:
+                pass
+            self._esc_watcher = None
+
+    def _on_emergency_esc(self):
+        self._stop_requested = True
+        try:
+            self.root.after(0, self._announce_stop)
+        except Exception:
+            self._announce_stop()
 
     def _esc_pressed(self):
         try:
             import ctypes
-            return bool(ctypes.windll.user32.GetAsyncKeyState(0x1B) & 0x8001)
+            return bool(ctypes.windll.user32.GetAsyncKeyState(0x1B) & 0x8000)
         except Exception:
             return False
 
@@ -1423,16 +1445,8 @@ class SenderApp:
         if self._stop_requested:
             self._announce_stop()
             return True
-        try:
-            self.root.update()
-        except self.tk.TclError:
-            self._stop_requested = True
-            self._announce_stop()
-            return True
         if self._esc_pressed():
-            self.request_stop()
-        if self._stop_requested:
-            self._announce_stop()
+            self._on_emergency_esc()
             return True
         return False
 
@@ -1797,6 +1811,17 @@ class SenderApp:
             self.stat_failed_val.set(f"{failed} 人")
             f_count = len(self.input_paths)
             self.stat_files_val.set(f"{f_count} 个文件 · 共 {total} 人" if f_count else f"共 {total} 人")
+        if hasattr(self, "start_btn") and not self._running:
+            has_sent = sent > 0
+            has_unsent_selected = any(
+                (item.get("_selected_var") is not None and item["_selected_var"].get())
+                and self._status_of(item) != "已发送"
+                for item in self.items
+            )
+            if has_sent and has_unsent_selected:
+                self.start_btn.config(text="▶ 继续发送")
+            else:
+                self.start_btn.config(text="▶ 开始发送")
 
     def _apply_selection_status(self, item, selected: bool):
         status_var = item.get("_status_var")
@@ -2374,21 +2399,60 @@ class SenderApp:
             self.emit("没有勾选任何学生，请先勾选要发送的学生")
             self.hint_var.set("没有勾选任何学生")
             return
-        selected_ids = {id(item) for item in selected_items}
+
+        unsent_items = [it for it in selected_items if self._status_of(it) != "已发送"]
+        already_sent_items = [it for it in selected_items if self._status_of(it) == "已发送"]
         total_count = len(self.items)
-        prompt_text = f"3秒后即将开始发送，本次将发送{selected_count}人，共{total_count}人，发送中按ESC可停止。"
-        self.start_btn.config(state="disabled")
-        try:
-            confirmed = messagebox.askyesno(
-                "确认发送", prompt_text, parent=self.root,
-                default=messagebox.YES)
-        except Exception:
-            self.start_btn.config(state="normal")
-            raise
-        if not confirmed:
-            self.start_btn.config(state="normal")
-            self.hint_var.set("已取消发送")
-            return
+
+        if already_sent_items and not unsent_items:
+            # 选中的全部都已是已发送状态，需用户主动确认才重新发送
+            if not messagebox.askyesno(
+                "重新发送确认",
+                f"当前勾选的 {len(already_sent_items)} 位学生此前均已发送成功。\n\n是否确认重新发送这些学生？",
+                parent=self.root,
+                default=messagebox.NO
+            ):
+                self.hint_var.set("已取消重新发送")
+                return
+            target_items = selected_items
+        elif already_sent_items and unsent_items:
+            # 选中的既有已发送，又有未发送 -> 自动断点续发，仅发送未发学生，保护已发学生！
+            target_items = unsent_items
+            prompt_text = (
+                f"3秒后即将继续发送，本次将发送剩余未发学生 {len(unsent_items)} 人"
+                f"（已自动跳过已发 {len(already_sent_items)} 人，共 {total_count} 人），"
+                "发送中按ESC可停止。"
+            )
+            self.start_btn.config(state="disabled")
+            try:
+                confirmed = messagebox.askyesno(
+                    "确认继续发送", prompt_text, parent=self.root,
+                    default=messagebox.YES)
+            except Exception:
+                self.start_btn.config(state="normal")
+                raise
+            if not confirmed:
+                self.start_btn.config(state="normal")
+                self.hint_var.set("已取消发送")
+                return
+        else:
+            target_items = selected_items
+            prompt_text = f"3秒后即将开始发送，本次将发送{len(selected_items)}人，共{total_count}人，发送中按ESC可停止。"
+            self.start_btn.config(state="disabled")
+            try:
+                confirmed = messagebox.askyesno(
+                    "确认发送", prompt_text, parent=self.root,
+                    default=messagebox.YES)
+            except Exception:
+                self.start_btn.config(state="normal")
+                raise
+            if not confirmed:
+                self.start_btn.config(state="normal")
+                self.hint_var.set("已取消发送")
+                return
+
+        target_ids = {id(item) for item in target_items}
+        effective_count = len(target_items)
 
         try:
             token = None
@@ -2411,11 +2475,11 @@ class SenderApp:
                 self._reply_analyzer.token = token
 
             for item in self.items:
-                if id(item) in selected_ids:
+                if id(item) in target_ids:
                     self.set_status(item, "待发送")
                     item["_last_result"] = ""
                     item["_last_reason"] = ""
-                else:
+                elif self._status_of(item) != "已发送":
                     self.set_status(item, "已跳过")
                     item["_last_result"] = "skipped"
                     item["_last_reason"] = "未勾选"
@@ -2426,7 +2490,7 @@ class SenderApp:
             self._close_after_stop = False
             self._start_esc_watcher()
             self._set_running_ui(True)
-            self._update_progress(0, selected_count)
+            self._update_progress(0, effective_count)
             self.result_var.set("正在发送...")
             self.hint_var.set("正在发送...按 Esc 可停止")
             verify_mode = self._current_verify_mode()
@@ -2434,7 +2498,7 @@ class SenderApp:
             # 启动后台工作线程执行实际发送，彻底避免 UI 假死与主线程阻塞
             self._worker_thread = threading.Thread(
                 target=self._run_all_worker,
-                args=(selected_ids, selected_count, token, verify_mode),
+                args=(target_ids, effective_count, token, verify_mode),
                 daemon=True,
                 name="SenderWorkerThread"
             )
@@ -2446,13 +2510,13 @@ class SenderApp:
             self.emit(f"❌ 启动发送异常：{exc}")
             messagebox.showerror("启动失败", f"启动发送时发生异常：{exc}", parent=self.root)
 
-    def _run_all_worker(self, selected_ids, selected_count, token, verify_mode):
+    def _run_all_worker(self, target_ids, effective_count, token, verify_mode):
         processed = 0
         stopped = False
         self.emit("=================== 开始执行发送任务 ===================")
-        self.emit(f"📋 任务概览：待发勾选 {selected_count} 人（名单总计 {len(self.items)} 人）")
+        self.emit(f"📋 任务概览：本次计划发送 {effective_count} 人（名单总计 {len(self.items)} 人）")
         self.emit("🔍 标题核验：Qwen3.8-Max 云端多模态大模型优先，网络异常自动降级本地 OCR")
-        self.emit("🛡️ 安全机制：严格拦截群聊、学号姓名双重比对校验、按 ESC 随时安全停止")
+        self.emit("🛡️ 安全机制：严格拦截群聊、学号姓名双重比对校验、按 ESC 随时安全停止（底层钩子拦截企微防最小化）")
         self.emit("-------------------------------------------------------")
 
         # 3 秒倒计时，给用户准备与按 ESC 取消的机会
@@ -2470,7 +2534,7 @@ class SenderApp:
 
         try:
             for item in self.items:
-                if id(item) not in selected_ids:
+                if id(item) not in target_ids:
                     continue
                 if self._poll_stop():
                     stopped = True
@@ -2479,17 +2543,23 @@ class SenderApp:
                 sid = item.get("sid", "-")
                 msg_len = len(item.get("message", ""))
                 item_key = item.get("_archive_key") or self.archive_key
+
+                # 保护机制：如果当前学生已被判定为已发送，安全跳过
+                if self._status_of(item) == "已发送":
+                    self.emit(f"⏭ [{name}] 该学生已发送成功，安全跳过，防止重复打扰家长")
+                    continue
+
                 if SKIP_SENT and self._history and self._history.is_sent(item_key, name):
                     self.set_status(item, "已跳过（已发送）")
                     item["_last_result"] = "skipped_sent"
                     item["_last_reason"] = "已发送过，自动跳过"
                     processed += 1
-                    self._update_progress(processed, selected_count)
-                    self.emit(f"⏭ [{processed}/{selected_count}] [{name}] 本周历史记录已标记发送，自动跳过")
+                    self._update_progress(processed, effective_count)
+                    self.emit(f"⏭ [{processed}/{effective_count}] [{name}] 本周历史记录已标记发送，自动跳过")
                     continue
                 self.set_status(item, "发送中")
-                self.hint_var.set(f"正在发送：{name} ({processed+1}/{selected_count})")
-                self.emit(f"▶ 正在处理 [{processed+1}/{selected_count}]: {name} (学号: {sid}) | 话术字数: {msg_len} 字")
+                self.hint_var.set(f"正在发送：{name} ({processed+1}/{effective_count})")
+                self.emit(f"▶ 正在处理 [{processed+1}/{effective_count}]: {name} (学号: {sid}) | 话术字数: {msg_len} 字")
                 try:
                     res = send_student(
                         item, self.server, token, parent=self.root,
@@ -2506,7 +2576,7 @@ class SenderApp:
                     "error": "发送失败",
                     "blocked": "已拦截",
                     "unmatched": "未匹配",
-                    "stopped": "已跳过",
+                    "stopped": "待发送",
                 }.get(result)
                 if status is None:
                     status = "发送失败"
@@ -2516,7 +2586,7 @@ class SenderApp:
                     item["_last_failure_reason"] = reason or status
                 self.set_status(item, status)
                 processed += 1
-                self._update_progress(processed, selected_count)
+                self._update_progress(processed, effective_count)
                 for note in res.get("notes", []):
                     dedupe_add(self.reply_notes, note)
                 self.refresh_reply_count()
@@ -2528,19 +2598,26 @@ class SenderApp:
                         self.emit(f"  ⚠️ [{name}] 历史记录写入失败：{exc}")
                 if result == "sent":
                     self.emit(f"  ✅ [{name}] 状态更新：已发送")
+                    # 发送成功后自动取消勾选，防止后续重复发送
+                    var = item.get("_selected_var")
+                    if var is not None:
+                        try:
+                            self.root.after(0, lambda v=var: v.set(False))
+                        except Exception:
+                            var.set(False)
                 elif result == "blocked":
                     self.emit(f"  🛑 [{name}] 状态更新：已拦截（{reason}）")
                 elif result == "unmatched":
                     self.emit(f"  ⚠️ [{name}] 状态更新：未匹配（{reason}）")
                 elif result == "stopped":
-                    self.emit(f"  ⏹ [{name}] 状态更新：已停止（{reason}）")
+                    self.emit(f"  ⏹ [{name}] 状态保持：已暂停（{reason}）")
                 else:
                     self.emit(f"  ❌ [{name}] 状态更新：发送失败（{reason}）")
 
                 if result == "stopped":
                     stopped = True
                     break
-                if processed < selected_count and not self._stop_requested:
+                if processed < effective_count and not self._stop_requested:
                     if processed % BATCH_BREAK_EVERY == 0:
                         break_gap = random.uniform(*BATCH_BREAK_GAP)
                         self.emit(f"  ☕ 已连续处理 {processed} 人，执行防风控停顿 {break_gap:.1f} 秒（按ESC可停止）...")
@@ -2561,23 +2638,24 @@ class SenderApp:
             self._stop_esc_watcher()
             if stopped:
                 for item in self.items:
-                    if (id(item) in selected_ids
+                    if (id(item) in target_ids
                             and self._status_of(item) in ("待发送", "发送中")):
-                        self.set_status(item, "已跳过")
-                        item["_last_result"] = "stopped"
-                        item["_last_reason"] = "用户停止，未发送"
+                        self.set_status(item, "待发送")
+                        item["_last_result"] = "paused"
+                        item["_last_reason"] = "已暂停，可继续发送"
             for item in self.items:
                 if self._status_of(item) == "发送中":
-                    self.set_status(item, "发送失败")
-                    item["_last_result"] = "error"
-                    reason = item.get("_last_reason") or "程序异常中断"
+                    self.set_status(item, "待发送" if stopped else "发送失败")
+                    item["_last_result"] = "paused" if stopped else "error"
+                    reason = "已暂停，可继续发送" if stopped else (item.get("_last_reason") or "程序异常中断")
                     item["_last_reason"] = reason
-                    item["_last_failure_reason"] = reason
-            summary = self._summary_text(stopped, selected_count)
+                    if not stopped:
+                        item["_last_failure_reason"] = reason
+            summary = self._summary_text(stopped, effective_count)
             self.result_var.set(summary)
-            self._update_progress(processed, selected_count, stopped=stopped)
+            self._update_progress(processed, effective_count, stopped=stopped)
             self.hint_var.set(
-                "已停止，未发送学生已标记为“已跳过”。" if stopped else "本批处理结束")
+                "已暂停发送，点击“继续发送”可随时断点续发剩余学员。" if stopped else "本批处理结束")
 
             if not self._close_after_stop:
                 try:
@@ -2597,7 +2675,7 @@ class SenderApp:
 
             # 调度回主线程更新 UI、恢复按键状态并弹出提示
             try:
-                self.root.after(0, self._on_worker_finished, stopped, selected_count, counts, summary)
+                self.root.after(0, self._on_worker_finished, stopped, effective_count, counts, summary)
             except Exception:
                 pass
 

@@ -200,6 +200,28 @@ class TestWebEdition(unittest.TestCase):
         ret = run_smoke_test()
         self.assertEqual(ret, 0)
 
+    def test_web_controller_breakpoint_resume(self):
+        ctrl = WebController()
+        ctrl.items = [
+            {"_id": "id1", "sid": "101", "studentName": "学生甲", "_status": "已发送", "_selected": True},
+            {"_id": "id2", "sid": "102", "studentName": "学生乙", "_status": "待发送", "_selected": True},
+        ]
+        with unittest.mock.patch("threading.Thread") as mock_thread:
+            res = ctrl.start_send()
+            self.assertTrue(res["success"])
+            self.assertEqual(res["selected_count"], 1)
+            called_args = mock_thread.call_args[1]["args"]
+            effective_ids = called_args[0]
+            self.assertIn("id2", effective_ids)
+            self.assertNotIn("id1", effective_ids)
+            self.assertEqual(ctrl.items[0]["_status"], "已发送")
+
+        # 测试中断后恢复断点
+        ctrl._finish_run(stopped=True, selected_ids={"id2"})
+        self.assertEqual(ctrl.items[1]["_status"], "待发送")
+        self.assertEqual(ctrl.items[1]["_last_reason"], "已暂停，可继续发送")
+        self.assertTrue(ctrl.items[1]["_selected"])
+
 
 if __name__ == "__main__":
     unittest.main()

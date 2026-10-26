@@ -452,7 +452,7 @@
     <div class="brand">
       <div class="logo-badge">极</div>
       <div class="brand-title">极方每周反馈程序</div>
-      <div class="brand-badge">Web版 v1.8.1</div>
+      <div class="brand-badge">Web版 v1.8.2</div>
     </div>
     <div class="nav-actions">
       <button class="btn btn-sm" onclick="copyAllStudentInfo()">📋 复制学号姓名</button>
@@ -1048,6 +1048,14 @@
         progressFill.style.width = "0%";
         percentLabel.innerText = "";
 
+        const hasSent = (appState.students || []).some(s => s.status === "已发送");
+        const hasUnsentSelected = (appState.students || []).some(s => s.selected && s.status !== "已发送");
+        if (hasSent && hasUnsentSelected) {
+          startBtn.innerHTML = "▶ 继续发送";
+        } else {
+          startBtn.innerHTML = "🚀 开始发送";
+        }
+
         startBtn.disabled = !appState.students || appState.students.length === 0;
         calibBtn.disabled = false;
         stopBtn.disabled = true;
@@ -1215,13 +1223,29 @@
     // 发送与停止控制
     function confirmStartSend() {
       const sum = appState.summary || {};
-      const selected = sum.selected || 0;
-      const total = sum.total || 0;
-      if (selected <= 0) {
+      const students = appState.students || [];
+      const selectedStudents = students.filter(s => s.selected);
+      const unsentSelected = selectedStudents.filter(s => s.status !== "已发送");
+      const alreadySentSelected = selectedStudents.filter(s => s.status === "已发送");
+      const total = sum.total || students.length;
+
+      if (selectedStudents.length === 0) {
         alert("请先勾选需要发送的学员！");
         return;
       }
-      const promptMsg = `3秒后即将开始发送，本次将发送${selected}人，共${total}人，发送中按ESC可停止。是否继续？`;
+
+      let promptMsg = "";
+      if (alreadySentSelected.length > 0 && unsentSelected.length > 0) {
+        promptMsg = `3秒后即将继续发送，本次将发送剩余未发学生 ${unsentSelected.length} 人（已自动跳过已发 ${alreadySentSelected.length} 人，共 ${total} 人），发送中按ESC可停止。是否继续？`;
+      } else if (alreadySentSelected.length > 0 && unsentSelected.length === 0) {
+        if (!confirm(`勾选的 ${alreadySentSelected.length} 位学生此前均已发送成功。\n\n是否确认重新发送这些学生？`)) {
+          return;
+        }
+        doStartSend();
+        return;
+      } else {
+        promptMsg = `3秒后即将开始发送，本次将发送${selectedStudents.length}人，共${total}人，发送中按ESC可停止。是否继续？`;
+      }
       if (!confirm(promptMsg)) return;
 
       doStartSend();
