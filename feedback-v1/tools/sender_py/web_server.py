@@ -38,7 +38,7 @@ def get_web_ui_html_path() -> str:
 class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
     """处理 WebUI 静态资源与 REST API 请求。"""
 
-    server_version = "JiFangFeedbackWeb/1.8.4"
+    server_version = "JiFangFeedbackWeb/1.8.5"
 
     def log_message(self, format, *args):
         # 静默常规 HTTP 请求，避免终端滚屏刷屏
@@ -117,7 +117,33 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/api/reply_notes":
-            self._send_json({"notes": self.controller.reply_notes})
+            try:
+                from sender_py.reply_notes import actionable
+                from sender_py.utils import parse_student_identifier
+            except ModuleNotFoundError:
+                from reply_notes import actionable
+                from utils import parse_student_identifier
+            notes = actionable(self.controller.reply_notes)
+            result = []
+            seen = set()
+            for n in notes:
+                raw = n.get("student", "")
+                sid, sname = parse_student_identifier(raw)
+                key = (sid, sname)
+                if key in seen:
+                    continue
+                seen.add(key)
+                result.append({
+                    "sid": sid or "-",
+                    "sname": sname or raw,
+                    "student": raw,
+                    "chat_title": n.get("chat_title", ""),
+                    "last_message": n.get("last_message", ""),
+                    "parent_reply": n.get("last_message", ""),
+                    "verdict": n.get("verdict", "需回"),
+                    "time": n.get("time", ""),
+                })
+            self._send_json({"notes": result})
             return
 
         if path == "/api/sent_files":
@@ -183,6 +209,32 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
 
         self._send_json({"error": "Not Found"}, 404)
 
+    def _choose_native_files(self):
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            try:
+                root.attributes("-topmost", True)
+            except Exception:
+                pass
+            paths = filedialog.askopenfilenames(
+                parent=root,
+                title="选择反馈文件（可按 Ctrl+A 全选所有文件）",
+                filetypes=[
+                    ("反馈文件（JSON / HTML）", "*.json *.html *.htm"),
+                    ("JSON 文件", "*.json"),
+                    ("HTML 快照", "*.html *.htm"),
+                    ("所有文件", "*.*"),
+                ],
+            )
+            root.destroy()
+            if paths:
+                self.controller.add_input_files(list(paths), replace=False)
+        except Exception as exc:
+            self.controller.emit(f"⚠️ 打开本地文件选择器失败：{exc}")
+
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
@@ -234,6 +286,12 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
             replace = bool(body.get("replace", False))
             res = self.controller.add_input_files(paths, replace=replace)
             self._send_json(res)
+            return
+
+        # 2.5 弹出原生 Windows 文件选择器（支持 Ctrl+A 全选多文件）
+        if path == "/api/files/choose_native":
+            threading.Thread(target=self._choose_native_files, daemon=True).start()
+            self._send_json({"success": True})
             return
 
         # 3. 移除指定文件

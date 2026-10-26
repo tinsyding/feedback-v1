@@ -222,6 +222,47 @@ class TestWebEdition(unittest.TestCase):
         self.assertEqual(ctrl.items[1]["_last_reason"], "已暂停，可继续发送")
         self.assertTrue(ctrl.items[1]["_selected"])
 
+    def test_save_uploaded_file_preserves_filename(self):
+        ctrl = WebController()
+        with tempfile.TemporaryDirectory() as td:
+            with unittest.mock.patch.object(ctrl, "get_upload_dir", return_value=td):
+                p1 = ctrl.save_uploaded_file("一班反馈.json", b"content1")
+                self.assertEqual(os.path.basename(p1), "一班反馈.json")
+                # 再次上传同名文件，不追加时间戳数字
+                p2 = ctrl.save_uploaded_file("一班反馈.json", b"content2")
+                self.assertEqual(os.path.basename(p2), "一班反馈.json")
+                self.assertEqual(p1, p2)
+
+    def test_reply_notes_actionable_only(self):
+        ctrl = WebController()
+        # 1. 明确无需回 (needs_reply=False) -> 不应出现在待回名单
+        ctrl.reply_notes.append({
+            "student": "90001张三",
+            "chat_title": "90001张三",
+            "last_message": "收到谢谢",
+            "needs_reply": False,
+            "verdict": "无需回",
+        })
+        # 2. 需回 (needs_reply=True) -> 应该出现
+        ctrl.reply_notes.append({
+            "student": "90002李四",
+            "chat_title": "90002李四",
+            "last_message": "老师下周几上课？",
+            "needs_reply": True,
+            "verdict": "需回",
+        })
+        # 3. 异常待确认 (needs_reply=None) -> 应该出现
+        ctrl.reply_notes.append({
+            "student": "90003王五",
+            "chat_title": "90003王五",
+            "last_message": "请问这个怎么做",
+            "needs_reply": None,
+            "verdict": "待人工确认",
+        })
+
+        state = ctrl.get_state()
+        self.assertEqual(state["reply_notes_count"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

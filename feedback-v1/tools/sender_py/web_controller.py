@@ -16,7 +16,7 @@ try:
         AFTER_SEND_GAP, BATCH_BREAK_EVERY, BATCH_BREAK_GAP,
         CANDIDATE_GAP, SEARCH_GAP, STUDENT_GAP, pause
     )
-    from sender_py.reply_notes import dedupe_add
+    from sender_py.reply_notes import actionable, dedupe_add
     from sender_py.roi_manager import default_config_path, save_roi, signature_key, validate_rel
     from sender_py.sender import (
         AsyncReplyAnalyzer, archive_key_for_input, load_feedback_inputs,
@@ -30,7 +30,7 @@ except ModuleNotFoundError:
         AFTER_SEND_GAP, BATCH_BREAK_EVERY, BATCH_BREAK_GAP,
         CANDIDATE_GAP, SEARCH_GAP, STUDENT_GAP, pause
     )
-    from reply_notes import dedupe_add
+    from reply_notes import actionable, dedupe_add
     from roi_manager import default_config_path, save_roi, signature_key, validate_rel
     from sender import (
         AsyncReplyAnalyzer, archive_key_for_input, load_feedback_inputs,
@@ -206,17 +206,10 @@ class WebController:
         return {"success": True, "count": len(items), "files": len(target_paths)}
 
     def save_uploaded_file(self, filename: str, content: bytes) -> str:
-        """保存上传的二进制文件到本地缓存目录。"""
+        """保存上传的二进制文件到本地缓存目录，保持原始文件名不变。"""
         upload_dir = self.get_upload_dir()
         base_name = os.path.basename(filename)
         save_path = os.path.join(upload_dir, base_name)
-
-        # 避免重名覆盖
-        if os.path.exists(save_path):
-            stem, ext = os.path.splitext(base_name)
-            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            save_path = os.path.join(upload_dir, f"{stem}_{ts}{ext}")
-
         with open(save_path, "wb") as f:
             f.write(content)
         return save_path
@@ -387,7 +380,15 @@ class WebController:
             if kind == "note":
                 note = event[1]
                 dedupe_add(self.reply_notes, note)
-                self.emit(f"📨 检测到家长留言 [{note.get('sname')}]: {note.get('parent_reply', '')[:30]}")
+                student = note.get("student", "")
+                verdict_str = note.get("verdict", "")
+                last_msg = note.get("last_message", "")
+                if note.get("needs_reply") is True:
+                    self.emit(f"🔔 [{student}] 后台留言分析：{verdict_str}（最后消息：{last_msg or '无'}）")
+                elif note.get("needs_reply") is None:
+                    self.emit(f"⚠️ [{student}] 后台留言分析：{verdict_str}（{last_msg or '无'}）")
+                else:
+                    self.emit(f"✓ [{student}] 后台留言分析：无需回复")
 
     def _run_worker(self, selected_ids: set, selected_count: int, total_count: int):
         """发送工作者主线程。"""
@@ -682,7 +683,7 @@ class WebController:
                 "files": files_list,
                 "duplicate_count": self.duplicate_count,
                 "students": students_list,
-                "reply_notes_count": len(self.reply_notes),
+                "reply_notes_count": len(actionable(self.reply_notes)),
                 "logs_count": len(self.logs),
             }
 
