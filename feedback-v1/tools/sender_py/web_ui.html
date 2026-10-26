@@ -243,7 +243,15 @@
       vertical-align: middle;
     }
     tbody tr:hover { background: var(--row-hover); }
+    tbody tr.selected-row { background: #f8faff; }
+    tbody tr.selected-row:hover { background: #eff6ff; }
     .col-check { width: 44px; text-align: center; }
+    .col-check input[type="checkbox"], th.col-check input[type="checkbox"] {
+      cursor: pointer;
+      width: 16px;
+      height: 16px;
+      accent-color: var(--primary);
+    }
     .col-sid { width: 90px; font-family: monospace; font-weight: 600; color: #3b82f6; }
     .col-name { width: 110px; font-weight: 600; color: #1e293b; }
     .col-status { width: 105px; }
@@ -444,7 +452,7 @@
     <div class="brand">
       <div class="logo-badge">极</div>
       <div class="brand-title">极方每周反馈程序</div>
-      <div class="brand-badge">Web版 v1.8.0</div>
+      <div class="brand-badge">Web版 v1.8.1</div>
     </div>
     <div class="nav-actions">
       <button class="btn btn-sm" onclick="copyAllStudentInfo()">📋 复制学号姓名</button>
@@ -463,12 +471,12 @@
         <span class="summary-text" id="filePoolSummary">尚未选择文件（0 个文件 · 0 人）</span>
         <div style="display:flex; gap:8px;">
           <input type="file" id="filePicker" multiple accept=".json,.html,.htm" style="display:none" onchange="handleFileSelect(event)">
-          <button class="btn btn-primary btn-sm" onclick="document.getElementById('filePicker').click()">➕ 添加文件</button>
+          <button class="btn btn-primary btn-sm" id="addFilesBtn" onclick="document.getElementById('filePicker').click()">➕ 添加文件</button>
           <button class="btn btn-sm" id="clearFilesBtn" onclick="clearAllFiles()" disabled>🗑️ 清空</button>
         </div>
       </div>
       <div class="drop-zone" id="dropZone" onclick="document.getElementById('filePicker').click()">
-        <span style="font-size:13px; color:#64748b;">💡 支持同时多选或直接将 JSON / HTML 反馈文件拖拽到此处追加载入</span>
+        <span style="font-size:13px; color:#64748b;">💡 支持同时多选文件，或再次点击按钮继续追加，也支持直接将 JSON / HTML 反馈文件拖拽到此处</span>
       </div>
       <div class="file-chips" id="fileChipsContainer" style="display:none;"></div>
     </section>
@@ -489,6 +497,7 @@
         </select>
         <button class="btn btn-sm" onclick="setSelectAction('all')">☑ 全选</button>
         <button class="btn btn-sm" onclick="setSelectAction('none')">☐ 全不选</button>
+        <button class="btn btn-sm" onclick="setSelectAction('invert')">🔲 反选</button>
         <button class="btn btn-sm" onclick="retryFailedStudents()">🔄 重发失败</button>
         <button class="btn btn-sm" onclick="copyFailedList()">📋 复制失败名单</button>
       </div>
@@ -586,8 +595,8 @@
             <tr>
               <th style="width:160px;">发送时间</th>
               <th>文件名称</th>
-              <th style="width:90px;">已发人数</th>
-              <th style="width:120px;">操作</th>
+              <th style="width:110px;">已发人数</th>
+              <th style="width:230px;">操作</th>
             </tr>
           </thead>
           <tbody id="sentFilesTableBody">
@@ -595,7 +604,8 @@
           </tbody>
         </table>
       </div>
-      <div class="modal-footer">
+      <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+        <button class="btn btn-sm" onclick="openSentFilesFolder()">📂 打开本地保存目录</button>
         <button class="btn" onclick="closeModal('sentFilesModal')">关闭</button>
       </div>
     </div>
@@ -819,6 +829,11 @@
       const poolSummary = document.getElementById("filePoolSummary");
       const chips = document.getElementById("fileChipsContainer");
       const clearBtn = document.getElementById("clearFilesBtn");
+      const addBtn = document.getElementById("addFilesBtn");
+      if (addBtn) {
+        addBtn.disabled = appState.running;
+        addBtn.innerText = (appState.files && appState.files.length > 0) ? "➕ 继续添加文件" : "➕ 添加文件";
+      }
 
       if (!appState.files || appState.files.length === 0) {
         poolSummary.innerText = "尚未选择文件（0 个文件 · 0 人）";
@@ -860,12 +875,27 @@
       renderBottomBar();
     }
 
-    // 表格筛选与渲染
-    function renderTable() {
+    let lastCheckedIndex = null;
+    let _lastTableSignature = "";
+
+    function getFilteredStudents() {
+      if (!appState.students) return [];
       const q = (document.getElementById("searchInput").value || "").trim().toLowerCase();
       const statusFilter = document.getElementById("statusFilter").value;
-      const tbody = document.getElementById("studentTableBody");
+      return appState.students.filter(st => {
+        if (statusFilter !== "全部" && st.status !== statusFilter) return false;
+        if (q) {
+          const matchName = (st.sname || "").toLowerCase().includes(q) || (st.studentName || "").toLowerCase().includes(q);
+          const matchSid = (st.sid || "").toLowerCase().includes(q);
+          if (!matchName && !matchSid) return false;
+        }
+        return true;
+      });
+    }
 
+    // 表格筛选与渲染
+    function renderTable() {
+      const tbody = document.getElementById("studentTableBody");
       if (!appState.students || appState.students.length === 0) {
         tbody.innerHTML = `
           <tr>
@@ -877,19 +907,13 @@
             </td>
           </tr>
         `;
-        document.getElementById("toolbarSummary").innerText = "共 0 人";
+        _lastTableSignature = "";
+        updateSummaryAndMaster([]);
         return;
       }
 
-      const filtered = appState.students.filter(st => {
-        if (statusFilter !== "全部" && st.status !== statusFilter) return false;
-        if (q) {
-          const matchName = (st.sname || "").toLowerCase().includes(q) || (st.studentName || "").toLowerCase().includes(q);
-          const matchSid = (st.sid || "").toLowerCase().includes(q);
-          if (!matchName && !matchSid) return false;
-        }
-        return true;
-      });
+      const filtered = getFilteredStudents();
+      const currentSignature = filtered.map(st => st.id).join(",");
 
       if (filtered.length === 0) {
         tbody.innerHTML = `
@@ -902,17 +926,21 @@
             </td>
           </tr>
         `;
-      } else {
-        tbody.innerHTML = filtered.map(st => {
+        _lastTableSignature = "";
+      } else if (_lastTableSignature !== currentSignature) {
+        // 结构发生变化时才全量重绘 DOM
+        _lastTableSignature = currentSignature;
+        tbody.innerHTML = filtered.map((st, idx) => {
           const badgeClass = getBadgeClass(st.status);
+          const isChecked = !!st.selected;
           return `
-            <tr>
+            <tr id="row_${st.id}" class="${isChecked ? 'selected-row' : ''}" style="cursor:pointer;" onclick="handleRowClick(event, '${st.id}', ${idx})">
               <td class="col-check">
-                <input type="checkbox" ${st.selected ? 'checked' : ''} ${appState.running ? 'disabled' : ''} onchange="toggleStudentCheck('${st.id}')">
+                <input type="checkbox" id="cb_${st.id}" ${isChecked ? 'checked' : ''} ${appState.running ? 'disabled' : ''} onclick="handleCheckboxClick(event, '${st.id}', ${idx})">
               </td>
               <td class="col-sid">${st.sid || '-'}</td>
               <td class="col-name">${st.sname || st.studentName || '-'}</td>
-              <td class="col-status"><span class="badge ${badgeClass}">${st.status}</span></td>
+              <td class="col-status"><span id="badge_${st.id}" class="badge ${badgeClass}">${st.status}</span></td>
               <td class="col-msg">
                 <div class="msg-preview" title="点击查看全文" onclick="openMsgPreviewModal('${escapeJs(st.studentName)}', '${escapeJs(st.message)}')">${st.message || ''}</div>
               </td>
@@ -924,11 +952,64 @@
             </tr>
           `;
         }).join("");
+      } else {
+        // 结构一致时仅就地更新复选框与状态角标，避免销毁正在交互的 DOM 节点
+        filtered.forEach(st => {
+          const cb = document.getElementById("cb_" + st.id);
+          if (cb) {
+            cb.disabled = !!appState.running;
+            if (cb !== document.activeElement) {
+              cb.checked = !!st.selected;
+            }
+          }
+          const row = document.getElementById("row_" + st.id);
+          if (row) {
+            if (st.selected) {
+              row.classList.add("selected-row");
+            } else {
+              row.classList.remove("selected-row");
+            }
+          }
+          const badge = document.getElementById("badge_" + st.id);
+          if (badge) {
+            const cls = "badge " + getBadgeClass(st.status);
+            if (badge.className !== cls) badge.className = cls;
+            if (badge.innerText !== st.status) badge.innerText = st.status;
+          }
+        });
       }
 
+      updateSummaryAndMaster(filtered);
+    }
+
+    function updateSummaryAndMaster(filtered) {
+      if (!filtered) filtered = getFilteredStudents();
+      const master = document.getElementById("masterCheckbox");
+      if (master) {
+        master.disabled = !!appState.running || filtered.length === 0;
+        if (filtered.length === 0) {
+          master.checked = false;
+          master.indeterminate = false;
+        } else {
+          const checkedCount = filtered.filter(st => st.selected).length;
+          if (checkedCount === filtered.length) {
+            master.checked = true;
+            master.indeterminate = false;
+          } else if (checkedCount > 0) {
+            master.checked = false;
+            master.indeterminate = true;
+          } else {
+            master.checked = false;
+            master.indeterminate = false;
+          }
+        }
+      }
+
+      const totalStudents = appState.students ? appState.students.length : 0;
+      const selectedTotal = appState.students ? appState.students.filter(s => s.selected).length : 0;
       const sum = appState.summary || {};
       document.getElementById("toolbarSummary").innerText =
-        `共 ${sum.total || 0} 人 · 勾选 ${sum.selected || 0} 人 (成功: ${sum.sent || 0}, 失败: ${sum.failed || 0}, 未匹配: ${sum.unmatched || 0}, 拦截: ${sum.blocked || 0})`;
+        `共 ${totalStudents} 人 · 勾选 ${selectedTotal} 人 (成功: ${sum.sent || 0}, 失败: ${sum.failed || 0}, 未匹配: ${sum.unmatched || 0}, 拦截: ${sum.blocked || 0})`;
     }
 
     function getBadgeClass(status) {
@@ -973,31 +1054,143 @@
       }
     }
 
-    // 勾选操作
+    // 勾选操作 (含 Shift+Click 区域多选 与 行点击)
+    function handleCheckboxClick(event, id, index) {
+      event.stopPropagation();
+      if (appState.running) return;
+
+      const targetChecked = event.target.checked;
+      const filtered = getFilteredStudents();
+
+      if (event.shiftKey && lastCheckedIndex !== null && lastCheckedIndex !== index) {
+        // Shift+Click 区域连续多选
+        const start = Math.min(lastCheckedIndex, index);
+        const end = Math.max(lastCheckedIndex, index);
+        const rangeIds = [];
+
+        for (let i = start; i <= end; i++) {
+          const s = filtered[i];
+          if (s) {
+            s.selected = targetChecked;
+            rangeIds.push(s.id);
+            const cb = document.getElementById("cb_" + s.id);
+            if (cb) cb.checked = targetChecked;
+            const row = document.getElementById("row_" + s.id);
+            if (row) {
+              if (targetChecked) row.classList.add("selected-row");
+              else row.classList.remove("selected-row");
+            }
+          }
+        }
+
+        const idSet = new Set(rangeIds);
+        appState.students.forEach(s => {
+          if (idSet.has(s.id)) s.selected = targetChecked;
+        });
+
+        updateSummaryAndMaster(filtered);
+        sendSelectionUpdate(targetChecked ? "select_ids" : "deselect_ids", rangeIds);
+      } else {
+        // 单项点击
+        lastCheckedIndex = index;
+        const s = appState.students.find(it => it.id === id);
+        if (s) s.selected = targetChecked;
+        if (filtered[index]) filtered[index].selected = targetChecked;
+
+        const row = document.getElementById("row_" + id);
+        if (row) {
+          if (targetChecked) row.classList.add("selected-row");
+          else row.classList.remove("selected-row");
+        }
+
+        updateSummaryAndMaster(filtered);
+        sendSelectionUpdate(targetChecked ? "select_ids" : "deselect_ids", [id]);
+      }
+    }
+
+    function handleRowClick(event, id, index) {
+      if (appState.running) return;
+      if (
+        event.target.tagName === 'BUTTON' ||
+        event.target.tagName === 'INPUT' ||
+        event.target.closest('.msg-preview') ||
+        event.target.closest('.col-actions')
+      ) {
+        return;
+      }
+      const cb = document.getElementById("cb_" + id);
+      if (cb && !cb.disabled) {
+        cb.checked = !cb.checked;
+        handleCheckboxClick({
+          shiftKey: event.shiftKey,
+          target: cb,
+          stopPropagation: () => {}
+        }, id, index);
+      }
+    }
+
+    function handleMasterCheck(event) {
+      if (appState.running) return;
+      const targetChecked = event.target.checked;
+      const filtered = getFilteredStudents();
+      const ids = filtered.map(s => s.id);
+
+      filtered.forEach(s => {
+        s.selected = targetChecked;
+        const cb = document.getElementById("cb_" + s.id);
+        if (cb) cb.checked = targetChecked;
+        const row = document.getElementById("row_" + s.id);
+        if (row) {
+          if (targetChecked) row.classList.add("selected-row");
+          else row.classList.remove("selected-row");
+        }
+      });
+
+      const idSet = new Set(ids);
+      appState.students.forEach(s => {
+        if (idSet.has(s.id)) s.selected = targetChecked;
+      });
+
+      updateSummaryAndMaster(filtered);
+
+      if (filtered.length === appState.students.length) {
+        sendSelectionUpdate(targetChecked ? "all" : "none");
+      } else {
+        sendSelectionUpdate(targetChecked ? "select_ids" : "deselect_ids", ids);
+      }
+    }
+
     async function setSelectAction(action) {
+      if (appState.running) return;
       try {
+        if (action === "all") {
+          appState.students.forEach(s => s.selected = true);
+        } else if (action === "none") {
+          appState.students.forEach(s => s.selected = false);
+        } else if (action === "invert") {
+          appState.students.forEach(s => s.selected = !s.selected);
+        } else if (action === "failed") {
+          appState.students.forEach(s => {
+            s.selected = ["发送失败", "未匹配", "已拦截"].includes(s.status);
+          });
+        }
+        renderTable();
         await fetch("/api/students/toggle", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: action })
         });
-        fetchState();
       } catch (err) {}
     }
 
-    async function toggleStudentCheck(id) {
+    async function sendSelectionUpdate(action, ids) {
       try {
         await fetch("/api/students/toggle", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "toggle_specific", ids: [id] })
+          body: JSON.stringify({ action: action, ids: ids })
         });
-        fetchState();
       } catch (err) {}
-    }
-
-    function handleMasterCheck(event) {
-      setSelectAction(event.target.checked ? "all" : "none");
     }
 
     function handleSearchFilter() {
@@ -1209,13 +1402,16 @@
         if (recs.length === 0) {
           tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:#94a3b8; padding:30px;">暂无本地已发文件记录</td></tr>`;
         } else {
-          tbody.innerHTML = recs.map(r => `
+          tbody.innerHTML = recs.map((r, idx) => `
             <tr>
               <td style="color:#64748b; font-size:12px;">${r.sent_time || '-'}</td>
-              <td style="font-weight:600; color:#1e293b;">${r.original_filename || '-'}</td>
-              <td style="font-weight:600; color:#16a34a;">${r.student_count || 0} 人</td>
+              <td style="font-weight:600; color:#1e293b;">${r.file_name || '-'}</td>
+              <td style="font-weight:600; color:#16a34a;">${r.sent_count || 0} / ${r.total_count || 0} 人</td>
               <td>
-                <button class="btn btn-sm" onclick="copyText('${escapeJs(r.html_record || r.json_record || '')}', '✓ 记录路径已复制')">复制路径</button>
+                <div style="display:flex; gap:6px;">
+                  <button class="btn btn-sm btn-primary" onclick="window.open('/api/sent_files/view?index=' + ${idx}, '_blank')">🌐 打开HTML报告</button>
+                  <button class="btn btn-sm" onclick="copyText('${escapeJs(r.html_record || r.file_path || '')}', '✓ 记录路径已复制')">📋 复制路径</button>
+                </div>
               </td>
             </tr>
           `).join("");
@@ -1223,6 +1419,20 @@
         openModal("sentFilesModal");
       } catch (err) {
         alert(`加载已发文件记录失败: ${err}`);
+      }
+    }
+
+    async function openSentFilesFolder() {
+      try {
+        const res = await fetch("/api/sent_files/open_folder", { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
+          showToast("✓ 已在本地系统打开记录目录");
+        } else {
+          showToast("本地记录保存在用户目录 ~/.sender_py/sent_records");
+        }
+      } catch (e) {
+        showToast("打开本地目录失败: " + e);
       }
     }
 

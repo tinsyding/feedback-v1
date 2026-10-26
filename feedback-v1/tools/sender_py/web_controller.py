@@ -239,6 +239,19 @@ class WebController:
                 for it in self.items:
                     st = it.get("_status", "")
                     it["_selected"] = st in ("发送失败", "未匹配", "已拦截")
+            elif action == "invert":
+                for it in self.items:
+                    it["_selected"] = not it.get("_selected", True)
+            elif action == "select_ids" and ids is not None:
+                id_set = set(ids)
+                for it in self.items:
+                    if it["_id"] in id_set:
+                        it["_selected"] = True
+            elif action == "deselect_ids" and ids is not None:
+                id_set = set(ids)
+                for it in self.items:
+                    if it["_id"] in id_set:
+                        it["_selected"] = False
             elif action == "toggle_specific" and ids is not None:
                 id_set = set(ids)
                 for it in self.items:

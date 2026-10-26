@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.8.0"
+APP_VERSION = "1.8.1"
 
 
 def asset_path(filename: str) -> str:
@@ -1438,6 +1438,8 @@ class SenderApp:
 
     def request_stop(self, event=None):
         if not self._running:
+            self._set_running_ui(False)
+            self.start_btn.config(state="normal")
             return None
         self._stop_requested = True
         self._announce_stop()
@@ -2372,6 +2374,7 @@ class SenderApp:
             self.emit("没有勾选任何学生，请先勾选要发送的学生")
             self.hint_var.set("没有勾选任何学生")
             return
+        selected_ids = {id(item) for item in selected_items}
         total_count = len(self.items)
         prompt_text = f"3秒后即将开始发送，本次将发送{selected_count}人，共{total_count}人，发送中按ESC可停止。"
         self.start_btn.config(state="disabled")
@@ -2387,54 +2390,61 @@ class SenderApp:
             self.hint_var.set("已取消发送")
             return
 
-        token = None
         try:
+            token = None
             try:
-                from sender_py.vision_api import load_token
-            except ModuleNotFoundError:
-                from vision_api import load_token
-            token = load_token() or None
-        except Exception:
-            pass
+                try:
+                    from sender_py.vision_api import load_token
+                except ModuleNotFoundError:
+                    from vision_api import load_token
+                token = load_token() or None
+            except Exception:
+                pass
 
-        if self._reply_analyzer is None:
-            self._reply_analyzer = AsyncReplyAnalyzer(
-                server=self.server, token=token, max_workers=3,
-                event_queue=self._reply_event_queue
-            )
-        else:
-            self._reply_analyzer.server = self.server
-            self._reply_analyzer.token = token
-
-        for item in self.items:
-            if id(item) in selected_ids:
-                self.set_status(item, "待发送")
-                item["_last_result"] = ""
-                item["_last_reason"] = ""
+            if self._reply_analyzer is None:
+                self._reply_analyzer = AsyncReplyAnalyzer(
+                    server=self.server, token=token, max_workers=3,
+                    event_queue=self._reply_event_queue
+                )
             else:
-                self.set_status(item, "已跳过")
-                item["_last_result"] = "skipped"
-                item["_last_reason"] = "未勾选"
+                self._reply_analyzer.server = self.server
+                self._reply_analyzer.token = token
 
-        self._running = True
-        self._stop_requested = False
-        self._stop_announced = False
-        self._close_after_stop = False
-        self._start_esc_watcher()
-        self._set_running_ui(True)
-        self._update_progress(0, selected_count)
-        self.result_var.set("正在发送...")
-        self.hint_var.set("正在发送...按 Esc 可停止")
-        verify_mode = self._current_verify_mode()
+            for item in self.items:
+                if id(item) in selected_ids:
+                    self.set_status(item, "待发送")
+                    item["_last_result"] = ""
+                    item["_last_reason"] = ""
+                else:
+                    self.set_status(item, "已跳过")
+                    item["_last_result"] = "skipped"
+                    item["_last_reason"] = "未勾选"
 
-        # 启动后台工作线程执行实际发送，彻底避免 UI 假死与主线程阻塞
-        self._worker_thread = threading.Thread(
-            target=self._run_all_worker,
-            args=(selected_ids, selected_count, token, verify_mode),
-            daemon=True,
-            name="SenderWorkerThread"
-        )
-        self._worker_thread.start()
+            self._running = True
+            self._stop_requested = False
+            self._stop_announced = False
+            self._close_after_stop = False
+            self._start_esc_watcher()
+            self._set_running_ui(True)
+            self._update_progress(0, selected_count)
+            self.result_var.set("正在发送...")
+            self.hint_var.set("正在发送...按 Esc 可停止")
+            verify_mode = self._current_verify_mode()
+
+            # 启动后台工作线程执行实际发送，彻底避免 UI 假死与主线程阻塞
+            self._worker_thread = threading.Thread(
+                target=self._run_all_worker,
+                args=(selected_ids, selected_count, token, verify_mode),
+                daemon=True,
+                name="SenderWorkerThread"
+            )
+            self._worker_thread.start()
+        except Exception as exc:
+            self._running = False
+            self._set_running_ui(False)
+            self.start_btn.config(state="normal")
+            self.emit(f"❌ 启动发送异常：{exc}")
+            messagebox.showerror("启动失败", f"启动发送时发生异常：{exc}", parent=self.root)
 
     def _run_all_worker(self, selected_ids, selected_count, token, verify_mode):
         processed = 0

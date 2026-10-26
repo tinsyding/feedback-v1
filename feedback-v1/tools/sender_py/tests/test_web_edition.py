@@ -8,6 +8,7 @@ import time
 import unittest
 import urllib.request
 
+from sender_py.store import SentFilesManager
 from sender_py.web_controller import WebController
 from sender_py.web_main import find_free_port, run_smoke_test
 from sender_py.web_server import ThreadingFeedbackServer, get_web_ui_html_path
@@ -28,14 +29,15 @@ class TestWebEdition(unittest.TestCase):
         self.assertGreater(port, 1024)
 
     def test_controller_state_and_files(self):
-        ctrl = WebController()
-        state = ctrl.get_state()
-        self.assertFalse(state["running"])
-        self.assertEqual(len(state["students"]), 0)
-        self.assertEqual(len(state["files"]), 0)
-
-        # 创建测试 JSON 文件
         with tempfile.TemporaryDirectory() as td:
+            ctrl = WebController()
+            ctrl.sent_files = SentFilesManager(base_dir=td)
+            state = ctrl.get_state()
+            self.assertFalse(state["running"])
+            self.assertEqual(len(state["students"]), 0)
+            self.assertEqual(len(state["files"]), 0)
+
+            # 创建测试 JSON 文件
             f1 = os.path.join(td, "test_1.json")
             with open(f1, "w", encoding="utf-8") as fp:
                 json.dump([
@@ -62,9 +64,29 @@ class TestWebEdition(unittest.TestCase):
             self.assertEqual(state["summary"]["selected"], 2)
 
             first_id = state["students"][0]["id"]
+            second_id = state["students"][1]["id"]
             ctrl.set_selection("toggle_specific", [first_id])
             state = ctrl.get_state()
             self.assertEqual(state["summary"]["selected"], 1)
+
+            # 测试 select_ids, deselect_ids, invert
+            ctrl.set_selection("deselect_ids", [second_id])
+            state = ctrl.get_state()
+            self.assertEqual(state["summary"]["selected"], 0)
+
+            ctrl.set_selection("select_ids", [first_id, second_id])
+            state = ctrl.get_state()
+            self.assertEqual(state["summary"]["selected"], 2)
+
+            ctrl.set_selection("invert")
+            state = ctrl.get_state()
+            self.assertEqual(state["summary"]["selected"], 0)
+
+            # 测试已发文件管理与 list_records 兼容性
+            entry = ctrl.sent_files.record_sent_file(f1, ctrl.items)
+            self.assertIn("file_name", entry)
+            self.assertEqual(len(ctrl.sent_files.list_records()), 1)
+            self.assertEqual(len(ctrl.sent_files.get_records()), 1)
 
             # 3. 日志与 SSE 队列
             q = ctrl.add_listener()
@@ -80,71 +102,99 @@ class TestWebEdition(unittest.TestCase):
             self.assertEqual(len(ctrl.items), 0)
 
     def test_http_server_endpoints(self):
-        ctrl = WebController()
-        port = find_free_port(19800)
-        server = ThreadingFeedbackServer(("127.0.0.1", port), ctrl)
-        t = threading.Thread(target=server.serve_forever, daemon=True)
-        t.start()
-        time.sleep(0.3)
+        with tempfile.TemporaryDirectory() as td:
+            ctrl = WebController()
+            ctrl.sent_files = SentFilesManager(base_dir=td)
+            port = find_free_port(19800)
+            server = ThreadingFeedbackServer(("127.0.0.1", port), ctrl)
+            t = threading.Thread(target=server.serve_forever, daemon=True)
+            t.start()
+            time.sleep(0.3)
 
-        base_url = f"http://127.0.0.1:{port}"
+            base_url = f"http://127.0.0.1:{port}"
 
-        try:
-            # 1. GET /
-            with urllib.request.urlopen(f"{base_url}/") as resp:
-                self.assertEqual(resp.status, 200)
-                html = resp.read().decode("utf-8")
-                self.assertIn("极方每周反馈程序", html)
+            try:
+                # 1. GET /
+                with urllib.request.urlopen(f"{base_url}/") as resp:
+                    self.assertEqual(resp.status, 200)
+                    html = resp.read().decode("utf-8")
+                    self.assertIn("极方每周反馈程序", html)
 
-            # 2. GET /api/state
-            with urllib.request.urlopen(f"{base_url}/api/state") as resp:
-                self.assertEqual(resp.status, 200)
-                data = json.loads(resp.read().decode("utf-8"))
-                self.assertEqual(data["running"], False)
+                # 2. GET /api/state
+                with urllib.request.urlopen(f"{base_url}/api/state") as resp:
+                    self.assertEqual(resp.status, 200)
+                    data = json.loads(resp.read().decode("utf-8"))
+                    self.assertEqual(data["running"], False)
 
-            # 3. POST /api/upload (JSON 方式)
-            upload_payload = json.dumps({
-                "files": [
-                    {
-                        "name": "mock.json",
-                        "content": json.dumps([
-                            {"sid": "90003", "sname": "王五", "studentName": "90003王五", "message": "评语3"}
-                        ], ensure_ascii=False)
-                    }
-                ]
-            }).encode("utf-8")
-            req = urllib.request.Request(f"{base_url}/api/upload", data=upload_payload, headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req) as resp:
-                self.assertEqual(resp.status, 200)
-                data = json.loads(resp.read().decode("utf-8"))
-                self.assertTrue(data["success"])
-                self.assertEqual(data["count"], 1)
+                # 3. POST /api/upload (JSON 方式)
+                upload_payload = json.dumps({
+                    "files": [
+                        {
+                            "name": "mock.json",
+                            "content": json.dumps([
+                                {"sid": "90003", "sname": "王五", "studentName": "90003王五", "message": "评语3"}
+                            ], ensure_ascii=False)
+                        }
+                    ]
+                }).encode("utf-8")
+                req = urllib.request.Request(f"{base_url}/api/upload", data=upload_payload, headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req) as resp:
+                    self.assertEqual(resp.status, 200)
+                    data = json.loads(resp.read().decode("utf-8"))
+                    self.assertTrue(data["success"])
+                    self.assertEqual(data["count"], 1)
 
-            # 4. POST /api/students/toggle
-            toggle_payload = json.dumps({"action": "none"}).encode("utf-8")
-            req = urllib.request.Request(f"{base_url}/api/students/toggle", data=toggle_payload, headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req) as resp:
-                self.assertEqual(resp.status, 200)
+                # 4. POST /api/students/toggle
+                toggle_payload = json.dumps({"action": "none"}).encode("utf-8")
+                req = urllib.request.Request(f"{base_url}/api/students/toggle", data=toggle_payload, headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req) as resp:
+                    self.assertEqual(resp.status, 200)
 
-            # 验证状态
-            with urllib.request.urlopen(f"{base_url}/api/state") as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                self.assertEqual(data["summary"]["selected"], 0)
+                # 验证状态
+                with urllib.request.urlopen(f"{base_url}/api/state") as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    self.assertEqual(data["summary"]["selected"], 0)
 
-            # 5. GET /api/logs
-            with urllib.request.urlopen(f"{base_url}/api/logs?since=0") as resp:
-                self.assertEqual(resp.status, 200)
-                data = json.loads(resp.read().decode("utf-8"))
-                self.assertIsInstance(data.get("logs"), list)
+                # 5. GET /api/logs
+                with urllib.request.urlopen(f"{base_url}/api/logs?since=0") as resp:
+                    self.assertEqual(resp.status, 200)
+                    data = json.loads(resp.read().decode("utf-8"))
+                    self.assertIsInstance(data.get("logs"), list)
 
-            # 6. POST /api/stop
-            req = urllib.request.Request(f"{base_url}/api/stop", data=b"{}", headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req) as resp:
-                self.assertEqual(resp.status, 200)
+                # 6. POST /api/stop
+                req = urllib.request.Request(f"{base_url}/api/stop", data=b"{}", headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req) as resp:
+                    self.assertEqual(resp.status, 200)
 
-        finally:
-            server.shutdown()
-            server.server_close()
+                # 7. GET /api/sent_files 与 /api/sent_files/view
+                # 先记录一个模拟已发文件
+                ctrl.sent_files.record_sent_file("测试已发.json", [
+                    {"sid": "90001", "studentName": "张三", "status": "已发送", "message": "好评"}
+                ])
+                with urllib.request.urlopen(f"{base_url}/api/sent_files") as resp:
+                    self.assertEqual(resp.status, 200)
+                    data = json.loads(resp.read().decode("utf-8"))
+                    self.assertIsInstance(data.get("records"), list)
+                    self.assertEqual(len(data["records"]), 1)
+                    self.assertEqual(data["records"][0]["file_name"], "测试已发.json")
+
+                with urllib.request.urlopen(f"{base_url}/api/sent_files/view?index=0") as resp:
+                    self.assertEqual(resp.status, 200)
+                    html_report = resp.read().decode("utf-8")
+                    self.assertIn("极方反馈发送记录", html_report)
+                    self.assertIn("张三", html_report)
+
+                # 8. POST /api/sent_files/open_folder
+                with unittest.mock.patch("sender_py.store.open_folder_or_file", return_value=True):
+                    req = urllib.request.Request(f"{base_url}/api/sent_files/open_folder", data=b"{}", headers={"Content-Type": "application/json"})
+                    with urllib.request.urlopen(req) as resp:
+                        self.assertEqual(resp.status, 200)
+                        data = json.loads(resp.read().decode("utf-8"))
+                        self.assertEqual(data.get("success"), True)
+
+            finally:
+                server.shutdown()
+                server.server_close()
 
     def test_smoke_test(self):
         ret = run_smoke_test()

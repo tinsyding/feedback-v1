@@ -438,6 +438,63 @@ class TestStage6(unittest.TestCase):
         self.assertEqual(BATCH_BREAK_EVERY, 15)
         self.assertEqual(BATCH_BREAK_GAP, (2.0, 3.0))
 
+    def test_run_all_selected_ids_defined(self):
+        from sender_py.sender import SenderApp
+        import unittest.mock
+        import sys
+
+        class DummyVar:
+            def __init__(self, val=True): self.val = val
+            def get(self): return self.val
+            def set(self, v): self.val = v
+
+        class DummyBtn:
+            def __init__(self): self.state = "normal"
+            def config(self, **kwargs):
+                if "state" in kwargs: self.state = kwargs["state"]
+
+        class DummySender:
+            items = [
+                {"sid": "001", "sname": "张三", "_selected_var": DummyVar(True)},
+                {"sid": "002", "sname": "李四", "_selected_var": DummyVar(False)},
+            ]
+            _running = False
+            start_btn = DummyBtn()
+            hint_var = DummyVar("")
+            result_var = DummyVar("")
+            server = "https://mock"
+            _reply_analyzer = None
+            _reply_event_queue = None
+            root = None
+            def emit(self, msg): pass
+            def _start_esc_watcher(self): pass
+            def _set_running_ui(self, v): pass
+            def _update_progress(self, *a, **k): pass
+            def _current_verify_mode(self): return "hybrid"
+            def _run_all_worker(self, *a, **k): pass
+            def set_status(self, item, st): item["_status"] = st
+
+        inst = DummySender()
+        mock_tk = unittest.mock.MagicMock()
+        mock_mb = unittest.mock.MagicMock()
+        mock_tk.messagebox = mock_mb
+        with unittest.mock.patch.dict(sys.modules, {"tkinter": mock_tk, "tkinter.messagebox": mock_mb}):
+            mock_mb.askyesno.return_value = False
+            SenderApp.run_all(inst)
+            self.assertEqual(inst.start_btn.state, "normal")
+
+            mock_mb.askyesno.return_value = True
+            with unittest.mock.patch("threading.Thread") as mock_thread:
+                SenderApp.run_all(inst)
+                self.assertTrue(inst._running)
+                mock_thread.assert_called_once()
+                called_args = mock_thread.call_args[1]["args"]
+                selected_ids = called_args[0]
+                selected_count = called_args[1]
+                self.assertEqual(selected_count, 1)
+                self.assertIn(id(inst.items[0]), selected_ids)
+                self.assertNotIn(id(inst.items[1]), selected_ids)
+
 
 if __name__ == "__main__":
     unittest.main()

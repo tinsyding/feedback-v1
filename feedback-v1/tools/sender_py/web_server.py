@@ -38,7 +38,7 @@ def get_web_ui_html_path() -> str:
 class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
     """处理 WebUI 静态资源与 REST API 请求。"""
 
-    server_version = "JiFangFeedbackWeb/1.8.0"
+    server_version = "JiFangFeedbackWeb/1.8.1"
 
     def log_message(self, format, *args):
         # 静默常规 HTTP 请求，避免终端滚屏刷屏
@@ -122,10 +122,31 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
 
         if path == "/api/sent_files":
             try:
-                records = self.controller.sent_files.list_records()
+                records = self.controller.sent_files.get_records()
             except Exception:
                 records = []
             self._send_json({"records": records})
+            return
+
+        if path == "/api/sent_files/view":
+            try:
+                idx = int(query.get("index", [-1])[0])
+                records = self.controller.sent_files.get_records()
+                if 0 <= idx < len(records):
+                    html_path = records[idx].get("html_record", "")
+                    if html_path and os.path.isfile(html_path):
+                        with open(html_path, "rb") as f:
+                            content = f.read()
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/html; charset=utf-8")
+                        self.send_header("Content-Length", str(len(content)))
+                        self.send_header("Cache-Control", "no-cache")
+                        self.end_headers()
+                        self.wfile.write(content)
+                        return
+            except Exception:
+                pass
+            self.send_error(404, "Sent file report not found")
             return
 
         # 3. Server-Sent Events (SSE 实时事件推送)
@@ -255,7 +276,20 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({"success": True, "message": "已在后台启动视野校准"})
             return
 
-        # 9. 退出后台程序
+        # 9. 打开已发文件记录目录
+        if path == "/api/sent_files/open_folder":
+            try:
+                try:
+                    from sender_py.store import open_folder_or_file
+                except ModuleNotFoundError:
+                    from store import open_folder_or_file
+                ok = open_folder_or_file(self.controller.sent_files.records_dir)
+            except Exception:
+                ok = False
+            self._send_json({"success": ok})
+            return
+
+        # 10. 退出后台程序
         if path == "/api/shutdown":
             self._send_json({"success": True, "message": "服务正在退出..."})
             def _exit_later():

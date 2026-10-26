@@ -34,6 +34,9 @@ def open_directory(dir_path: str) -> bool:
         return False
 
 
+open_folder_or_file = open_directory
+
+
 class SentFilesManager:
     """管理已经发送过的 JSON / HTML 文件记录，保存在本地。"""
     def __init__(self, base_dir: str = None):
@@ -62,6 +65,8 @@ class SentFilesManager:
 
     def get_records(self) -> list:
         return list(self._records)
+
+    list_records = get_records
 
     def is_file_sent(self, file_path_or_name: str) -> bool:
         """检查某个文件是否在本地有发送成功的记录。"""
