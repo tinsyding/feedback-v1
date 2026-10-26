@@ -1,5 +1,7 @@
 """窗口查找（Windows 专属，win32gui/ctypes 只在函数内导入，Linux 导入本模块不报错）。"""
 
+import time
+
 
 def set_per_monitor_dpi_awareness():
     """启动时设置 Per-Monitor DPI 感知，三段兜底（与旧版一致）；非 Windows 返回 False。
@@ -30,7 +32,7 @@ def set_per_monitor_dpi_awareness():
 
 
 def get_wecom_hwnd():
-    """标题含企业微信/WeCom（兼容 WeCom），过滤 Wedoc，面积>300x300。无则返回 None。"""
+    """标题含企业微信/WeCom（兼容 WeCom），过滤 Wedoc/全局搜索，面积>300x300。无则返回 None。"""
     try:
         import win32gui
     except Exception:
@@ -43,7 +45,7 @@ def get_wecom_hwnd():
                 return True
             cls = win32gui.GetClassName(hwnd)
             title = win32gui.GetWindowText(hwnd)
-            if ("WeWorkWindow" in cls or "企业微信" in title or "WeCom" in title or "WXWork" in cls) and "Wedoc" not in cls:
+            if ("WeWorkWindow" in cls or "企业微信" in title or "WeCom" in title or "WXWork" in cls) and "Wedoc" not in cls and "SearchTab" not in cls and "全局搜索" not in title:
                 r = win32gui.GetWindowRect(hwnd)
                 if r[2] - r[0] > 300 and r[3] - r[1] > 300:
                     found.append(hwnd)
@@ -56,6 +58,88 @@ def get_wecom_hwnd():
     except Exception:
         return None
     return found[0] if found else None
+
+
+def find_wecom_search_tab_wnd():
+    """查找企业微信“全局搜索”独立弹窗 (SearchTabWnd2)。
+
+    当搜索联系人无本地匹配时，企业微信会弹出此独立窗口（顶级窗口无宿主，类名 SearchTabWnd2，标题 全局搜索）。
+    若存在返回窗口句柄 (hwnd)，否则返回 None。非 Windows 或找不到返回 None。
+    """
+    try:
+        import win32gui
+    except Exception:
+        return None
+
+    # 1. 优先检查当前前台窗口
+    try:
+        fg = win32gui.GetForegroundWindow()
+        if fg and win32gui.IsWindow(fg) and win32gui.IsWindowVisible(fg):
+            cls = win32gui.GetClassName(fg)
+            title = win32gui.GetWindowText(fg)
+            if "SearchTab" in cls or "全局搜索" in title:
+                return fg
+    except Exception:
+        pass
+
+    # 2. 枚举所有顶层可见窗口
+    found = []
+
+    def _cb(hwnd, _):
+        try:
+            if not win32gui.IsWindow(hwnd) or not win32gui.IsWindowVisible(hwnd):
+                return True
+            cls = win32gui.GetClassName(hwnd)
+            title = win32gui.GetWindowText(hwnd)
+            if "SearchTab" in cls or ("全局搜索" in title and ("Search" in cls or "Wnd" in cls or "WeWork" in cls or not cls)):
+                found.append(hwnd)
+        except Exception:
+            pass
+        return True
+
+    try:
+        win32gui.EnumWindows(_cb, None)
+    except Exception:
+        return None
+
+    return found[0] if found else None
+
+
+def close_wecom_search_tab_wnd(search_hwnd=None) -> bool:
+    """关闭企业微信“全局搜索”弹窗并重新激活企微主窗口。
+
+    成功关闭返回 True，未发现弹窗返回 False。
+    """
+    try:
+        import win32gui
+        import win32con
+    except Exception:
+        return False
+
+    hwnd = search_hwnd or find_wecom_search_tab_wnd()
+    if not hwnd:
+        return False
+
+    try:
+        win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+        time.sleep(0.15)
+        if win32gui.IsWindow(hwnd):
+            try:
+                win32gui.SendMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+                time.sleep(0.1)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # 重新激活企微主窗口
+    try:
+        find_and_activate_wecom()
+        time.sleep(0.15)
+    except Exception:
+        pass
+
+    return True
 
 
 def get_wecom_rect():

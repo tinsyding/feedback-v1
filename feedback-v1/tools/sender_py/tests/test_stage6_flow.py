@@ -13,7 +13,7 @@ from sender_py.reply_notes import (
 )
 from sender_py.sender import (
     archive_key_for_input, candidate_search_plan, decide_action, load_feedback_inputs,
-    run_candidate_outcomes, search_and_enter, status_matches_filter,
+    run_candidate_outcomes, search_and_enter, send_student, status_matches_filter,
     summarize_status_counts,
 )
 from sender_py.store import HistoryManager, SentFilesManager
@@ -674,6 +674,76 @@ class TestStage6(unittest.TestCase):
         app._do_set_status(app.items[1], "发送中")
         self.assertEqual(app.students_tree.rows["row_1"]["tags"], ("st_发送中",))
         self.assertIn("row_1", app.students_tree.seen)
+
+    def test_find_and_close_wecom_search_tab_wnd(self):
+        # Linux 默认无 win32 模块，安全返回 None / False
+        self.assertIsNone(wu.find_wecom_search_tab_wnd())
+        self.assertFalse(wu.close_wecom_search_tab_wnd())
+
+        # 模拟 win32 环境
+        mock_win32gui = mock.MagicMock()
+        mock_win32con = mock.MagicMock()
+        mock_win32con.WM_CLOSE = 0x0010
+
+        with mock.patch.dict("sys.modules", {"win32gui": mock_win32gui, "win32con": mock_win32con}):
+            # 情况 1：前台窗口就是 SearchTabWnd2
+            mock_win32gui.GetForegroundWindow.return_value = 0x1234
+            mock_win32gui.IsWindow.return_value = True
+            mock_win32gui.IsWindowVisible.return_value = True
+            mock_win32gui.GetClassName.return_value = "SearchTabWnd2"
+            mock_win32gui.GetWindowText.return_value = "全局搜索"
+            self.assertEqual(wu.find_wecom_search_tab_wnd(), 0x1234)
+
+            # 情况 2：前台窗口不是，枚举窗口发现 SearchTabWnd2
+            mock_win32gui.GetForegroundWindow.return_value = 0x9999
+            mock_win32gui.GetClassName.side_effect = lambda h: "SearchTabWnd2" if h == 0x5678 else "OtherWnd"
+            mock_win32gui.GetWindowText.side_effect = lambda h: "全局搜索" if h == 0x5678 else "其他窗口"
+            def _fake_enum(cb, extra):
+                cb(0x1111, extra)
+                cb(0x5678, extra)
+            mock_win32gui.EnumWindows.side_effect = _fake_enum
+            self.assertEqual(wu.find_wecom_search_tab_wnd(), 0x5678)
+
+            # 情况 3：关闭弹窗
+            mock_win32gui.IsWindow.return_value = False
+            with mock.patch.object(wu, "find_and_activate_wecom", return_value=True) as mock_act:
+                ok = wu.close_wecom_search_tab_wnd(0x5678)
+                self.assertTrue(ok)
+                mock_win32gui.PostMessage.assert_called_with(0x5678, mock_win32con.WM_CLOSE, 0, 0)
+                mock_act.assert_called_once()
+
+    def test_send_student_search_tab_wnd_auto_skip(self):
+        """测试搜人未匹配弹出全局搜索窗口时，立即关闭弹窗并标记未匹配，直接跳过剩余候选。"""
+        logs = []
+        item = {
+            "sid": "65405",
+            "sname": "胡耔墨",
+            "studentName": "65405胡耔墨",
+            "message": "测试反馈话术内容",
+        }
+
+        with mock.patch.object(wu, "find_and_activate_wecom", return_value=True), \
+             mock.patch.object(wu, "ensure_fully_visible", return_value=(True, (0, 0, 1000, 800))), \
+             mock.patch.object(wu, "get_dpi_scale", return_value=1.0), \
+             mock.patch("sender_py.sender.ensure_roi", return_value=(10, 10, 200, 50)), \
+             mock.patch("sender_py.sender.search_and_enter", return_value=True) as mock_search, \
+             mock.patch.object(wu, "find_wecom_search_tab_wnd") as mock_find_tab, \
+             mock.patch.object(wu, "close_wecom_search_tab_wnd", return_value=True) as mock_close_tab:
+
+            # 第一次调用（开始前的残留检查）返回 None，候选 1 搜索后返回弹窗 HWND
+            mock_find_tab.side_effect = [None, 0x171286]
+
+            res = send_student(item, "http://localhost:8000", log=logs.append)
+
+            self.assertEqual(res["result"], "unmatched")
+            self.assertEqual(res["reason"], "未找到学生（弹出全局搜索窗口）")
+            # 必须仅执行了 1 次搜索，候选 2 和候选 3 被立即熔断跳过
+            self.assertEqual(mock_search.call_count, 1)
+            mock_close_tab.assert_called_with(0x171286)
+            # 验证日志输出
+            log_str = "\n".join(logs)
+            self.assertIn("SearchTabWnd2", log_str)
+            self.assertIn("自动关闭全局搜索窗口，直接跳过并开始处理下一位学生", log_str)
 
 
 if __name__ == "__main__":

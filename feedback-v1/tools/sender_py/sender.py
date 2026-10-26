@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.8.5"
+APP_VERSION = "1.8.6"
 
 
 def asset_path(filename: str) -> str:
@@ -634,6 +634,20 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
     name, sid, sname, message = item["studentName"], item["sid"], item["sname"], item["message"]
     notes = []
 
+    # 清理之前可能遗留的企业微信“全局搜索”弹窗
+    old_search = wu.find_wecom_search_tab_wnd()
+    if old_search:
+        wu.close_wecom_search_tab_wnd(old_search)
+
+    def _check_and_handle_search_tab():
+        tab_hwnd = wu.find_wecom_search_tab_wnd()
+        if tab_hwnd:
+            log(f"  🔍 检测到企业微信弹出【全局搜索】窗口 (SearchTabWnd2)，表明未搜到该学生 [{name}]")
+            log(f"  └ 自动关闭全局搜索窗口，直接跳过并开始处理下一位学生...")
+            wu.close_wecom_search_tab_wnd(tab_hwnd)
+            return True
+        return False
+
     def _paced(gaps):
         import random
         secs = random.uniform(*gaps)
@@ -672,6 +686,8 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
             return {"result": "stopped", "reason": "用户停止", "notes": notes}
         log(f"  └ 正在通过企业微信快捷键 (Ctrl+F) 聚焦搜索候选 {cand}/{MAX_CANDIDATES}...")
         entered = search_and_enter(name, cand)
+        if _check_and_handle_search_tab():
+            return {"result": "unmatched", "reason": "未找到学生（弹出全局搜索窗口）", "notes": notes}
         if entered:  # 截图前焦点守护：mss 截的是屏幕像素，失焦会被遮挡物污染
             if should_stop is not None and should_stop():
                 log(f"[{name}] 收到停止请求，候选 {cand} 未发送")
@@ -691,9 +707,13 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
                 if should_stop is not None and should_stop():
                     break
                 time.sleep(min(0.04, max(0.0, deadline - time.monotonic())))
+            if _check_and_handle_search_tab():
+                return {"result": "unmatched", "reason": "未找到学生（弹出全局搜索窗口）", "notes": notes}
         if should_stop is not None and should_stop():
             log(f"  └ 收到停止请求，候选 {cand} 未发送")
             return {"result": "stopped", "reason": "用户停止", "notes": notes}
+        if _check_and_handle_search_tab():
+            return {"result": "unmatched", "reason": "未找到学生（弹出全局搜索窗口）", "notes": notes}
         if reply_analyzer is not None:
             judgment, chat_title, err, chat_img = judge_candidate(
                 rect, roi, sid, sname, server, token, fast_title_only=True,
