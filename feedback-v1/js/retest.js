@@ -674,6 +674,74 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         ctx.closePath();
     }
 
+    // 智能分词与折行算法（支持中英文混排、避头尾法则与超长安全截断）
+    function splitQuestionTopicLines(ctx, text, maxWidth, maxLines = 4) {
+        const NO_START_CHARS = new Set([
+            ')', ']', '}', '）', '】', '》', '」', '』',
+            '、', '，', '。', '；', '：', '？', '！',
+            ',', '.', ';', ':', '?', '!', '%', '℃', '”', '’'
+        ]);
+        const NO_END_CHARS = new Set([
+            '(', '[', '{', '（', '【', '《', '「', '『', '“', '‘'
+        ]);
+
+        const tokens = [];
+        const regex = /([a-zA-Z0-9_\-\.\/]+|\s+|.)/gu;
+        let m;
+        while ((m = regex.exec(text)) !== null) {
+            tokens.push(m[0]);
+        }
+
+        const lines = [];
+        let lineTokens = [];
+
+        for (let i = 0; i < tokens.length; i++) {
+            const token = tokens[i];
+            if (lineTokens.length === 0 && /^\s+$/.test(token)) {
+                continue;
+            }
+
+            if (lines.length === maxLines - 1) {
+                const testStr = lineTokens.concat(token).join('');
+                if (ctx.measureText(testStr).width > maxWidth) {
+                    let candidate = lineTokens.join('');
+                    while (candidate.length > 0 && ctx.measureText(candidate + '…').width > maxWidth) {
+                        candidate = candidate.slice(0, -1);
+                    }
+                    lines.push((candidate + '…').trimEnd());
+                    lineTokens = [];
+                    break;
+                } else {
+                    lineTokens.push(token);
+                }
+                continue;
+            }
+
+            const testStr = lineTokens.concat(token).join('');
+            if (ctx.measureText(testStr).width <= maxWidth) {
+                lineTokens.push(token);
+            } else {
+                if (NO_START_CHARS.has(token) && lineTokens.length > 1) {
+                    const popped = lineTokens.pop();
+                    lines.push(lineTokens.join('').trimEnd());
+                    lineTokens = [popped, token];
+                } else if (lineTokens.length > 1 && NO_END_CHARS.has(lineTokens[lineTokens.length - 1])) {
+                    const popped = lineTokens.pop();
+                    lines.push(lineTokens.join('').trimEnd());
+                    lineTokens = [popped, token];
+                } else {
+                    lines.push(lineTokens.join('').trimEnd());
+                    lineTokens = /^\s+$/.test(token) ? [] : [token];
+                }
+            }
+        }
+
+        if (lineTokens.length > 0) {
+            lines.push(lineTokens.join('').trimEnd());
+        }
+        return lines.length > 0 ? lines : [text];
+    }
+
     // 错题本每道题前的标题：优先显示“专题五：勾股定理”，没有专题时退回知识点。
     function formatQuestionTopicLabel(week, topic) {
         const weekNum = parseInt(week, 10);
@@ -686,28 +754,63 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
     }
 
     /**
-     * 把专题/知识点文字渲染成横条 PNG DataURL（pdf-lib 内置字体无中文，只能走 canvas）。
-     * 返回 null 时调用方跳过，不影响正文排版。
+     * 把专题/知识点文字渲染成横条 PNG DataURL（pdf-lib 内置字体无中文，走 canvas）。
+     * 支持超长考点智能换行（单行 20pt，多行自适应撑高），返回 { dataUrl, heightPt, blockPt, widthPt, lineCount }。
      */
-    function generateQuestionTopicBadgeDataUrl(labelText, widthPt) {
-        const label = String(labelText || '').trim().slice(0, 100);
+    function generateQuestionTopicBadge(labelText, widthPt) {
+        const label = String(labelText || '').trim().slice(0, 300);
         if (!label) return null;
         const wPt = Math.max(120, Math.min(540, Number(widthPt) || 540));
         const cacheKey = wPt.toFixed(1) + '___' + label;
         if (questionTopicBadgeCache[cacheKey]) {
             return questionTopicBadgeCache[cacheKey];
         }
+
         try {
             const K = 2; // 2 倍超采样，保证打印清晰
-            const hpx = 20 * K;
             const wpx = Math.max(240, Math.round(wPt * K));
+            const padL = 10 * K;
+            const padR = 8 * K;
+            const maxW = wpx - padL - padR;
+
+            const testCanvas = document.createElement('canvas');
+            const testCtx = testCanvas.getContext('2d');
+            const fontSingle = '700 ' + (12 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+            const fontMulti = '700 ' + (11 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+
+            testCtx.font = fontSingle;
+            let lines = [];
+            let isSingleLine = false;
+
+            if (testCtx.measureText(label).width <= maxW) {
+                lines = [label];
+                isSingleLine = true;
+            } else {
+                testCtx.font = fontMulti;
+                lines = splitQuestionTopicLines(testCtx, label, maxW, 4);
+                if (lines.length <= 1) {
+                    isSingleLine = true;
+                }
+            }
+
+            let heightPt = 20;
+            let linePitchPt = 14;
+            let padYPt = 4.5;
+            if (!isSingleLine) {
+                linePitchPt = 14;
+                padYPt = 5;
+                heightPt = padYPt * 2 + lines.length * linePitchPt;
+            }
+            const hpx = Math.round(heightPt * K);
+
             const badgeCanvas = document.createElement('canvas');
             badgeCanvas.width = wpx;
             badgeCanvas.height = hpx;
             const ctx = badgeCanvas.getContext('2d');
 
             // 浅蓝底 + 描边
-            questionTopicBadgeRoundRect(ctx, 1, 1, wpx - 2, hpx - 2, 9 * K);
+            const borderRadius = isSingleLine ? (8 * K) : Math.min(8 * K, Math.round(hpx / 3.5));
+            questionTopicBadgeRoundRect(ctx, 1, 1, wpx - 2, hpx - 2, borderRadius);
             ctx.fillStyle = '#eff6ff';
             ctx.fill();
             ctx.lineWidth = 2;
@@ -715,32 +818,46 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             ctx.stroke();
 
             // 左侧蓝色色条
+            const barMarginY = isSingleLine ? (4.5 * K) : (4 * K);
             ctx.fillStyle = '#2563eb';
-            ctx.fillRect(0, 5 * K, 3 * K, hpx - 10 * K);
+            ctx.fillRect(0, barMarginY, 3 * K, hpx - barMarginY * 2);
 
-            // 文字（超宽截断加省略号）
-            const padL = 9 * K;
-            const padR = 6 * K;
-            ctx.font = '700 ' + (12 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
-            ctx.textBaseline = 'middle';
-            const maxW = wpx - padL - padR;
-            let shown = label;
-            while (shown.length > 1 && ctx.measureText(shown).width > maxW) {
-                shown = shown.slice(0, -1);
-            }
-            if (shown !== label) {
-                shown = shown.slice(0, -1) + '…';
-            }
+            // 文字绘制
             ctx.fillStyle = '#1e40af';
-            ctx.fillText(shown, padL, hpx / 2 + K);
+            if (isSingleLine) {
+                ctx.font = fontSingle;
+                ctx.textBaseline = 'middle';
+                ctx.fillText(lines[0], padL, hpx / 2 + K);
+            } else {
+                ctx.font = fontMulti;
+                ctx.textBaseline = 'middle';
+                const padYPx = padYPt * K;
+                const linePitchPx = linePitchPt * K;
+                for (let i = 0; i < lines.length; i++) {
+                    const textY = padYPx + (i + 0.5) * linePitchPx;
+                    ctx.fillText(lines[i], padL, textY);
+                }
+            }
 
             const dataUrl = badgeCanvas.toDataURL('image/png');
-            questionTopicBadgeCache[cacheKey] = dataUrl;
-            return dataUrl;
+            const result = {
+                dataUrl,
+                heightPt,
+                blockPt: heightPt + (window.QUESTION_TOPIC_BANNER_GAP || 6),
+                widthPt: wPt,
+                lineCount: lines.length
+            };
+            questionTopicBadgeCache[cacheKey] = result;
+            return result;
         } catch (err) {
             console.warn('generateQuestionTopicBadge failed:', err);
             return null;
         }
+    }
+
+    function generateQuestionTopicBadgeDataUrl(labelText, widthPt) {
+        const badge = generateQuestionTopicBadge(labelText, widthPt);
+        return badge ? badge.dataUrl : null;
     }
 
     // Download & Merge PDFs with modal progress feedback
@@ -1059,9 +1176,23 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
                         // 检查当前页剩余空间是否足够
                         const showTopicBanner = (pIdx === 0 && !!qTopicLabel);
+                        let topicBannerInfo = null;
+                        let currentBannerH = QUESTION_TOPIC_BANNER_H;
+                        let currentBannerBlock = QUESTION_TOPIC_BANNER_BLOCK;
+
+                        if (showTopicBanner) {
+                            // 预估宽度（切片通常为 A4 宽 530~540pt），计算真实换行行数与横条高度
+                            const estW = Math.max(120, Math.min(540, origW || 540));
+                            topicBannerInfo = generateQuestionTopicBadge(qTopicLabel, estW);
+                            if (topicBannerInfo) {
+                                currentBannerH = topicBannerInfo.heightPt;
+                                currentBannerBlock = topicBannerInfo.blockPt;
+                            }
+                        }
+
                         const isPageTop = (!currentPage || currentY >= (PAGE_HEIGHT - TOP_MARGIN - 5));
                         const neededH = isPageTop ? effectiveHeightPt : (SEPARATOR_HEIGHT + effectiveHeightPt);
-                        const neededHWithBanner = neededH + (showTopicBanner ? QUESTION_TOPIC_BANNER_BLOCK : 0);
+                        const neededHWithBanner = neededH + (showTopicBanner ? currentBannerBlock : 0);
 
                         if (!currentPage || (currentY - neededHWithBanner < BOTTOM_MARGIN) || (isFullPage && !isPageTop)) {
                             // 空间不足，或当前是整页大题且当前页已被占用 -> 开新 A4 页
@@ -1093,7 +1224,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
                         const contentAreaH = PAGE_HEIGHT - TOP_MARGIN - BOTTOM_MARGIN;
                         const scale = isFullPage
-                            ? Math.min(PAGE_WIDTH / origW, Math.max(0.1, (contentAreaH - (showTopicBanner ? QUESTION_TOPIC_BANNER_BLOCK : 0)) / effectiveHeightPt), 1.0)
+                            ? Math.min(PAGE_WIDTH / origW, Math.max(0.1, (contentAreaH - (showTopicBanner ? currentBannerBlock : 0)) / effectiveHeightPt), 1.0)
                             : Math.min(PAGE_WIDTH / origW, 1.0);
                         const drawW = origW * scale;
                         const drawH = effectiveHeightPt * scale;
@@ -1102,16 +1233,18 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                         // 在每道题首切片上方绘制“专题X：知识点”横条（失败则跳过，不挡正文）
                         if (showTopicBanner) {
                             try {
-                                const badgeUrl = generateQuestionTopicBadgeDataUrl(qTopicLabel, drawW);
-                                if (badgeUrl) {
-                                    const badgeImg = await mergedPdf.embedPng(badgeUrl);
+                                if (!topicBannerInfo || Math.abs(topicBannerInfo.widthPt - drawW) > 2) {
+                                    topicBannerInfo = generateQuestionTopicBadge(qTopicLabel, drawW);
+                                }
+                                if (topicBannerInfo && topicBannerInfo.dataUrl) {
+                                    const badgeImg = await mergedPdf.embedPng(topicBannerInfo.dataUrl);
                                     currentPage.drawImage(badgeImg, {
                                         x: drawX,
-                                        y: currentY - QUESTION_TOPIC_BANNER_H,
+                                        y: currentY - topicBannerInfo.heightPt,
                                         width: drawW,
-                                        height: QUESTION_TOPIC_BANNER_H
+                                        height: topicBannerInfo.heightPt
                                     });
-                                    currentY -= QUESTION_TOPIC_BANNER_BLOCK;
+                                    currentY -= topicBannerInfo.blockPt;
                                 }
                             } catch (badgeErr) {
                                 console.warn('Question topic banner skipped:', badgeErr);
