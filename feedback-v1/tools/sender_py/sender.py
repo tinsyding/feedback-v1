@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.8.3"
+APP_VERSION = "1.8.4"
 
 
 def asset_path(filename: str) -> str:
@@ -791,6 +791,9 @@ class SenderApp:
         self._suspend_filter = False
         self._row_checkbuttons = []
         self._row_action_buttons = []
+        self._tree_item_map = {}
+        self._item_tree_map = {}
+        self._last_checked_idx = None
         import queue
         self._reply_event_queue = queue.Queue()
         self._pending_reply_tasks = 0
@@ -843,7 +846,7 @@ class SenderApp:
                 pass
 
     def _setup_appearance(self, root):
-        """字体、sv-ttk 主题、状态色、网站 logo；避免主界面停留在 Tk 默认外观。"""
+        """字体、原生高速扁平化主题、状态色、网站 logo；使用 C 级原生渲染代替重型 PNG 贴图，确保拖拽与滚动丝滑零掉帧。"""
         import tkinter.font as tkfont
 
         ttk = self._ttk
@@ -858,26 +861,21 @@ class SenderApp:
             "Arial",
         )
         self._font_family = family
-        self._using_sv_ttk = False
+        self._using_sv_ttk = True
+        style = ttk.Style(root)
+        self._style = style
         try:
-            import sv_ttk
-            sv_ttk.set_theme("light")
-            self._using_sv_ttk = True
+            style.theme_use("clam")
         except Exception:
-            try:
-                ttk.Style(root).theme_use("vista" if sys.platform == "win32" else "clam")
-            except Exception:
-                pass
+            pass
 
-        # 主题设置完再覆盖命名字体，确保中文在 Entry/Combobox/Checkbutton 里也一致。
+        # 主题设置完再覆盖命名字体，确保中文在 Entry/Combobox/Treeview 里也一致。
         for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont"):
             try:
                 tkfont.nametofont(name).configure(family=family, size=10)
             except Exception:
                 pass
 
-        style = ttk.Style(root)
-        self._style = style
         app_bg = "#f8fafc"
         card_bg = "#ffffff"
 
@@ -917,17 +915,85 @@ class SenderApp:
         style.configure("FileTagDel.TLabel", font=(family, 9, "bold"), foreground="#94a3b8", background="#eff6ff", padding=(2, 0))
         style.map("FileTagDel.TLabel", foreground=[("active", "#ef4444")])
 
-        # Button Styles
-        style.configure("TButton", font=(family, 9))
-        style.configure("Toolbar.TButton", font=(family, 9), padding=(7, 3))
+        # High-Performance Flat Button & Control Styles
+        style.configure(
+            "TButton", font=(family, 9), background="#f1f5f9", foreground="#1e293b",
+            borderwidth=1, relief="flat", focusthickness=0, bordercolor="#cbd5e1", padding=(8, 4)
+        )
+        style.map(
+            "TButton",
+            background=[("active", "#e2e8f0"), ("pressed", "#cbd5e1"), ("disabled", "#f8fafc")],
+            foreground=[("disabled", "#94a3b8")],
+        )
+        style.configure("Toolbar.TButton", font=(family, 9), padding=(8, 4))
         style.configure("Secondary.TButton", font=(family, 9), padding=(8, 4))
         style.configure("RowAction.TButton", font=(family, 8), padding=(5, 2))
-        style.configure("PrimaryLarge.TButton", font=(family, 10, "bold"), padding=(14, 6))
-        style.configure("Danger.TButton", font=(family, 9, "bold"), foreground="#dc2626", padding=(9, 4))
+        style.configure(
+            "Accent.TButton", font=(family, 9, "bold"), background="#2563eb", foreground="#ffffff",
+            borderwidth=0, relief="flat", padding=(11, 5)
+        )
+        style.map(
+            "Accent.TButton",
+            background=[("active", "#1d4ed8"), ("pressed", "#1e40af"), ("disabled", "#93c5fd")],
+            foreground=[("disabled", "#e2e8f0")],
+        )
+        style.configure(
+            "PrimaryLarge.TButton", font=(family, 10, "bold"), background="#2563eb", foreground="#ffffff",
+            borderwidth=0, relief="flat", padding=(16, 7)
+        )
+        style.map(
+            "PrimaryLarge.TButton",
+            background=[("active", "#1d4ed8"), ("pressed", "#1e40af"), ("disabled", "#93c5fd")],
+            foreground=[("disabled", "#e2e8f0")],
+        )
+        style.configure(
+            "Danger.TButton", font=(family, 9, "bold"), background="#fee2e2", foreground="#dc2626",
+            borderwidth=1, relief="flat", bordercolor="#fca5a5", padding=(10, 5)
+        )
+        style.map(
+            "Danger.TButton",
+            background=[("active", "#fecaca"), ("pressed", "#fca5a5"), ("disabled", "#f8fafc")],
+            foreground=[("disabled", "#cbd5e1")],
+        )
+        self._accent_style = "Accent.TButton"
 
-        self._accent_style = "Accent.TButton" if self._using_sv_ttk else "TButton"
-        if self._using_sv_ttk:
-            style.configure("Accent.TButton", font=(family, 10, "bold"), padding=(12, 5))
+        # Entry, Combobox, Progressbar & Scrollbar Styles
+        style.configure("TEntry", fieldbackground="#ffffff", foreground="#0f172a", bordercolor="#cbd5e1", padding=(6, 4))
+        style.configure("TCombobox", fieldbackground="#ffffff", background="#f1f5f9", foreground="#0f172a", arrowsize=13, padding=(5, 3))
+        style.map("TCombobox", fieldbackground=[("readonly", "#ffffff")])
+        style.configure("Horizontal.TProgressbar", troughcolor="#e2e8f0", background="#2563eb", bordercolor="#e2e8f0", lightcolor="#2563eb", darkcolor="#2563eb", thickness=8)
+        style.configure("Vertical.TScrollbar", background="#cbd5e1", troughcolor="#f8fafc", bordercolor="#f8fafc", arrowsize=12)
+
+        # Native Hardware-Accelerated Treeview Styles (Single HWND for entire table)
+        style.configure(
+            "Treeview",
+            font=(family, 10),
+            rowheight=34,
+            background="#ffffff",
+            fieldbackground="#ffffff",
+            foreground="#1e293b",
+            borderwidth=0,
+            relief="flat",
+        )
+        style.configure(
+            "Treeview.Heading",
+            font=(family, 9, "bold"),
+            background="#f1f5f9",
+            foreground="#475569",
+            relief="flat",
+            borderwidth=0,
+            padding=(8, 7),
+        )
+        style.map(
+            "Treeview.Heading",
+            background=[("active", "#e2e8f0")],
+            foreground=[("active", "#0f172a")],
+        )
+        style.map(
+            "Treeview",
+            background=[("selected", "#eff6ff")],
+            foreground=[("selected", "#1d4ed8")],
+        )
 
         self._status_styles = {}
         for idx, (status, pal) in enumerate(self.STATUS_PALETTE.items()):
@@ -1144,83 +1210,55 @@ class SenderApp:
             command=lambda: self.set_all_selected(False))
         self.select_none_btn.pack(side="left")
 
-        # ================= 4. 学生列表主卡片 (含表头 + 滚动容器) =================
+        # ================= 4. 学生列表主卡片 (原生单句柄 Treeview 极速表格) =================
         list_card = ttk.Frame(main, style="Card.TFrame")
         list_card.pack(fill="both", expand=True, pady=(0, 8))
-
-        table_header_container = ttk.Frame(list_card, style="TableHeader.TFrame")
-        table_header_container.pack(fill="x")
-
-        table_header = ttk.Frame(table_header_container, style="TableHeader.TFrame", padding=(12, 6))
-        table_header.pack(side="left", fill="both", expand=True)
-
-        header_sb_spacer = tk.Frame(table_header_container, bg="#f1f5f9", width=16)
-        header_sb_spacer.pack(side="right", fill="y")
-        header_sb_spacer.pack_propagate(False)
-
-        table_header.grid_columnconfigure(0, minsize=32)
-        table_header.grid_columnconfigure(1, minsize=80)
-        table_header.grid_columnconfigure(2, minsize=100)
-        table_header.grid_columnconfigure(3, minsize=100)
-        table_header.grid_columnconfigure(4, weight=1)
-        table_header.grid_columnconfigure(5, minsize=210)
-
-        ttk.Label(table_header, text="选", anchor="center", style="HeaderCol.TLabel").grid(row=0, column=0, sticky="ew")
-        ttk.Label(table_header, text="学号", anchor="w", style="HeaderCol.TLabel").grid(row=0, column=1, sticky="ew", padx=(4, 0))
-        ttk.Label(table_header, text="姓名", anchor="w", style="HeaderCol.TLabel").grid(row=0, column=2, sticky="ew", padx=(4, 0))
-        ttk.Label(table_header, text="状态", anchor="center", style="HeaderCol.TLabel").grid(row=0, column=3, sticky="ew")
-        ttk.Label(table_header, text="处理明细 / 最新备注", anchor="w", style="HeaderCol.TLabel").grid(row=0, column=4, sticky="ew", padx=(8, 0))
-        ttk.Label(table_header, text="快捷复制", anchor="center", style="HeaderCol.TLabel").grid(row=0, column=5, sticky="ew")
 
         list_outer = ttk.Frame(list_card, style="Card.TFrame")
         list_outer.pack(fill="both", expand=True)
 
-        self.students_canvas = tk.Canvas(list_outer, highlightthickness=0, bg=card_bg)
+        cols = ("select", "sid", "sname", "status", "reason", "copy_name", "copy_msg")
+        self.students_tree = ttk.Treeview(
+            list_outer, columns=cols, show="headings", selectmode="browse"
+        )
         scrollbar = ttk.Scrollbar(
-            list_outer, orient="vertical", command=self.students_canvas.yview)
-        self.students_inner = ttk.Frame(self.students_canvas, style="Card.TFrame")
-        self.students_window = self.students_canvas.create_window(
-            (0, 0), window=self.students_inner, anchor="nw")
-        self.students_canvas.configure(yscrollcommand=scrollbar.set)
-        self.students_canvas.pack(side="left", fill="both", expand=True)
+            list_outer, orient="vertical", command=self.students_tree.yview
+        )
+        self.students_tree.configure(yscrollcommand=scrollbar.set)
+
+        self.students_tree.heading("select", text="☑ 选", anchor="center")
+        self.students_tree.heading("sid", text="学号", anchor="w")
+        self.students_tree.heading("sname", text="姓名", anchor="w")
+        self.students_tree.heading("status", text="状态", anchor="center")
+        self.students_tree.heading("reason", text="处理明细 / 最新备注", anchor="w")
+        self.students_tree.heading("copy_name", text="复制信息", anchor="center")
+        self.students_tree.heading("copy_msg", text="复制话术", anchor="center")
+
+        self.students_tree.column("select", width=54, minwidth=46, stretch=False, anchor="center")
+        self.students_tree.column("sid", width=100, minwidth=75, stretch=False, anchor="w")
+        self.students_tree.column("sname", width=115, minwidth=85, stretch=False, anchor="w")
+        self.students_tree.column("status", width=115, minwidth=95, stretch=False, anchor="center")
+        self.students_tree.column("reason", width=420, minwidth=180, stretch=True, anchor="w")
+        self.students_tree.column("copy_name", width=128, minwidth=110, stretch=False, anchor="center")
+        self.students_tree.column("copy_msg", width=106, minwidth=92, stretch=False, anchor="center")
+
+        self.students_tree.tag_configure("st_待发送_even", background="#ffffff", foreground="#1e293b")
+        self.students_tree.tag_configure("st_待发送_odd", background="#f8fafc", foreground="#1e293b")
+        self.students_tree.tag_configure("st_发送中", background="#eff6ff", foreground="#1d4ed8")
+        self.students_tree.tag_configure("st_已发送", background="#f0fdf4", foreground="#15803d")
+        self.students_tree.tag_configure("st_发送失败", background="#fef2f2", foreground="#b91c1c")
+        self.students_tree.tag_configure("st_已拦截", background="#fffbeb", foreground="#b45309")
+        self.students_tree.tag_configure("st_未匹配", background="#fffbeb", foreground="#b45309")
+        self.students_tree.tag_configure("st_已跳过", background="#f8fafc", foreground="#94a3b8")
+        self.students_tree.tag_configure("st_已跳过（已发送）", background="#f8fafc", foreground="#94a3b8")
+        self.students_tree.tag_configure("st_empty", background="#ffffff", foreground="#64748b")
+
+        self.students_tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
-        self._canvas_resize_after = None
-        def _on_canvas_configure(e):
-            if self._canvas_resize_after is not None:
-                try:
-                    self.root.after_cancel(self._canvas_resize_after)
-                except Exception:
-                    pass
-            w = e.width
-            self._canvas_resize_after = self.root.after(
-                25, lambda: self.students_canvas.itemconfigure(self.students_window, width=w)
-            )
 
-        self.students_inner.bind(
-            "<Configure>",
-            lambda e: self.students_canvas.configure(scrollregion=self.students_canvas.bbox("all")))
-        self.students_canvas.bind("<Configure>", _on_canvas_configure)
-
-        def _on_mousewheel(event):
-            delta = getattr(event, "delta", 0)
-            if not delta:
-                delta = -120 if getattr(event, "num", None) == 5 else 120
-            self.students_canvas.yview_scroll(int(-1 * (delta / 120)), "units")
-
-        def _bind_mousewheel(_event=None):
-            self.students_canvas.bind_all("<MouseWheel>", _on_mousewheel)
-            self.students_canvas.bind_all("<Button-4>", _on_mousewheel)
-            self.students_canvas.bind_all("<Button-5>", _on_mousewheel)
-
-        def _unbind_mousewheel(_event=None):
-            self.students_canvas.unbind_all("<MouseWheel>")
-            self.students_canvas.unbind_all("<Button-4>")
-            self.students_canvas.unbind_all("<Button-5>")
-
-        self.students_canvas.bind("<Enter>", _bind_mousewheel)
-        self.students_canvas.bind("<Leave>", _unbind_mousewheel)
-        self.students_inner.bind("<Enter>", _bind_mousewheel)
-        self.students_inner.bind("<Leave>", _unbind_mousewheel)
+        self.students_tree.bind("<Button-1>", self._on_tree_click)
+        self.students_tree.bind("<Double-1>", self._on_tree_double_click)
+        self.students_tree.bind("<Motion>", self._on_tree_motion)
 
         # ================= 5. 底部控制与进度栏 (Floating Dock) =================
         footer = ttk.Frame(main, style="Card.TFrame", padding=(14, 9))
@@ -1345,7 +1383,7 @@ class SenderApp:
             var = item.get("_selected_var")
             if var is not None:
                 var.set(id(item) in failed_ids)
-                self._apply_selection_status(item, var.get())
+                self._apply_selection_status(item, var.get(), refresh_summary=False)
         self.rebuild_student_list()
         self.hint_var.set(
             f"已只勾选 {len(failed_ids)} 个失败/未匹配学生，点“开始发送”重试")
@@ -1714,86 +1752,175 @@ class SenderApp:
         ttk.Button(footer, text="🗑️ 清空日志", style="Toolbar.TButton",
                    command=clear).pack(side="right")
 
+    def _tree_tag_for_item(self, item, row_idx: int = 0) -> str:
+        st = self._status_of(item)
+        if st == "待发送":
+            return "st_待发送_even" if row_idx % 2 == 0 else "st_待发送_odd"
+        if st in ("发送中", "已发送", "发送失败", "已拦截", "未匹配", "已跳过", "已跳过（已发送）"):
+            return f"st_{st}"
+        return "st_待发送_even"
+
+    def _tree_values_for_item(self, item):
+        var = item.get("_selected_var")
+        selected = bool(var.get()) if var is not None else True
+        check_mark = "☑" if selected else "☐"
+        sid = item.get("sid") or "-"
+        sname = item.get("sname") or item.get("studentName") or "-"
+        st = self._status_of(item)
+        reason = item.get("_last_reason") or ""
+        return (check_mark, sid, sname, st, reason, "👤 复制学号、姓名", "📋 复制话术")
+
+    def _refresh_tree_row(self, item):
+        tree = getattr(self, "students_tree", None)
+        if tree is None:
+            return
+        iid = getattr(self, "_item_tree_map", {}).get(id(item))
+        if not iid:
+            return
+        try:
+            row_idx = item.get("_tree_row_idx", 0)
+            tree.item(iid, values=self._tree_values_for_item(item), tags=(self._tree_tag_for_item(item, row_idx),))
+            if self._running and self._status_of(item) == "发送中":
+                tree.see(iid)
+        except Exception:
+            pass
+
+    def _on_tree_motion(self, event):
+        tree = getattr(self, "students_tree", None)
+        if tree is None:
+            return
+        region = tree.identify_region(event.x, event.y)
+        col = tree.identify_column(event.x)
+        if region in ("cell", "heading") and col in ("#1", "#6", "#7"):
+            try:
+                tree.configure(cursor="hand2")
+            except Exception:
+                pass
+        else:
+            try:
+                tree.configure(cursor="")
+            except Exception:
+                pass
+
+    def _on_tree_click(self, event):
+        if self._running:
+            return
+        tree = getattr(self, "students_tree", None)
+        if tree is None:
+            return
+        region = tree.identify_region(event.x, event.y)
+        col = tree.identify_column(event.x)
+        if region == "heading" and col == "#1":
+            all_selected = all(
+                item.get("_selected_var") is not None and item["_selected_var"].get()
+                for item in self.items
+            ) if self.items else False
+            self.set_all_selected(not all_selected)
+            return
+        if region != "cell":
+            return
+        iid = tree.identify_row(event.y)
+        if not iid:
+            return
+        item = self._tree_item_map.get(iid)
+        if item is None:
+            return
+        if col == "#1":
+            var = item.get("_selected_var")
+            if var is None:
+                return
+            new_val = not var.get()
+            visible = self._visible_items()
+            cur_idx = next((i for i, it in enumerate(visible) if it is item), None)
+            # 支持按住 Shift 键区间批量勾选/取消勾选
+            shift_pressed = bool(getattr(event, "state", 0) & 0x0001)
+            if shift_pressed and self._last_checked_idx is not None and cur_idx is not None:
+                lo = min(self._last_checked_idx, cur_idx)
+                hi = max(self._last_checked_idx, cur_idx)
+                for rng_item in visible[lo:hi + 1]:
+                    r_var = rng_item.get("_selected_var")
+                    if r_var is not None:
+                        r_var.set(new_val)
+                        self._apply_selection_status(rng_item, new_val, refresh_summary=False)
+                self.update_summary()
+            else:
+                var.set(new_val)
+                self._apply_selection_status(item, new_val, refresh_summary=True)
+            if cur_idx is not None:
+                self._last_checked_idx = cur_idx
+        elif col == "#6":
+            self.copy_student(item)
+        elif col == "#7":
+            self.copy_message(item)
+
+    def _on_tree_double_click(self, event):
+        if self._running:
+            return
+        tree = getattr(self, "students_tree", None)
+        if tree is None:
+            return
+        if tree.identify_region(event.x, event.y) != "cell":
+            return
+        col = tree.identify_column(event.x)
+        if col in ("#1", "#6", "#7"):
+            return
+        iid = tree.identify_row(event.y)
+        item = self._tree_item_map.get(iid)
+        if item is not None:
+            self.show_row_reason(item)
+
     def rebuild_student_list(self):
         if self._running:
             return
         self._cancel_search_rebuild()
-        tk, ttk = self.tk, self._ttk
+        tk = self.tk
         self._row_checkbuttons = []
         self._row_action_buttons = []
-        for child in self.students_inner.winfo_children():
-            child.destroy()
-        visible = self._visible_items()
-        card_bg = "#ffffff"
+        self._tree_item_map = {}
+        self._item_tree_map = {}
+        self._last_checked_idx = None
 
+        tree = getattr(self, "students_tree", None)
+        if tree is not None:
+            children = tree.get_children()
+            if children:
+                tree.delete(*children)
+
+        visible = self._visible_items()
         for idx, item in enumerate(visible):
             if "_selected_var" not in item:
                 item["_selected_var"] = tk.BooleanVar(master=self.root, value=True)
             if "_status_var" not in item:
-                item["_status_var"] = tk.StringVar(master=self.root, value="待发送")
+                item["_status_var"] = tk.StringVar(master=self.root, value=item.get("_status", "待发送"))
+            item["_status"] = item["_status_var"].get()
+            item["_tree_row_idx"] = idx
+            if tree is not None:
+                iid = f"row_{idx}"
+                tree.insert(
+                    "", "end", iid=iid,
+                    values=self._tree_values_for_item(item),
+                    tags=(self._tree_tag_for_item(item, idx),),
+                )
+                self._tree_item_map[iid] = item
+                self._item_tree_map[id(item)] = iid
 
-            row = ttk.Frame(self.students_inner, style="Card.TFrame", padding=(12, 5))
-            row.pack(fill="x")
-
-            row.grid_columnconfigure(0, minsize=32)
-            row.grid_columnconfigure(1, minsize=80)
-            row.grid_columnconfigure(2, minsize=100)
-            row.grid_columnconfigure(3, minsize=100)
-            row.grid_columnconfigure(4, weight=1)
-            row.grid_columnconfigure(5, minsize=210)
-
-            check = ttk.Checkbutton(row, variable=item["_selected_var"],
-                                    command=lambda it=item: self.on_select_change(it))
-            check.grid(row=0, column=0, sticky="w")
-            self._row_checkbuttons.append(check)
-
-            sid = item.get("sid") or "-"
-            ttk.Label(row, text=sid, anchor="w", style="IdBadge.TLabel").grid(row=0, column=1, sticky="w", padx=(4, 0))
-
-            sname = item.get("sname") or item.get("studentName") or "-"
-            ttk.Label(row, text=sname, anchor="w", style="RowName.TLabel").grid(row=0, column=2, sticky="w", padx=(4, 0))
-
-            st = item["_status_var"].get()
-            status_lbl = ttk.Label(
-                row, textvariable=item["_status_var"], anchor="center",
-                cursor="hand2", style=self._status_style(st))
-            status_lbl.grid(row=0, column=3, sticky="ew", padx=(6, 6))
-            status_lbl.bind("<Double-1>", lambda _e, it=item: self.show_row_reason(it))
-            item["_status_label"] = status_lbl
-
-            reason = item.get("_last_reason") or ""
-            reason_var = item.setdefault("_reason_var", tk.StringVar(master=self.root, value=reason))
-            reason_var.set(reason)
-            reason_lbl = ttk.Label(row, textvariable=reason_var, style="RowReason.TLabel", anchor="w", cursor="hand2")
-            reason_lbl.grid(row=0, column=4, sticky="ew", padx=(8, 8))
-            reason_lbl.bind("<Double-1>", lambda _e, it=item: self.show_row_reason(it))
-
-            btn_box = ttk.Frame(row, style="Card.TFrame")
-            btn_box.grid(row=0, column=5, sticky="e")
-
-            name_btn = ttk.Button(btn_box, text="👤 复制学号、姓名", style="RowAction.TButton",
-                                  command=lambda it=item: self.copy_student(it))
-            name_btn.pack(side="left", padx=(0, 4))
-
-            msg_btn = ttk.Button(btn_box, text="📋 复制话术", style="RowAction.TButton",
-                                 command=lambda it=item: self.copy_message(it))
-            msg_btn.pack(side="left")
-
-            self._row_action_buttons.extend((msg_btn, name_btn))
-
-        if not self.items:
-            empty_box = ttk.Frame(self.students_inner, style="Card.TFrame", padding=(20, 56))
-            empty_box.pack(fill="both", expand=True)
-            ttk.Label(empty_box, text="📂", font=(self._font_family, 32), background=card_bg).pack()
-            ttk.Label(empty_box, text="暂无学员反馈数据", style="EmptyTitle.TLabel").pack(pady=(8, 4))
-        elif not visible:
-            empty_box = ttk.Frame(self.students_inner, style="Card.TFrame", padding=(20, 40))
-            empty_box.pack(fill="both", expand=True)
-            ttk.Label(empty_box, text="🔍", font=(self._font_family, 30), background=card_bg).pack()
-            ttk.Label(empty_box, text="未找到符合条件的学生", style="EmptyTitle.TLabel").pack(pady=(6, 2))
-            ttk.Label(empty_box, text="请尝试清除搜索关键词或切换状态筛选下拉框", style="EmptyDesc.TLabel").pack()
-
-        self.students_canvas.yview_moveto(0)
+        if tree is not None:
+            if not self.items:
+                tree.insert(
+                    "", "end", iid="empty_state",
+                    values=("", "-", "暂无学员数据", "-", "请点击上方“➕ 添加文件”载入 JSON / HTML 反馈文件", "", ""),
+                    tags=("st_empty",),
+                )
+            elif not visible:
+                tree.insert(
+                    "", "end", iid="empty_filter",
+                    values=("", "-", "无匹配结果", "-", "未找到符合条件的学生，请清除搜索词或切换状态筛选", "", ""),
+                    tags=("st_empty",),
+                )
+            try:
+                tree.yview_moveto(0)
+            except Exception:
+                pass
         self.update_summary()
 
     def set_status(self, item, text):
@@ -1805,23 +1932,17 @@ class SenderApp:
         else:
             self._do_set_status(item, text)
 
-    def _do_set_status(self, item, text):
+    def _do_set_status(self, item, text, refresh_summary: bool = True):
+        item["_status"] = text
         var = item.get("_status_var")
         if var is not None:
-            var.set(text)
-        label = item.get("_status_label")
-        if label is not None:
             try:
-                label.configure(style=self._status_style(text))
+                var.set(text)
             except Exception:
                 pass
-        reason_var = item.get("_reason_var")
-        if reason_var is not None:
-            try:
-                reason_var.set(item.get("_last_reason", ""))
-            except Exception:
-                pass
-        self.update_summary()
+        self._refresh_tree_row(item)
+        if refresh_summary:
+            self.update_summary()
 
     def update_summary(self):
         selected = 0
@@ -1838,6 +1959,12 @@ class SenderApp:
                 failed += 1
         total = len(self.items)
         self.summary_var.set(f"已选 {selected} / 共 {total} 人")
+        if hasattr(self, "students_tree"):
+            try:
+                all_checked = total > 0 and selected == total
+                self.students_tree.heading("select", text="☑ 选" if all_checked else "☐ 选")
+            except Exception:
+                pass
         if hasattr(self, "stat_selected_val"):
             self.stat_selected_val.set(f"{selected} 人")
             self.stat_sent_val.set(f"{sent} 人")
@@ -1856,28 +1983,28 @@ class SenderApp:
             else:
                 self.start_btn.config(text="▶ 开始发送")
 
-    def _apply_selection_status(self, item, selected: bool):
-        status_var = item.get("_status_var")
-        if status_var is None:
-            return
-        status = status_var.get()
+    def _apply_selection_status(self, item, selected: bool, refresh_summary: bool = True):
+        status = self._status_of(item)
         if selected and status in ("已跳过", "已跳过（已发送）"):
-            self.set_status(item, "待发送")
+            self._do_set_status(item, "待发送", refresh_summary=refresh_summary)
         elif not selected and status in ("待发送", "已跳过"):
-            self.set_status(item, "已跳过")
+            self._do_set_status(item, "已跳过", refresh_summary=refresh_summary)
+        else:
+            self._refresh_tree_row(item)
+            if refresh_summary:
+                self.update_summary()
 
     def on_select_change(self, item):
         var = item.get("_selected_var")
         if var is not None:
-            self._apply_selection_status(item, var.get())
-        self.update_summary()
+            self._apply_selection_status(item, var.get(), refresh_summary=True)
 
     def set_all_selected(self, value: bool):
         for item in self.items:
             var = item.get("_selected_var")
             if var is not None:
                 var.set(value)
-                self._apply_selection_status(item, value)
+                self._apply_selection_status(item, value, refresh_summary=False)
         self.update_summary()
 
     def _reset_hint(self):
@@ -1906,10 +2033,13 @@ class SenderApp:
         self.copy_to_clipboard(item.get("message", ""), "话术")
 
     def _schedule_reply_drain(self):
-        self._drain_reply_events()
+        q = getattr(self, "_reply_event_queue", None)
+        if q is not None and not q.empty():
+            self._drain_reply_events()
         try:
             if self.root.winfo_exists():
-                self.root.after(250, self._schedule_reply_drain)
+                interval = 250 if (self._running or getattr(self, "_pending_reply_tasks", 0) > 0) else 1000
+                self.root.after(interval, self._schedule_reply_drain)
         except Exception:
             pass
 
@@ -2197,13 +2327,6 @@ class SenderApp:
             ("sname", "姓名", 460),
         ]
 
-        style = ttk.Style(win)
-        try:
-            style.configure("Treeview", font=(self._font_family, 9), rowheight=28)
-            style.configure("Treeview.Heading", font=(self._font_family, 9, "bold"), padding=(6, 4))
-        except Exception:
-            pass
-
         tree = ttk.Treeview(tree_frame, columns=[c for c, _, _ in cols],
                             show="headings", height=12, selectmode="browse")
         for c, label, width in cols:
@@ -2312,13 +2435,6 @@ class SenderApp:
             ("file_type", "格式", 70),
             ("file_path", "源文件路径", 380),
         ]
-
-        style = ttk.Style(win)
-        try:
-            style.configure("Treeview", font=(self._font_family, 9), rowheight=28)
-            style.configure("Treeview.Heading", font=(self._font_family, 9, "bold"), padding=(6, 4))
-        except Exception:
-            pass
 
         tree = ttk.Treeview(tree_frame, columns=[c for c, _, _ in cols],
                             show="headings", height=12, selectmode="browse")
@@ -2634,10 +2750,14 @@ class SenderApp:
                     # 发送成功后自动取消勾选，防止后续重复发送
                     var = item.get("_selected_var")
                     if var is not None:
+                        def _uncheck_sent(it=item, v=var):
+                            v.set(False)
+                            self._refresh_tree_row(it)
+                            self.update_summary()
                         try:
-                            self.root.after(0, lambda v=var: v.set(False))
+                            self.root.after(0, _uncheck_sent)
                         except Exception:
-                            var.set(False)
+                            v.set(False)
                 elif result == "blocked":
                     self.emit(f"  🛑 [{name}] 状态更新：已拦截（{reason}）")
                 elif result == "unmatched":

@@ -588,6 +588,93 @@ class TestStage6(unittest.TestCase):
         }
         self.assertFalse(rescue_option1_fuzzy_match(group_judgment, "65405", "胡耔墨")["matched"])
 
+    def test_treeview_high_perf_ui_helpers(self):
+        from sender_py.sender import SenderApp
+
+        class DummyVar:
+            def __init__(self, val): self.val = val
+            def get(self): return self.val
+            def set(self, v): self.val = v
+
+        class DummyTree:
+            def __init__(self):
+                self.rows = {}
+                self.heading_text = {}
+                self.seen = []
+            def get_children(self):
+                return tuple(self.rows.keys())
+            def delete(self, *iids):
+                for iid in iids:
+                    self.rows.pop(iid, None)
+            def insert(self, _parent, _index, iid=None, values=(), tags=()):
+                self.rows[iid] = {"values": values, "tags": tags}
+            def item(self, iid, values=None, tags=None):
+                if iid in self.rows:
+                    if values is not None:
+                        self.rows[iid]["values"] = values
+                    if tags is not None:
+                        self.rows[iid]["tags"] = tags
+            def heading(self, col, text=None, **_kw):
+                if text is not None:
+                    self.heading_text[col] = text
+            def see(self, iid):
+                self.seen.append(iid)
+            def yview_moveto(self, _v):
+                pass
+
+        class DummyTk:
+            TclError = RuntimeError
+            @staticmethod
+            def BooleanVar(master=None, value=True):
+                return DummyVar(value)
+            @staticmethod
+            def StringVar(master=None, value=""):
+                return DummyVar(value)
+
+        class DummyApp:
+            tk = DummyTk
+            root = None
+            _running = False
+            _search_after = None
+            search_var = DummyVar("")
+            filter_var = DummyVar("全部")
+            summary_var = DummyVar("")
+            input_paths = ["a.json"]
+            items = [
+                {"sid": "65405", "sname": "胡耔墨", "studentName": "65405胡耔墨", "message": "m1"},
+                {"sid": "65406", "sname": "李四", "studentName": "65406李四", "message": "m2"},
+            ]
+            students_tree = DummyTree()
+            _status_of = SenderApp._status_of
+            _visible_items = SenderApp._visible_items
+            _cancel_search_rebuild = SenderApp._cancel_search_rebuild
+            _tree_tag_for_item = SenderApp._tree_tag_for_item
+            _tree_values_for_item = SenderApp._tree_values_for_item
+            _refresh_tree_row = SenderApp._refresh_tree_row
+            rebuild_student_list = SenderApp.rebuild_student_list
+            _do_set_status = SenderApp._do_set_status
+            set_status = SenderApp.set_status
+            update_summary = SenderApp.update_summary
+            _apply_selection_status = SenderApp._apply_selection_status
+            set_all_selected = SenderApp.set_all_selected
+
+        app = DummyApp()
+        app.rebuild_student_list()
+        self.assertEqual(len(app.students_tree.rows), 2)
+        self.assertEqual(app.students_tree.rows["row_0"]["values"][0], "☑")
+        self.assertEqual(app.students_tree.rows["row_0"]["tags"], ("st_待发送_even",))
+        self.assertEqual(app.students_tree.rows["row_1"]["tags"], ("st_待发送_odd",))
+
+        app.set_all_selected(False)
+        self.assertEqual(app.students_tree.rows["row_0"]["values"][0], "☐")
+        self.assertEqual(app.students_tree.rows["row_0"]["values"][3], "已跳过")
+        self.assertEqual(app.students_tree.heading_text.get("select"), "☐ 选")
+
+        app._running = True
+        app._do_set_status(app.items[1], "发送中")
+        self.assertEqual(app.students_tree.rows["row_1"]["tags"], ("st_发送中",))
+        self.assertIn("row_1", app.students_tree.seen)
+
 
 if __name__ == "__main__":
     unittest.main()
