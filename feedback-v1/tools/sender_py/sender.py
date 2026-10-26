@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.8.2"
+APP_VERSION = "1.8.3"
 
 
 def asset_path(filename: str) -> str:
@@ -496,6 +496,33 @@ class AsyncReplyAnalyzer:
                 pass
 
 
+def rescue_option1_fuzzy_match(judgment: dict, target_id: str, target_name: str) -> dict:
+    """方案1智能容错：在非群聊且学号精确匹配的前提下，允许姓名存在1字形近/OCR误差。"""
+    if not isinstance(judgment, dict):
+        return judgment
+    if judgment.get("matched") is True or judgment.get("is_group") is True:
+        return judgment
+
+    try:
+        try:
+            from sender_py.local_ocr import detect_is_group, match_name_fuzzy, normalize_clean
+        except ModuleNotFoundError:
+            from local_ocr import detect_is_group, match_name_fuzzy, normalize_clean
+
+        title = str(judgment.get("detected_title") or "")
+        clean_title = normalize_clean(title)
+        clean_id = normalize_clean(target_id)
+        if clean_id and not detect_is_group(title):
+            if clean_id in clean_title:
+                name_ok, name_reason = match_name_fuzzy(target_name, clean_title)
+                if name_ok:
+                    judgment["matched"] = True
+                    judgment["reason"] = f"方案1容错放行：学号[{target_id}]精准吻合，{name_reason}"
+    except Exception:
+        pass
+    return judgment
+
+
 def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
                     token=None, fast_title_only: bool = False,
                     verify_mode: str = "auto") -> tuple:
@@ -563,6 +590,7 @@ def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
                 else:
                     err = str(e)
         if judgment is not None:
+            judgment = rescue_option1_fuzzy_match(judgment, target_id, target_name)
             return (judgment, judgment.get("detected_title"), None, chat_img)
         return (None, None, err, chat_img)
 
@@ -576,6 +604,7 @@ def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
         judgment["last_message_text"] = "(本地OCR模式)"
         judgment["needs_reply"] = None
         judgment["reason"] = f"[本地OCR模式] {judgment.get('reason', '')}"
+        judgment = rescue_option1_fuzzy_match(judgment, target_id, target_name)
         return (judgment, judgment.get("detected_title"), None)
 
     try:
@@ -587,8 +616,10 @@ def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
                 local_res["last_sender"] = "unknown"
                 local_res["last_message_text"] = "(API异常，本地OCR备用通道)"
                 local_res["needs_reply"] = None
+                local_res = rescue_option1_fuzzy_match(local_res, target_id, target_name)
                 return (local_res, local_res.get("detected_title"), None)
         return (None, None, str(e))
+    judgment = rescue_option1_fuzzy_match(judgment, target_id, target_name)
     return (judgment, judgment.get("detected_title"), None)
 
 
@@ -682,7 +713,9 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
             log(f"  └ 候选 {cand} 校验异常：{err}，换下一候选")
             _paced(CANDIDATE_GAP)
             continue
-        if judgment and ("[备选方案: 本地OCR]" in str(judgment.get("reason", "")) or "[本地OCR模式]" in str(judgment.get("reason", ""))):
+        if judgment and "方案1容错放行" in str(judgment.get("reason", "")):
+            log(f"  💡 方案1智能容错生效：{judgment.get('reason')}")
+        elif judgment and ("[备选方案: 本地OCR]" in str(judgment.get("reason", "")) or "[本地OCR模式]" in str(judgment.get("reason", ""))):
             log(f"  └ 💡 采用本地 OCR 备用通道核验：{judgment.get('reason')}")
         decision = decide_action(judgment)
         if decision["action"] == "send":

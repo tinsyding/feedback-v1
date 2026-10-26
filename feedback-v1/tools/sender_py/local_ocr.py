@@ -64,11 +64,77 @@ def normalize_clean(s: str) -> str:
     return re.sub(r'[\s\-_—·.,，:：()（）\[\]【】]+', '', str(s)).lower()
 
 
+def levenshtein_distance(s1: str, s2: str) -> int:
+    """计算两个字符串之间的编辑距离。"""
+    if s1 == s2:
+        return 0
+    if not s1:
+        return len(s2)
+    if not s2:
+        return len(s1)
+    prev = list(range(len(s2) + 1))
+    for i, c1 in enumerate(s1):
+        curr = [i + 1] * (len(s2) + 1)
+        for j, c2 in enumerate(s2):
+            cost = 0 if c1 == c2 else 1
+            curr[j + 1] = min(curr[j] + 1, prev[j + 1] + 1, prev[j] + cost)
+        prev = curr
+    return prev[-1]
+
+
+def match_name_fuzzy(target_name: str, raw_text: str) -> tuple:
+    """方案1：核验姓名是否匹配（支持 1 个字的 OCR 形近字/生僻字/错别字容差）。
+    
+    返回 (is_match: bool, reason: str)。
+    """
+    clean_name = normalize_clean(target_name)
+    clean_text = normalize_clean(raw_text)
+    if not clean_name:
+        return (True, "无目标姓名要求")
+    if clean_name in clean_text:
+        return (True, f"姓名[{target_name}]完全一致")
+
+    n = len(clean_name)
+    if n < 2:
+        return (False, f"姓名[{target_name}]过短且未完全匹配")
+
+    # 1. 滑动窗口编辑距离检测（从带有学号、后缀的长标题中找出最匹配的姓名片段）
+    min_dist = 999
+    best_sub = ""
+    for w_len in (n, n + 1, n - 1):
+        if w_len <= 0 or w_len > len(clean_text):
+            continue
+        for i in range(len(clean_text) - w_len + 1):
+            sub = clean_text[i:i + w_len]
+            dist = levenshtein_distance(clean_name, sub)
+            if dist < min_dist:
+                min_dist = dist
+                best_sub = sub
+
+    # 姓名长度 >= 2 时，允许最多 1 个字的形近字/OCR 差异（如 胡耔墨 vs 胡籽墨）
+    if min_dist <= 1:
+        return (True, f"姓名[{target_name}]命中形近容错（标题中为[{best_sub}]，仅差1字）")
+
+    # 2. 针对 3 字及以上姓名，若其中 >= n-1 个字按顺序匹配，亦视为放行（如生僻字漏识1字）
+    matched_chars = 0
+    last_pos = -1
+    for char in clean_name:
+        pos = clean_text.find(char, last_pos + 1)
+        if pos != -1:
+            matched_chars += 1
+            last_pos = pos
+
+    if n >= 3 and matched_chars >= n - 1:
+        return (True, f"姓名[{target_name}]主要文字吻合（{matched_chars}/{n}字按序吻合）")
+
+    return (False, f"姓名[{target_name}]未匹配（差异大于1字）")
+
+
 def parse_title_judgment(ocr_text: str, target_id: str, target_name: str) -> dict:
     """纯函数：依据 OCR 识别出的文本做确定性核验决策（无环境依赖，可 100% 单测）。
     
-    返回字段与 identify.php 接口完全对齐：
-      - matched: bool（标题同时包含学号与姓名才为 true，任一缺失或为群聊则 false）
+    遵循方案1（学号精确匹配 + 姓名 1 字形近容错）：
+      - matched: bool（非群聊，且学号精准匹配+姓名完全或1字容错时为 true）
       - is_group: bool（是否检测到群聊）
       - title_in_header: bool（是否识别到有效标题）
       - detected_title: str（识别原文）
@@ -94,15 +160,10 @@ def parse_title_judgment(ocr_text: str, target_id: str, target_name: str) -> dic
             "reason": f"本地OCR检测到群聊特征（{raw}），严格拦截",
         }
 
-    # 2. 身份核验：检查学号与姓名
     clean_text = normalize_clean(raw)
     clean_id = normalize_clean(target_id)
     clean_name = normalize_clean(target_name)
 
-    has_id = (clean_id in clean_text) if clean_id else True
-    has_name = (clean_name in clean_text) if clean_name else True
-
-    # 至少学号或姓名之一有要求，否则不可无条件通过
     if not clean_id and not clean_name:
         return {
             "matched": False,
@@ -112,26 +173,50 @@ def parse_title_judgment(ocr_text: str, target_id: str, target_name: str) -> dic
             "reason": "目标学号与姓名均为空，拒绝放行",
         }
 
-    if has_id and has_name:
+    # 2. 如果提供了目标学号（机构业务唯一标识）
+    if clean_id:
+        if clean_id not in clean_text:
+            return {
+                "matched": False,
+                "is_group": False,
+                "title_in_header": True,
+                "detected_title": raw,
+                "reason": f"本地OCR核验未通过：缺失学号[{target_id}]（识别原文: {raw}）",
+            }
+        # 学号 100% 精确吻合！进入姓名核验（方案1：允许 1 字 OCR 形近容错）
+        name_ok, name_reason = match_name_fuzzy(clean_name, clean_text)
+        if name_ok:
+            return {
+                "matched": True,
+                "is_group": False,
+                "title_in_header": True,
+                "detected_title": raw,
+                "reason": f"本地OCR匹配成功：学号[{target_id}]精准吻合，{name_reason}",
+            }
+        else:
+            return {
+                "matched": False,
+                "is_group": False,
+                "title_in_header": True,
+                "detected_title": raw,
+                "reason": f"本地OCR核验未通过：学号[{target_id}]吻合但缺失姓名[{target_name}]（识别原文: {raw}）",
+            }
+
+    # 3. 若无目标学号，仅有姓名：要求姓名必须完全一致且非群聊
+    if clean_name in clean_text:
         return {
             "matched": True,
             "is_group": False,
             "title_in_header": True,
             "detected_title": raw,
-            "reason": f"本地OCR匹配成功：识别到标题包含学号[{target_id}]与姓名[{target_name}]",
+            "reason": f"本地OCR匹配成功：无学号，姓名[{target_name}]完全一致",
         }
-
-    missing = []
-    if not has_id:
-        missing.append(f"学号[{target_id}]")
-    if not has_name:
-        missing.append(f"姓名[{target_name}]")
     return {
         "matched": False,
         "is_group": False,
         "title_in_header": True,
         "detected_title": raw,
-        "reason": f"本地OCR未完全匹配目标：缺失{'和'.join(missing)}（识别原文: {raw}）",
+        "reason": f"本地OCR核验未通过：无学号，缺失姓名[{target_name}]（识别原文: {raw}）",
     }
 
 

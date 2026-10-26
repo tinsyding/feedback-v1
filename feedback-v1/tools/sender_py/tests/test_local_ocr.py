@@ -89,6 +89,26 @@ class LocalOcrTest(unittest.TestCase):
         self.assertFalse(res["is_group"])
         self.assertEqual(res["detected_title"], "202405 王小明")
 
+    def test_option1_fuzzy_match_homoglyph_and_rare_characters(self):
+        # 验证方案1：学号精确匹配(65405)，姓名支持1字形近/OCR误差(胡耔墨 vs 胡籽墨)
+        res = parse_title_judgment("65405胡籽墨 @微信", "65405", "胡耔墨")
+        self.assertTrue(res["matched"])
+        self.assertFalse(res["is_group"])
+        self.assertIn("命中形近容错", res["reason"])
+
+        # 验证其他生僻字/形近字：如 峰 vs 夆
+        res2 = parse_title_judgment("99001张夆 @微信", "99001", "张峰")
+        self.assertTrue(res2["matched"])
+
+        # 验证若是群聊，哪怕学号姓名都符合，依然坚决拦截
+        res_group = parse_title_judgment("65405胡籽墨家校沟通群(3)", "65405", "胡耔墨")
+        self.assertFalse(res_group["matched"])
+        self.assertTrue(res_group["is_group"])
+
+        # 验证如果人名完全风马牛不相及（差异大于1字），拒绝放行
+        res_mismatch = parse_title_judgment("65405李四 @微信", "65405", "胡耔墨")
+        self.assertFalse(res_mismatch["matched"])
+
 
 if __name__ == "__main__":
     unittest.main()

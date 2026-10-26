@@ -566,6 +566,28 @@ class TestStage6(unittest.TestCase):
         self.assertTrue(callback_called[0])
         watcher.stop()
 
+    def test_rescue_option1_fuzzy_match(self):
+        from sender_py.sender import rescue_option1_fuzzy_match
+        # 模拟云端 API 严格返回 matched=False，但 detected_title 中包含学号与形近字姓名
+        mock_judgment = {
+            "matched": False,
+            "is_group": False,
+            "detected_title": "65405胡籽墨 @微信",
+            "reason": "学号或姓名不匹配",
+        }
+        rescued = rescue_option1_fuzzy_match(mock_judgment, "65405", "胡耔墨")
+        self.assertTrue(rescued["matched"])
+        self.assertIn("方案1容错放行", rescued["reason"])
+
+        # 若是群聊，决不放行
+        group_judgment = {
+            "matched": False,
+            "is_group": True,
+            "detected_title": "65405胡籽墨群聊",
+            "reason": "群聊",
+        }
+        self.assertFalse(rescue_option1_fuzzy_match(group_judgment, "65405", "胡耔墨")["matched"])
+
 
 if __name__ == "__main__":
     unittest.main()

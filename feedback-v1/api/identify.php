@@ -145,11 +145,16 @@ if ($mode === 'title') {
     $prompt = '你是企业微信窗口核验器。看聊天窗口顶部标题栏截图。'
         . '目标学生学号为“' . $targetId . '”，姓名为“' . $targetName . '”。'
         . '只输出 JSON（无 markdown、无多余文字），字段：'
-        . '{"matched":bool(标题同时包含学号与姓名才为true，任一缺失/是群聊则false),'
+        . '{"matched":bool(是否为目标学生的私聊窗口),'
         . '"is_group":bool(是群聊/多人会话为true),'
         . '"title_in_header":bool(标题栏能读到有效标题),'
-        . '"detected_title":string(标题栏读到的原文，读不到为空字符串),'
-        . '"reason":string(一句话理由)}';
+        . '"detected_title":string(标题栏读到的完整原文),'
+        . '"reason":string(一句话理由)}。'
+        . '【核验规则(方案1：学号精确+姓名容错)】：'
+        . '1. 红线拦截：只要标题呈现群聊/讨论组特征（如带人数括号“(45)”、交流群、多位人名顿号逗号分隔等），matched必须为false，is_group必须为true；'
+        . '2. 私聊判定：'
+        . '   - 若目标学号非空（如5位数字）：学号为机构唯一主键，标题必须精准包含该学号。在此前提下，若姓名完全一致、或仅相差1个字（形近字/生僻字OCR误差，如“耔”识别为“籽”、“峰”识别为“夆”等）、或带“@微信/爸爸/妈妈”等后缀，均判定 matched=true；只有当学号缺失不符、或完全是另一个互不相干的人名时，matched 才为 false；'
+        . '   - 若目标学号为空：标题必须完全包含目标姓名且非群聊才 matched=true。';
     $userContent = [
         ['type' => 'text', 'text' => $prompt],
         ['type' => 'image_url', 'image_url' => ['url' => _img_data_url($_FILES['image_title']['tmp_name'])]],
@@ -170,14 +175,18 @@ if ($mode === 'title') {
     $prompt = '你是企业微信窗口核验器。看两张图：图1是聊天窗口顶部标题栏截图，图2是同一窗口聊天区末尾截图。'
         . '目标学生学号为“' . $targetId . '”，姓名为“' . $targetName . '”。'
         . '只输出 JSON（无 markdown、无多余文字），字段：'
-        . '{"matched":bool(标题同时包含学号与姓名才为true，任一缺失/是群聊则false),'
+        . '{"matched":bool(是否为目标学生的私聊窗口),'
         . '"is_group":bool(是群聊/多人会话为true),'
         . '"title_in_header":bool(标题栏能读到有效标题),'
-        . '"detected_title":string(标题栏读到的原文，读不到为空字符串),'
+        . '"detected_title":string(标题栏读到的完整原文),'
         . '"last_sender":"me"|"parent"|"unknown"|null(聊天末尾最后一条是谁发的：我/家长/无法判断/无消息),'
         . '"last_message_text":string(最后一条文本内容，无则为空字符串),'
         . '"needs_reply":bool|null(家长最后一条需要老师回复为true，明确无需回为false，判不出为null),'
-        . '"reason":string(一句话理由)}';
+        . '"reason":string(一句话理由)}。'
+        . '【核验规则(方案1：学号精确+姓名容错)】：'
+        . '1. 红线拦截：只要呈现群聊/讨论组特征，matched必须为false，is_group必须为true；'
+        . '2. 私聊判定：若目标学号非空，学号为唯一主键，标题必须包含该学号；在此前提下，若姓名一致、或仅相差1字(形近字/生僻字OCR误差，如“耔”和“籽”)、或带后缀，matched=true；'
+        . '若目标学号为空，则标题中姓名必须完全一致且非群聊。';
     $userContent = [
         ['type' => 'text', 'text' => $prompt],
         ['type' => 'image_url', 'image_url' => ['url' => _img_data_url($_FILES['image_title']['tmp_name'])]],
