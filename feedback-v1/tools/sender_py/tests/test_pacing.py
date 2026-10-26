@@ -2,15 +2,20 @@
 
 import unittest
 
-from sender_py.pacing import AFTER_SEND_GAP, CANDIDATE_GAP, STUDENT_GAP, pause
+from sender_py.pacing import (
+    AFTER_SEND_GAP, BATCH_BREAK_EVERY, BATCH_BREAK_GAP,
+    CANDIDATE_GAP, SEARCH_GAP, STUDENT_GAP, pause
+)
 
 
 class TestPacing(unittest.TestCase):
     def test_ranges_ordered(self):
-        for low, high in (CANDIDATE_GAP, AFTER_SEND_GAP, STUDENT_GAP):
+        for low, high in (CANDIDATE_GAP, AFTER_SEND_GAP, STUDENT_GAP, SEARCH_GAP):
             self.assertLess(low, high)
             self.assertGreaterEqual(low, 0)
-            self.assertLessEqual(high, 1.0)  # 全部控制在 1 秒以内
+            self.assertLessEqual(high, 1.0)
+        self.assertEqual(BATCH_BREAK_EVERY, 15)
+        self.assertEqual(BATCH_BREAK_GAP, (2.0, 3.0))
 
     def test_pause_stubbed(self):
         calls = []

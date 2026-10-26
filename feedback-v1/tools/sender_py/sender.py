@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.7.3"
+APP_VERSION = "1.7.4"
 
 
 def asset_path(filename: str) -> str:
@@ -30,7 +30,10 @@ def app_icon_path():
 
 
 try:  # 仓库结构优先；散装拷贝（文件同目录）兜底
-    from sender_py.pacing import AFTER_SEND_GAP, CANDIDATE_GAP, STUDENT_GAP, pause
+    from sender_py.pacing import (
+        AFTER_SEND_GAP, BATCH_BREAK_EVERY, BATCH_BREAK_GAP,
+        CANDIDATE_GAP, SEARCH_GAP, STUDENT_GAP, pause
+    )
     from sender_py.reply_notes import actionable, dedupe_add, make_note, should_record
     from sender_py.roi_manager import (
         crop_chat_tail, default_config_path, derive_chat, load_roi, needs_calibration,
@@ -38,7 +41,10 @@ try:  # 仓库结构优先；散装拷贝（文件同目录）兜底
     )
     from sender_py.utils import load_feedback_items, parse_student_identifier
 except ModuleNotFoundError:
-    from pacing import AFTER_SEND_GAP, CANDIDATE_GAP, STUDENT_GAP, pause
+    from pacing import (
+        AFTER_SEND_GAP, BATCH_BREAK_EVERY, BATCH_BREAK_GAP,
+        CANDIDATE_GAP, SEARCH_GAP, STUDENT_GAP, pause
+    )
     from reply_notes import actionable, dedupe_add, make_note, should_record
     from roi_manager import (
         crop_chat_tail, default_config_path, derive_chat, load_roi, needs_calibration,
@@ -630,7 +636,8 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
                 log(f"  └ 候选 {cand}：企微唤起失败，尝试下一候选")
                 _paced(CANDIDATE_GAP)
                 continue
-            time.sleep(0.3)
+            search_delay = pause(*SEARCH_GAP)
+            log(f"  └ 搜索完成，随机停顿 {search_delay:.2f} 秒...")
         if should_stop is not None and should_stop():
             log(f"  └ 收到停止请求，候选 {cand} 未发送")
             return {"result": "stopped", "reason": "用户停止", "notes": notes}
@@ -2524,11 +2531,18 @@ class SenderApp:
                     stopped = True
                     break
                 if processed < selected_count and not self._stop_requested:
-                    gap = random.uniform(*STUDENT_GAP)
-                    self.emit(f"  ⏳ 随机停顿 {gap:.1f} 秒，模拟人工打字节奏...")
-                    if not self._interruptible_pause(gap):
-                        stopped = True
-                        break
+                    if processed % BATCH_BREAK_EVERY == 0:
+                        break_gap = random.uniform(*BATCH_BREAK_GAP)
+                        self.emit(f"  ☕ 已连续处理 {processed} 人，执行防风控停顿 {break_gap:.1f} 秒（按ESC可停止）...")
+                        if not self._interruptible_pause(break_gap):
+                            stopped = True
+                            break
+                    else:
+                        gap = random.uniform(*STUDENT_GAP)
+                        self.emit(f"  ⏳ 随机停顿 {gap:.1f} 秒，模拟人工打字节奏...")
+                        if not self._interruptible_pause(gap):
+                            stopped = True
+                            break
         except Exception as exc:
             self.emit(f"发送流程异常：{exc}")
             stopped = True

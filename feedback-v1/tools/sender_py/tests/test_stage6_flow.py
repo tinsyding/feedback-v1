@@ -432,6 +432,12 @@ class TestStage6(unittest.TestCase):
         dialog.set_status("测试更新状态...", "副标题")
         dialog.close()
 
+    def test_search_gap_and_batch_break_constants(self):
+        from sender_py.pacing import BATCH_BREAK_EVERY, BATCH_BREAK_GAP, SEARCH_GAP
+        self.assertEqual(SEARCH_GAP, (0.3, 0.6))
+        self.assertEqual(BATCH_BREAK_EVERY, 15)
+        self.assertEqual(BATCH_BREAK_GAP, (2.0, 3.0))
+
 
 if __name__ == "__main__":
     unittest.main()
