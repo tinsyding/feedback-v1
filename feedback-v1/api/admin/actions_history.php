@@ -127,13 +127,13 @@ switch ($action) {
                     DB::execute("
                         INSERT INTO `student_record_history` (
                             record_id, batch_id, batch_code, student_id, student_name, student_key,
-                            week_num, preview_week_num, homework_score, preview_score, total_score, error_count,
-                            error_questions, preview_error_questions, teacher_comment, source_files, retest_token,
+                            week_num, homework_score, preview_score, total_score, error_count,
+                            error_questions, teacher_comment, source_files, retest_token,
                             created_by, operator, operation_type, record_created_at, record_updated_at, archived_at
                         ) VALUES (
                             ?, ?, ?, ?, ?, ?,
-                            ?, ?, ?, ?, ?, ?,
                             ?, ?, ?, ?, ?,
+                            ?, ?, ?, ?,
                             ?, ?, 'before_rollback', ?, ?, NOW()
                         )
                     ", [
@@ -144,13 +144,11 @@ switch ($action) {
                         $currentRec['student_name'],
                         $currentRec['student_key'] ?? '',
                         $currentRec['week_num'],
-                        $currentRec['preview_week_num'] ?? null,
                         $currentRec['homework_score'],
                         $currentRec['preview_score'],
                         $currentRec['total_score'],
                         $currentRec['error_count'],
                         $currentRec['error_questions'],
-                        $currentRec['preview_error_questions'] ?? null,
                         $currentRec['teacher_comment'],
                         $currentRec['source_files'] ?? null,
                         $currentRec['retest_token'] ?? null,
@@ -166,13 +164,11 @@ switch ($action) {
                             student_id = ?,
                             student_name = ?,
                             student_key = ?,
-                            preview_week_num = ?,
                             homework_score = ?,
                             preview_score = ?,
                             total_score = ?,
                             error_count = ?,
                             error_questions = ?,
-                            preview_error_questions = ?,
                             teacher_comment = ?,
                             source_files = ?,
                             retest_token = ?,
@@ -182,13 +178,11 @@ switch ($action) {
                         $h['student_id'] ?? '',
                         $h['student_name'],
                         $hStudentKey,
-                        $h['preview_week_num'] ?? null,
                         $h['homework_score'],
                         $h['preview_score'],
                         $h['total_score'],
                         $h['error_count'],
                         $h['error_questions'],
-                        $h['preview_error_questions'] ?? null,
                         $h['teacher_comment'],
                         $h['source_files'],
                         $h['retest_token'],
@@ -198,14 +192,14 @@ switch ($action) {
                     // 如果当前记录已被删除，则恢复插入
                     DB::execute("
                         INSERT INTO `student_records` (
-                            batch_id, student_id, student_name, student_key, week_num, preview_week_num,
+                            batch_id, student_id, student_name, student_key, week_num,
                             homework_score, preview_score, total_score, error_count,
-                            error_questions, preview_error_questions, teacher_comment, source_files, retest_token,
+                            error_questions, teacher_comment, source_files, retest_token,
                             created_at, updated_at
                         ) VALUES (
-                            ?, ?, ?, ?, ?, ?,
-                            ?, ?, ?, ?,
                             ?, ?, ?, ?, ?,
+                            ?, ?, ?, ?,
+                            ?, ?, ?, ?,
                             ?, NOW()
                         )
                     ", [
@@ -214,13 +208,11 @@ switch ($action) {
                         $h['student_name'],
                         $hStudentKey,
                         $h['week_num'],
-                        $h['preview_week_num'] ?? null,
                         $h['homework_score'],
                         $h['preview_score'],
                         $h['total_score'],
                         $h['error_count'],
                         $h['error_questions'],
-                        $h['preview_error_questions'] ?? null,
                         $h['teacher_comment'],
                         $h['source_files'],
                         $h['retest_token'],

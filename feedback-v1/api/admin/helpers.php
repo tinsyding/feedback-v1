@@ -95,21 +95,16 @@ function syncQbankJsonBackup(int $qbankId, ?array $oldWeekRec = null): void {
             @mkdir($qbankDataDir, 0755, true);
         }
 
-        $weekRec = DB::fetchOne("SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$qbankId]);
+        $weekRec = DB::fetchOne("SELECT `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$qbankId]);
         if (!$weekRec) return;
-        $bankType = ($weekRec['bank_type'] ?? 'homework') === 'preview' ? 'preview' : 'homework';
-        $typeSegment = $bankType === 'preview' ? '_preview' : '';
 
         // 若修改前记录存在，且文件名发生改变，安全删除旧文件
         if ($oldWeekRec) {
-            $oldBankType = ($oldWeekRec['bank_type'] ?? 'homework') === 'preview' ? 'preview' : 'homework';
-            $oldTypeSegment = $oldBankType === 'preview' ? '_preview' : '';
-            $oldF1 = $qbankDataDir . '/' . rawurlencode($oldWeekRec['year']) . '_' . rawurlencode($oldWeekRec['season']) . '_' . rawurlencode($oldWeekRec['subject']) . '_' . rawurlencode($oldWeekRec['grade']) . '_' . rawurlencode($oldWeekRec['tier']) . $oldTypeSegment . '_week' . intval($oldWeekRec['week']) . '.json';
-            $oldF2 = $qbankDataDir . '/' . rawurlencode($oldWeekRec['subject']) . '_' . rawurlencode($oldWeekRec['grade']) . '_' . rawurlencode($oldWeekRec['tier']) . $oldTypeSegment . '_week' . intval($oldWeekRec['week']) . '.json';
-            $newF1 = $qbankDataDir . '/' . rawurlencode($weekRec['year']) . '_' . rawurlencode($weekRec['season']) . '_' . rawurlencode($weekRec['subject']) . '_' . rawurlencode($weekRec['grade']) . '_' . rawurlencode($weekRec['tier']) . $typeSegment . '_week' . intval($weekRec['week']) . '.json';
+            $oldF1 = $qbankDataDir . '/' . rawurlencode($oldWeekRec['year']) . '_' . rawurlencode($oldWeekRec['season']) . '_' . rawurlencode($oldWeekRec['subject']) . '_' . rawurlencode($oldWeekRec['grade']) . '_' . rawurlencode($oldWeekRec['tier']) . '_week' . intval($oldWeekRec['week']) . '.json';
+            $oldF2 = $qbankDataDir . '/' . rawurlencode($oldWeekRec['subject']) . '_' . rawurlencode($oldWeekRec['grade']) . '_' . rawurlencode($oldWeekRec['tier']) . '_week' . intval($oldWeekRec['week']) . '.json';
+            $newF1 = $qbankDataDir . '/' . rawurlencode($weekRec['year']) . '_' . rawurlencode($weekRec['season']) . '_' . rawurlencode($weekRec['subject']) . '_' . rawurlencode($weekRec['grade']) . '_' . rawurlencode($weekRec['tier']) . '_week' . intval($weekRec['week']) . '.json';
             if ($oldF1 !== $newF1 && file_exists($oldF1)) @unlink($oldF1);
-            // 旧版无年份文件名已按题库类型带 _preview 后缀，不会误删另一类题库
-            if (file_exists($oldF2) && $oldF2 !== $newF1) @unlink($oldF2);
+            if (file_exists($oldF2)) @unlink($oldF2);
         }
 
         // 获取明细题目
@@ -136,7 +131,6 @@ function syncQbankJsonBackup(int $qbankId, ?array $oldWeekRec = null): void {
         }
 
         $jsonData = [
-            'bankType' => $bankType,
             'year' => intval($weekRec['year']),
             'season' => $weekRec['season'],
             'subject' => $weekRec['subject'],
@@ -146,7 +140,7 @@ function syncQbankJsonBackup(int $qbankId, ?array $oldWeekRec = null): void {
             'questions' => $questions,
             'updatedAt' => round(microtime(true) * 1000)
         ];
-        $targetF = $qbankDataDir . '/' . rawurlencode($weekRec['year']) . '_' . rawurlencode($weekRec['season']) . '_' . rawurlencode($weekRec['subject']) . '_' . rawurlencode($weekRec['grade']) . '_' . rawurlencode($weekRec['tier']) . $typeSegment . '_week' . intval($weekRec['week']) . '.json';
+        $targetF = $qbankDataDir . '/' . rawurlencode($weekRec['year']) . '_' . rawurlencode($weekRec['season']) . '_' . rawurlencode($weekRec['subject']) . '_' . rawurlencode($weekRec['grade']) . '_' . rawurlencode($weekRec['tier']) . '_week' . intval($weekRec['week']) . '.json';
         @file_put_contents($targetF, json_encode($jsonData, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
     } catch (Throwable $e) {
         error_log("syncQbankJsonBackup error: " . $e->getMessage());
@@ -162,10 +156,8 @@ function deleteQbankJsonBackup(?array $weekRec): void {
         if (!$weekRec) return;
         $qbankDataDir = dirname(__DIR__, 2) . '/data/qbank';
         if (!is_dir($qbankDataDir)) return;
-        $bankType = ($weekRec['bank_type'] ?? 'homework') === 'preview' ? 'preview' : 'homework';
-        $typeSegment = $bankType === 'preview' ? '_preview' : '';
-        $f1 = $qbankDataDir . '/' . rawurlencode($weekRec['year']) . '_' . rawurlencode($weekRec['season']) . '_' . rawurlencode($weekRec['subject']) . '_' . rawurlencode($weekRec['grade']) . '_' . rawurlencode($weekRec['tier']) . $typeSegment . '_week' . intval($weekRec['week']) . '.json';
-        $f2 = $qbankDataDir . '/' . rawurlencode($weekRec['subject']) . '_' . rawurlencode($weekRec['grade']) . '_' . rawurlencode($weekRec['tier']) . $typeSegment . '_week' . intval($weekRec['week']) . '.json';
+        $f1 = $qbankDataDir . '/' . rawurlencode($weekRec['year']) . '_' . rawurlencode($weekRec['season']) . '_' . rawurlencode($weekRec['subject']) . '_' . rawurlencode($weekRec['grade']) . '_' . rawurlencode($weekRec['tier']) . '_week' . intval($weekRec['week']) . '.json';
+        $f2 = $qbankDataDir . '/' . rawurlencode($weekRec['subject']) . '_' . rawurlencode($weekRec['grade']) . '_' . rawurlencode($weekRec['tier']) . '_week' . intval($weekRec['week']) . '.json';
         if (file_exists($f1)) @unlink($f1);
         if (file_exists($f2)) @unlink($f2);
     } catch (Throwable $e) {

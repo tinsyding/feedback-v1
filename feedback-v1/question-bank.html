@@ -12,7 +12,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261022-4';
+            const v = '20261022-2';
             document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/question-bank.css?v=${v}">`);
@@ -118,13 +118,6 @@
                         </div>
                         <div class="config-card-body">
                             <div class="qb-selectors">
-                                <div class="qb-select-group">
-                                    <label>题库类型</label>
-                                    <select class="qb-select" id="qb-bank-type" onchange="onBankTypeChange()">
-                                        <option value="homework" selected>课后巩固</option>
-                                        <option value="preview">预习</option>
-                                    </select>
-                                </div>
                                 <div class="qb-select-group" style="display: none;">
                                     <label>年份</label>
                                     <select class="qb-select" id="qb-year" onchange="onSelectorChange()">
@@ -179,7 +172,7 @@
                                     </select>
                                 </div>
                                 <div class="qb-select-group">
-                                    <label id="qb-week-label">课后巩固专题</label>
+                                    <label>课后巩固专题</label>
                                     <select class="qb-select" id="qb-week" onchange="onSelectorChange()">
                                         <option value="" selected>请选择专题</option>
                                     </select>
@@ -244,17 +237,6 @@
                                                 </svg>
                                                 重置
                                             </button>
-                                        </div>
-                                    </div>
-                                    <div class="saved-category-row">
-                                        <span class="saved-filter-title">
-                                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                                                <path d="M4 6h16M4 12h16M4 18h7"></path>
-                                            </svg>
-                                            题库类型：
-                                        </span>
-                                        <div class="saved-subject-tabs" id="saved-bank-type-tabs">
-                                            <!-- 动态渲染题库类型标签 -->
                                         </div>
                                     </div>
                                     <div class="saved-category-row">
@@ -613,7 +595,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261022-4';
+            const v = '20261022-2';
             document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
             document.write(`<script src="js/common.js?v=${v}"><\/script>`);
             document.write(`<script src="js/auth.js?v=${v}"><\/script>`);

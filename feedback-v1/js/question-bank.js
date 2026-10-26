@@ -155,7 +155,6 @@ function detectQuestionNumberFromPageText(items, pageWidth, pageHeight, pageNumb
 
 const yearSelect = document.getElementById('qb-year');
 const seasonSelect = document.getElementById('qb-season');
-const bankTypeSelect = document.getElementById('qb-bank-type');
 const subjectSelect = document.getElementById('qb-subject');
 const gradeSelect = document.getElementById('qb-grade');
 const tierSelect = document.getElementById('qb-tier');
@@ -232,7 +231,6 @@ async function generateFingerprint() {
 let maxWeeks = 30; // Default max weeks
 
 async function initQuestionBank() {
-    updateBankTypeUi();
     browserFingerprint = await generateFingerprint();
     if (window.Logger) {
         Logger.setContext({ fingerprint: browserFingerprint });
@@ -352,38 +350,6 @@ function numToChinese(n) {
 function getTopicLabel(w) {
     if (!w || isNaN(parseInt(w))) return '';
     return '专题' + numToChinese(parseInt(w));
-}
-
-function getBankType() {
-    return bankTypeSelect && bankTypeSelect.value === 'preview' ? 'preview' : 'homework';
-}
-
-function getBankTypeLabel(type) {
-    return type === 'preview' ? '预习' : '课后巩固';
-}
-
-function updateBankTypeUi() {
-    const type = getBankType();
-    const weekLabel = document.getElementById('qb-week-label');
-    if (weekLabel) weekLabel.textContent = type === 'preview' ? '预习专题' : '课后巩固专题';
-    const searchInput = document.getElementById('qb-search-input');
-    if (searchInput) {
-        searchInput.placeholder = type === 'preview'
-            ? '按题号或知识点过滤...'
-            : '按题号、知识点或微课链接过滤...';
-    }
-}
-
-function onBankTypeChange() {
-    updateBankTypeUi();
-    // 切换题库类型时清空当前编辑内容，避免把课后巩固题目误存到预习题库
-    currentQuestions = [];
-    isDirty = false;
-    batchImported = false;
-    renderQuestionList();
-    updateStatus();
-    loadCurrentData();
-    if (typeof applySavedDataFilter === 'function') applySavedDataFilter();
 }
 
 function populateWeekSelector() {
@@ -1416,7 +1382,6 @@ function selectBatchPdf(type) {
 async function loadCurrentData() {
     const year = yearSelect ? parseInt(yearSelect.value) : 2026;
     const season = seasonSelect ? seasonSelect.value : '春';
-    const bankType = getBankType();
     const subject = subjectSelect ? subjectSelect.value : '';
     const grade = gradeSelect ? gradeSelect.value : '';
     const tier = tierSelect ? tierSelect.value : '';
@@ -1432,10 +1397,10 @@ async function loadCurrentData() {
     }
 
     try {
-        const result = await apiGet('get', { year, season, bankType, subject, grade, tier, week });
+        const result = await apiGet('get', { year, season, subject, grade, tier, week });
         if (result.success && result.data) {
             currentQuestions = result.data.questions || [];
-            if (window.Logger) Logger.action('load_question_bank', { year, season, bankType, subject, grade, tier, week, questionCount: currentQuestions.length });
+            if (window.Logger) Logger.action('load_question_bank', { year, season, subject, grade, tier, week, questionCount: currentQuestions.length });
         } else {
             currentQuestions = [];
         }
@@ -1584,20 +1549,14 @@ async function saveQuestions() {
         }
     }
 
-    const bankType = getBankType();
-    // 预习题库只需要知识点，不保存微课讲解链接
-    const questionsForSave = bankType === 'preview'
-        ? currentQuestions.map(q => ({ ...q, videoUrl: '', video_url: '' }))
-        : currentQuestions;
     const data = {
-        bankType,
         year: yearSelect ? parseInt(yearSelect.value) : 2026,
         season: seasonSelect ? seasonSelect.value : '春',
         subject: subjectSelect.value,
         grade: gradeSelect.value,
         tier: tierSelect.value,
         week: parseInt(weekSelect.value),
-        questions: questionsForSave,
+        questions: currentQuestions,
         teacher_username: window.currentUser?.username || '',
         teacher_name: window.currentUser?.real_name || ''
     };
@@ -1607,14 +1566,13 @@ async function saveQuestions() {
         const checkRes = await apiGet('get', {
             year: data.year,
             season: data.season,
-            bankType: data.bankType,
             subject: data.subject,
             grade: data.grade,
             tier: data.tier,
             week: data.week
         });
         if (checkRes && checkRes.success && checkRes.data && Array.isArray(checkRes.data.questions) && checkRes.data.questions.length > 0) {
-            const diffs = compareQuestions(checkRes.data.questions, questionsForSave);
+            const diffs = compareQuestions(checkRes.data.questions, currentQuestions);
             // 如果对比没有任何变动，则不弹窗，直接保存
             if (diffs.length > 0) {
                 const currentSummary = [data.grade, data.subject, `${data.tier}班`, getTopicLabel(data.week)].filter(Boolean).join(' · ');
@@ -1780,7 +1738,6 @@ async function executeSaveQuestions(data) {
             
             if (window.Logger) {
                 Logger.action('save_question_bank', {
-                    bankType: data.bankType,
                     year: data.year,
                     season: data.season,
                     subject: data.subject,
@@ -1813,7 +1770,6 @@ async function executeSaveQuestions(data) {
                                 const targetCheck = await apiGet('get', {
                                     year: data.year,
                                     season: data.season,
-                                    bankType: data.bankType,
                                     subject: data.subject,
                                     grade: data.grade,
                                     tier: targetTier,
@@ -1852,26 +1808,25 @@ async function executeSaveQuestions(data) {
     }
 }
 
-function deleteStoredData(subject, grade, tier, week, year, season, bankType) {
+function deleteStoredData(subject, grade, tier, week, year, season) {
     if (window.currentUser && window.currentUser.role === 'assistant') {
         showToast('助教账号仅拥有查看权限，无法删除题库！', 'warn');
         return;
     }
     const delYear = year || (yearSelect ? parseInt(yearSelect.value) : 2026);
     const delSeason = season || (seasonSelect ? seasonSelect.value : '春');
-    const delBankType = bankType === 'preview' ? 'preview' : 'homework';
     showCustomDialog({
         title: '删除数据',
-        body: `确定要删除「${getBankTypeLabel(delBankType)} · ${delYear} ${delSeason}季 · ${subject} · ${grade} · ${tier} · ${getTopicLabel(week)}」的题目数据吗？此操作不可恢复。`,
+        body: `确定要删除「${delYear} ${delSeason}季 · ${subject} · ${grade} · ${tier} · ${getTopicLabel(week)}」的题目数据吗？此操作不可恢复。`,
         confirmText: '删除',
         danger: true,
         onConfirm: async () => {
             try {
-                const result = await apiDelete({ year: delYear, season: delSeason, bankType: delBankType, subject, grade, tier, week, teacher_username: window.currentUser?.username || '' });
+                const result = await apiDelete({ year: delYear, season: delSeason, subject, grade, tier, week, teacher_username: window.currentUser?.username || '' });
                 if (result.success) {
                     const curYear = yearSelect ? parseInt(yearSelect.value) : 2026;
                     const curSeason = seasonSelect ? seasonSelect.value : '春';
-                    if (delBankType === getBankType() && delYear === curYear && delSeason === curSeason && subject === subjectSelect.value && grade === gradeSelect.value && tier === tierSelect.value && String(week) === weekSelect.value) {
+                    if (delYear === curYear && delSeason === curSeason && subject === subjectSelect.value && grade === gradeSelect.value && tier === tierSelect.value && String(week) === weekSelect.value) {
                         await loadCurrentData();
                     }
                     renderSavedDataList();
@@ -1879,7 +1834,6 @@ function deleteStoredData(subject, grade, tier, week, year, season, bankType) {
                     
                     if (window.Logger) {
                         Logger.action('delete_question_bank', {
-                            bankType: delBankType,
                             year: delYear,
                             season: delSeason,
                             subject: subject,
@@ -2204,12 +2158,11 @@ function renderQuestionList() {
         return;
     }
 
-    const isPreviewBank = getBankType() === 'preview';
     const filtered = currentQuestions.map((q, index) => ({ q, originalIndex: index })).filter(({ q }) => {
         if (!questionSearchFilter) return true;
         const idStr = String(q.id).toLowerCase();
         const topicStr = (q.topic || '').toLowerCase();
-        const videoStr = isPreviewBank ? '' : (q.videoUrl || q.video_url || '').toLowerCase();
+        const videoStr = (q.videoUrl || q.video_url || '').toLowerCase();
         return idStr.includes(questionSearchFilter) || topicStr.includes(questionSearchFilter) || videoStr.includes(questionSearchFilter);
     });
 
@@ -2232,7 +2185,20 @@ function renderQuestionList() {
         item.className = 'question-item' + (isAssistant ? ' readonly-item' : '');
         item.dataset.index = originalIndex;
         const videoVal = q.videoUrl || q.video_url || '';
-        const videoRowHtml = isPreviewBank ? '' : `
+        item.innerHTML = `
+            <div class="question-id-tags">
+                <input type="number" class="question-id-input" min="1" step="1" value="${escapeHtml(q.id)}" onwheel="this.blur()" onchange="onIdChange(${originalIndex}, this.value)" ${idReadonlyAttr}>
+            </div>
+            <div class="question-main-fields">
+                <div class="question-field-row question-topic-row">
+                    <label class="question-field-label topic-label">知识点：</label>
+                    <textarea class="question-topic-input"
+                           placeholder="输入知识点 (必填)..."
+                           rows="1"
+                           oninput="onTopicChange(${originalIndex}, this.value); autoResizeTopicTextarea(this);"
+                           onfocus="autoResizeTopicTextarea(this)"
+                           onblur="onTopicBlur(${originalIndex}, this)" ${readonlyAttr}>${escapeHtml(q.topic || '')}</textarea>
+                </div>
                 <div class="question-field-row">
                     <label class="question-field-label video-label">微课链接：</label>
                     <div class="question-video-input-wrap">
@@ -2248,22 +2214,6 @@ function renderQuestionList() {
                         ${videoVal ? `<a href="${escapeHtml(videoVal)}" target="_blank" class="video-preview-link" title="新窗口打开微课链接"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>` : ''}
                     </div>
                 </div>
-        `;
-        item.innerHTML = `
-            <div class="question-id-tags">
-                <input type="number" class="question-id-input" min="1" step="1" value="${escapeHtml(q.id)}" onwheel="this.blur()" onchange="onIdChange(${originalIndex}, this.value)" ${idReadonlyAttr}>
-            </div>
-            <div class="question-main-fields">
-                <div class="question-field-row question-topic-row">
-                    <label class="question-field-label topic-label">知识点：</label>
-                    <textarea class="question-topic-input"
-                           placeholder="输入知识点 (必填)..."
-                           rows="1"
-                           oninput="onTopicChange(${originalIndex}, this.value); autoResizeTopicTextarea(this);"
-                           onfocus="autoResizeTopicTextarea(this)"
-                           onblur="onTopicBlur(${originalIndex}, this)" ${readonlyAttr}>${escapeHtml(q.topic || '')}</textarea>
-                </div>
-                ${videoRowHtml}
             </div>
             <div class="question-pdf-actions">
                 ${renderPdfBtn(q, originalIndex, 'exercise')}
@@ -2313,15 +2263,14 @@ function updateStatus() {
 
     if (saveInfo) {
         if (!hasAllSelectors) {
-            saveInfo.textContent = `请先选择学科、年级、班层和${getBankTypeLabel(getBankType())}专题`;
+            saveInfo.textContent = '请先选择学科、年级、班层和课后巩固专题';
         } else {
-            saveInfo.textContent = `${getBankTypeLabel(getBankType())} · ${subjectSelect.value} · ${gradeSelect.value} · ${tierSelect.value} · ${getTopicLabel(weekSelect.value)} · ${currentQuestions.length}道题`;
+            saveInfo.textContent = `${subjectSelect.value} · ${gradeSelect.value} · ${tierSelect.value} · ${getTopicLabel(weekSelect.value)} · ${currentQuestions.length}道题`;
         }
     }
 }
 
 let allSavedDataList = [];
-let savedBankTypeFilter = 'all';
 let savedSubjectFilter = 'all';
 let savedGradeFilter = 'all';
 let savedTierFilter = 'all';
@@ -2363,7 +2312,6 @@ async function renderSavedDataList() {
             countBadge.textContent = `共 ${allSavedDataList.length} 个专题`;
         }
 
-        renderSavedBankTypeTabs();
         renderSavedSubjectTabs();
         renderSavedTierTabs();
         renderSavedGradeTabs();
@@ -2378,46 +2326,10 @@ async function renderSavedDataList() {
 }
 
 function renderAllCategoryTabs() {
-    renderSavedBankTypeTabs();
     renderSavedSubjectTabs();
     renderSavedTierTabs();
     renderSavedGradeTabs();
     renderSavedWeekTabs();
-}
-
-function renderSavedBankTypeTabs() {
-    const tabsContainer = document.getElementById('saved-bank-type-tabs');
-    if (!tabsContainer) return;
-
-    const counts = { homework: 0, preview: 0 };
-    allSavedDataList.forEach(item => {
-        if (savedSubjectFilter !== 'all' && item.subject !== savedSubjectFilter) return;
-        if (savedTierFilter !== 'all' && item.tier !== savedTierFilter) return;
-        if (savedGradeFilter !== 'all' && item.grade !== savedGradeFilter) return;
-        if (savedWeekFilter !== 'all' && String(item.week) !== String(savedWeekFilter)) return;
-        const type = item.bankType === 'preview' ? 'preview' : 'homework';
-        counts[type] = (counts[type] || 0) + 1;
-    });
-
-    const total = counts.homework + counts.preview;
-    let html = `
-        <button type="button" class="ui-pill ${savedBankTypeFilter === 'all' ? 'active' : ''}" onclick="setSavedBankTypeFilter('all')">
-            全部类型 <span class="pill-count">${total}</span>
-        </button>
-        <button type="button" class="ui-pill ${savedBankTypeFilter === 'homework' ? 'active' : ''}" onclick="setSavedBankTypeFilter('homework')">
-            课后巩固 <span class="pill-count">${counts.homework}</span>
-        </button>
-        <button type="button" class="ui-pill ${savedBankTypeFilter === 'preview' ? 'active' : ''}" onclick="setSavedBankTypeFilter('preview')">
-            预习 <span class="pill-count">${counts.preview}</span>
-        </button>
-    `;
-    tabsContainer.innerHTML = html;
-}
-
-function setSavedBankTypeFilter(type) {
-    savedBankTypeFilter = type === 'preview' || type === 'homework' ? type : 'all';
-    renderAllCategoryTabs();
-    applySavedDataFilter();
 }
 
 function renderSavedSubjectTabs() {
@@ -2433,7 +2345,6 @@ function renderSavedSubjectTabs() {
     let totalMatching = 0;
 
     allSavedDataList.forEach(item => {
-        if (savedBankTypeFilter !== 'all' && (item.bankType || 'homework') !== savedBankTypeFilter) return;
         if (savedTierFilter !== 'all' && item.tier !== savedTierFilter) return;
         if (savedGradeFilter !== 'all' && item.grade !== savedGradeFilter) return;
         if (savedWeekFilter !== 'all' && String(item.week) !== String(savedWeekFilter)) return;
@@ -2477,7 +2388,6 @@ function renderSavedTierTabs() {
     let totalMatching = 0;
 
     allSavedDataList.forEach(item => {
-        if (savedBankTypeFilter !== 'all' && (item.bankType || 'homework') !== savedBankTypeFilter) return;
         if (savedSubjectFilter !== 'all' && item.subject !== savedSubjectFilter) return;
         if (savedGradeFilter !== 'all' && item.grade !== savedGradeFilter) return;
         if (savedWeekFilter !== 'all' && String(item.week) !== String(savedWeekFilter)) return;
@@ -2521,7 +2431,6 @@ function renderSavedGradeTabs() {
     let totalMatching = 0;
 
     allSavedDataList.forEach(item => {
-        if (savedBankTypeFilter !== 'all' && (item.bankType || 'homework') !== savedBankTypeFilter) return;
         if (savedSubjectFilter !== 'all' && item.subject !== savedSubjectFilter) return;
         if (savedTierFilter !== 'all' && item.tier !== savedTierFilter) return;
         if (savedWeekFilter !== 'all' && String(item.week) !== String(savedWeekFilter)) return;
@@ -2565,7 +2474,6 @@ function renderSavedWeekTabs() {
     let totalMatching = 0;
 
     allSavedDataList.forEach(item => {
-        if (savedBankTypeFilter !== 'all' && (item.bankType || 'homework') !== savedBankTypeFilter) return;
         if (savedSubjectFilter !== 'all' && item.subject !== savedSubjectFilter) return;
         if (savedTierFilter !== 'all' && item.tier !== savedTierFilter) return;
         if (savedGradeFilter !== 'all' && item.grade !== savedGradeFilter) return;
@@ -2649,7 +2557,6 @@ function onSavedFilterChange() {
 }
 
 function resetSavedFilters() {
-    savedBankTypeFilter = 'all';
     savedSubjectFilter = 'all';
     savedTierFilter = 'all';
     savedGradeFilter = 'all';
@@ -2671,15 +2578,13 @@ function applySavedDataFilter() {
     const isAssistant = Boolean(window.currentUser && window.currentUser.role === 'assistant');
 
     let filtered = allSavedDataList.filter(item => {
-        if (savedBankTypeFilter !== 'all' && (item.bankType || 'homework') !== savedBankTypeFilter) return false;
         if (savedSubjectFilter !== 'all' && item.subject !== savedSubjectFilter) return false;
         if (savedTierFilter !== 'all' && item.tier !== savedTierFilter) return false;
         if (savedGradeFilter !== 'all' && item.grade !== savedGradeFilter) return false;
         if (savedWeekFilter !== 'all' && String(item.week) !== String(savedWeekFilter)) return false;
         if (savedSearchQuery) {
             const topicLabel = getTopicLabel(item.week);
-            const typeLabel = getBankTypeLabel(item.bankType);
-            const fullSearch = `${typeLabel} ${item.subject} ${item.grade} ${item.tier} ${topicLabel} 专题${item.week} 第${item.week}周`.toLowerCase();
+            const fullSearch = `${item.subject} ${item.grade} ${item.tier} ${topicLabel} 专题${item.week} 第${item.week}周`.toLowerCase();
             if (!fullSearch.includes(savedSearchQuery)) return false;
         }
         return true;
@@ -2706,7 +2611,6 @@ function applySavedDataFilter() {
 
     const currentYear = yearSelect ? parseInt(yearSelect.value) : 2026;
     const currentSeason = seasonSelect ? seasonSelect.value : '春';
-    const currentBankType = getBankType();
     const currentSubject = subjectSelect ? subjectSelect.value : '';
     const currentGrade = gradeSelect ? gradeSelect.value : '';
     const currentTier = tierSelect ? tierSelect.value : '';
@@ -2716,21 +2620,16 @@ function applySavedDataFilter() {
         const itemYear = item.year || 2026;
         const itemSeason = item.season || '春';
         const itemGrade = item.grade || '未指定年级';
-        const itemBankType = item.bankType === 'preview' ? 'preview' : 'homework';
-        const isActive = itemBankType === currentBankType && item.year === currentYear && item.season === currentSeason && item.subject === currentSubject && item.grade === currentGrade && item.tier === currentTier && String(item.week) === currentWeek;
+        const isActive = item.year === currentYear && item.season === currentSeason && item.subject === currentSubject && item.grade === currentGrade && item.tier === currentTier && String(item.week) === currentWeek;
         const topicName = getTopicLabel(item.week);
         const subjectClass = getSubjectBadgeClass(item.subject);
-        const typeBadge = itemBankType === 'preview'
-            ? '<span class="saved-badge badge-preview">预习</span>'
-            : '<span class="saved-badge badge-homework">课后巩固</span>';
 
         const card = document.createElement('div');
         card.className = 'saved-data-card' + (isActive ? ' active' : '');
-        card.onclick = () => editSavedItem(item.subject, itemGrade, item.tier, item.week, itemYear, itemSeason, itemBankType);
+        card.onclick = () => editSavedItem(item.subject, itemGrade, item.tier, item.week, itemYear, itemSeason);
         card.innerHTML = `
             <div class="saved-card-header">
                 <div class="saved-card-tags">
-                    ${typeBadge}
                     <span class="saved-badge ${subjectClass}">${escapeHtml(item.subject)}</span>
                     <span class="saved-grade-tag">${escapeHtml(itemGrade)} · ${escapeHtml(item.tier)}层</span>
                 </div>
@@ -2749,7 +2648,7 @@ function applySavedDataFilter() {
                 </div>
             </div>
             <div class="saved-card-actions">
-                <button type="button" class="saved-btn edit-btn" onclick="event.stopPropagation(); editSavedItem('${escapeHtml(item.subject)}', '${escapeHtml(itemGrade)}', '${escapeHtml(item.tier)}', ${item.week}, ${itemYear}, '${escapeHtml(itemSeason)}', '${itemBankType}')">
+                <button type="button" class="saved-btn edit-btn" onclick="event.stopPropagation(); editSavedItem('${escapeHtml(item.subject)}', '${escapeHtml(itemGrade)}', '${escapeHtml(item.tier)}', ${item.week}, ${itemYear}, '${escapeHtml(itemSeason)}')">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
@@ -2757,7 +2656,7 @@ function applySavedDataFilter() {
                     ${isAssistant ? '查看题目' : '去更改题目'}
                 </button>
                 ${isAssistant ? '' : `
-                <button type="button" class="saved-btn delete-btn" onclick="event.stopPropagation(); deleteStoredData('${escapeHtml(item.subject)}', '${escapeHtml(itemGrade)}', '${escapeHtml(item.tier)}', ${item.week}, ${itemYear}, '${escapeHtml(itemSeason)}', '${itemBankType}')" title="删除此专题数据">
+                <button type="button" class="saved-btn delete-btn" onclick="event.stopPropagation(); deleteStoredData('${escapeHtml(item.subject)}', '${escapeHtml(itemGrade)}', '${escapeHtml(item.tier)}', ${item.week}, ${itemYear}, '${escapeHtml(itemSeason)}')" title="删除此专题数据">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"></line>
                         <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -2769,13 +2668,9 @@ function applySavedDataFilter() {
     });
 }
 
-async function editSavedItem(subject, grade, tier, week, year, season, bankType) {
+async function editSavedItem(subject, grade, tier, week, year, season) {
     if (year && yearSelect) yearSelect.value = String(year);
     if (season && seasonSelect) seasonSelect.value = season;
-    if (bankType && bankTypeSelect) {
-        bankTypeSelect.value = bankType === 'preview' ? 'preview' : 'homework';
-        updateBankTypeUi();
-    }
     if (subjectSelect) subjectSelect.value = subject;
 
     if (gradeSelect) {
@@ -2804,14 +2699,13 @@ async function editSavedItem(subject, grade, tier, week, year, season, bankType)
     await loadCurrentData();
     goToStep(4);
     const isAssistant = window.currentUser && window.currentUser.role === 'assistant';
-    const typeLabel = getBankTypeLabel(bankType);
     showToast(isAssistant 
-        ? `已载入「${typeLabel} · ${subject} · ${grade} · ${tier} · ${getTopicLabel(week)}」，当前为助教只读浏览模式`
-        : `已载入「${typeLabel} · ${subject} · ${grade} · ${tier} · ${getTopicLabel(week)}」，可直接修改`);
+        ? `已载入「${subject} · ${grade} · ${tier} · ${getTopicLabel(week)}」，当前为助教只读浏览模式`
+        : `已载入「${subject} · ${grade} · ${tier} · ${getTopicLabel(week)}」，可直接修改`);
 }
 
-function loadSavedItem(subject, grade, tier, week, year, season, bankType) {
-    editSavedItem(subject, grade, tier, week, year, season, bankType);
+function loadSavedItem(subject, grade, tier, week, year, season) {
+    editSavedItem(subject, grade, tier, week, year, season);
 }
 
 function highlightActiveSavedItem() {
@@ -2829,8 +2723,6 @@ function formatTime(ts) {
 
 // ========== Expose to window ==========
 window.onSelectorChange = onSelectorChange;
-window.onBankTypeChange = onBankTypeChange;
-window.setSavedBankTypeFilter = setSavedBankTypeFilter;
 window.addQuestion = addQuestion;
 window.addBatchQuestions = addBatchQuestions;
 window.removeQuestion = removeQuestion;

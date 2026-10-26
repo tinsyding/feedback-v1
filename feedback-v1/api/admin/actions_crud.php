@@ -225,7 +225,7 @@ switch ($action) {
 
             // 对 qbank_questions 排除巨型 base64 缩略图以提升翻页性能；对 admin_users 脱敏密码哈希
             if ($table === 'qbank_questions') {
-                $selectFields = "id, qbank_id, bank_type, `year`, `season`, subject, grade, tier, `week`, question_num, topic, video_url, exercise_pdf, exercise_name, (exercise_thumb IS NOT NULL AND exercise_thumb != '') AS has_exercise_thumb, answer_pdf, answer_name, (answer_thumb IS NOT NULL AND answer_thumb != '') AS has_answer_thumb, created_by, updated_by, created_at, updated_at";
+                $selectFields = "id, qbank_id, `year`, `season`, subject, grade, tier, `week`, question_num, topic, video_url, exercise_pdf, exercise_name, (exercise_thumb IS NOT NULL AND exercise_thumb != '') AS has_exercise_thumb, answer_pdf, answer_name, (answer_thumb IS NOT NULL AND answer_thumb != '') AS has_answer_thumb, created_by, updated_by, created_at, updated_at";
                 $rows = DB::fetchAll("SELECT {$selectFields} FROM `{$table}` {$whereSql} ORDER BY `{$sort}` {$order} LIMIT {$offset}, {$pageSize}", $params);
             } elseif ($table === 'admin_users') {
                 $rows = DB::fetchAll("SELECT `id`, `username`, '●●●●●●●●' AS `password_hash`, `real_name`, `role`, `status`, `last_login_at`, `last_login_ip`, `created_at`, `updated_at` FROM `{$table}` {$whereSql} ORDER BY `{$sort}` {$order} LIMIT {$offset}, {$pageSize}", $params);
@@ -373,7 +373,7 @@ switch ($action) {
 
                     $tRows = DB::fetchAll(
                         "SELECT `question_num`, `topic` FROM `qbank_questions` 
-                         WHERE `bank_type` = 'homework' AND `subject` = ? AND `grade` IN ($inGrades) AND `tier` IN ($inTiers) AND `week` = ?",
+                         WHERE `subject` = ? AND `grade` IN ($inGrades) AND `tier` IN ($inTiers) AND `week` = ?",
                         $params
                     );
                     $subKey = $qItem['subject'] . '___' . $qItem['grade'] . '___' . $qItem['tier'] . '___' . $qItem['week'];
@@ -582,9 +582,9 @@ switch ($action) {
 
             // 题库题目表新增时若关联了期次，自动补全缺失的年份/学期/学科/年级/班层/周次
             if ($table === 'qbank_questions' && !empty($input['qbank_id'])) {
-                $pWeek = DB::fetchOne("SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$input['qbank_id']]);
+                $pWeek = DB::fetchOne("SELECT `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$input['qbank_id']]);
                 if ($pWeek) {
-                    foreach (['bank_type', 'year', 'season', 'subject', 'grade', 'tier', 'week'] as $k) {
+                    foreach (['year', 'season', 'subject', 'grade', 'tier', 'week'] as $k) {
                         if (!isset($input[$k]) || $input[$k] === '') {
                             $input[$k] = $pWeek[$k];
                         }
@@ -723,14 +723,14 @@ switch ($action) {
             // 若更新的是 qbank_weeks 表，记录修改前的基础信息以便清理/重命名旧的 JSON 灾备文件
             $oldWeekRec = null;
             if ($table === 'qbank_weeks') {
-                $oldWeekRec = DB::fetchOne("SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$id]);
+                $oldWeekRec = DB::fetchOne("SELECT `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$id]);
             }
 
             // 若更新的是 qbank_questions 表且修改了所属专题 qbank_id，自动对齐期次维度字段
             if ($table === 'qbank_questions' && isset($input['qbank_id'])) {
-                $parentWeek = DB::fetchOne("SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$input['qbank_id']]);
+                $parentWeek = DB::fetchOne("SELECT `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$input['qbank_id']]);
                 if ($parentWeek) {
-                    foreach (['bank_type', 'year', 'season', 'subject', 'grade', 'tier', 'week'] as $k) {
+                    foreach (['year', 'season', 'subject', 'grade', 'tier', 'week'] as $k) {
                         $input[$k] = $parentWeek[$k];
                     }
                 }
@@ -768,14 +768,13 @@ switch ($action) {
                         DB::execute("
                             INSERT INTO `student_record_history` (
                                 record_id, batch_id, batch_code, student_id, student_name, student_key,
-                                week_num, preview_week_num, homework_score, preview_score, total_score, error_count,
-                                error_questions, preview_error_questions, teacher_comment, source_files, retest_token,
+                                week_num, homework_score, preview_score, total_score, error_count,
+                                error_questions, teacher_comment, source_files, retest_token,
                                 created_by, operator, operation_type, record_created_at, record_updated_at, archived_at
                             ) VALUES (
                                 ?, ?, ?, ?, ?, ?,
-                                ?, ?,
-                                ?, ?, ?, ?,
                                 ?, ?, ?, ?, ?,
+                                ?, ?, ?, ?,
                                 ?, ?, 'admin_edit', ?, ?, NOW()
                             )
                         ", [
@@ -786,13 +785,11 @@ switch ($action) {
                             $oldRec['student_name'],
                             $oldRec['student_key'] ?? '',
                             $oldRec['week_num'],
-                            $oldRec['preview_week_num'] ?? null,
                             $oldRec['homework_score'],
                             $oldRec['preview_score'],
                             $oldRec['total_score'],
                             $oldRec['error_count'],
                             $oldRec['error_questions'],
-                            $oldRec['preview_error_questions'] ?? null,
                             $oldRec['teacher_comment'],
                             $oldRec['source_files'] ?? null,
                             $oldRec['retest_token'] ?? null,
@@ -815,15 +812,14 @@ switch ($action) {
             // 若更新的是 qbank_weeks 表，级联同步更新 qbank_questions 明细表与 JSON 灾备文件
             if ($table === 'qbank_weeks') {
                 try {
-                    $newWeek = DB::fetchOne("SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$id]);
+                    $newWeek = DB::fetchOne("SELECT `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$id]);
                     if ($newWeek) {
                         // 1. 级联同步 qbank_questions 冗余字段
                         DB::execute("
                             UPDATE `qbank_questions`
-                            SET `bank_type` = ?, `year` = ?, `season` = ?, `subject` = ?, `grade` = ?, `tier` = ?, `week` = ?, `updated_at` = NOW()
+                            SET `year` = ?, `season` = ?, `subject` = ?, `grade` = ?, `tier` = ?, `week` = ?, `updated_at` = NOW()
                             WHERE `qbank_id` = ?
                         ", [
-                            $newWeek['bank_type'] ?? 'homework',
                             $newWeek['year'],
                             $newWeek['season'],
                             $newWeek['subject'],
@@ -905,7 +901,7 @@ switch ($action) {
             if ($table === 'qbank_weeks') {
                 try {
                     foreach ($ids as $delId) {
-                        $wRec = DB::fetchOne("SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$delId]);
+                        $wRec = DB::fetchOne("SELECT `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$delId]);
                         deleteQbankJsonBackup($wRec);
                     }
                     $inPlaceholders = implode(',', array_fill(0, count($ids), '?'));
