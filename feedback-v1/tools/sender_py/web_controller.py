@@ -838,7 +838,11 @@ class WebController:
                         self.benchmark_state["summary"] = compute_benchmark_summary(records)
                     self._notify_state_change()
                 else:
-                    self.emit(f"  ⚠️ [{name}] 未能获取有效评测数据：{res.get('reason')}")
+                    reason = res.get("reason", "")
+                    self.emit(f"  ⚠️ [{name}] 未能获取有效评测数据：{reason}")
+                    if reason in ("ROI 校准未完成", "ROI 未校准", "用户停止"):
+                        self.emit("🛑 视野校准已放弃或用户终止，基准评测已停止。")
+                        break
 
                 time.sleep(0.4)
 

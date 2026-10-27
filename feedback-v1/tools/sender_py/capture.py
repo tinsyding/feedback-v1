@@ -28,6 +28,19 @@ def capture_wecom_window(rect=None):
     x, y, w, h = rect
     if w < 200 or h < 150:
         return None
+    # 自动安全守护：若坐标为负（部分飘出屏幕，如藏在左边），自动将其拉回可视区域
+    if x < 0 or y < 0:
+        try:
+            try:
+                from sender_py.window_utils import ensure_fully_visible
+            except ModuleNotFoundError:
+                from window_utils import ensure_fully_visible
+            ok, fresh = ensure_fully_visible()
+            if ok and fresh:
+                rect = fresh
+                x, y, w, h = rect
+        except Exception:
+            pass
     try:
         import mss
     except Exception:

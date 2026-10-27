@@ -219,14 +219,15 @@ def benchmark_single_student(
     if should_stop is not None and should_stop():
         return {"success": False, "reason": "用户停止", "record": None}
 
-    rect = wu.get_wecom_rect()
+    ok_vis, vis = wu.ensure_fully_visible(log=log)
+    rect = vis if (ok_vis and vis) else wu.get_wecom_rect()
     if not rect:
         return {"success": False, "reason": "未找到企业微信窗口", "record": None}
 
     scale = wu.get_dpi_scale()
     roi = ensure_roi(None, rect, scale, config_path, server=server, token=token, log=log)
     if not roi:
-        return {"success": False, "reason": "ROI 未校准", "record": None}
+        return {"success": False, "reason": "ROI 校准未完成", "record": None}
 
     log(f"  🔍 正在企业微信中搜索联系人: {name} (候选 1)...")
     entered = search_and_enter(name, 1)

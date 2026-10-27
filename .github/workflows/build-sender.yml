@@ -208,7 +208,5 @@ jobs:
           files: |
             dist/JiFangFeedbackSender-onedir-windows-x64.zip
             dist/JiFangFeedbackWeb-onedir-windows-x64.zip
-            dist/极方每周反馈程序-绿色文件夹版.zip
-            dist/极方每周反馈程序-Web版-绿色文件夹版.zip
           fail_on_unmatched_files: true
           body: ""

@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.8.9"
+APP_VERSION = "1.8.10"
 
 
 def asset_path(filename: str) -> str:
@@ -706,7 +706,7 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
             return {"result": "error", "reason": "企微唤起失败（最小化或无响应），请手动点开后重试",
                     "notes": notes}
         time.sleep(0.3)
-        ok_vis, vis = wu.ensure_fully_visible()
+        ok_vis, vis = wu.ensure_fully_visible(log=log)
         if not ok_vis:
             return {"result": "error", "reason": f"窗口半截在屏幕外且无法自动归位：{vis}",
                     "notes": notes}
@@ -716,7 +716,8 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         scale = wu.get_dpi_scale()
         roi = ensure_roi(parent, rect, scale, config_path, server=server, token=token, log=log)
         if roi is None:
-            return {"result": "error", "reason": "ROI 校准未完成", "notes": notes}
+            log("🛑 视野校准已放弃，安全中止后续发送任务。")
+            return {"result": "stopped", "reason": "ROI 校准未完成", "notes": notes}
         if should_stop is not None and should_stop():
             log(f"[{name}] 收到停止请求，候选{cand}未发送")
             return {"result": "stopped", "reason": "用户停止", "notes": notes}
@@ -1346,7 +1347,7 @@ class SenderApp:
 
         self.hint_var = tk.StringVar(
             master=self.root,
-            value="💡 勾选学生后点“开始发送” · 发送中按 Esc 安全停止 · 双击状态列可查看详细原因")
+            value="💡 勾选学生后点“开始发送” · 发送中按 Esc 停止 · 请勿将企微拖出屏幕外或改动大小")
         ttk.Label(progress_box, textvariable=self.hint_var, style="Hint.TLabel",
                   anchor="w", wraplength=640).pack(fill="x")
 
@@ -2073,7 +2074,7 @@ class SenderApp:
     def _reset_hint(self):
         if self._running:
             return
-        self.hint_var.set("勾选学生后点击“开始发送”；发送中按 Esc 停止；双击状态列查看失败原因。")
+        self.hint_var.set("💡 勾选学生后点“开始发送”；发送中请勿将企微拖出屏幕外或改动大小；按 Esc 停止。")
 
     def copy_to_clipboard(self, text, label):
         if self._running:

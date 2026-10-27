@@ -285,7 +285,7 @@ def is_foreground_wecom() -> bool:
         return True
 
 
-def ensure_fully_visible() -> tuple:
+def ensure_fully_visible(log=None) -> tuple:
     """mss 截屏幕像素：窗口半截出屏则截不全。把企微 Clamp 回虚拟屏内（保尺寸只挪位置）。
 
     返回 (True, rect)；窗口比整块虚拟屏还大则 (False, reason)，请用户手动处理。
@@ -310,7 +310,13 @@ def ensure_fully_visible() -> tuple:
         nx = min(max(l, vx), vx + vw - w)
         ny = min(max(t, vy), vy + vh - h)
         if (nx, ny) != (l, t):
+            if log:
+                try:
+                    log("⚠️ 检测到企业微信窗口部分飘出屏幕，已自动拉回可见区域（提示：发送或评测中请勿将窗口移出屏幕或改动大小）")
+                except Exception:
+                    pass
             win32gui.MoveWindow(hwnd, nx, ny, w, h, True)
+            time.sleep(0.08)
         l, t, r, b = win32gui.GetWindowRect(hwnd)
         return (True, (l, t, r - l, b - t))
     except Exception as e:
