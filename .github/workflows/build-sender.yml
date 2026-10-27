@@ -77,7 +77,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r feedback-v1/tools/sender_py/requirements.txt
-          python -m pip install pyinstaller nuitka zstandard
+          python -m pip install pyinstaller
 
       - name: Compile Python
         run: python -m compileall -q feedback-v1/tools/sender_py
@@ -110,48 +110,13 @@ jobs:
           print("UI smoke OK")
           PY
 
-      # ---- 1. PyInstaller 单文件模式 (--onefile) ----
-      - name: Build Windows executable (Tkinter Onefile)
-        env:
-          PYTHONPATH: ${{ github.workspace }}/feedback-v1/tools
-        run: |
-          python -m PyInstaller --noconfirm --clean --noupx --windowed --onefile \
-            --name JiFangFeedbackSender \
-            --icon feedback-v1/favicon.ico \
-            --version-file feedback-v1/tools/sender_py/version_info.txt \
-            --add-data "feedback-v1/favicon.ico;." \
-            --add-data "feedback-v1/tools/example.png;." \
-            --paths feedback-v1/tools \
-            --paths feedback-v1/tools/sender_py \
-            --collect-submodules sender_py \
-            --collect-all sv_ttk \
-            feedback-v1/tools/sender_py/sender.py
-          mv dist/JiFangFeedbackSender.exe "dist/极方每周反馈程序.exe"
-
-      - name: Build Windows executable (Web Onefile)
-        env:
-          PYTHONPATH: ${{ github.workspace }}/feedback-v1/tools
-        run: |
-          python -m PyInstaller --noconfirm --clean --noupx --windowed --onefile \
-            --name JiFangFeedbackWeb \
-            --icon feedback-v1/favicon.ico \
-            --version-file feedback-v1/tools/sender_py/version_info.txt \
-            --add-data "feedback-v1/favicon.ico;." \
-            --add-data "feedback-v1/tools/example.png;." \
-            --add-data "feedback-v1/tools/sender_py/web_ui.html;sender_py" \
-            --paths feedback-v1/tools \
-            --paths feedback-v1/tools/sender_py \
-            --collect-submodules sender_py \
-            feedback-v1/tools/sender_py/web_main.py
-          mv dist/JiFangFeedbackWeb.exe "dist/极方每周反馈程序-Web版.exe"
-
-      # ---- 2. 文件夹模式 (--onedir，解压即用，防360拦截首选) ----
+      # ---- 文件夹模式 (--onedir，解压即用，防360拦截首选，极速打包) ----
       - name: Build Windows Folder Editions (--onedir)
         env:
           PYTHONPATH: ${{ github.workspace }}/feedback-v1/tools
         run: |
-          mkdir -p dist_dir
-          # 2.1 Tkinter 文件夹版
+          mkdir -p dist dist_dir
+          # 1. Tkinter 文件夹版
           python -m PyInstaller --noconfirm --clean --noupx --windowed --onedir \
             --distpath dist_dir \
             --name "JiFangFeedbackSender" \
@@ -163,12 +128,13 @@ jobs:
             --paths feedback-v1/tools/sender_py \
             --collect-submodules sender_py \
             --collect-all sv_ttk \
+            --collect-all rapidocr_onnxruntime \
             feedback-v1/tools/sender_py/sender.py
           mv dist_dir/JiFangFeedbackSender/JiFangFeedbackSender.exe "dist_dir/JiFangFeedbackSender/极方每周反馈程序.exe"
           mv dist_dir/JiFangFeedbackSender "dist_dir/极方每周反馈程序-绿色文件夹版"
           powershell -NoProfile -Command "Compress-Archive -Path 'dist_dir/极方每周反馈程序-绿色文件夹版' -DestinationPath 'dist/极方每周反馈程序-绿色文件夹版.zip' -Force"
 
-          # 2.2 Web 文件夹版
+          # 2. Web 文件夹版
           python -m PyInstaller --noconfirm --clean --noupx --windowed --onedir \
             --distpath dist_dir \
             --name "JiFangFeedbackWeb" \
@@ -180,86 +146,30 @@ jobs:
             --paths feedback-v1/tools \
             --paths feedback-v1/tools/sender_py \
             --collect-submodules sender_py \
+            --collect-all rapidocr_onnxruntime \
             feedback-v1/tools/sender_py/web_main.py
           mv dist_dir/JiFangFeedbackWeb/JiFangFeedbackWeb.exe "dist_dir/JiFangFeedbackWeb/极方每周反馈程序-Web版.exe"
           mv dist_dir/JiFangFeedbackWeb "dist_dir/极方每周反馈程序-Web版-绿色文件夹版"
           powershell -NoProfile -Command "Compress-Archive -Path 'dist_dir/极方每周反馈程序-Web版-绿色文件夹版' -DestinationPath 'dist/极方每周反馈程序-Web版-绿色文件夹版.zip' -Force"
 
-      # ---- 3. Nuitka 原生机器码编译模式 (原生C++编译，彻底免杀) ----
-      - name: Build Windows Nuitka Editions
-        env:
-          PYTHONPATH: ${{ github.workspace }}/feedback-v1/tools
-        run: |
-          # 3.1 Web 版 Nuitka 编译
-          python -m nuitka --standalone --assume-yes-for-downloads --windows-console-mode=disable \
-            --windows-icon-from-ico=feedback-v1/favicon.ico \
-            --windows-company-name="极方教学" \
-            --windows-product-name="极方每周反馈程序-Web版" \
-            --windows-file-version="1.8.7.0" \
-            --windows-product-version="1.8.7.0" \
-            --windows-file-description="极方企业微信作业反馈发送器-Web版" \
-            --include-package=sender_py \
-            --include-data-files="feedback-v1/favicon.ico=favicon.ico" \
-            --include-data-files="feedback-v1/tools/example.png=example.png" \
-            --include-data-files="feedback-v1/tools/sender_py/web_ui.html=sender_py/web_ui.html" \
-            --output-dir=dist_nuitka_web \
-            --output-filename="极方每周反馈程序-Web版.exe" \
-            feedback-v1/tools/sender_py/web_main.py
-          mv dist_nuitka_web/web_main.dist "dist_nuitka_web/极方每周反馈程序-Web版-Nuitka原生版"
-          powershell -NoProfile -Command "Compress-Archive -Path 'dist_nuitka_web/极方每周反馈程序-Web版-Nuitka原生版' -DestinationPath 'dist/极方每周反馈程序-Web版-Nuitka原生版.zip' -Force"
-
-          # 3.2 Tkinter 版 Nuitka 编译
-          python -m nuitka --standalone --assume-yes-for-downloads --windows-console-mode=disable \
-            --windows-icon-from-ico=feedback-v1/favicon.ico \
-            --windows-company-name="极方教学" \
-            --windows-product-name="极方每周反馈程序" \
-            --windows-file-version="1.8.7.0" \
-            --windows-product-version="1.8.7.0" \
-            --windows-file-description="极方企业微信作业反馈发送器" \
-            --enable-plugin=tk-inter \
-            --include-package-data=sv_ttk \
-            --include-package=sender_py \
-            --include-data-files="feedback-v1/favicon.ico=favicon.ico" \
-            --include-data-files="feedback-v1/tools/example.png=example.png" \
-            --output-dir=dist_nuitka \
-            --output-filename="极方每周反馈程序.exe" \
-            feedback-v1/tools/sender_py/sender.py
-          mv dist_nuitka/sender.dist "dist_nuitka/极方每周反馈程序-Nuitka原生版"
-          powershell -NoProfile -Command "Compress-Archive -Path 'dist_nuitka/极方每周反馈程序-Nuitka原生版' -DestinationPath 'dist/极方每周反馈程序-Nuitka原生版.zip' -Force"
-
       - name: Verify build output
         run: |
-          test -f "dist/极方每周反馈程序.exe"
-          test -f "dist/极方每周反馈程序-Web版.exe"
           test -f "dist/极方每周反馈程序-绿色文件夹版.zip"
           test -f "dist/极方每周反馈程序-Web版-绿色文件夹版.zip"
-          test -f "dist/极方每周反馈程序-Nuitka原生版.zip"
-          test -f "dist/极方每周反馈程序-Web版-Nuitka原生版.zip"
           ls -lh dist/
 
       - name: Frozen exe smoke test
         run: |
-          # 1. 单文件冒烟验证
-          python -c "import subprocess, sys; p = subprocess.run(['dist/极方每周反馈程序.exe', '--smoke-test'], timeout=120); sys.exit(p.returncode)"
-          python -c "import subprocess, sys; p = subprocess.run(['dist/极方每周反馈程序-Web版.exe', '--smoke-test'], timeout=120); sys.exit(p.returncode)"
-          # 2. 文件夹版冒烟验证
           python -c "import subprocess, sys; p = subprocess.run(['dist_dir/极方每周反馈程序-绿色文件夹版/极方每周反馈程序.exe', '--smoke-test'], timeout=120); sys.exit(p.returncode)"
           python -c "import subprocess, sys; p = subprocess.run(['dist_dir/极方每周反馈程序-Web版-绿色文件夹版/极方每周反馈程序-Web版.exe', '--smoke-test'], timeout=120); sys.exit(p.returncode)"
-          # 3. Nuitka 编译版冒烟验证
-          python -c "import subprocess, sys; p = subprocess.run(['dist_nuitka/极方每周反馈程序-Nuitka原生版/极方每周反馈程序.exe', '--smoke-test'], timeout=120); sys.exit(p.returncode)"
-          python -c "import subprocess, sys; p = subprocess.run(['dist_nuitka_web/极方每周反馈程序-Web版-Nuitka原生版/极方每周反馈程序-Web版.exe', '--smoke-test'], timeout=120); sys.exit(p.returncode)"
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v5
         with:
           name: JiFangFeedbackSender-windows-x64
           path: |
-            dist/极方每周反馈程序.exe
-            dist/极方每周反馈程序-Web版.exe
             dist/极方每周反馈程序-绿色文件夹版.zip
             dist/极方每周反馈程序-Web版-绿色文件夹版.zip
-            dist/极方每周反馈程序-Nuitka原生版.zip
-            dist/极方每周反馈程序-Web版-Nuitka原生版.zip
           if-no-files-found: error
 
   release:
@@ -286,17 +196,9 @@ jobs:
           python - <<'PY'
           import shutil
 
-          # 单文件 exe
-          shutil.copyfile("dist/极方每周反馈程序.exe", "dist/JiFangFeedbackSender-windows-x64.exe")
-          shutil.copyfile("dist/极方每周反馈程序-Web版.exe", "dist/JiFangFeedbackWeb-windows-x64.exe")
-
-          # 文件夹绿色版 zip
+          # 文件夹绿色版 zip (保留英文规范命名与中文友好命名)
           shutil.copyfile("dist/极方每周反馈程序-绿色文件夹版.zip", "dist/JiFangFeedbackSender-onedir-windows-x64.zip")
           shutil.copyfile("dist/极方每周反馈程序-Web版-绿色文件夹版.zip", "dist/JiFangFeedbackWeb-onedir-windows-x64.zip")
-
-          # Nuitka 原生编译版 zip
-          shutil.copyfile("dist/极方每周反馈程序-Nuitka原生版.zip", "dist/JiFangFeedbackSender-nuitka-windows-x64.zip")
-          shutil.copyfile("dist/极方每周反馈程序-Web版-Nuitka原生版.zip", "dist/JiFangFeedbackWeb-nuitka-windows-x64.zip")
           PY
 
       - name: Publish release asset
@@ -304,15 +206,9 @@ jobs:
         with:
           name: ${{ steps.release_meta.outputs.title }}
           files: |
-            dist/JiFangFeedbackSender-windows-x64.exe
-            dist/JiFangFeedbackWeb-windows-x64.exe
             dist/JiFangFeedbackSender-onedir-windows-x64.zip
             dist/JiFangFeedbackWeb-onedir-windows-x64.zip
-            dist/JiFangFeedbackSender-nuitka-windows-x64.zip
-            dist/JiFangFeedbackWeb-nuitka-windows-x64.zip
             dist/极方每周反馈程序-绿色文件夹版.zip
             dist/极方每周反馈程序-Web版-绿色文件夹版.zip
-            dist/极方每周反馈程序-Nuitka原生版.zip
-            dist/极方每周反馈程序-Web版-Nuitka原生版.zip
           fail_on_unmatched_files: true
           body: ""

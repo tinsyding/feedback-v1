@@ -392,6 +392,27 @@
                             </div>
                         </div>
 
+                        <!-- 企微标题核验 (Qwen3.8-Flash) 开关 -->
+                        <div class="glass-card settings-section-card" style="padding: 16px 20px; margin-top: 14px;">
+                            <div class="setting-row" style="align-items: center;">
+                                <div class="setting-info-block" style="flex: 1; padding-right: 20px;">
+                                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
+                                        <h4 style="margin: 0; font-size: 0.96rem; font-weight: 600; color: var(--text-primary);">企业微信标题核验 (Qwen3.8-Flash)</h4>
+                                        <span id="sender-flash-status-badge" class="badge-status status-badge active">云端 Flash 开启</span>
+                                    </div>
+                                    <p class="setting-desc" style="margin: 0; font-size: 0.82rem; color: var(--text-secondary); line-height: 1.45;">
+                                        关闭后将停用云端 Qwen3.8-Flash，强制所有发送器客户端使用本地极速 OCR（10~15ms 零延迟且免 Token 消耗）。后台家长留言分析（Qwen3.8-Max）保持正常开启。
+                                    </p>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 12px; flex-shrink: 0;">
+                                    <label class="switch-control" title="切换是否使用云端 Qwen3.8-Flash 标题核验（关闭则强制客户端使用本地OCR）">
+                                        <input type="checkbox" id="sender-flash-toggle" onchange="onSenderFlashToggleChange()">
+                                        <span class="switch-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Floating Action Bar -->
                         <div class="floating-action-bar">
                             <div class="action-bar-status">
@@ -1131,7 +1152,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261005';
+            const v = '20261027b';
             document.write(`<script src="js/admin.js?v=${v}"><\/script>`);
         })();
     </script>

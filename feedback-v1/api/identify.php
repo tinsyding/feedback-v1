@@ -92,6 +92,17 @@ if ($targetId === '' && $targetName === '') {
     sendResponse(false, null, 'target_id 与 target_name 不能同时为空', 400);
 }
 
+// ---- 标题核验模式控制：若管理员已停用 Qwen3.8-Flash，强制客户端转走本地离线 OCR ----
+if ($mode === 'title') {
+    $cfgFile = __DIR__ . '/../config.json';
+    if (file_exists($cfgFile)) {
+        $cfgJson = @json_decode(file_get_contents($cfgFile), true);
+        if (!empty($cfgJson['disableQwenFlashTitle'])) {
+            sendResponse(false, null, 'ADMIN_FORCED_LOCAL_OCR: 管理员已开启强制本地OCR核验，云端Flash通道已停用', 200);
+        }
+    }
+}
+
 $requiredFields = ['image_title', 'image_chat'];
 if ($mode === 'title') {
     $requiredFields = ['image_title'];

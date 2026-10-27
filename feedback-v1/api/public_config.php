@@ -19,6 +19,7 @@ $defaults = [
     'forceIntegerScores' => true,
     'retestQuestionSpacing' => 26,
     'retestQrCodeEnabled' => false,
+    'disableQwenFlashTitle' => false,
 ];
 
 $configFile = __DIR__ . '/../config.json';
@@ -41,6 +42,7 @@ $defaults['semesterWeeks'] = max(1, min(30, (int)$defaults['semesterWeeks']));
 $defaults['forceIntegerScores'] = (bool)$defaults['forceIntegerScores'];
 $defaults['retestQuestionSpacing'] = max(10, min(260, (int)$defaults['retestQuestionSpacing']));
 $defaults['retestQrCodeEnabled'] = (bool)$defaults['retestQrCodeEnabled'];
+$defaults['disableQwenFlashTitle'] = (bool)$defaults['disableQwenFlashTitle'];
 
 // 注意：绝不在此输出 retestSecret / DB 凭据等敏感字段
 // 扁平输出（而非 {success,data} 包裹），以兼容既有前端 c.xxx 直接访问写法

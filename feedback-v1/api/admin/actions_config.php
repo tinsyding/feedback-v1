@@ -54,9 +54,12 @@ switch ($action) {
                 if (isset($input['retestQrCodeEnabled'])) {
                     $config['retestQrCodeEnabled'] = (bool)$input['retestQrCodeEnabled'];
                 }
+                if (isset($input['disableQwenFlashTitle'])) {
+                    $config['disableQwenFlashTitle'] = (bool)$input['disableQwenFlashTitle'];
+                }
                 
                 // Keep comment
-                $config['_comment'] = "defaultSeason: spring/summer/autumn/winter (春/暑/秋/寒). semesterYear: 当前学年. semesterWeeks: 学期总周/次数. retestQuestionSpacing: 错题本拼页题目间隙(pt). retestQrCodeEnabled: 下载PDF是否包含视频讲解二维码.";
+                $config['_comment'] = "defaultSeason: spring/summer/autumn/winter (春/暑/秋/寒). semesterYear: 当前学年. semesterWeeks: 学期总周/次数. retestQuestionSpacing: 错题本拼页题目间隙(pt). retestQrCodeEnabled: 下载PDF是否包含视频讲解二维码. disableQwenFlashTitle: 是否停用云端Qwen-Flash标题核验(强制本地OCR).";
                 
                 // Save
                 $result = file_put_contents($configFile, json_encode($config, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
@@ -70,7 +73,8 @@ switch ($action) {
                     'defaultSeason' => $config['defaultSeason'] ?? 'autumn',
                     'semesterWeeks' => $config['semesterWeeks'] ?? 14,
                     'retestQrCodeEnabled' => $config['retestQrCodeEnabled'] ?? true,
-                    'message' => '管理员修改系统配置及错题本PDF二维码开关'
+                    'disableQwenFlashTitle' => $config['disableQwenFlashTitle'] ?? false,
+                    'message' => '管理员修改系统配置及企微标题核验开关'
                 ]);
                 
                 sendResponse(true, [

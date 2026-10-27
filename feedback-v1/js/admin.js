@@ -1,7 +1,7 @@
 /**
  * ============================================================================
  * 极方管理后台 (Admin Console) 前端运行脚本 - 生产环境合并包
- * 自动生成时间: 2026-10-05 19:36:54
+ * 自动生成时间: 2026-10-27 23:32:37
  * 源码模块目录: js/admin/
  * 请勿直接手动修改此文件，开发时请修改 js/admin/ 中的子模块并执行本打包脚本。
  * ============================================================================
@@ -574,8 +574,37 @@
             const qrToggle = document.getElementById('retest-qrcode-toggle');
             const isChecked = qrToggle ? qrToggle.checked : true;
             updateRetestQrToggleLabel(isChecked);
-            // 实时自动保存并弹窗提示
-            await saveConfig(true);
+            const msg = isChecked
+                ? '已成功开启题目视频讲解二维码（下载 PDF 将附带二维码）'
+                : '已成功关闭题目视频讲解二维码（下载 PDF 将无二维码）';
+            await saveConfig(true, msg);
+        }
+
+        function updateSenderFlashToggleLabel(enabled) {
+            const badge = document.getElementById('sender-flash-status-badge');
+            if (badge) {
+                if (enabled) {
+                    badge.textContent = '云端 Flash 开启';
+                    badge.style.background = 'rgba(16, 185, 129, 0.15)';
+                    badge.style.color = '#10b981';
+                    badge.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+                } else {
+                    badge.textContent = '已禁用 · 强制本地 OCR';
+                    badge.style.background = 'rgba(245, 158, 11, 0.15)';
+                    badge.style.color = '#f59e0b';
+                    badge.style.borderColor = 'rgba(245, 158, 11, 0.3)';
+                }
+            }
+        }
+
+        async function onSenderFlashToggleChange() {
+            const flashToggle = document.getElementById('sender-flash-toggle');
+            const isChecked = flashToggle ? flashToggle.checked : true;
+            updateSenderFlashToggleLabel(isChecked);
+            const msg = isChecked
+                ? '已开启云端 Qwen3.8-Flash 标题核验（客户端将优先云端秒验）'
+                : '已停用云端 Qwen-Flash，已强制所有客户端使用本地离线极速 OCR（免 Token 消耗）！';
+            await saveConfig(true, msg);
         }
 
         function updateConfigUI() {
@@ -595,6 +624,14 @@
             if (qrToggle) {
                 qrToggle.checked = qrEnabled;
                 updateRetestQrToggleLabel(qrEnabled);
+            }
+
+            // Qwen3.8-Flash 标题核验开关 (disableQwenFlashTitle 为 true 代表关闭)
+            const flashEnabled = currentConfig.disableQwenFlashTitle !== true;
+            const flashToggle = document.getElementById('sender-flash-toggle');
+            if (flashToggle) {
+                flashToggle.checked = flashEnabled;
+                updateSenderFlashToggleLabel(flashEnabled);
             }
 
             ['spring', 'summer', 'autumn', 'winter'].forEach(s => {
@@ -641,11 +678,13 @@
             if (suffix) suffix.textContent = meta.unit;
         }
 
-        async function saveConfig(isSilent = false) {
+        async function saveConfig(isSilent = false, customSilentMsg = '') {
             const year = parseInt(document.getElementById('semester-year').value) || 2026;
             const weeks = parseInt(document.getElementById('semester-weeks').value) || 14;
             const qrToggle = document.getElementById('retest-qrcode-toggle');
             const qrEnabled = qrToggle ? qrToggle.checked : true;
+            const flashToggle = document.getElementById('sender-flash-toggle');
+            const flashEnabled = flashToggle ? flashToggle.checked : true;
             const statusEl = document.getElementById('save-status');
 
             const config = {
@@ -653,7 +692,8 @@
                 defaultSeason: currentSeason,
                 semesterWeeks: weeks,
                 forceIntegerScores: true,
-                retestQrCodeEnabled: qrEnabled
+                retestQrCodeEnabled: qrEnabled,
+                disableQwenFlashTitle: !flashEnabled
             };
             if (currentConfig && currentConfig.retestQuestionSpacing) {
                 config.retestQuestionSpacing = currentConfig.retestQuestionSpacing;
@@ -675,7 +715,7 @@
                 if (result.success) {
                     currentConfig = result.data.config;
                     const toastMsg = isSilent
-                        ? (qrEnabled ? '已成功开启题目视频讲解二维码（下载 PDF 将附带二维码）' : '已成功关闭题目视频讲解二维码（下载 PDF 将无二维码）')
+                        ? (customSilentMsg || '系统配置已更新生效！')
                         : '系统全局配置已成功保存并实时生效！';
                     showToast(toastMsg, 'success');
                     if (statusEl) {
@@ -701,6 +741,9 @@
                 }
             }
         }
+
+        window.onRetestQrToggleChange = onRetestQrToggleChange;
+        window.onSenderFlashToggleChange = onSenderFlashToggleChange;
 
 
 /* ============================================================================

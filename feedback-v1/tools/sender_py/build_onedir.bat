@@ -49,6 +49,7 @@ python -m PyInstaller --noconfirm --clean --noupx --windowed --onedir ^
     --paths "%~dp0" ^
     --collect-submodules sender_py ^
     --collect-all sv_ttk ^
+    --collect-all rapidocr_onnxruntime ^
     "%SENDER_PY%"
 
 if exist "%~dp0dist_dir\JiFangFeedbackSender\JiFangFeedbackSender.exe" (
@@ -72,6 +73,7 @@ python -m PyInstaller --noconfirm --clean --noupx --windowed --onedir ^
     --paths "%REPO_ROOT%\tools" ^
     --paths "%~dp0" ^
     --collect-submodules sender_py ^
+    --collect-all rapidocr_onnxruntime ^
     "%WEB_MAIN_PY%"
 
 if exist "%~dp0dist_dir\JiFangFeedbackWeb\JiFangFeedbackWeb.exe" (

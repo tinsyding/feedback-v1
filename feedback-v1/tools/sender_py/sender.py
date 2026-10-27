@@ -580,7 +580,10 @@ def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
                 from local_ocr import identify_title_local
             local_res = identify_title_local(title_img, target_id, target_name)
             if local_res and local_res.get("title_in_header"):
-                local_res["reason"] = f"[备选方案: 本地OCR] {local_res.get('reason', '')} (API异常: {err_msg})"
+                if "ADMIN_FORCED_LOCAL_OCR" in err_msg:
+                    local_res["reason"] = f"[强制本地OCR] {local_res.get('reason', '')}"
+                else:
+                    local_res["reason"] = f"[备选方案: 本地OCR] {local_res.get('reason', '')} (API异常: {err_msg})"
                 return local_res
         except Exception:
             pass
@@ -752,8 +755,11 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
             continue
         if judgment and "方案1容错放行" in str(judgment.get("reason", "")):
             log(f"  💡 方案1智能容错生效：{judgment.get('reason')}")
-        elif judgment and ("[备选方案: 本地OCR]" in str(judgment.get("reason", "")) or "[本地OCR模式]" in str(judgment.get("reason", ""))):
-            log(f"  └ 💡 采用本地 OCR 备用通道核验：{judgment.get('reason')}")
+        elif judgment and ("[备选方案: 本地OCR]" in str(judgment.get("reason", "")) or "[本地OCR模式]" in str(judgment.get("reason", "")) or "[强制本地OCR]" in str(judgment.get("reason", ""))):
+            if "[强制本地OCR]" in str(judgment.get("reason", "")):
+                log(f"  └ ⚡ 管理员已开启强制本地OCR：{judgment.get('reason')}")
+            else:
+                log(f"  └ 💡 采用本地 OCR 备用通道核验：{judgment.get('reason')}")
         decision = decide_action(judgment)
         if decision["action"] == "send":
             log(f"  ✓ 候选 {cand} 核验通过 (窗口标题: [{chat_title or '未知'}])，符合发送条件")
