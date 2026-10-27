@@ -20,7 +20,8 @@ except ModuleNotFoundError:
 
 
 def get_web_ui_html_path() -> str:
-    """获取单页面 web_ui.html 路径（支持 PyInstaller onefile 解压目录与源码路径）。"""
+    """获取单页面 web_ui.html 路径（自适应 PyInstaller onefile/onedir、Nuitka standalone 及源码路径）。"""
+    # 1. PyInstaller _MEIPASS 优先
     if getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", None):
         p1 = os.path.join(sys._MEIPASS, "sender_py", "web_ui.html")
         if os.path.isfile(p1):
@@ -28,6 +29,16 @@ def get_web_ui_html_path() -> str:
         p2 = os.path.join(sys._MEIPASS, "web_ui.html")
         if os.path.isfile(p2):
             return p2
+    # 2. Nuitka standalone 或 PyInstaller onedir (exe 同级或 sender_py 子目录)
+    if getattr(sys, "frozen", False) or "__compiled__" in globals():
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        p1 = os.path.join(exe_dir, "sender_py", "web_ui.html")
+        if os.path.isfile(p1):
+            return p1
+        p2 = os.path.join(exe_dir, "web_ui.html")
+        if os.path.isfile(p2):
+            return p2
+    # 3. 源码同级目录
     here = os.path.dirname(os.path.abspath(__file__))
     p = os.path.join(here, "web_ui.html")
     if os.path.isfile(p):
@@ -89,10 +100,18 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
         if path == "/favicon.ico":
             icon_path = ""
             if getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", None):
-                icon_path = os.path.join(sys._MEIPASS, "favicon.ico")
-            if not os.path.isfile(icon_path):
+                candidate = os.path.join(sys._MEIPASS, "favicon.ico")
+                if os.path.isfile(candidate):
+                    icon_path = candidate
+            if not icon_path and (getattr(sys, "frozen", False) or "__compiled__" in globals()):
+                candidate = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "favicon.ico")
+                if os.path.isfile(candidate):
+                    icon_path = candidate
+            if not icon_path:
                 here = os.path.dirname(os.path.abspath(__file__))
-                icon_path = os.path.normpath(os.path.join(here, "..", "..", "favicon.ico"))
+                candidate = os.path.normpath(os.path.join(here, "..", "..", "favicon.ico"))
+                if os.path.isfile(candidate):
+                    icon_path = candidate
             if os.path.isfile(icon_path):
                 with open(icon_path, "rb") as f:
                     content = f.read()

@@ -66,6 +66,8 @@ def _load_example_photo(tk, max_w=EXAMPLE_MAX_W):
     base = getattr(sys, "_MEIPASS", None)
     if base:
         candidates.append(os.path.join(base, "example.png"))
+    exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+    candidates.append(os.path.join(exe_dir, "example.png"))
     candidates.extend((os.path.join(here, "..", "example.png"),
                        os.path.join(here, "example.png")))
     path = next((p for p in candidates if os.path.isfile(p)), None)

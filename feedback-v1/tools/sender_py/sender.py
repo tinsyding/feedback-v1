@@ -16,11 +16,28 @@ APP_VERSION = "1.8.6"
 
 
 def asset_path(filename: str) -> str:
-    """返回运行时资源路径：onefile 解压目录优先，源码运行回退到 feedback-v1/。"""
+    """返回运行时资源路径：自适应 PyInstaller onefile/onedir、Nuitka standalone 及源码运行。"""
+    # 1. PyInstaller _MEIPASS 优先 (onefile / onedir 临时目录)
     if getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", None):
-        return os.path.join(sys._MEIPASS, filename)
+        p = os.path.join(sys._MEIPASS, filename)
+        if os.path.isfile(p):
+            return p
+    # 2. Nuitka standalone 或 PyInstaller onedir (exe 同级目录)
+    if getattr(sys, "frozen", False) or "__compiled__" in globals():
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        p = os.path.join(exe_dir, filename)
+        if os.path.isfile(p):
+            return p
+    # 3. 源码同级目录
     here = os.path.dirname(os.path.abspath(__file__))
-    return os.path.normpath(os.path.join(here, "..", "..", filename))
+    p = os.path.join(here, filename)
+    if os.path.isfile(p):
+        return p
+    # 4. 回退到上级仓库根目录
+    repo_fallback = os.path.normpath(os.path.join(here, "..", "..", filename))
+    if os.path.isfile(repo_fallback):
+        return repo_fallback
+    return p
 
 
 def app_icon_path():
