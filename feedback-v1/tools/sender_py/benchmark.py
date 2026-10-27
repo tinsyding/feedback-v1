@@ -31,7 +31,6 @@ try:
         _preprocess_title_img,
         _extract_text_from_rapidocr_result,
         _ocr_via_winocr,
-        _ocr_via_windows_powershell,
         parse_title_judgment,
     )
     from sender_py.sender import (
@@ -50,7 +49,6 @@ except ModuleNotFoundError:
         _preprocess_title_img,
         _extract_text_from_rapidocr_result,
         _ocr_via_winocr,
-        _ocr_via_windows_powershell,
         parse_title_judgment,
     )
     from sender import (
@@ -110,39 +108,7 @@ def evaluate_title_image_all_engines(
             "latency_ms": t_ms,
         }
 
-    # 2. RapidOCR (纯识别模式 Rec-Only，10~15ms 极速)
-    t0 = time.perf_counter()
-    try:
-        engine = _get_rapidocr_engine()
-        if engine is None:
-            raise RuntimeError("RapidOCR 未安装或模型缺失")
-        if proc_img is None:
-            raise ValueError("预处理图像为空")
-        ocr_res, _ = engine(proc_img, use_det=False, use_cls=False)
-        text = _extract_text_from_rapidocr_result(ocr_res)
-        t_ms = round((time.perf_counter() - t0) * 1000)
-        judgment = parse_title_judgment(text, sid, sname)
-        judgment = rescue_option1_fuzzy_match(judgment, sid, sname)
-        results["rapid_rec"] = {
-            "name": "RapidOCR(纯识别)",
-            "status": "ok",
-            "matched": bool(judgment.get("matched")),
-            "text": text,
-            "reason": judgment.get("reason", ""),
-            "latency_ms": t_ms,
-        }
-    except Exception as exc:
-        t_ms = round((time.perf_counter() - t0) * 1000)
-        results["rapid_rec"] = {
-            "name": "RapidOCR(纯识别)",
-            "status": "error",
-            "matched": False,
-            "text": f"失败: {exc}",
-            "reason": str(exc),
-            "latency_ms": t_ms,
-        }
-
-    # 3. RapidOCR (全流程检测+识别 Det + Rec)
+    # 2. RapidOCR (全流程检测+识别 Det + Rec)
     t0 = time.perf_counter()
     try:
         engine = _get_rapidocr_engine()
@@ -174,7 +140,7 @@ def evaluate_title_image_all_engines(
             "latency_ms": t_ms,
         }
 
-    # 4. winocr (Windows 原生 WinRT 进程内直调)
+    # 3. winocr (Windows 原生 WinRT 进程内直调)
     t0 = time.perf_counter()
     try:
         if sys.platform != "win32":
@@ -199,34 +165,6 @@ def evaluate_title_image_all_engines(
             "status": "skipped" if sys.platform != "win32" else "error",
             "matched": False,
             "text": "(未安装或非Win10+)" if sys.platform != "win32" else f"失败: {exc}",
-            "reason": str(exc),
-            "latency_ms": t_ms,
-        }
-
-    # 5. PowerShell WinRT OCR (系统命令行保底)
-    t0 = time.perf_counter()
-    try:
-        if sys.platform != "win32":
-            raise RuntimeError("仅限 Windows")
-        text = _ocr_via_windows_powershell(proc_img)
-        t_ms = round((time.perf_counter() - t0) * 1000)
-        judgment = parse_title_judgment(text, sid, sname)
-        judgment = rescue_option1_fuzzy_match(judgment, sid, sname)
-        results["ps_winrt"] = {
-            "name": "PowerShell WinRT",
-            "status": "ok",
-            "matched": bool(judgment.get("matched")),
-            "text": text,
-            "reason": judgment.get("reason", ""),
-            "latency_ms": t_ms,
-        }
-    except Exception as exc:
-        t_ms = round((time.perf_counter() - t0) * 1000)
-        results["ps_winrt"] = {
-            "name": "PowerShell WinRT",
-            "status": "skipped" if sys.platform != "win32" else "error",
-            "matched": False,
-            "text": "(仅限Windows)" if sys.platform != "win32" else f"失败: {exc}",
             "reason": str(exc),
             "latency_ms": t_ms,
         }
@@ -353,13 +291,11 @@ def compute_benchmark_summary(records: List[dict]) -> dict:
             "engines": {},
         }
 
-    engine_keys = ["qwen_flash", "rapid_rec", "rapid_full", "winocr", "ps_winrt"]
+    engine_keys = ["winocr", "rapid_full", "qwen_flash"]
     engine_names = {
-        "qwen_flash": "Qwen3.8-Flash",
-        "rapid_rec": "RapidOCR(纯识别)",
+        "winocr": "winocr (WinRT极速)",
         "rapid_full": "RapidOCR(全流程)",
-        "winocr": "winocr",
-        "ps_winrt": "PowerShell WinRT",
+        "qwen_flash": "Qwen3.8-Flash",
     }
 
     engine_data: Dict[str, dict] = {}
@@ -449,21 +385,15 @@ def generate_benchmark_csv_content(records: List[dict], summary: Optional[dict] 
         "搜索联系人",
         "目标学号",
         "目标姓名",
-        "QwenFlash识别文本",
-        "QwenFlash判定",
-        "QwenFlash耗时(ms)",
-        "RapidOCR纯识别文本",
-        "RapidOCR纯识别判定",
-        "RapidOCR纯识别耗时(ms)",
-        "RapidOCR全流程文本",
-        "RapidOCR全流程判定",
-        "RapidOCR全流程耗时(ms)",
         "winocr识别文本",
         "winocr判定",
         "winocr耗时(ms)",
-        "PowerShellWinRT文本",
-        "PowerShellWinRT判定",
-        "PowerShellWinRT耗时(ms)",
+        "RapidOCR全流程文本",
+        "RapidOCR全流程判定",
+        "RapidOCR全流程耗时(ms)",
+        "QwenFlash识别文本",
+        "QwenFlash判定",
+        "QwenFlash耗时(ms)",
         "引擎一致性",
         "最快引擎",
     ]
@@ -472,11 +402,9 @@ def generate_benchmark_csv_content(records: List[dict], summary: Optional[dict] 
     # 3. 逐行填充
     for idx, r in enumerate(records, 1):
         eng = r.get("engines", {})
-        qwen = eng.get("qwen_flash", {})
-        r_rec = eng.get("rapid_rec", {})
-        r_full = eng.get("rapid_full", {})
         win = eng.get("winocr", {})
-        ps = eng.get("ps_winrt", {})
+        r_full = eng.get("rapid_full", {})
+        qwen = eng.get("qwen_flash", {})
 
         disc_str = "⚠️ 存在分歧" if r.get("has_discrepancy") else "一致"
         row = [
@@ -484,21 +412,15 @@ def generate_benchmark_csv_content(records: List[dict], summary: Optional[dict] 
             r.get("studentName", ""),
             r.get("sid", ""),
             r.get("sname", ""),
-            qwen.get("text", ""),
-            "通过" if qwen.get("matched") else "未通过",
-            qwen.get("latency_ms", 0),
-            r_rec.get("text", ""),
-            "通过" if r_rec.get("matched") else "未通过",
-            r_rec.get("latency_ms", 0),
-            r_full.get("text", ""),
-            "通过" if r_full.get("matched") else "未通过",
-            r_full.get("latency_ms", 0),
             win.get("text", ""),
             "通过" if win.get("matched") else "未通过",
             win.get("latency_ms", 0),
-            ps.get("text", ""),
-            "通过" if ps.get("matched") else "未通过",
-            ps.get("latency_ms", 0),
+            r_full.get("text", ""),
+            "通过" if r_full.get("matched") else "未通过",
+            r_full.get("latency_ms", 0),
+            qwen.get("text", ""),
+            "通过" if qwen.get("matched") else "未通过",
+            qwen.get("latency_ms", 0),
             disc_str,
             r.get("fastest", "-"),
         ]

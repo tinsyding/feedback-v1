@@ -452,7 +452,7 @@
     <div class="brand" onclick="onBrandBadgeClick()" style="cursor:pointer;" title="极方每周反馈程序">
       <div class="logo-badge">极</div>
       <div class="brand-title">极方每周反馈程序</div>
-      <div class="brand-badge">Web版 v1.8.8</div>
+      <div class="brand-badge">Web版 v1.8.9</div>
     </div>
     <div class="nav-actions">
       <button class="btn btn-sm" id="calibNavBtn" onclick="triggerCalibrate()">校准视野</button>
@@ -677,37 +677,27 @@
           <span>【物理安全保护已生效】本模式仅在企业微信中搜索联系人并对标题截图进行多引擎横向测算，严格不调用任何发送操作，绝不向家长发送消息！</span>
         </div>
 
-        <!-- 汇总看板 Stats Grid -->
-        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; margin-bottom:14px;">
+        <!-- 汇总看板 Stats Grid (三层阶梯级联) -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px; margin-bottom:14px;">
           <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px;">
             <div style="font-size:11px; color:#64748b; font-weight:600;">评测样本总数</div>
             <div id="bmTotalCount" style="font-size:20px; font-weight:700; color:#0f172a; margin-top:2px;">0 人</div>
             <div id="bmDiscCount" style="font-size:11px; color:#f59e0b; margin-top:2px;">存在分歧: 0 例</div>
           </div>
           <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px;">
-            <div style="font-size:11px; color:#64748b; font-weight:600;">Qwen3.8-Flash (云端)</div>
-            <div id="bmQwenRate" style="font-size:20px; font-weight:700; color:#2563eb; margin-top:2px;">-</div>
-            <div id="bmQwenLat" style="font-size:11px; color:#64748b; margin-top:2px;">平均耗时: - ms</div>
-          </div>
-          <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px;">
-            <div style="font-size:11px; color:#64748b; font-weight:600;">RapidOCR 纯识别 (Rec)</div>
-            <div id="bmRapidRecRate" style="font-size:20px; font-weight:700; color:#16a34a; margin-top:2px;">-</div>
-            <div id="bmRapidRecLat" style="font-size:11px; color:#64748b; margin-top:2px;">平均耗时: - ms</div>
-          </div>
-          <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px;">
-            <div style="font-size:11px; color:#64748b; font-weight:600;">RapidOCR 全流程 (Det+Rec)</div>
-            <div id="bmRapidFullRate" style="font-size:20px; font-weight:700; color:#0d9488; margin-top:2px;">-</div>
-            <div id="bmRapidFullLat" style="font-size:11px; color:#64748b; margin-top:2px;">平均耗时: - ms</div>
-          </div>
-          <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px;">
-            <div style="font-size:11px; color:#64748b; font-weight:600;">winocr (WinRT直调)</div>
+            <div style="font-size:11px; color:#7c3aed; font-weight:600;">第 1 层：winocr (WinRT直调)</div>
             <div id="bmWinocrRate" style="font-size:20px; font-weight:700; color:#7c3aed; margin-top:2px;">-</div>
             <div id="bmWinocrLat" style="font-size:11px; color:#64748b; margin-top:2px;">平均耗时: - ms</div>
           </div>
           <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px;">
-            <div style="font-size:11px; color:#64748b; font-weight:600;">PowerShell WinRT</div>
-            <div id="bmPsRate" style="font-size:20px; font-weight:700; color:#475569; margin-top:2px;">-</div>
-            <div id="bmPsLat" style="font-size:11px; color:#64748b; margin-top:2px;">平均耗时: - ms</div>
+            <div style="font-size:11px; color:#0d9488; font-weight:600;">第 2 层：RapidOCR (全流程 Det+Rec)</div>
+            <div id="bmRapidFullRate" style="font-size:20px; font-weight:700; color:#0d9488; margin-top:2px;">-</div>
+            <div id="bmRapidFullLat" style="font-size:11px; color:#64748b; margin-top:2px;">平均耗时: - ms</div>
+          </div>
+          <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px;">
+            <div style="font-size:11px; color:#2563eb; font-weight:600;">第 3 层：Qwen3.8-Flash (云端兜底)</div>
+            <div id="bmQwenRate" style="font-size:20px; font-weight:700; color:#2563eb; margin-top:2px;">-</div>
+            <div id="bmQwenLat" style="font-size:11px; color:#64748b; margin-top:2px;">平均耗时: - ms</div>
           </div>
         </div>
 
@@ -743,17 +733,16 @@
               <tr style="background:#f1f5f9; color:#475569; border-bottom:1px solid #cbd5e1;">
                 <th style="padding:8px 10px; width:45px;">#</th>
                 <th style="padding:8px 10px; width:120px;">学生 / 学号</th>
-                <th style="padding:8px 10px;">Qwen3.8-Flash</th>
-                <th style="padding:8px 10px;">RapidOCR 纯识别</th>
-                <th style="padding:8px 10px;">RapidOCR 全流程</th>
-                <th style="padding:8px 10px;">winocr</th>
-                <th style="padding:8px 10px;">PowerShell WinRT</th>
+                <th style="padding:8px 10px;">第 1 层: winocr (47ms)</th>
+                <th style="padding:8px 10px;">第 2 层: RapidOCR 全流程 (800ms)</th>
+                <th style="padding:8px 10px;">第 3 层: Qwen3.8-Flash (云端)</th>
                 <th style="padding:8px 10px; width:85px; text-align:center;">一致性</th>
+                <th style="padding:8px 10px; width:80px;">最快引擎</th>
               </tr>
             </thead>
             <tbody id="bmTableBody">
               <tr>
-                <td colspan="8" style="padding:30px; text-align:center; color:#94a3b8;">暂无评测数据，请点击左上方“开始评测”</td>
+                <td colspan="7" style="padding:30px; text-align:center; color:#94a3b8;">暂无评测数据，请点击左上方“开始评测”</td>
               </tr>
             </tbody>
           </table>
@@ -904,11 +893,9 @@
       };
 
       const engs = sm.engines || {};
-      renderEngineStat("bmQwenRate", "bmQwenLat", engs.qwen_flash);
-      renderEngineStat("bmRapidRecRate", "bmRapidRecLat", engs.rapid_rec);
-      renderEngineStat("bmRapidFullRate", "bmRapidFullLat", engs.rapid_full);
       renderEngineStat("bmWinocrRate", "bmWinocrLat", engs.winocr);
-      renderEngineStat("bmPsRate", "bmPsLat", engs.ps_winrt);
+      renderEngineStat("bmRapidFullRate", "bmRapidFullLat", engs.rapid_full);
+      renderEngineStat("bmQwenRate", "bmQwenLat", engs.qwen_flash);
 
       renderBenchmarkTable();
     }
@@ -919,18 +906,16 @@
       const list = onlyDisc ? benchmarkRecords.filter(r => r.has_discrepancy) : benchmarkRecords;
 
       if (!list || list.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" style="padding:30px; text-align:center; color:#94a3b8;">${onlyDisc ? '当前无任何存在分歧的学生（各引擎识别结论完全一致）' : '暂无评测数据，请点击上方“开始评测”'}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" style="padding:30px; text-align:center; color:#94a3b8;">${onlyDisc ? '当前无任何存在分歧的学生（各引擎识别结论完全一致）' : '暂无评测数据，请点击上方“开始评测”'}</td></tr>`;
         return;
       }
 
       let html = "";
       list.forEach((r, idx) => {
         const eng = r.engines || {};
-        const qwen = eng.qwen_flash || {};
-        const r_rec = eng.rapid_rec || {};
-        const r_full = eng.rapid_full || {};
         const win = eng.winocr || {};
-        const ps = eng.ps_winrt || {};
+        const r_full = eng.rapid_full || {};
+        const qwen = eng.qwen_flash || {};
 
         const cell = (e) => {
           if (!e || !e.name) return '<span style="color:#cbd5e1;">-</span>';
@@ -962,12 +947,11 @@
               <div>${escapeHtml(r.studentName || '-')}</div>
               <div style="font-size:11px; color:#64748b; font-weight:normal;">学号: ${escapeHtml(r.sid || '-')}</div>
             </td>
-            <td style="padding:8px 10px;">${cell(qwen)}</td>
-            <td style="padding:8px 10px;">${cell(r_rec)}</td>
-            <td style="padding:8px 10px;">${cell(r_full)}</td>
             <td style="padding:8px 10px;">${cell(win)}</td>
-            <td style="padding:8px 10px;">${cell(ps)}</td>
+            <td style="padding:8px 10px;">${cell(r_full)}</td>
+            <td style="padding:8px 10px;">${cell(qwen)}</td>
             <td style="padding:8px 10px; text-align:center;">${discTag}</td>
+            <td style="padding:8px 10px; font-size:11px; color:#475569; font-weight:600;">${escapeHtml(r.fastest || '-')}</td>
           </tr>
         `;
       });

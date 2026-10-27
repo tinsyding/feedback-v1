@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.8.8"
+APP_VERSION = "1.8.9"
 
 
 def asset_path(filename: str) -> str:
@@ -600,15 +600,31 @@ def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
             judgment = identify_title_local(title_img, target_id, target_name)
             judgment["reason"] = f"[本地OCR模式] {judgment.get('reason', '')}"
         else:
+            # 三层阶梯式智能核验：
+            # 第 1 层 winocr (WinRT ~47ms) -> 第 2 层 RapidOCR 全流程 (Det+Rec ~800ms)
             try:
-                judgment = identify_title(title_img, target_id, target_name, server, token)
-            except Exception as e:
-                if verify_mode == "auto":
-                    judgment = _fallback_local(str(e))
-                    if judgment is None:
-                        err = f"API核验失败且本地OCR无法识别文字（API错误: {e}）"
-                else:
-                    err = str(e)
+                from sender_py.local_ocr import identify_title_local
+            except ModuleNotFoundError:
+                from local_ocr import identify_title_local
+            local_res = identify_title_local(title_img, target_id, target_name)
+
+            # 若本地两层已成功匹配，直接毫秒级极速放行！
+            if local_res and local_res.get("matched"):
+                judgment = local_res
+                judgment["reason"] = f"[备选方案: 本地OCR] {judgment.get('reason', '')}"
+            else:
+                # 第 3 层：Qwen3.8-Flash 云端多模态大模型终极兜底（本地未通过时才介入）
+                try:
+                    judgment = identify_title(title_img, target_id, target_name, server, token)
+                    if judgment and judgment.get("matched"):
+                        judgment["reason"] = f"[Qwen-Flash兜底通过] {judgment.get('reason', '')}"
+                except Exception as e:
+                    # 云端报错或管理员开启了【强制本地OCR】(ADMIN_FORCED_LOCAL_OCR)，采纳本地判定
+                    judgment = local_res or parse_title_judgment("", target_id, target_name)
+                    if "ADMIN_FORCED_LOCAL_OCR" in str(e):
+                        judgment["reason"] = f"[强制本地OCR] {judgment.get('reason', '')}"
+                    else:
+                        judgment["reason"] = f"[备选方案: 本地OCR] {judgment.get('reason', '')} (API异常: {e})"
         if judgment is not None:
             judgment = rescue_option1_fuzzy_match(judgment, target_id, target_name)
             return (judgment, judgment.get("detected_title"), None, chat_img)

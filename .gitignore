@@ -10,6 +10,7 @@
 feedback_debug.log
 debug_screenshots/
 pic-example/
+tmp/
 
 # Environment & Sensitive configs
 .env

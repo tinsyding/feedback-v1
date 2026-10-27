@@ -11,7 +11,7 @@ import time
 import webbrowser
 
 APP_NAME = "极方每周反馈程序 (Web版)"
-APP_VERSION = "1.8.8"
+APP_VERSION = "1.8.9"
 
 
 def find_free_port(start: int = 8765, max_attempts: int = 100) -> int:

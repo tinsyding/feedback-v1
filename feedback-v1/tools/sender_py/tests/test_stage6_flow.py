@@ -293,8 +293,8 @@ class TestStage6(unittest.TestCase):
             self.assertIn("[备选方案: 本地OCR]", judgment["reason"])
             self.assertEqual(chat_title, "202401-张三 (极方学员)")
 
-        # 1.5. 模拟服务端返回 ADMIN_FORCED_LOCAL_OCR，自动标记为 [强制本地OCR]
-        set_ocr_hook_for_testing(lambda img: "202401-张三 (极方学员)")
+        # 1.5. 模拟本地未匹配尝试调用 API 时，服务端返回 ADMIN_FORCED_LOCAL_OCR，自动标记为 [强制本地OCR]
+        set_ocr_hook_for_testing(lambda img: "未识别标题")
         with mock.patch.object(capture, "capture_wecom_window", return_value=dummy_img), \
              mock.patch.object(vision_api, "identify_title", side_effect=RuntimeError("标题核验被拒绝：ADMIN_FORCED_LOCAL_OCR: 管理员已开启强制本地OCR")):
             judgment, chat_title, err, chat_img = judge_candidate(
@@ -303,7 +303,7 @@ class TestStage6(unittest.TestCase):
             )
             self.assertIsNone(err)
             self.assertIsNotNone(judgment)
-            self.assertTrue(judgment["matched"])
+            self.assertFalse(judgment["matched"])
             self.assertIn("[强制本地OCR]", judgment["reason"])
 
         # 2. 模拟本地 OCR 识别到群聊，即使 API 挂了也严格拦截群聊

@@ -21,38 +21,37 @@ class TestBenchmark(unittest.TestCase):
         """测试注入 Hook 时正确返回模拟的多引擎评测结果。"""
         def mock_hook(img, sid, sname, server, token):
             return {
-                "qwen_flash": {"name": "Qwen3.8-Flash", "status": "ok", "matched": True, "text": "202401张三", "latency_ms": 350},
-                "rapid_rec": {"name": "RapidOCR(纯识别)", "status": "ok", "matched": True, "text": "202401张三", "latency_ms": 12},
-                "rapid_full": {"name": "RapidOCR(全流程)", "status": "ok", "matched": True, "text": "202401张三", "latency_ms": 48},
                 "winocr": {"name": "winocr", "status": "ok", "matched": True, "text": "202401张三", "latency_ms": 20},
-                "ps_winrt": {"name": "PowerShell WinRT", "status": "ok", "matched": True, "text": "202401张三", "latency_ms": 420},
-            }, False, "RapidOCR(纯识别)"
+                "rapid_full": {"name": "RapidOCR(全流程)", "status": "ok", "matched": True, "text": "202401张三", "latency_ms": 48},
+                "qwen_flash": {"name": "Qwen3.8-Flash", "status": "ok", "matched": True, "text": "202401张三", "latency_ms": 350},
+            }, False, "winocr"
 
         benchmark.set_benchmark_hook_for_testing(mock_hook)
         results, has_disc, fastest = benchmark.evaluate_title_image_all_engines(
             None, "202401", "张三", "https://mock.server", "tok"
         )
         self.assertFalse(has_disc)
-        self.assertEqual(fastest, "RapidOCR(纯识别)")
-        self.assertEqual(results["rapid_rec"]["latency_ms"], 12)
+        self.assertEqual(fastest, "winocr")
+        self.assertEqual(results["winocr"]["latency_ms"], 20)
         self.assertTrue(results["qwen_flash"]["matched"])
 
     def test_discrepancy_detection(self):
         """测试当引擎之间识别结论不一致时，精准标记分歧。"""
         def mock_disc_hook(img, sid, sname, server, token):
             return {
-                "qwen_flash": {"name": "Qwen3.8-Flash", "status": "ok", "matched": True, "text": "65405胡耔墨", "latency_ms": 320},
-                "rapid_rec": {"name": "RapidOCR(纯识别)", "status": "ok", "matched": True, "text": "65405胡籽墨", "latency_ms": 14},
                 "winocr": {"name": "winocr", "status": "ok", "matched": False, "text": "65405乱码墨", "latency_ms": 25},
-            }, True, "RapidOCR(纯识别)"
+                "rapid_full": {"name": "RapidOCR(全流程)", "status": "ok", "matched": True, "text": "65405胡耔墨", "latency_ms": 50},
+                "qwen_flash": {"name": "Qwen3.8-Flash", "status": "ok", "matched": True, "text": "65405胡耔墨", "latency_ms": 320},
+            }, True, "winocr"
 
         benchmark.set_benchmark_hook_for_testing(mock_disc_hook)
         results, has_disc, fastest = benchmark.evaluate_title_image_all_engines(
             None, "65405", "胡耔墨", "https://mock.server"
         )
         self.assertTrue(has_disc)
-        self.assertEqual(fastest, "RapidOCR(纯识别)")
+        self.assertEqual(fastest, "winocr")
         self.assertFalse(results["winocr"]["matched"])
+        self.assertTrue(results["rapid_full"]["matched"])
         self.assertTrue(results["qwen_flash"]["matched"])
 
     def test_compute_benchmark_summary(self):
@@ -64,11 +63,9 @@ class TestBenchmark(unittest.TestCase):
                 "sname": "张三",
                 "has_discrepancy": False,
                 "engines": {
-                    "qwen_flash": {"status": "ok", "matched": True, "latency_ms": 300},
-                    "rapid_rec": {"status": "ok", "matched": True, "latency_ms": 10},
-                    "rapid_full": {"status": "ok", "matched": True, "latency_ms": 40},
                     "winocr": {"status": "ok", "matched": True, "latency_ms": 20},
-                    "ps_winrt": {"status": "ok", "matched": True, "latency_ms": 400},
+                    "rapid_full": {"status": "ok", "matched": True, "latency_ms": 40},
+                    "qwen_flash": {"status": "ok", "matched": True, "latency_ms": 300},
                 }
             },
             {
@@ -77,11 +74,9 @@ class TestBenchmark(unittest.TestCase):
                 "sname": "李四",
                 "has_discrepancy": True,
                 "engines": {
-                    "qwen_flash": {"status": "ok", "matched": True, "latency_ms": 400},
-                    "rapid_rec": {"status": "ok", "matched": True, "latency_ms": 20},
-                    "rapid_full": {"status": "ok", "matched": False, "latency_ms": 60},
                     "winocr": {"status": "skipped", "matched": False, "latency_ms": 0},
-                    "ps_winrt": {"status": "ok", "matched": False, "latency_ms": 500},
+                    "rapid_full": {"status": "ok", "matched": False, "latency_ms": 60},
+                    "qwen_flash": {"status": "ok", "matched": True, "latency_ms": 400},
                 }
             }
         ]
@@ -92,21 +87,17 @@ class TestBenchmark(unittest.TestCase):
         self.assertEqual(summary["discrepancy_rate_pct"], 50.0)
 
         engs = summary["engines"]
-        # Qwen-Flash: 2/2 = 100%, avg latency = (300+400)/2 = 350.0
-        self.assertEqual(engs["qwen_flash"]["match_rate_pct"], 100.0)
-        self.assertEqual(engs["qwen_flash"]["avg_latency_ms"], 350.0)
-
-        # RapidOCR (Rec-Only): 2/2 = 100%, avg latency = (10+20)/2 = 15.0
-        self.assertEqual(engs["rapid_rec"]["match_rate_pct"], 100.0)
-        self.assertEqual(engs["rapid_rec"]["avg_latency_ms"], 15.0)
+        # winocr: evaluated 1, matched 1 = 100%
+        self.assertEqual(engs["winocr"]["evaluated_count"], 1)
+        self.assertEqual(engs["winocr"]["match_rate_pct"], 100.0)
 
         # RapidOCR (Det+Rec): 1/2 = 50%, avg latency = 50.0
         self.assertEqual(engs["rapid_full"]["match_rate_pct"], 50.0)
         self.assertEqual(engs["rapid_full"]["avg_latency_ms"], 50.0)
 
-        # winocr: evaluated 1, matched 1 = 100%
-        self.assertEqual(engs["winocr"]["evaluated_count"], 1)
-        self.assertEqual(engs["winocr"]["match_rate_pct"], 100.0)
+        # Qwen-Flash: 2/2 = 100%, avg latency = (300+400)/2 = 350.0
+        self.assertEqual(engs["qwen_flash"]["match_rate_pct"], 100.0)
+        self.assertEqual(engs["qwen_flash"]["avg_latency_ms"], 350.0)
 
     def test_generate_benchmark_csv_content(self):
         """测试 CSV 导出内容格式完备性。"""
@@ -116,13 +107,11 @@ class TestBenchmark(unittest.TestCase):
                 "sid": "202401",
                 "sname": "张三",
                 "has_discrepancy": False,
-                "fastest": "RapidOCR(纯识别)",
+                "fastest": "winocr",
                 "engines": {
-                    "qwen_flash": {"text": "202401张三", "matched": True, "latency_ms": 350},
-                    "rapid_rec": {"text": "202401张三", "matched": True, "latency_ms": 12},
-                    "rapid_full": {"text": "202401张三", "matched": True, "latency_ms": 50},
                     "winocr": {"text": "202401张三", "matched": True, "latency_ms": 22},
-                    "ps_winrt": {"text": "202401张三", "matched": True, "latency_ms": 410},
+                    "rapid_full": {"text": "202401张三", "matched": True, "latency_ms": 50},
+                    "qwen_flash": {"text": "202401张三", "matched": True, "latency_ms": 350},
                 }
             }
         ]
@@ -130,11 +119,11 @@ class TestBenchmark(unittest.TestCase):
         csv_str = benchmark.generate_benchmark_csv_content(records, summary)
 
         self.assertIn("多引擎识别基准评测报告", csv_str)
+        self.assertIn("winocr", csv_str)
+        self.assertIn("RapidOCR(全流程)", csv_str)
         self.assertIn("Qwen3.8-Flash", csv_str)
-        self.assertIn("RapidOCR(纯识别)", csv_str)
         self.assertIn("202401张三", csv_str)
         self.assertIn("350", csv_str)
-        self.assertIn("12", csv_str)
 
     def test_benchmark_single_student_zero_send_safety(self):
         """核心安全红线测试：确保评测学生时绝不调用 paste_and_send。"""
