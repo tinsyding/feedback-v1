@@ -15,21 +15,20 @@ set SENDER_PY=%~dp0sender.py
 set WEB_MAIN_PY=%~dp0web_main.py
 set WEB_UI=%~dp0web_ui.html
 set "PYTHONPATH=%~dp0..;%~dp0;%PYTHONPATH%"
-set "PY_CMD=py -3.12"
 
-echo [1/4] 检查 Python 3.12 环境及 Nuitka...
-%PY_CMD% --version >nul 2>&1
+echo [1/4] 检查 Python 环境及 Nuitka...
+python --version >nul 2>&1
 if errorlevel 1 goto :no_python
 
 echo 当前使用的 Python 版本：
-%PY_CMD% --version
+python --version
 
 echo 安装/更新 Nuitka 与运行依赖...
-%PY_CMD% -m pip install --upgrade pip
-%PY_CMD% -m pip install -r "%~dp0requirements.txt"
+python -m pip install --upgrade pip
+python -m pip install -r "%~dp0requirements.txt"
 if errorlevel 1 goto :pip_error
 
-%PY_CMD% -m pip install nuitka zstandard
+python -m pip install nuitka zstandard
 if errorlevel 1 goto :nuitka_install_error
 
 echo.
@@ -41,13 +40,14 @@ set "OPTS_WEB=%OPTS_WEB% --windows-product-name=JiFangFeedbackWeb"
 set "OPTS_WEB=%OPTS_WEB% --windows-file-version=1.8.10.0"
 set "OPTS_WEB=%OPTS_WEB% --windows-product-version=1.8.10.0"
 set "OPTS_WEB=%OPTS_WEB% --include-package=sender_py"
+set "OPTS_WEB=%OPTS_WEB% --include-package-data=rapidocr_onnxruntime"
 set "OPTS_WEB=%OPTS_WEB% --include-data-files=%FAVICON%=favicon.ico"
 set "OPTS_WEB=%OPTS_WEB% --include-data-files=%EXAMPLE%=example.png"
 set "OPTS_WEB=%OPTS_WEB% --include-data-files=%WEB_UI%=sender_py/web_ui.html"
 set "OPTS_WEB=%OPTS_WEB% --output-dir=%~dp0dist_nuitka_web"
 set "OPTS_WEB=%OPTS_WEB% --output-filename=JiFangFeedbackWeb.exe"
 
-%PY_CMD% -m nuitka %OPTS_WEB% "%WEB_MAIN_PY%"
+python -m nuitka %OPTS_WEB% "%WEB_MAIN_PY%"
 if errorlevel 1 goto :compile_web_error
 
 if exist "%~dp0dist_nuitka_web\web_main.dist\JiFangFeedbackWeb.exe" (
@@ -70,13 +70,14 @@ set "OPTS_GUI=%OPTS_GUI% --windows-file-version=1.8.10.0"
 set "OPTS_GUI=%OPTS_GUI% --windows-product-version=1.8.10.0"
 set "OPTS_GUI=%OPTS_GUI% --enable-plugin=tk-inter"
 set "OPTS_GUI=%OPTS_GUI% --include-package-data=sv_ttk"
+set "OPTS_GUI=%OPTS_GUI% --include-package-data=rapidocr_onnxruntime"
 set "OPTS_GUI=%OPTS_GUI% --include-package=sender_py"
 set "OPTS_GUI=%OPTS_GUI% --include-data-files=%FAVICON%=favicon.ico"
 set "OPTS_GUI=%OPTS_GUI% --include-data-files=%EXAMPLE%=example.png"
 set "OPTS_GUI=%OPTS_GUI% --output-dir=%~dp0dist_nuitka"
 set "OPTS_GUI=%OPTS_GUI% --output-filename=JiFangFeedbackSender.exe"
 
-%PY_CMD% -m nuitka %OPTS_GUI% "%SENDER_PY%"
+python -m nuitka %OPTS_GUI% "%SENDER_PY%"
 if errorlevel 1 goto :compile_gui_error
 
 if exist "%~dp0dist_nuitka\sender.dist\JiFangFeedbackSender.exe" (
@@ -114,8 +115,8 @@ exit /b 0
 
 :no_python
 echo.
-echo 【错误】未检测到 Python 3.12！
-echo 请确认已安装 Python 3.12 且 py.exe 启动器可用。
+echo 【错误】未检测到 Python！
+echo 请确认已安装 Python 3.10+ 并勾选 Add to PATH。
 pause
 exit /b 1
 

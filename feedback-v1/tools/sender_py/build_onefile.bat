@@ -16,23 +16,22 @@ set SENDER_PY=%~dp0sender.py
 set WEB_MAIN_PY=%~dp0web_main.py
 set WEB_UI=%~dp0web_ui.html
 set "PYTHONPATH=%REPO_ROOT%\tools;%~dp0;%PYTHONPATH%"
-set "PY_CMD=py -3.12"
 
-echo [1/3] 检查 Python 3.12 环境及依赖...
-%PY_CMD% --version >nul 2>&1
+echo [1/3] 检查 Python 环境及依赖...
+python --version >nul 2>&1
 if errorlevel 1 goto :no_python
 
 echo 当前使用的 Python 版本：
-%PY_CMD% --version
+python --version
 
-%PY_CMD% -m pip install --upgrade pip
-%PY_CMD% -m pip install -r "%~dp0requirements.txt"
+python -m pip install --upgrade pip
+python -m pip install -r "%~dp0requirements.txt"
 if errorlevel 1 goto :pip_error
-%PY_CMD% -m pip install pyinstaller
+python -m pip install pyinstaller
 
 echo.
 echo [2/3] 正在打包【Tkinter 桌面版】(单文件 exe)...
-%PY_CMD% -m PyInstaller --noconfirm --clean --noupx --windowed --onefile ^
+python -m PyInstaller --noconfirm --clean --noupx --windowed --onefile ^
     --name "JiFangFeedbackSender" ^
     --icon "%FAVICON%" ^
     --version-file "%VERSION_FILE%" ^
@@ -42,6 +41,7 @@ echo [2/3] 正在打包【Tkinter 桌面版】(单文件 exe)...
     --paths "%~dp0" ^
     --collect-submodules sender_py ^
     --collect-all sv_ttk ^
+    --collect-all rapidocr_onnxruntime ^
     "%SENDER_PY%"
 
 if exist "%~dp0dist\JiFangFeedbackSender.exe" (
@@ -50,7 +50,7 @@ if exist "%~dp0dist\JiFangFeedbackSender.exe" (
 
 echo.
 echo [3/3] 正在打包【WebUI 浏览器版】(单文件 exe)...
-%PY_CMD% -m PyInstaller --noconfirm --clean --noupx --windowed --onefile ^
+python -m PyInstaller --noconfirm --clean --noupx --windowed --onefile ^
     --name "JiFangFeedbackWeb" ^
     --icon "%FAVICON%" ^
     --version-file "%VERSION_FILE%" ^
@@ -60,6 +60,7 @@ echo [3/3] 正在打包【WebUI 浏览器版】(单文件 exe)...
     --paths "%REPO_ROOT%\tools" ^
     --paths "%~dp0" ^
     --collect-submodules sender_py ^
+    --collect-all rapidocr_onnxruntime ^
     "%WEB_MAIN_PY%"
 
 if exist "%~dp0dist\JiFangFeedbackWeb.exe" (
@@ -80,8 +81,8 @@ exit /b 0
 
 :no_python
 echo.
-echo 【错误】未检测到 Python 3.12！
-echo 请确认已安装 Python 3.12 且 py.exe 启动器可用。
+echo 【错误】未检测到 Python！
+echo 请确认已安装 Python 3.10+ 并勾选 Add to PATH。
 pause
 exit /b 1
 

@@ -16,25 +16,24 @@ set SENDER_PY=%~dp0sender.py
 set WEB_MAIN_PY=%~dp0web_main.py
 set WEB_UI=%~dp0web_ui.html
 set "PYTHONPATH=%REPO_ROOT%\tools;%~dp0;%PYTHONPATH%"
-set "PY_CMD=py -3.12"
 
-echo [1/4] 检查 Python 3.12 环境及依赖...
-%PY_CMD% --version >nul 2>&1
+echo [1/4] 检查 Python 环境及依赖...
+python --version >nul 2>&1
 if errorlevel 1 goto :no_python
 
 echo 当前使用的 Python 版本：
-%PY_CMD% --version
+python --version
 
 echo 安装/更新 PyInstaller 及项目运行依赖...
-%PY_CMD% -m pip install --upgrade pip
-%PY_CMD% -m pip install -r "%~dp0requirements.txt"
+python -m pip install --upgrade pip
+python -m pip install -r "%~dp0requirements.txt"
 if errorlevel 1 goto :pip_error
-%PY_CMD% -m pip install pyinstaller
+python -m pip install pyinstaller
 
 echo.
 echo [2/4] 正在打包【Tkinter 桌面版】(文件夹模式)...
 if not exist "%~dp0dist_dir" mkdir "%~dp0dist_dir"
-%PY_CMD% -m PyInstaller --noconfirm --clean --noupx --windowed --onedir ^
+python -m PyInstaller --noconfirm --clean --noupx --windowed --onedir ^
     --distpath "%~dp0dist_dir" ^
     --name "JiFangFeedbackSender" ^
     --icon "%FAVICON%" ^
@@ -58,7 +57,7 @@ ren "%~dp0dist_dir\JiFangFeedbackSender" "极方每周反馈程序-绿色文件�
 
 echo.
 echo [3/4] 正在打包【WebUI 浏览器版】(文件夹模式)...
-%PY_CMD% -m PyInstaller --noconfirm --clean --noupx --windowed --onedir ^
+python -m PyInstaller --noconfirm --clean --noupx --windowed --onedir ^
     --distpath "%~dp0dist_dir" ^
     --name "JiFangFeedbackWeb" ^
     --icon "%FAVICON%" ^
@@ -105,8 +104,8 @@ exit /b 0
 
 :no_python
 echo.
-echo 【错误】未检测到 Python 3.12！
-echo 请确认已安装 Python 3.12 且 py.exe 启动器可用。
+echo 【错误】未检测到 Python！
+echo 请确认已安装 Python 3.10+ 并勾选 Add to PATH。
 pause
 exit /b 1
 
