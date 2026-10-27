@@ -898,10 +898,12 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         const appendWeekPdfs = (wd, fallbackWeek) => {
             if (!wd) return;
             const appendList = (list, sourceType, headerWeek) => {
-                (list || []).forEach(p => {
+                if (!list || !list.length) return;
+                const validItems = [];
+                list.forEach(p => {
                     const url = type === 'exercise' ? p.exercisePdf : p.answerPdf;
                     if (url) {
-                        pdfsToMerge.push({
+                        validItems.push({
                             url: url,
                             errorNum: p.errorNum,
                             videoUrl: p.videoUrl || p.video_url || '',
@@ -910,6 +912,36 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             sourceType: sourceType
                         });
                     }
+                });
+                if (validItems.length === 0) return;
+
+                // 同知识点错题合并归类：
+                // 若一个学生多道错题属于同一知识点，将这些错题聚合在该知识点下，仅首题展示知识点横条
+                const parseQNum = val => {
+                    if (typeof val === 'number') return val;
+                    const m = String(val || '').match(/\d+/);
+                    return m ? parseInt(m[0], 10) : 0;
+                };
+
+                const topicGroups = new Map();
+                validItems.forEach((item, idx) => {
+                    const cleanT = String(item.topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
+                    const groupKey = cleanT ? ('topic:' + cleanT) : ('__no_topic_' + (item.errorNum || idx) + '__');
+                    if (!topicGroups.has(groupKey)) {
+                        topicGroups.set(groupKey, []);
+                    }
+                    topicGroups.get(groupKey).push(item);
+                });
+
+                topicGroups.forEach(groupItems => {
+                    groupItems.sort((a, b) => parseQNum(a.errorNum) - parseQNum(b.errorNum));
+                    groupItems.forEach((item, idx) => {
+                        pdfsToMerge.push({
+                            ...item,
+                            isFirstInTopicGroup: idx === 0,
+                            topicGroupSize: groupItems.length
+                        });
+                    });
                 });
             };
             appendList(wd.previewPdfs, 'preview', wd.previewWeek || fallbackWeek);
@@ -1198,7 +1230,8 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                         const { topCropPt, bottomCutPt, effectiveHeightPt, isFullPage } = bounds;
 
                         // 检查当前页剩余空间是否足够
-                        const showTopicBanner = (pIdx === 0 && !!qTopicLabel);
+                        const isFirstInTopicGroup = typeof qItem === 'object' ? (qItem.isFirstInTopicGroup !== false) : true;
+                        const showTopicBanner = (pIdx === 0 && isFirstInTopicGroup && !!qTopicLabel);
                         let topicBannerInfo = null;
                         let currentBannerH = QUESTION_TOPIC_BANNER_H;
                         let currentBannerBlock = QUESTION_TOPIC_BANNER_BLOCK;
