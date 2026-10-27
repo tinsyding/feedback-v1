@@ -82,6 +82,20 @@ class WebController:
             "countdown": 0,
         }
 
+        self.benchmark_state = {
+            "running": False,
+            "progress": {
+                "processed": 0,
+                "total": 0,
+                "current_name": "",
+                "step_text": "就绪",
+            },
+            "records": [],
+            "summary": {},
+        }
+        self._benchmark_stop_requested = False
+        self._benchmark_worker_thread = None
+
     def _start_esc_watcher(self):
         self._stop_esc_watcher()
         if GlobalEscWatcher is None:
@@ -102,6 +116,7 @@ class WebController:
 
     def _on_emergency_esc(self):
         self._stop_requested = True
+        self._benchmark_stop_requested = True
         self.emit("⏹ 监听到全局 ESC 按键（已阻止企微最小化），正在安全停止任务并保持断点...")
 
     def _load_token(self):
@@ -696,3 +711,148 @@ class WebController:
                 q.put_nowait({"type": "state_change"})
             except Exception:
                 pass
+
+    # ================= 多引擎基准评测 (Benchmark Dry-Run) =================
+
+    def start_benchmark(self, target_ids: list = None) -> dict:
+        """启动多引擎基准评测（全仿真·只测不发）。"""
+        with self._lock:
+            if self._running:
+                return {"success": False, "message": "常规发送任务正在执行中，请先停止发送"}
+            if self.benchmark_state["running"]:
+                return {"success": False, "message": "基准评测已在运行中"}
+
+            if target_ids is not None:
+                selected_set = set(target_ids)
+                items_to_run = [it for it in self.items if it["_id"] in selected_set]
+            else:
+                items_to_run = [it for it in self.items if it.get("_selected", True)]
+
+            if not items_to_run:
+                return {"success": False, "message": "未勾选任何需要评测的学生"}
+
+            self.benchmark_state["running"] = True
+            self.benchmark_state["progress"] = {
+                "processed": 0,
+                "total": len(items_to_run),
+                "current_name": "",
+                "step_text": "正在启动评测...",
+            }
+            self.benchmark_state["records"] = []
+            self.benchmark_state["summary"] = {}
+            self._benchmark_stop_requested = False
+
+        self._benchmark_worker_thread = threading.Thread(
+            target=self._run_benchmark_worker,
+            args=(items_to_run,),
+            daemon=True
+        )
+        self._benchmark_worker_thread.start()
+        return {"success": True, "message": f"多引擎基准评测已启动，共 {len(items_to_run)} 人", "total": len(items_to_run)}
+
+    def stop_benchmark(self) -> dict:
+        """停止多引擎基准评测。"""
+        with self._lock:
+            if not self.benchmark_state["running"]:
+                return {"success": True, "message": "当前未在运行评测"}
+            self._benchmark_stop_requested = True
+        self.emit("⏹ [评测] 已收到停止请求，正在中止当前学生评测...")
+        return {"success": True, "message": "已发送停止请求"}
+
+    def get_benchmark_state(self) -> dict:
+        """获取当前评测状态与结果数据。"""
+        with self._lock:
+            return {
+                "running": self.benchmark_state["running"],
+                "stop_requested": self._benchmark_stop_requested,
+                "progress": dict(self.benchmark_state["progress"]),
+                "records": list(self.benchmark_state["records"]),
+                "summary": dict(self.benchmark_state["summary"]),
+            }
+
+    def get_benchmark_csv_content(self) -> tuple:
+        """生成评测 CSV 文本内容与建议文件名。"""
+        try:
+            try:
+                from sender_py.benchmark import generate_benchmark_csv_content, compute_benchmark_summary
+            except ModuleNotFoundError:
+                from benchmark import generate_benchmark_csv_content, compute_benchmark_summary
+        except Exception as exc:
+            return (f"导出异常: {exc}", "error.csv")
+
+        with self._lock:
+            records = list(self.benchmark_state["records"])
+            summary = self.benchmark_state.get("summary") or compute_benchmark_summary(records)
+
+        csv_text = generate_benchmark_csv_content(records, summary)
+        filename = f"OCR_Benchmark_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+        return (csv_text, filename)
+
+    def _run_benchmark_worker(self, items_to_run: list):
+        """评测工作线程：全仿真运行企微搜索与截图核验，物理断路不发消息。"""
+        total = len(items_to_run)
+        self.emit(f"🧪 [多引擎评测] 开始基准评测（共 {total} 人，全程只识别不发送，按 ESC 随时停止）")
+        self._start_esc_watcher()
+
+        try:
+            try:
+                from sender_py.benchmark import benchmark_single_student, compute_benchmark_summary
+                from sender_py.roi_manager import default_config_path
+            except ModuleNotFoundError:
+                from benchmark import benchmark_single_student, compute_benchmark_summary
+                from roi_manager import default_config_path
+
+            records = []
+            config_path = default_config_path()
+
+            for idx, item in enumerate(items_to_run, 1):
+                if self._benchmark_stop_requested:
+                    self.emit("⏹ [多引擎评测] 收到停止请求，评测终止。")
+                    break
+
+                name = item.get("studentName", "")
+                with self._lock:
+                    self.benchmark_state["progress"] = {
+                        "processed": idx,
+                        "total": total,
+                        "current_name": name,
+                        "step_text": f"正在评测：{name} ({idx}/{total})",
+                    }
+                self._notify_state_change()
+
+                self.emit(f"🧪 [{idx}/{total}] 正在全仿真比对联系人: {name}...")
+                res = benchmark_single_student(
+                    item,
+                    self.server,
+                    self.token,
+                    config_path=config_path,
+                    log=self.emit,
+                    should_stop=lambda: self._benchmark_stop_requested,
+                )
+
+                if res.get("record"):
+                    rec = res["record"]
+                    records.append(rec)
+                    with self._lock:
+                        self.benchmark_state["records"] = list(records)
+                        self.benchmark_state["summary"] = compute_benchmark_summary(records)
+                    self._notify_state_change()
+                else:
+                    self.emit(f"  ⚠️ [{name}] 未能获取有效评测数据：{res.get('reason')}")
+
+                time.sleep(0.4)
+
+            summary = compute_benchmark_summary(records)
+            with self._lock:
+                self.benchmark_state["summary"] = summary
+                self.benchmark_state["progress"]["step_text"] = "评测已完成"
+            self._notify_state_change()
+
+            self.emit(f"🎉 [多引擎评测] 评测任务全部完成！共测试 {len(records)} 人，发现分歧 {summary.get('discrepancy_count', 0)} 例。")
+        except Exception as exc:
+            self.emit(f"❌ [多引擎评测] 运行异常: {exc}")
+        finally:
+            with self._lock:
+                self.benchmark_state["running"] = False
+            self._stop_esc_watcher()
+            self._notify_state_change()

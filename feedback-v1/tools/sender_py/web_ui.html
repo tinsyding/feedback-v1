@@ -449,7 +449,7 @@
 
   <!-- 顶部导航 -->
   <header>
-    <div class="brand">
+    <div class="brand" onclick="onBrandBadgeClick()" style="cursor:pointer;" title="极方每周反馈程序">
       <div class="logo-badge">极</div>
       <div class="brand-title">极方每周反馈程序</div>
       <div class="brand-badge">Web版 v1.8.7</div>
@@ -660,6 +660,112 @@
     </div>
   </div>
 
+  <!-- 弹窗 6：多引擎识别基准评测 (Benchmark Dry-Run) -->
+  <div class="modal-overlay" id="benchmarkModal">
+    <div class="modal-card" style="max-width:1120px; width:95vw;">
+      <div class="modal-header" style="background:#0f172a; color:#fff; border-top-left-radius:var(--radius-lg); border-top-right-radius:var(--radius-lg); padding:16px 20px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="background:#2563eb; color:#fff; padding:3px 8px; border-radius:6px; font-size:12px; font-weight:700;">🧪 实验室功能</span>
+          <h3 style="margin:0; font-size:16px; font-weight:700; color:#fff;">多引擎识别基准评测 (Benchmark Dry-Run)</h3>
+        </div>
+        <button class="modal-close" style="color:#94a3b8;" onclick="closeModal('benchmarkModal')">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:16px 20px; max-height:calc(85vh - 140px); overflow-y:auto;">
+        <!-- 安全提示横幅 -->
+        <div style="background:#fef3c7; border:1px solid #fde68a; border-radius:8px; padding:10px 14px; margin-bottom:14px; display:flex; align-items:center; gap:10px; color:#92400e; font-size:13px; font-weight:600;">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+          <span>【物理安全保护已生效】本模式仅在企业微信中搜索联系人并对标题截图进行多引擎横向测算，严格不调用任何发送操作，绝不向家长发送消息！</span>
+        </div>
+
+        <!-- 汇总看板 Stats Grid -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; margin-bottom:14px;">
+          <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px;">
+            <div style="font-size:11px; color:#64748b; font-weight:600;">评测样本总数</div>
+            <div id="bmTotalCount" style="font-size:20px; font-weight:700; color:#0f172a; margin-top:2px;">0 人</div>
+            <div id="bmDiscCount" style="font-size:11px; color:#f59e0b; margin-top:2px;">存在分歧: 0 例</div>
+          </div>
+          <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px;">
+            <div style="font-size:11px; color:#64748b; font-weight:600;">Qwen3.8-Flash (云端)</div>
+            <div id="bmQwenRate" style="font-size:20px; font-weight:700; color:#2563eb; margin-top:2px;">-</div>
+            <div id="bmQwenLat" style="font-size:11px; color:#64748b; margin-top:2px;">平均耗时: - ms</div>
+          </div>
+          <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px;">
+            <div style="font-size:11px; color:#64748b; font-weight:600;">RapidOCR 纯识别 (Rec)</div>
+            <div id="bmRapidRecRate" style="font-size:20px; font-weight:700; color:#16a34a; margin-top:2px;">-</div>
+            <div id="bmRapidRecLat" style="font-size:11px; color:#64748b; margin-top:2px;">平均耗时: - ms</div>
+          </div>
+          <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px;">
+            <div style="font-size:11px; color:#64748b; font-weight:600;">RapidOCR 全流程 (Det+Rec)</div>
+            <div id="bmRapidFullRate" style="font-size:20px; font-weight:700; color:#0d9488; margin-top:2px;">-</div>
+            <div id="bmRapidFullLat" style="font-size:11px; color:#64748b; margin-top:2px;">平均耗时: - ms</div>
+          </div>
+          <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px;">
+            <div style="font-size:11px; color:#64748b; font-weight:600;">winocr (WinRT直调)</div>
+            <div id="bmWinocrRate" style="font-size:20px; font-weight:700; color:#7c3aed; margin-top:2px;">-</div>
+            <div id="bmWinocrLat" style="font-size:11px; color:#64748b; margin-top:2px;">平均耗时: - ms</div>
+          </div>
+          <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px;">
+            <div style="font-size:11px; color:#64748b; font-weight:600;">PowerShell WinRT</div>
+            <div id="bmPsRate" style="font-size:20px; font-weight:700; color:#475569; margin-top:2px;">-</div>
+            <div id="bmPsLat" style="font-size:11px; color:#64748b; margin-top:2px;">平均耗时: - ms</div>
+          </div>
+        </div>
+
+        <!-- 操作与过滤控制栏 -->
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; gap:12px; flex-wrap:wrap;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button id="btnStartBenchmark" class="btn btn-primary btn-sm" onclick="triggerStartBenchmark()">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+              <span>开始评测 (仅勾选学生)</span>
+            </button>
+            <button id="btnStopBenchmark" class="btn btn-danger btn-sm" style="display:none;" onclick="triggerStopBenchmark()">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>
+              <span>停止评测</span>
+            </button>
+            <button id="btnExportBenchmark" class="btn btn-sm" onclick="downloadBenchmarkCsv()">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              <span>导出完整对比表 (CSV)</span>
+            </button>
+          </div>
+          <div style="display:flex; align-items:center; gap:12px;">
+            <label style="font-size:13px; color:#475569; display:flex; align-items:center; gap:6px; cursor:pointer;">
+              <input type="checkbox" id="bmFilterDiscrepancy" onchange="renderBenchmarkTable()">
+              <span>⚠️ 仅看存在分歧的学生</span>
+            </label>
+            <span id="bmStatusText" style="font-size:12px; color:#64748b; font-weight:600;">就绪</span>
+          </div>
+        </div>
+
+        <!-- 数据表格 -->
+        <div style="border:1px solid #e2e8f0; border-radius:8px; overflow:hidden;">
+          <table style="width:100%; border-collapse:collapse; font-size:12px; text-align:left;">
+            <thead>
+              <tr style="background:#f1f5f9; color:#475569; border-bottom:1px solid #cbd5e1;">
+                <th style="padding:8px 10px; width:45px;">#</th>
+                <th style="padding:8px 10px; width:120px;">学生 / 学号</th>
+                <th style="padding:8px 10px;">Qwen3.8-Flash</th>
+                <th style="padding:8px 10px;">RapidOCR 纯识别</th>
+                <th style="padding:8px 10px;">RapidOCR 全流程</th>
+                <th style="padding:8px 10px;">winocr</th>
+                <th style="padding:8px 10px;">PowerShell WinRT</th>
+                <th style="padding:8px 10px; width:85px; text-align:center;">一致性</th>
+              </tr>
+            </thead>
+            <tbody id="bmTableBody">
+              <tr>
+                <td colspan="8" style="padding:30px; text-align:center; color:#94a3b8;">暂无评测数据，请点击左上方“开始评测”</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-size:12px; color:#94a3b8;">快捷键提示：任何时候按 ESC 均可紧急停止评测并关闭面板</span>
+        <button class="btn btn-sm" onclick="closeModal('benchmarkModal')">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 轻量气泡通知 Toast -->
   <div id="toast">已复制到剪贴板</div>
 
@@ -693,18 +799,222 @@
       setTimeout(() => t.classList.remove("show"), 2000);
     }
 
-    // 全局 ESC 按键支持
+    // 全局 ESC 按键支持 & 隐蔽基准评测快捷键
     function initKeyboardEsc() {
       document.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
-          // 如果正在发送，触发停止
+          // 如果正在发送或评测，触发停止
           if (appState.running) {
             triggerStop();
+          }
+          if (benchmarkRunning) {
+            triggerStopBenchmark();
           }
           // 关闭所有弹窗
           document.querySelectorAll(".modal-overlay.active").forEach(m => m.classList.remove("active"));
         }
+        // 隐蔽快捷键：Ctrl + Alt + B 或 Ctrl + Shift + D 呼出多引擎评测面板
+        if ((e.ctrlKey && e.altKey && (e.key === 'b' || e.key === 'B')) ||
+            (e.ctrlKey && e.shiftKey && (e.key === 'd' || e.key === 'D'))) {
+          e.preventDefault();
+          openBenchmarkModal();
+        }
       });
+    }
+
+    // 彩蛋机制：连续点击版本号 5 次呼出评测面板
+    let brandClickCount = 0;
+    let brandClickTimer = null;
+    function onBrandBadgeClick() {
+      brandClickCount++;
+      clearTimeout(brandClickTimer);
+      brandClickTimer = setTimeout(() => { brandClickCount = 0; }, 2500);
+      if (brandClickCount >= 5) {
+        brandClickCount = 0;
+        showToast("🧪 已激活隐藏功能：多引擎识别基准评测！");
+        openBenchmarkModal();
+      }
+    }
+
+    // ================= 多引擎基准评测 (Benchmark Dry-Run) 前端逻辑 =================
+    let benchmarkPollTimer = null;
+    let benchmarkRecords = [];
+    let benchmarkSummary = {};
+    let benchmarkRunning = false;
+
+    async function openBenchmarkModal() {
+      document.getElementById("benchmarkModal").classList.add("active");
+      await fetchBenchmarkState();
+      if (!benchmarkPollTimer) {
+        benchmarkPollTimer = setInterval(fetchBenchmarkState, 1200);
+      }
+    }
+
+    async function fetchBenchmarkState() {
+      const modal = document.getElementById("benchmarkModal");
+      if (!modal || !modal.classList.contains("active")) {
+        if (benchmarkPollTimer) {
+          clearInterval(benchmarkPollTimer);
+          benchmarkPollTimer = null;
+        }
+        return;
+      }
+      try {
+        const res = await fetch("/api/benchmark/state");
+        const data = await res.json();
+        benchmarkRunning = data.running || false;
+        benchmarkRecords = data.records || [];
+        benchmarkSummary = data.summary || {};
+        updateBenchmarkUI(data);
+      } catch (e) {
+        console.error("fetchBenchmarkState err:", e);
+      }
+    }
+
+    function updateBenchmarkUI(data) {
+      const btnStart = document.getElementById("btnStartBenchmark");
+      const btnStop = document.getElementById("btnStopBenchmark");
+      const statusText = document.getElementById("bmStatusText");
+
+      if (data.running) {
+        btnStart.style.display = "none";
+        btnStop.style.display = "inline-flex";
+        statusText.innerHTML = `<span style="color:#2563eb; animation:pulse 1s infinite;">▶ ${data.progress?.step_text || '评测进行中...'}</span>`;
+      } else {
+        btnStart.style.display = "inline-flex";
+        btnStop.style.display = "none";
+        statusText.innerText = data.progress?.step_text || (benchmarkRecords.length ? "评测完成" : "就绪");
+      }
+
+      const sm = data.summary || {};
+      const total = sm.total || benchmarkRecords.length || 0;
+      document.getElementById("bmTotalCount").innerText = `${total} 人`;
+      document.getElementById("bmDiscCount").innerText = `存在分歧: ${sm.discrepancy_count || 0} 例`;
+
+      const renderEngineStat = (rateElId, latElId, engData) => {
+        const rateEl = document.getElementById(rateElId);
+        const latEl = document.getElementById(latElId);
+        if (!engData || !engData.evaluated_count) {
+          if (rateEl) rateEl.innerText = "-";
+          if (latEl) latEl.innerText = "平均耗时: - ms";
+        } else {
+          if (rateEl) rateEl.innerText = `${engData.match_rate_pct}%`;
+          if (latEl) latEl.innerText = `平均 ${engData.avg_latency_ms} ms (${engData.min_latency_ms}~${engData.max_latency_ms}ms)`;
+        }
+      };
+
+      const engs = sm.engines || {};
+      renderEngineStat("bmQwenRate", "bmQwenLat", engs.qwen_flash);
+      renderEngineStat("bmRapidRecRate", "bmRapidRecLat", engs.rapid_rec);
+      renderEngineStat("bmRapidFullRate", "bmRapidFullLat", engs.rapid_full);
+      renderEngineStat("bmWinocrRate", "bmWinocrLat", engs.winocr);
+      renderEngineStat("bmPsRate", "bmPsLat", engs.ps_winrt);
+
+      renderBenchmarkTable();
+    }
+
+    function renderBenchmarkTable() {
+      const tbody = document.getElementById("bmTableBody");
+      const onlyDisc = document.getElementById("bmFilterDiscrepancy")?.checked || false;
+      const list = onlyDisc ? benchmarkRecords.filter(r => r.has_discrepancy) : benchmarkRecords;
+
+      if (!list || list.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" style="padding:30px; text-align:center; color:#94a3b8;">${onlyDisc ? '当前无任何存在分歧的学生（各引擎识别结论完全一致）' : '暂无评测数据，请点击上方“开始评测”'}</td></tr>`;
+        return;
+      }
+
+      let html = "";
+      list.forEach((r, idx) => {
+        const eng = r.engines || {};
+        const qwen = eng.qwen_flash || {};
+        const r_rec = eng.rapid_rec || {};
+        const r_full = eng.rapid_full || {};
+        const win = eng.winocr || {};
+        const ps = eng.ps_winrt || {};
+
+        const cell = (e) => {
+          if (!e || !e.name) return '<span style="color:#cbd5e1;">-</span>';
+          const matched = e.matched;
+          const bg = matched ? "rgba(22,163,74,0.1)" : "rgba(239,68,68,0.1)";
+          const clr = matched ? "#16a34a" : "#dc2626";
+          const icon = matched ? "✓" : "✗";
+          const text = e.text || "-";
+          const lat = e.latency_ms !== undefined ? `${e.latency_ms}ms` : "";
+          return `
+            <div style="font-family:monospace; line-height:1.3;">
+              <div style="display:flex; align-items:center; gap:4px; margin-bottom:2px;">
+                <span style="background:${bg}; color:${clr}; font-weight:700; padding:1px 5px; border-radius:3px; font-size:10px;">${icon} ${matched ? '匹配' : '未匹配'}</span>
+                <span style="font-size:10px; color:#64748b;">${lat}</span>
+              </div>
+              <div style="font-size:11px; color:#334155; word-break:break-all;">${escapeHtml(text)}</div>
+            </div>
+          `;
+        };
+
+        const discTag = r.has_discrepancy
+          ? `<span style="background:#fef3c7; color:#b45309; font-weight:700; padding:2px 6px; border-radius:4px; font-size:11px; white-space:nowrap;">⚠️ 有分歧</span>`
+          : `<span style="background:#f0fdf4; color:#15803d; font-weight:600; padding:2px 6px; border-radius:4px; font-size:11px; white-space:nowrap;">一致</span>`;
+
+        html += `
+          <tr style="border-bottom:1px solid #e2e8f0; background:${r.has_discrepancy ? '#fffbeb' : '#fff'};">
+            <td style="padding:8px 10px; color:#94a3b8; font-family:monospace;">${idx + 1}</td>
+            <td style="padding:8px 10px; font-weight:600; color:#1e293b;">
+              <div>${escapeHtml(r.studentName || '-')}</div>
+              <div style="font-size:11px; color:#64748b; font-weight:normal;">学号: ${escapeHtml(r.sid || '-')}</div>
+            </td>
+            <td style="padding:8px 10px;">${cell(qwen)}</td>
+            <td style="padding:8px 10px;">${cell(r_rec)}</td>
+            <td style="padding:8px 10px;">${cell(r_full)}</td>
+            <td style="padding:8px 10px;">${cell(win)}</td>
+            <td style="padding:8px 10px;">${cell(ps)}</td>
+            <td style="padding:8px 10px; text-align:center;">${discTag}</td>
+          </tr>
+        `;
+      });
+      tbody.innerHTML = html;
+    }
+
+    async function triggerStartBenchmark() {
+      const selected = appState.students.filter(s => s.selected);
+      if (!selected.length) {
+        showToast("请先在主界面勾选要评测的学生！");
+        return;
+      }
+      try {
+        const res = await fetch("/api/benchmark/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: selected.map(s => s.id) })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(`已开始评测 ${selected.length} 位学生（全仿真只测不发）`);
+          fetchBenchmarkState();
+        } else {
+          showToast(data.message || "启动失败");
+        }
+      } catch (e) {
+        showToast("网络请求失败: " + e);
+      }
+    }
+
+    async function triggerStopBenchmark() {
+      try {
+        const res = await fetch("/api/benchmark/stop", { method: "POST" });
+        const data = await res.json();
+        showToast(data.message || "已发送停止请求");
+        fetchBenchmarkState();
+      } catch (e) {
+        showToast("停止请求失败: " + e);
+      }
+    }
+
+    function downloadBenchmarkCsv() {
+      if (!benchmarkRecords.length) {
+        showToast("当前暂无评测数据，请先开始评测！");
+        return;
+      }
+      window.open("/api/benchmark/export", "_blank");
     }
 
     // 文件夹递归遍历支持

@@ -859,6 +859,10 @@ class SenderApp:
         root.minsize(1040, 660)
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         root.bind("<Escape>", self.request_stop)
+        root.bind("<Control-Alt-b>", self.open_benchmark_window)
+        root.bind("<Control-Alt-B>", self.open_benchmark_window)
+        root.bind("<Control-Shift-D>", self.open_benchmark_window)
+        root.bind("<Control-Shift-d>", self.open_benchmark_window)
 
         self._build_ui()
         self.search_var.trace_add("write", self._on_search_change)
@@ -2545,6 +2549,128 @@ class SenderApp:
         ttk.Button(actions, text="🔄 刷新", style="Toolbar.TButton",
                    command=populate_tree).pack(side="left")
         tree.bind("<Double-1>", open_report)
+
+    def open_benchmark_window(self, _event=None):
+        """打开隐藏的多引擎识别基准评测窗口 (Benchmark Dry-Run)。"""
+        from tkinter import messagebox, filedialog
+        try:
+            try:
+                from sender_py.benchmark import benchmark_single_student, compute_benchmark_summary, generate_benchmark_csv_content
+                from sender_py.roi_manager import default_config_path
+            except ModuleNotFoundError:
+                from benchmark import benchmark_single_student, compute_benchmark_summary, generate_benchmark_csv_content
+                from roi_manager import default_config_path
+        except Exception as e:
+            messagebox.showerror("错误", f"无法加载基准评测模块: {e}", parent=self.root)
+            return
+
+        selected_items = [it for it in self.items if it.get("_selected", True)]
+        if not selected_items:
+            messagebox.showinfo("提示", "当前未勾选任何需要评测的学生，请先在主列表勾选学生！", parent=self.root)
+            return
+
+        ok = messagebox.askyesno(
+            "🧪 多引擎识别基准评测 (只测不发)",
+            f"已激活隐藏功能：多引擎横向比对评测！\n\n"
+            f"【物理安全防护】：\n"
+            f"将逐一在企业微信中搜索勾选的 {len(selected_items)} 位学生并截图标题栏，"
+            f"同时对同一张图调用 Qwen-Flash 与本地多种 OCR 进行精度与毫秒级耗时比对。\n\n"
+            f"⚠️ 绝不向企微输入框粘贴或发送任何文字！\n\n"
+            f"是否立即开始评测？",
+            parent=self.root
+        )
+        if not ok:
+            return
+
+        records = []
+        win = tk.Toplevel(self.root)
+        win.title("🧪 多引擎识别基准评测进度 (只测不发)")
+        win.geometry("750x450")
+        win.transient(self.root)
+        self._center_window(win, 750, 450)
+
+        body = ttk.Frame(win, padding=16)
+        body.pack(fill="both", expand=True)
+
+        status_lbl = ttk.Label(body, text="正在准备评测...", font=("Microsoft YaHei UI", 10, "bold"))
+        status_lbl.pack(anchor="w", pady=(0, 10))
+
+        prog = ttk.Progressbar(body, maximum=len(selected_items), value=0)
+        prog.pack(fill="x", pady=(0, 10))
+
+        txt_frame = ttk.Frame(body)
+        txt_frame.pack(fill="both", expand=True)
+        txt = tk.Text(txt_frame, wrap="word", height=12, font=("Consolas", 9))
+        scroll = ttk.Scrollbar(txt_frame, orient="vertical", command=txt.yview)
+        txt.configure(yscrollcommand=scroll.set)
+        txt.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+
+        stopped = [False]
+        def on_stop():
+            stopped[0] = True
+            status_lbl.config(text="正在停止...")
+
+        btn_box = ttk.Frame(body)
+        btn_box.pack(fill="x", pady=(10, 0))
+        stop_btn = ttk.Button(btn_box, text="⏹ 停止评测", command=on_stop)
+        stop_btn.pack(side="right", padx=(8, 0))
+        export_btn = ttk.Button(btn_box, text="📥 导出对比表(CSV)", state="disabled")
+        export_btn.pack(side="right")
+
+        def do_export():
+            if not records:
+                return
+            csv_str = generate_benchmark_csv_content(records, compute_benchmark_summary(records))
+            fn = filedialog.asksaveasfilename(
+                parent=win,
+                title="保存评测对比表",
+                defaultextension=".csv",
+                initialfile=f"OCR_Benchmark_{time.strftime('%Y%m%d_%H%M%S')}.csv",
+                filetypes=[("CSV 文件", "*.csv"), ("所有文件", "*.*")]
+            )
+            if fn:
+                with open(fn, "w", encoding="utf-8-sig", newline="") as f:
+                    f.write(csv_str)
+                messagebox.showinfo("成功", f"评测报表已成功保存至:\n{fn}", parent=win)
+
+        export_btn.config(command=do_export)
+
+        def worker():
+            config_path = default_config_path()
+            for idx, item in enumerate(selected_items, 1):
+                if stopped[0]:
+                    break
+                sname = item.get("studentName", "")
+                def _update_ui(i=idx, sn=sname):
+                    status_lbl.config(text=f"正在评测 ({i}/{len(selected_items)}): {sn}")
+                    prog.config(value=i)
+                win.after(0, _update_ui)
+
+                def log_fn(m):
+                    def _log(msg=m):
+                        txt.insert("end", f"{msg}\n")
+                        txt.see("end")
+                    win.after(0, _log)
+
+                res = benchmark_single_student(
+                    item, self.server, self.token,
+                    config_path=config_path,
+                    log=log_fn,
+                    should_stop=lambda: stopped[0]
+                )
+                if res.get("record"):
+                    records.append(res["record"])
+                time.sleep(0.3)
+
+            def _finish():
+                summary = compute_benchmark_summary(records)
+                status_lbl.config(text=f"评测完成！共测试 {len(records)} 人，发现分歧 {summary.get('discrepancy_count', 0)} 例。")
+                stop_btn.config(state="disabled")
+                export_btn.config(state="normal")
+            win.after(0, _finish)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _record_sent_files(self):
         """记录已经发送过的 JSON / HTML 文件，生成快照并保存在本地。"""

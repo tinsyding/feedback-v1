@@ -194,6 +194,23 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(404, "Sent file report not found")
             return
 
+        # 2.8 多引擎基准评测 API
+        if path == "/api/benchmark/state":
+            self._send_json(self.controller.get_benchmark_state())
+            return
+
+        if path == "/api/benchmark/export":
+            csv_text, fname = self.controller.get_benchmark_csv_content()
+            csv_bytes = ("\ufeff" + csv_text).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/csv; charset=utf-8")
+            self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+            self.send_header("Content-Length", str(len(csv_bytes)))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(csv_bytes)
+            return
+
         # 3. Server-Sent Events (SSE 实时事件推送)
         if path == "/api/events":
             self.send_response(200)
@@ -364,6 +381,18 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 ok = False
             self._send_json({"success": ok})
+            return
+
+        # 9.5 多引擎基准评测控制
+        if path == "/api/benchmark/start":
+            ids = body.get("ids", None)
+            res = self.controller.start_benchmark(ids)
+            self._send_json(res)
+            return
+
+        if path == "/api/benchmark/stop":
+            res = self.controller.stop_benchmark()
+            self._send_json(res)
             return
 
         # 10. 退出后台程序
