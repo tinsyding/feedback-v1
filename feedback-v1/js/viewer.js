@@ -1248,7 +1248,7 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
             grade: sessionPayload.plusData.grade,
             tier: sessionPayload.plusData.tier,
             week: sessionPayload.plusData.week,
-            preview_week: pvLesson || sessionPayload.plusData.week,
+            preview_week: sessionPayload.plusData.previewWeek || pvLesson || sessionPayload.plusData.week,
             has_preview_data: !!previewData,
             has_homework_data: true,
             source_files: uploadedFileNames,
@@ -1296,7 +1296,7 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                 errors: commentForPlus.errorNums,
                 previewErrors: previewParsedForPlus?.errorNums || [],
                 previewComment: previewCommentForPlus,
-                previewWeek: pvLesson || sessionPayload.plusData.week,
+                previewWeek: sessionPayload.plusData.previewWeek || pvLesson || sessionPayload.plusData.week,
                 homeworkScore: homeworkScore,
                 previewScore: previewScore,
                 totalScore: studentTot || batchTotalScore || 100,
@@ -1391,9 +1391,10 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
         feedback += `以下是${getStudentDisplayName(studentName)}${feedbackSubject}作业情况反馈：\n`;
 
         // --- Preview homework section ---
+        let previewParsed = null;
         if (previewData && pvLesson) {
             const pvInfo = previewMap[studentName];
-            const previewParsed = pvInfo?.comment ? parseErrorQuestionsFromComment(String(pvInfo.comment)) : null;
+            previewParsed = pvInfo?.comment ? parseErrorQuestionsFromComment(String(pvInfo.comment)) : null;
             const previewDisplayInfo = (sessionPayload.plusData?.enabled && previewParsed && previewParsed.errorNums.length > 0)
                 ? { ...pvInfo, comment: previewParsed.cleanComment }
                 : pvInfo;
@@ -1403,17 +1404,22 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                 feedback += buildPreviewFeedbackSection(previewDisplayInfo, pvLesson, previewStats, previewMetricMode, rankFormat);
             }
 
-            // 预习错题与课后巩固共用同一个错题本 Token，在预习段落后也给出入口
+            // 预习作业个人薄弱点展示
             if (sessionPayload.plusData?.enabled && previewParsed && previewParsed.errorNums.length > 0) {
-                feedback += `【错题本】：本次预习与课后巩固错题已合并，点击链接查看\n`;
-                const previewToken = plusTokens[studentKey]
-                    || plusTokens[legacyStudentKey]
-                    || (!studentId ? (plusTokens[fullName] || plusTokens[studentName]) : '');
-                if (previewToken) {
-                    const retestBase = getRetestBaseUrl();
-                    feedback += `${retestBase}?token=${previewToken}\n`;
-                } else {
-                    feedback += `(生成链接失败，请联系老师)\n`;
+                const previewQuestions = sessionPayload.plusData.previewQuestions || [];
+                if (previewQuestions.length > 0) {
+                    const previewQuestionMap = {};
+                    previewQuestions.forEach(q => {
+                        const ids = String(q.id).split(/[,、，]/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+                        const cleanT = typeof cleanTopicTrailingPunctuation === 'function' 
+                            ? cleanTopicTrailingPunctuation(q.topic) 
+                            : (q.topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
+                        ids.forEach(id => { previewQuestionMap[id] = cleanT; });
+                    });
+                    const previewTopics = [...new Set(previewParsed.errorNums.map(num => previewQuestionMap[num] || `第${num}题`).filter(Boolean))];
+                    if (previewTopics.length > 0) {
+                        feedback += `【个人薄弱点】：${previewTopics.join('、')}\n`;
+                    }
                 }
             }
         }
@@ -1471,10 +1477,12 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
             }
 
             // Plus: add targeted consolidation suggestions
-            if (plusData && plusData.enabled && plusData.questions) {
-                const hasErrors = errorQuestionNums.length > 0;
-                
-                if (hasErrors) {
+            if (plusData && plusData.enabled) {
+                const hasHomeworkErrors = errorQuestionNums.length > 0;
+                const hasPreviewErrors = Boolean(previewParsed && previewParsed.errorNums && previewParsed.errorNums.length > 0);
+                const hasAnyErrors = hasHomeworkErrors || hasPreviewErrors;
+
+                if (hasHomeworkErrors && plusData.questions) {
                     const questionMap = {};
                     plusData.questions.forEach(q => {
                         const ids = String(q.id).split(/[,、，]/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
@@ -1484,20 +1492,10 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                         ids.forEach(id => { questionMap[id] = cleanT; });
                     });
                     
-                    const errorTopics = [...new Set(errorQuestionNums.map(num => questionMap[num]).filter(Boolean))];
+                    const errorTopics = [...new Set(errorQuestionNums.map(num => questionMap[num] || `第${num}题`).filter(Boolean))];
                     
                     if (errorTopics.length > 0) {
                         plusFeedbackPart += `【个人薄弱点】：${errorTopics.join('、')}\n`;
-                    }
-                    plusFeedbackPart += `【错题本】：点击链接查看本专题的错题\n`;
-                    const token = plusTokens[studentKey]
-                        || plusTokens[legacyStudentKey]
-                        || (!studentId ? (plusTokens[fullName] || plusTokens[studentName]) : '');
-                    if (token) {
-                        const retestBase = getRetestBaseUrl();
-                        plusFeedbackPart += `${retestBase}?token=${token}\n`;
-                    } else {
-                        plusFeedbackPart += `(生成链接失败，请联系老师)\n`;
                     }
                     
                     errorQuestionNums.forEach(num => {
@@ -1511,6 +1509,19 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                             cachedPlusErrorStats[num].students.push(studentDisplayName);
                         }
                     });
+                }
+
+                if (hasAnyErrors) {
+                    plusFeedbackPart += `【错题本】：点击链接查看本专题的错题\n`;
+                    const token = plusTokens[studentKey]
+                        || plusTokens[legacyStudentKey]
+                        || (!studentId ? (plusTokens[fullName] || plusTokens[studentName]) : '');
+                    if (token) {
+                        const retestBase = getRetestBaseUrl();
+                        plusFeedbackPart += `${retestBase}?token=${token}\n`;
+                    } else {
+                        plusFeedbackPart += `(生成链接失败，请联系老师)\n`;
+                    }
                 } else {
                     // 严格校验：结合分数、正确率、推算满分以及评语多维判定是否真正满分
                     const studentAcc = (accIdx >= 0) ? parsePercentValue(row[accIdx]) : null;
@@ -1529,7 +1540,21 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
         } else {
             const plusData = sessionPayload.plusData;
             if (plusData && plusData.enabled) {
-                plusFeedbackPart = `第${hwLesson}${getLessonUnit()}${getHomeworkLabelFull()}未提交，暂无错题加练数据。\n`;
+                const hasPreviewErrors = Boolean(previewParsed && previewParsed.errorNums && previewParsed.errorNums.length > 0);
+                if (hasPreviewErrors) {
+                    plusFeedbackPart = `第${hwLesson}${getLessonUnit()}${getHomeworkLabelFull()}未提交。\n【错题本】：点击链接查看本专题的错题\n`;
+                    const token = plusTokens[studentKey]
+                        || plusTokens[legacyStudentKey]
+                        || (!studentId ? (plusTokens[fullName] || plusTokens[studentName]) : '');
+                    if (token) {
+                        const retestBase = getRetestBaseUrl();
+                        plusFeedbackPart += `${retestBase}?token=${token}\n`;
+                    } else {
+                        plusFeedbackPart += `(生成链接失败，请联系老师)\n`;
+                    }
+                } else {
+                    plusFeedbackPart = `第${hwLesson}${getLessonUnit()}${getHomeworkLabelFull()}未提交，暂无错题加练数据。\n`;
+                }
             }
         }
 
@@ -2007,7 +2032,7 @@ async function doGeneratePreviewOnlyFeedback() {
             grade: tokenGrade,
             tier: previewOnlyPlusData.tier || '',
             week: previewOnlyPlusData.week || pvLesson || 1,
-            preview_week: pvLesson || previewOnlyPlusData.week || 1,
+            preview_week: previewOnlyPlusData.previewWeek || pvLesson || previewOnlyPlusData.week || 1,
             has_preview_data: true,
             has_homework_data: false,
             source_files: previewFileNameList,
@@ -2035,7 +2060,7 @@ async function doGeneratePreviewOnlyFeedback() {
                 errors: [],
                 previewErrors: parsed?.errorNums || [],
                 previewComment,
-                previewWeek: pvLesson || previewOnlyPlusData.week || 1,
+                previewWeek: previewOnlyPlusData.previewWeek || pvLesson || previewOnlyPlusData.week || 1,
                 homeworkScore: null,
                 previewScore: pvInfo?.score ?? null,
                 totalScore: 100,
@@ -2115,6 +2140,21 @@ async function doGeneratePreviewOnlyFeedback() {
         }
 
         if (sessionPayload.plusData?.enabled && previewParsed && previewParsed.errorNums.length > 0) {
+            const previewQuestions = sessionPayload.plusData.previewQuestions || sessionPayload.plusData.questions || [];
+            if (previewQuestions.length > 0) {
+                const previewQuestionMap = {};
+                previewQuestions.forEach(q => {
+                    const ids = String(q.id).split(/[,、，]/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+                    const cleanT = typeof cleanTopicTrailingPunctuation === 'function' 
+                        ? cleanTopicTrailingPunctuation(q.topic) 
+                        : (q.topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
+                    ids.forEach(id => { previewQuestionMap[id] = cleanT; });
+                });
+                const previewTopics = [...new Set(previewParsed.errorNums.map(num => previewQuestionMap[num] || `第${num}题`).filter(Boolean))];
+                if (previewTopics.length > 0) {
+                    feedback += `【个人薄弱点】：${previewTopics.join('、')}\n`;
+                }
+            }
             const tokenIdMatch = fullName.match(/^(\d+)/);
             const tokenStudentId = tokenIdMatch ? tokenIdMatch[1] : '';
             const tokenGrade = sessionPayload.plusData?.grade || '';
@@ -2124,7 +2164,7 @@ async function doGeneratePreviewOnlyFeedback() {
                 : studentName;
             const tokenLegacyKey = tokenStudentId ? `${tokenStudentId}_${studentName}` : studentName;
             const token = previewOnlyPlusTokens[tokenStudentKey] || previewOnlyPlusTokens[tokenLegacyKey] || '';
-            feedback += `【错题本】：本次预习错题已生成，点击链接查看\n`;
+            feedback += `【错题本】：点击链接查看本专题的错题\n`;
             if (token) {
                 const retestBase = getRetestBaseUrl();
                 feedback += `${retestBase}?token=${token}\n`;

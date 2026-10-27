@@ -1000,7 +1000,7 @@
 
 
                                 <div id="plus-server-config">
-                                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 14px; margin-bottom: 14px;">
+                                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 14px; margin-bottom: 14px;">
                                         <div style="display: flex; flex-direction: column; gap: 6px;">
                                             <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-secondary);">学科</label>
                                             <select class="modern-input custom-select" id="plus-subject" onchange="onPlusSelectorChange()">
@@ -1035,8 +1035,14 @@
                                                 <option value="A">A</option>
                                             </select>
                                         </div>
+                                        <div style="display: flex; flex-direction: column; gap: 6px;" id="plus-preview-week-container">
+                                            <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-secondary);">预习专题</label>
+                                            <select class="modern-input custom-select" id="plus-preview-week" onchange="onPlusSelectorChange()">
+                                                <option value="">不关联预习 / 自动匹配</option>
+                                            </select>
+                                        </div>
                                         <div style="display: flex; flex-direction: column; gap: 6px;">
-                                            <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-secondary);">专题</label>
+                                            <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-secondary);">课后巩固专题</label>
                                             <select class="modern-input custom-select" id="plus-week" onchange="onPlusSelectorChange()">
                                                 <option value="" selected disabled>请选择专题</option>
                                             </select>
