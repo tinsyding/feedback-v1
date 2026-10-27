@@ -6,12 +6,6 @@ echo ========================================================
 echo        极方每周反馈程序 - 文件夹模式 (--onedir) 打包
 echo ========================================================
 echo.
-echo 文件夹模式说明：
-echo   此模式不会在运行时将文件解压到 AppData\Local\Temp 临时目录，
-echo   能够大幅避开 360/火绒/Windows Defender 的启发式木马拦截。
-echo   打包完成后会生成包含完整依赖的文件夹及对应 ZIP 压缩包，
-echo   解压到任意目录后双击 exe 即可直接运行。
-echo.
 
 cd /d "%~dp0"
 set REPO_ROOT=%~dp0..\..
@@ -26,11 +20,7 @@ set "PY_CMD=py -3.12"
 
 echo [1/4] 检查 Python 3.12 环境及依赖...
 %PY_CMD% --version >nul 2>&1
-if errorlevel 1 (
-    echo 【错误】未检测到 Python 3.12！请确认已安装 Python 3.12 且 Windows Python 启动器 (py.exe) 可用。
-    pause
-    exit /b 1
-)
+if errorlevel 1 goto :no_python
 
 echo 当前使用的 Python 版本：
 %PY_CMD% --version
@@ -38,11 +28,7 @@ echo 当前使用的 Python 版本：
 echo 安装/更新 PyInstaller 及项目运行依赖...
 %PY_CMD% -m pip install --upgrade pip
 %PY_CMD% -m pip install -r "%~dp0requirements.txt"
-if errorlevel 1 (
-    echo 【错误】依赖安装失败！请检查网络后重试。
-    pause
-    exit /b 1
-)
+if errorlevel 1 goto :pip_error
 %PY_CMD% -m pip install pyinstaller
 
 echo.
@@ -115,3 +101,17 @@ echo   - %~dp0dist_zip\极方每周反馈程序-Web版-绿色文件夹版.zip
 echo.
 echo 分发建议：直接把 ZIP 压缩包发给老师，解压后双击内部 exe 运行即可！
 pause
+exit /b 0
+
+:no_python
+echo.
+echo 【错误】未检测到 Python 3.12！
+echo 请确认已安装 Python 3.12 且 py.exe 启动器可用。
+pause
+exit /b 1
+
+:pip_error
+echo.
+echo 【错误】依赖安装失败！请检查网络后重试。
+pause
+exit /b 1

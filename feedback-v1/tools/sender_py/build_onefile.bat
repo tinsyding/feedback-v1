@@ -20,22 +20,14 @@ set "PY_CMD=py -3.12"
 
 echo [1/3] 检查 Python 3.12 环境及依赖...
 %PY_CMD% --version >nul 2>&1
-if errorlevel 1 (
-    echo 【错误】未检测到 Python 3.12！请确认已安装 Python 3.12 且 Windows Python 启动器 (py.exe) 可用。
-    pause
-    exit /b 1
-)
+if errorlevel 1 goto :no_python
 
 echo 当前使用的 Python 版本：
 %PY_CMD% --version
 
 %PY_CMD% -m pip install --upgrade pip
 %PY_CMD% -m pip install -r "%~dp0requirements.txt"
-if errorlevel 1 (
-    echo 【错误】依赖安装失败！请检查网络后重试。
-    pause
-    exit /b 1
-)
+if errorlevel 1 goto :pip_error
 %PY_CMD% -m pip install pyinstaller
 
 echo.
@@ -84,3 +76,17 @@ echo   - %~dp0dist\极方每周反馈程序.exe
 echo   - %~dp0dist\极方每周反馈程序-Web版.exe
 echo.
 pause
+exit /b 0
+
+:no_python
+echo.
+echo 【错误】未检测到 Python 3.12！
+echo 请确认已安装 Python 3.12 且 py.exe 启动器可用。
+pause
+exit /b 1
+
+:pip_error
+echo.
+echo 【错误】依赖安装失败！请检查网络后重试。
+pause
+exit /b 1
