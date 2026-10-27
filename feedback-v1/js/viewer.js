@@ -2139,12 +2139,13 @@ async function doGeneratePreviewOnlyFeedback() {
             feedback += buildPreviewFeedbackSection(previewDisplayInfo, pvLesson, previewStats, previewMetricMode, rankFormat);
         }
 
+        let previewOnlyPlusPart = '';
         if (sessionPayload.plusData?.enabled && previewParsed && previewParsed.errorNums.length > 0) {
             const previewQuestions = sessionPayload.plusData.previewQuestions || sessionPayload.plusData.questions || [];
             if (previewQuestions.length > 0) {
                 const previewQuestionMap = {};
                 previewQuestions.forEach(q => {
-                    const ids = String(q.id).split(/[,、，]/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+                    const ids = String(q.id || q.question_num || '').split(/[,、，]/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
                     const cleanT = typeof cleanTopicTrailingPunctuation === 'function' 
                         ? cleanTopicTrailingPunctuation(q.topic) 
                         : (q.topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
@@ -2164,12 +2165,12 @@ async function doGeneratePreviewOnlyFeedback() {
                 : studentName;
             const tokenLegacyKey = tokenStudentId ? `${tokenStudentId}_${studentName}` : studentName;
             const token = previewOnlyPlusTokens[tokenStudentKey] || previewOnlyPlusTokens[tokenLegacyKey] || '';
-            feedback += `【错题本】：点击链接查看本专题的错题\n`;
+            previewOnlyPlusPart += `【错题本】：点击链接查看本专题的错题\n`;
             if (token) {
                 const retestBase = getRetestBaseUrl();
-                feedback += `${retestBase}?token=${token}\n`;
+                previewOnlyPlusPart += `${retestBase}?token=${token}\n`;
             } else {
-                feedback += `(生成链接失败，请联系老师)\n`;
+                previewOnlyPlusPart += `(生成链接失败，请联系老师)\n`;
             }
         }
 
@@ -2340,6 +2341,10 @@ async function doGeneratePreviewOnlyFeedback() {
                 }
                 feedback += getFocusComment(adjustedReward2);
             }
+        }
+
+        if (previewOnlyPlusPart && previewOnlyPlusPart.trim()) {
+            feedback = feedback.trim() + `\n\n${previewOnlyPlusPart.trim()}`;
         }
 
         const tr = document.createElement('tr');

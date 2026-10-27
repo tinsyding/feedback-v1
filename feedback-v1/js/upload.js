@@ -2705,6 +2705,7 @@ function generateFeedback() {
         const pGrade = document.getElementById('plus-grade')?.value;
         const pTier = document.getElementById('plus-tier')?.value;
         const pWeek = document.getElementById('plus-week')?.value;
+        const pPreviewWeek = document.getElementById('plus-preview-week')?.value;
         if (!pGrade) {
             showToast('启用错题本时，请先选择年级');
             return;
@@ -2713,12 +2714,12 @@ function generateFeedback() {
             showToast('启用错题本时，请先选择班层');
             return;
         }
-        if (!pWeek) {
-            showToast('启用错题本时，请先选择专题');
+        if (!pWeek && !pPreviewWeek) {
+            showToast('启用错题本时，请选择预习专题或课后巩固专题');
             return;
         }
         if (!getPlusPayload()) {
-            showToast('请先选择有效的服务器题目数据');
+            showToast('请先选择有效的题目知识点数据');
             return;
         }
     }
@@ -3817,7 +3818,7 @@ function initPlusFeature() {
 function populatePlusWeekSelector() {
     const weekSelect = document.getElementById('plus-week');
     if (weekSelect) {
-        weekSelect.innerHTML = '<option value="" selected disabled>请选择巩固专题</option>';
+        weekSelect.innerHTML = '<option value="">不关联巩固 / 自动匹配</option>';
         for (let i = 1; i <= plusMaxWeeks; i++) {
             const opt = document.createElement('option');
             opt.value = i;
@@ -3881,16 +3882,17 @@ function togglePlusConfig() {
         if (tierEl) tierEl.value = '';
         const previewWeekEl = document.getElementById('plus-preview-week');
         if (previewWeekEl) {
-            const pvLesson = parseInt(document.getElementById('preview-lesson')?.value) || 0;
+            const pvLesson = previewData ? (extractLessonNumber(previewFileName, 'preview') || 1) : 0;
             previewWeekEl.value = pvLesson > 0 ? pvLesson : '';
         }
         if (weekEl) {
-            const hwLesson = parseInt(document.getElementById('homework-lesson')?.value) || 0;
+            const hwLesson = homeworkData ? (extractLessonNumber(homeworkFileName, 'homework') || 1) : 0;
             weekEl.value = hwLesson > 0 ? hwLesson : '';
         }
         onPlusSelectorChange();
     } else {
         plusQuestionData = null;
+        plusPreviewQuestionData = null;
     }
 }
 
@@ -3919,8 +3921,8 @@ async function onPlusSelectorChange() {
     const statusTextEl = document.getElementById('plus-data-status-text');
     const statusCallout = document.getElementById('plus-data-status');
 
-    if (!subject || !grade || !tier || !week) {
-        if (statusTextEl) statusTextEl.textContent = '请选择学科、年级、班层和课后巩固专题';
+    if (!subject || !grade || !tier || (!week && !previewWeek)) {
+        if (statusTextEl) statusTextEl.textContent = '请选择学科、年级、班层及对应专题';
         plusQuestionData = null;
         plusPreviewQuestionData = null;
         return;
@@ -3935,21 +3937,25 @@ async function onPlusSelectorChange() {
         if (window.defaultSeason) baseParams.season = window.defaultSeason;
 
         // 1. 获取课后巩固题目数据
-        const hwQuery = new URLSearchParams({ ...baseParams, action: 'get', bankType: 'homework', week }).toString();
-        const hwResp = await fetch(`${QBANK_API}?${hwQuery}`);
-        const hwResult = await hwResp.json();
-
-        let hwOk = false;
+        let hwOk = true;
         let hwText = '';
-        if (hwResult.success && hwResult.data) {
-            plusQuestionData = hwResult.data;
-            const qCount = (hwResult.data.questions || []).length;
-            const filledCount = (hwResult.data.questions || []).filter(q => q.topic && q.topic.trim()).length;
-            hwOk = true;
-            hwText = `课后巩固: ${filledCount}/${qCount}题`;
+        if (week) {
+            const hwQuery = new URLSearchParams({ ...baseParams, action: 'get', bankType: 'homework', week }).toString();
+            const hwResp = await fetch(`${QBANK_API}?${hwQuery}`);
+            const hwResult = await hwResp.json();
+            if (hwResult.success && hwResult.data) {
+                plusQuestionData = hwResult.data;
+                const qCount = (hwResult.data.questions || []).length;
+                const filledCount = (hwResult.data.questions || []).filter(q => q.topic && q.topic.trim()).length;
+                hwOk = true;
+                hwText = `课后巩固: ${filledCount}/${qCount}题`;
+            } else {
+                plusQuestionData = null;
+                hwOk = false;
+                hwText = '课后巩固: 未录入题目';
+            }
         } else {
             plusQuestionData = null;
-            hwText = '课后巩固: 未录入题目';
         }
 
         // 2. 若选择了预习专题，同时获取预习题目数据
@@ -3963,21 +3969,27 @@ async function onPlusSelectorChange() {
                 plusPreviewQuestionData = pvResult.data;
                 const pvCount = (pvResult.data.questions || []).length;
                 const pvFilled = (pvResult.data.questions || []).filter(q => q.topic && q.topic.trim()).length;
-                pvText = ` | 预习: ${pvFilled}/${pvCount}题`;
+                pvOk = true;
+                pvText = `预习: ${pvFilled}/${pvCount}题`;
             } else {
                 plusPreviewQuestionData = null;
                 pvOk = false;
-                pvText = ' | 预习: 未录入题目';
+                pvText = '预习: 未录入题目';
             }
         } else {
             plusPreviewQuestionData = null;
         }
 
+        const statusParts = [];
+        if (hwText) statusParts.push(hwText);
+        if (pvText) statusParts.push(pvText);
+
         if (statusTextEl) {
-            statusTextEl.textContent = `${hwText}${pvText}`;
+            statusTextEl.textContent = statusParts.join(' | ') || '未选择专题';
         }
         if (statusCallout) {
-            if (hwOk && pvOk) {
+            const allOk = (week ? hwOk : true) && (previewWeek ? pvOk : true);
+            if (allOk) {
                 statusCallout.style.borderColor = 'rgba(34, 197, 94, 0.3)';
                 statusCallout.style.background = 'rgba(34, 197, 94, 0.05)';
             } else {
@@ -4056,7 +4068,7 @@ function getPlusPayload() {
             questions: localQuestions
         };
     }
-    if (!plusQuestionData) return null;
+    if (!plusQuestionData && !plusPreviewQuestionData) return null;
     const pWeekVal = parseInt(document.getElementById('plus-week')?.value) || 0;
     const pvWeekVal = parseInt(document.getElementById('plus-preview-week')?.value) || 0;
     return {
@@ -4065,10 +4077,10 @@ function getPlusPayload() {
         subject: document.getElementById('plus-subject')?.value || '',
         grade: document.getElementById('plus-grade')?.value || '',
         tier: document.getElementById('plus-tier')?.value || '',
-        week: pWeekVal,
+        week: pWeekVal || pvWeekVal,
         homeworkWeek: pWeekVal,
         previewWeek: pvWeekVal,
-        questions: plusQuestionData.questions || [],
+        questions: plusQuestionData?.questions || [],
         previewQuestions: plusPreviewQuestionData?.questions || []
     };
 }
