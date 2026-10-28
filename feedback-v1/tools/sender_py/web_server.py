@@ -49,7 +49,7 @@ def get_web_ui_html_path() -> str:
 class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
     """处理 WebUI 静态资源与 REST API 请求。"""
 
-    server_version = "JiFangFeedbackWeb/1.8.16"
+    server_version = "JiFangFeedbackWeb/1.8.17"
 
     def log_message(self, format, *args):
         # 静默常规 HTTP 请求，避免终端滚屏刷屏
@@ -126,6 +126,43 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
             return
 
         # 2. REST API 接口
+        if path == "/api/debug/latest":
+            try:
+                try:
+                    from sender_py.debug_utils import get_latest_debug_info
+                except ModuleNotFoundError:
+                    from debug_utils import get_latest_debug_info
+                self._send_json(get_latest_debug_info())
+            except Exception as exc:
+                self._send_json({"available": False, "error": str(exc)})
+            return
+
+        if path == "/api/debug/image":
+            name = query.get("name", [""])[0]
+            safe_name = os.path.basename(name)
+            try:
+                try:
+                    from sender_py.debug_utils import get_debug_dir
+                except ModuleNotFoundError:
+                    from debug_utils import get_debug_dir
+                debug_dir = get_debug_dir()
+                target_path = os.path.join(debug_dir, safe_name)
+                if safe_name and os.path.isfile(target_path):
+                    with open(target_path, "rb") as f:
+                        img_bytes = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/png")
+                    self.send_header("Content-Length", str(len(img_bytes)))
+                    self.send_header("Cache-Control", "no-cache, no-store")
+                    self.end_headers()
+                    self.wfile.write(img_bytes)
+                    return
+            except Exception:
+                pass
+            self.send_response(404)
+            self.end_headers()
+            return
+
         if path == "/api/state":
             self._send_json(self.controller.get_state())
             return
@@ -402,6 +439,21 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
         if path == "/api/wecom/center":
             res = self.controller.restore_and_center_wecom()
             self._send_json(res)
+            return
+
+        # 9.9 打开现场截图存档文件夹
+        if path == "/api/debug/open_folder":
+            try:
+                try:
+                    from sender_py.debug_utils import get_debug_dir
+                    from sender_py.store import open_folder_or_file
+                except ModuleNotFoundError:
+                    from debug_utils import get_debug_dir
+                    from store import open_folder_or_file
+                ok = open_folder_or_file(get_debug_dir())
+                self._send_json({"success": ok})
+            except Exception as exc:
+                self._send_json({"success": False, "error": str(exc)})
             return
 
         # 10. 退出后台程序

@@ -201,6 +201,49 @@ class TestWebEdition(unittest.TestCase):
                         self.assertEqual(data.get("success"), True)
                         self.assertEqual(data.get("rect"), [100, 100, 960, 640])
 
+                # 8.6 GET /api/debug/latest 与 GET /api/debug/image 与 POST /api/debug/open_folder
+                with tempfile.TemporaryDirectory() as td:
+                    with unittest.mock.patch("sender_py.debug_utils.get_debug_dir", return_value=td):
+                        # 初始无数据
+                        with urllib.request.urlopen(f"{base_url}/api/debug/latest") as resp:
+                            self.assertEqual(resp.status, 200)
+                            data = json.loads(resp.read().decode("utf-8"))
+                            self.assertFalse(data.get("available"))
+
+                        # 写入模拟现场截图和元数据
+                        test_img_path = os.path.join(td, "latest_title.png")
+                        with open(test_img_path, "wb") as f:
+                            f.write(b"\x89PNG\r\n\x1a\nfakeimagebytes")
+                        with open(os.path.join(td, "latest_meta.json"), "w", encoding="utf-8") as f:
+                            json.dump({"target_id": "90001", "target_name": "张三"}, f)
+
+                        with urllib.request.urlopen(f"{base_url}/api/debug/latest") as resp:
+                            self.assertEqual(resp.status, 200)
+                            data = json.loads(resp.read().decode("utf-8"))
+                            self.assertTrue(data.get("available"))
+                            self.assertEqual(data.get("meta", {}).get("target_id"), "90001")
+
+                        # 测试 /api/debug/image
+                        with urllib.request.urlopen(f"{base_url}/api/debug/image?name=latest_title.png") as resp:
+                            self.assertEqual(resp.status, 200)
+                            self.assertEqual(resp.headers.get("Content-Type"), "image/png")
+                            self.assertEqual(resp.read(), b"\x89PNG\r\n\x1a\nfakeimagebytes")
+
+                        # 测试不存在的文件返回 404
+                        try:
+                            urllib.request.urlopen(f"{base_url}/api/debug/image?name=notfound.png")
+                            self.fail("Should have raised HTTPError 404")
+                        except urllib.error.HTTPError as exc:
+                            self.assertEqual(exc.code, 404)
+
+                        # 测试 /api/debug/open_folder
+                        with unittest.mock.patch("sender_py.store.open_folder_or_file", return_value=True):
+                            req = urllib.request.Request(f"{base_url}/api/debug/open_folder", data=b"{}", headers={"Content-Type": "application/json"})
+                            with urllib.request.urlopen(req) as resp:
+                                self.assertEqual(resp.status, 200)
+                                d = json.loads(resp.read().decode("utf-8"))
+                                self.assertTrue(d.get("success"))
+
             finally:
                 server.shutdown()
                 server.server_close()
@@ -352,6 +395,55 @@ class TestWebEdition(unittest.TestCase):
                 mock_server.server_close.assert_called_once()
                 mock_root.destroy.assert_called_once()
                 mock_exit.assert_called_once_with(0)
+
+    def test_debug_snapshot_lifecycle(self):
+        """测试核验现场截图存盘、清理与最新元数据获取逻辑。"""
+        from sender_py.debug_utils import (
+            save_candidate_snapshot,
+            get_latest_debug_info,
+            _cleanup_old_snapshots,
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            with unittest.mock.patch("sender_py.debug_utils.get_debug_dir", return_value=td):
+                # 模拟带 save() 方法的截屏对象
+                class MockImg:
+                    def __init__(self, tag):
+                        self.tag = tag
+                    def save(self, path, format="PNG"):
+                        with open(path, "wb") as f:
+                            f.write(f"img-{self.tag}".encode("utf-8"))
+
+                mock_full = MockImg("full")
+                mock_title = MockImg("title")
+                roi = {"title": [0.1, 0.01, 0.5, 0.05], "input": [0.1, 0.7, 0.8, 0.2]}
+
+                res = save_candidate_snapshot(
+                    mock_full, roi, mock_title, "90001", "张三", cand=1,
+                    diag_info={"reason": "测试核验"}
+                )
+
+                self.assertIsNotNone(res.get("title_path"))
+                self.assertIsNotNone(res.get("full_path"))
+                self.assertTrue(os.path.isfile(os.path.join(td, "latest_title.png")))
+                self.assertTrue(os.path.isfile(os.path.join(td, "latest_meta.json")))
+
+                info = get_latest_debug_info()
+                self.assertTrue(info.get("available"))
+                self.assertEqual(info.get("meta", {}).get("target_id"), "90001")
+                self.assertIn("latest_title.png", info.get("title_url"))
+
+                # 测试自动清理逻辑：生成超过限制的文件
+                for i in range(10):
+                    p = os.path.join(td, f"dummy_{i:02d}.png")
+                    with open(p, "w") as f:
+                        f.write("test")
+                    # 微小间隔使得 mtime 有先后
+                    time.sleep(0.01)
+
+                _cleanup_old_snapshots(td, max_files=5)
+                remaining = [f for f in os.listdir(td) if not f.startswith("latest_")]
+                self.assertLessEqual(len(remaining), 5)
 
 
 if __name__ == "__main__":

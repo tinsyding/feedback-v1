@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.8.16"
+APP_VERSION = "1.8.17"
 
 
 def asset_path(filename: str) -> str:
@@ -607,7 +607,7 @@ def rescue_option1_fuzzy_match(judgment: dict, target_id: str, target_name: str)
 
 def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
                     token=None, fast_title_only: bool = False,
-                    verify_mode: str = "auto") -> tuple:
+                    verify_mode: str = "auto", cand: int = 1) -> tuple:
     """整窗截图→裁 title/chat_tail→判定。
 
     verify_mode:
@@ -692,6 +692,26 @@ def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
                         judgment["reason"] = f"[备选方案: 本地OCR] {judgment.get('reason', '')} (API异常: {e})"
         if judgment is not None:
             judgment = rescue_option1_fuzzy_match(judgment, target_id, target_name)
+            try:
+                try:
+                    from sender_py.debug_utils import save_candidate_snapshot
+                except ModuleNotFoundError:
+                    from debug_utils import save_candidate_snapshot
+                diag_meta = {
+                    "title_abs": title_abs,
+                    "roi": roi,
+                    "rect": rect,
+                    "local_res": local_res if 'local_res' in locals() else None,
+                    "judgment": judgment,
+                }
+                snap_info = save_candidate_snapshot(img, roi, title_img, target_id, target_name, cand=cand, diag_info=diag_meta)
+                judgment["_diag"] = {
+                    "snapshot": snap_info,
+                    "local_res": local_res if 'local_res' in locals() else None,
+                    "title_abs": title_abs,
+                }
+            except Exception:
+                pass
             return (judgment, judgment.get("detected_title"), None, chat_img)
         return (None, None, err, chat_img)
 
@@ -706,6 +726,16 @@ def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
         judgment["needs_reply"] = None
         judgment["reason"] = f"[本地OCR模式] {judgment.get('reason', '')}"
         judgment = rescue_option1_fuzzy_match(judgment, target_id, target_name)
+        try:
+            try:
+                from sender_py.debug_utils import save_candidate_snapshot
+            except ModuleNotFoundError:
+                from debug_utils import save_candidate_snapshot
+            diag_meta = {"title_abs": title_abs, "roi": roi, "rect": rect, "judgment": judgment}
+            snap_info = save_candidate_snapshot(img, roi, title_img, target_id, target_name, cand=cand, diag_info=diag_meta)
+            judgment["_diag"] = {"snapshot": snap_info, "local_res": judgment, "title_abs": title_abs}
+        except Exception:
+            pass
         return (judgment, judgment.get("detected_title"), None)
 
     try:
@@ -718,9 +748,29 @@ def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
                 local_res["last_message_text"] = "(API异常，本地OCR备用通道)"
                 local_res["needs_reply"] = None
                 local_res = rescue_option1_fuzzy_match(local_res, target_id, target_name)
+                try:
+                    try:
+                        from sender_py.debug_utils import save_candidate_snapshot
+                    except ModuleNotFoundError:
+                        from debug_utils import save_candidate_snapshot
+                    diag_meta = {"title_abs": title_abs, "roi": roi, "rect": rect, "judgment": local_res}
+                    snap_info = save_candidate_snapshot(img, roi, title_img, target_id, target_name, cand=cand, diag_info=diag_meta)
+                    local_res["_diag"] = {"snapshot": snap_info, "local_res": local_res, "title_abs": title_abs}
+                except Exception:
+                    pass
                 return (local_res, local_res.get("detected_title"), None)
         return (None, None, str(e))
     judgment = rescue_option1_fuzzy_match(judgment, target_id, target_name)
+    try:
+        try:
+            from sender_py.debug_utils import save_candidate_snapshot
+        except ModuleNotFoundError:
+            from debug_utils import save_candidate_snapshot
+        diag_meta = {"title_abs": title_abs, "roi": roi, "rect": rect, "judgment": judgment}
+        snap_info = save_candidate_snapshot(img, roi, title_img, target_id, target_name, cand=cand, diag_info=diag_meta)
+        judgment["_diag"] = {"snapshot": snap_info, "local_res": None, "title_abs": title_abs}
+    except Exception:
+        pass
     return (judgment, judgment.get("detected_title"), None)
 
 
@@ -819,11 +869,12 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         if reply_analyzer is not None:
             judgment, chat_title, err, chat_img = judge_candidate(
                 rect, roi, sid, sname, server, token, fast_title_only=True,
-                verify_mode=verify_mode
+                verify_mode=verify_mode, cand=cand
             )
         else:
             judgment, chat_title, err = judge_candidate(
-                rect, roi, sid, sname, server, token, verify_mode=verify_mode
+                rect, roi, sid, sname, server, token, verify_mode=verify_mode,
+                cand=cand
             )
             chat_img = None
             if entered and should_record(chat_title, judgment):
@@ -831,6 +882,18 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         if should_stop is not None and should_stop():
             log(f"  └ 收到停止请求，候选 {cand} 未发送")
             return {"result": "stopped", "reason": "用户停止", "notes": notes}
+
+        # 输出详细核验诊断信息与截图存盘通知
+        diag = (judgment or {}).get("_diag", {})
+        title_abs = diag.get("title_abs")
+        snap = diag.get("snapshot") or {}
+        local_res = diag.get("local_res") or {}
+        if title_abs:
+            log(f"  🔍 [诊断] 标题栏裁切尺寸: {title_abs[2]}x{title_abs[3]} (位于原图坐标 x={title_abs[0]}, y={title_abs[1]})")
+        if local_res:
+            log(f"  🔍 [诊断] 本地OCR识别原文: [{local_res.get('detected_title') or '未检测到文字'}] ({local_res.get('reason', '')})")
+        if snap.get("title_filename"):
+            log(f"  📸 [现场截图已存盘] 标题图: {snap['title_filename']} (存档目录: {snap.get('debug_dir')})")
         if err is not None:
             log(f"  └ 候选 {cand} 校验异常：{err}，换下一候选")
             _paced(CANDIDATE_GAP)
