@@ -1,6 +1,6 @@
 # GitHub 配置与 CI/CD 工具链说明
 
-说明仓库远程源配置、GitHub Actions 工作流，以及本地开发环境中的 SSH、`gh` CLI 与 GitHub MCP 配置。
+说明仓库远程源配置与 GitHub Actions 自动化工作流。
 
 ## 一、远程仓库与分支
 
@@ -38,48 +38,3 @@
   - 或在 GitHub Actions 页面手动触发（`workflow_dispatch`）。
 - 运行环境：Linux（单元测试）+ Windows（打包与冒烟验证）。
 - 发布流程：编译打包后通过 `softprops/action-gh-release@v2` 创建对应 tag 的 GitHub Release 并上传附件。
-
-## 三、本机工具配置
-
-### 1. Git SSH
-- 密钥路径：`~/.ssh/id_ed25519`
-- 连通性检查：
-  ```bash
-  ssh -T git@github.com
-  ```
-
-### 2. GitHub CLI (`gh`)
-- 路径：`/home/tinsywsl/.gemini/antigravity-cli/bin/gh`（软链至 `~/.local/bin/gh`）
-- 配置文件：`~/.config/gh/hosts.yml`（账号 `tinsyding`）
-- 常用命令：
-  ```bash
-  # 查看最近工作流记录
-  gh run list -L 5
-
-  # 查看指定工作流运行日志
-  gh run view <RUN_ID> --log
-
-  # 查看最近 Release
-  gh release list -L 5
-  gh release view sender-v1.8.12
-  ```
-
-### 3. GitHub MCP Server
-- 二进制路径：`/home/tinsywsl/.gemini/antigravity-cli/bin/github-mcp-server`
-- 配置文件：`~/.gemini/config/mcp_config.json`
-  ```json
-  {
-    "mcpServers": {
-      "github": {
-        "command": "github-mcp-server",
-        "args": [
-          "stdio",
-          "--toolsets=all"
-        ],
-        "env": {
-          "GITHUB_PERSONAL_ACCESS_TOKEN": "您的_GITHUB_TOKEN"
-        }
-      }
-    }
-  }
-  ```

@@ -46,15 +46,10 @@ feedback/
 
 ## GitHub 与自动化流水线
 
-1. GitHub Actions：
-   - 生产部署：[`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml)，监听 `main` push，SSH 到服务器执行 `git pull`、权限修复与 10 项冒烟检查。
-   - 客户端打包：[`.github/workflows/build-sender.yml`](./.github/workflows/build-sender.yml)，监听 `sender-*` tag，编译 Windows 客户端并发布 GitHub Release。
-2. 本地开发工具：
-   - Git SSH：绑定 `tinsyding` 账号免密推送（同时推送到 GitHub 与 Gitee）；
-   - GitHub CLI (`gh`)：可在终端执行 `gh run list`、`gh release view` 等命令；
-   - GitHub MCP Server：已配置 `github-mcp-server`，供本地开发环境直接查询 Actions、Releases 与 Issues。
+- 生产部署：[`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml)，监听 `main` push，SSH 到服务器执行 `git pull`、权限修复与 10 项冒烟检查。
+- 客户端打包：[`.github/workflows/build-sender.yml`](./.github/workflows/build-sender.yml)，监听 `sender-*` tag，编译 Windows 客户端并发布 GitHub Release。
 
-详细配置见 [GitHub 配置与 CI/CD 工具链说明](./docs/github.md)。
+详细配置与分支约定见 [GitHub 配置与 CI/CD 工具链说明](./docs/github.md)。
 
 ## 运维与部署约定
 

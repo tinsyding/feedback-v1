@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.8.12"
+APP_VERSION = "1.8.13"
 
 
 def asset_path(filename: str) -> str:
@@ -173,13 +173,17 @@ def load_feedback_inputs(paths) -> tuple:
     return merged, file_counts, duplicate_count
 
 
-def candidate_search_plan(candidate_index: int) -> list:
+def candidate_search_plan(candidate_index: int, down_first: bool = False) -> list:
     """候选定位按键：先按 Down 选中第 N 个搜索结果，最后 Enter 进入会话。
 
     企业微信粘贴搜索词后结果列表已经刷新；不能先按 Enter，否则会直接进入
     第一个结果，Down 就变成在会话里移动，第二个候选会选错。
+
+    特殊情况：针对「文件传输助手」或显式指定 down_first=True 时，企微搜索后光标/焦点
+    停留在搜索框中，必须先按一次 Down 键才能选中第一项（文件传输助手），再按 Enter 进会话。
     """
-    return ["down"] * max(0, int(candidate_index) - 1) + ["enter"]
+    downs = int(candidate_index) if down_first else max(0, int(candidate_index) - 1)
+    return ["down"] * max(0, downs) + ["enter"]
 
 
 # ================= Windows 动作（需真机验证） =================
@@ -198,8 +202,14 @@ def safe_copy(text: str, retries: int = 5) -> bool:
     return False
 
 
-def search_and_enter(name: str, candidate_index: int) -> bool:
-    """搜人进会话：第 candidate_index 个结果。Ctrl+F 聚焦→全选→Backspace 清空→粘贴→等结果→Down 定位→回车进会话。"""
+def search_and_enter(name: str, candidate_index: int = 1, down_first: bool = None) -> bool:
+    """搜人进会话：第 candidate_index 个结果。Ctrl+F 聚焦→全选→Backspace 清空→粘贴→等结果→Down 定位→回车进会话。
+
+    注意：企微中「文件传输助手」比较特殊，搜索后焦点停在输入框中，必须先按下一次 Down 键才能选中；
+    因此当 name == "文件传输助手" 或显式指定 down_first=True 时，自动在回车前按 Down 键。
+    """
+    if down_first is None:
+        down_first = (name == "文件传输助手")
     try:
         from sender_py import window_utils as wu
     except ModuleNotFoundError:
@@ -217,7 +227,7 @@ def search_and_enter(name: str, candidate_index: int) -> bool:
         return False
     wu.tap_keys(wu.VK_CONTROL, wu.VK_V)
     time.sleep(1.0)  # 等搜索结果列表刷新；先 Down 选中候选，最后再 Enter
-    for action in candidate_search_plan(candidate_index):
+    for action in candidate_search_plan(candidate_index, down_first=down_first):
         if action == "down":
             wu.tap_key(wu.VK_DOWN)
             time.sleep(0.2)
@@ -361,6 +371,7 @@ def open_sample_chat_for_calibration(sample_name: str = None, log=print) -> bool
     优先级：
       1. 若传入有效样本姓名 (sample_name)，优先在企微搜索该姓名；
       2. 若未搜到该联系人（弹出全局搜索）或未传入姓名，自动回退到 100% 存在的系统内置联系人「文件传输助手」。
+         注意：「文件传输助手」搜索后焦点在搜索框，需按 Down 键再回车才能进入（search_and_enter 已自动处理）。
     """
     try:
         from sender_py import window_utils as wu

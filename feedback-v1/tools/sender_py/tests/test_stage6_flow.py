@@ -170,6 +170,11 @@ class TestStage6(unittest.TestCase):
             self.assertEqual(plan[-1], "enter")
             self.assertNotIn("enter", plan[:-1])
 
+        # 特殊情况：针对「文件传输助手」或 down_first=True，即使 candidate_index=1 也会先按 Down
+        self.assertEqual(candidate_search_plan(1, down_first=True), ["down", "enter"])
+        self.assertEqual(candidate_search_plan(2, down_first=True), ["down", "down", "enter"])
+        self.assertEqual(candidate_search_plan(0, down_first=True), ["enter"])
+
     def test_status_filter_and_summary_helpers(self):
         self.assertTrue(status_matches_filter("发送失败", "失败/未匹配"))
         self.assertTrue(status_matches_filter("未匹配", "失败/未匹配"))
@@ -208,6 +213,45 @@ class TestStage6(unittest.TestCase):
                          [0x08, wu.VK_DOWN, wu.VK_RETURN])
         self.assertLess(key_calls.index(("key", wu.VK_DOWN)),
                         key_calls.index(("key", wu.VK_RETURN)))
+
+    def test_search_and_enter_file_helper_down_first(self):
+        """测试文件传输助手特殊处理：第1候选依然先发 Down 再发 Enter。"""
+        calls_file_helper = []
+        calls_normal_student = []
+        calls_explicit_down = []
+
+        def make_recorder(target_list):
+            def record_key(vk):
+                target_list.append(("key", vk))
+                return True
+            return record_key
+
+        with mock.patch.object(wu, "find_and_activate_wecom", return_value=True), \
+                mock.patch.object(wu, "tap_keys", return_value=True), \
+                mock.patch.object(wu, "is_foreground_wecom", return_value=True), \
+                mock.patch("sender_py.sender.safe_copy", return_value=True), \
+                mock.patch("sender_py.sender.time.sleep", return_value=None):
+
+            # 1. 文件传输助手 (candidate_index=1): 自动 down_first
+            with mock.patch.object(wu, "tap_key", side_effect=make_recorder(calls_file_helper)):
+                self.assertTrue(search_and_enter("文件传输助手", 1))
+
+            # 2. 普通学生 (candidate_index=1): 不发 Down，直接 Enter
+            with mock.patch.object(wu, "tap_key", side_effect=make_recorder(calls_normal_student)):
+                self.assertTrue(search_and_enter("90001张三", 1))
+
+            # 3. 普通学生显式指定 down_first=True
+            with mock.patch.object(wu, "tap_key", side_effect=make_recorder(calls_explicit_down)):
+                self.assertTrue(search_and_enter("90001张三", 1, down_first=True))
+
+        keys_file_helper = [c[1] for c in calls_file_helper if c[0] == "key"]
+        self.assertEqual(keys_file_helper, [0x08, wu.VK_DOWN, wu.VK_RETURN])
+
+        keys_normal_student = [c[1] for c in calls_normal_student if c[0] == "key"]
+        self.assertEqual(keys_normal_student, [0x08, wu.VK_RETURN])
+
+        keys_explicit_down = [c[1] for c in calls_explicit_down if c[0] == "key"]
+        self.assertEqual(keys_explicit_down, [0x08, wu.VK_DOWN, wu.VK_RETURN])
 
     def test_async_reply_analyzer_pipeline_and_fail_open(self):
         import queue
