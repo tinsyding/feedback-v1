@@ -44,12 +44,11 @@ try {
             require __DIR__ . '/admin/actions_auth.php';
             break;
 
-        // --- 2. 系统全局配置 ---
+        // --- 2. 系统全局与 AI 模型配置 ---
         case 'config':
+        case 'test_ai_config':
             require __DIR__ . '/admin/actions_config.php';
             break;
-
-        // --- 2.1 视觉大模型与提示词配置 ---
 
 
         // --- 3. 数据表元数据与聚合统计 ---

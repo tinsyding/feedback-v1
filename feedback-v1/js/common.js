@@ -1,3 +1,46 @@
+/**
+ * Polyfill for Array.prototype.at, String.prototype.at, and %TypedArray%.prototype.at (ECMAScript 2022)
+ * 兼容 Chrome < 92, Safari < 15.4 等低版本内核环境
+ */
+(function () {
+    'use strict';
+    function at(n) {
+        if (this == null) {
+            throw new TypeError('Cannot call at on ' + this);
+        }
+        var O = Object(this);
+        var len = O.length >>> 0;
+        var k = Math.trunc(n) || 0;
+        if (k < 0) k += len;
+        return (k < 0 || k >= len) ? undefined : O[k];
+    }
+    var targets = [Array.prototype];
+    if (typeof String !== 'undefined' && String.prototype) {
+        targets.push(String.prototype);
+    }
+    if (typeof Uint8Array !== 'undefined') {
+        var typedArrayProto = Object.getPrototypeOf(Uint8Array).prototype;
+        if (typedArrayProto) {
+            targets.push(typedArrayProto);
+        }
+    }
+    for (var i = 0; i < targets.length; i++) {
+        var proto = targets[i];
+        if (proto && typeof proto.at !== 'function') {
+            try {
+                Object.defineProperty(proto, 'at', {
+                    value: at,
+                    writable: true,
+                    enumerable: false,
+                    configurable: true
+                });
+            } catch (e) {
+                proto.at = at;
+            }
+        }
+    }
+})();
+
 function escapeHtml(str) {
     if (str === null || str === undefined) return '';
     return String(str)

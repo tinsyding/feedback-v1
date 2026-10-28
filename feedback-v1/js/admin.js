@@ -1,7 +1,7 @@
 /**
  * ============================================================================
  * 极方管理后台 (Admin Console) 前端运行脚本 - 生产环境合并包
- * 自动生成时间: 2026-10-27 23:32:37
+ * 自动生成时间: 2026-10-28 14:22:49
  * 源码模块目录: js/admin/
  * 请勿直接手动修改此文件，开发时请修改 js/admin/ 中的子模块并执行本打包脚本。
  * ============================================================================
@@ -634,6 +634,19 @@
                 updateSenderFlashToggleLabel(flashEnabled);
             }
 
+            // 大模型配置回显
+            const apiKeyInput = document.getElementById('ai-api-key');
+            if (apiKeyInput) apiKeyInput.value = currentConfig.dashscopeApiKey || '';
+
+            const apiBaseInput = document.getElementById('ai-api-base');
+            if (apiBaseInput) apiBaseInput.value = currentConfig.identifyApiBase || '';
+
+            const modelInput = document.getElementById('ai-model');
+            if (modelInput) modelInput.value = currentConfig.identifyModel || '';
+
+            const fastModelInput = document.getElementById('ai-fast-model');
+            if (fastModelInput) fastModelInput.value = currentConfig.identifyFastModel || '';
+
             ['spring', 'summer', 'autumn', 'winter'].forEach(s => {
                 const card = document.getElementById(`season-${s}`);
                 if (card) card.classList.toggle('active', currentSeason === s);
@@ -695,6 +708,17 @@
                 retestQrCodeEnabled: qrEnabled,
                 disableQwenFlashTitle: !flashEnabled
             };
+
+            const apiKeyInput = document.getElementById('ai-api-key');
+            const apiBaseInput = document.getElementById('ai-api-base');
+            const modelInput = document.getElementById('ai-model');
+            const fastModelInput = document.getElementById('ai-fast-model');
+
+            if (apiKeyInput) config.dashscopeApiKey = apiKeyInput.value.trim();
+            if (apiBaseInput) config.identifyApiBase = apiBaseInput.value.trim();
+            if (modelInput) config.identifyModel = modelInput.value.trim();
+            if (fastModelInput) config.identifyFastModel = fastModelInput.value.trim();
+
             if (currentConfig && currentConfig.retestQuestionSpacing) {
                 config.retestQuestionSpacing = currentConfig.retestQuestionSpacing;
             }
@@ -742,8 +766,112 @@
             }
         }
 
+        function toggleApiKeyVisibility() {
+            const input = document.getElementById('ai-api-key');
+            const eye = document.getElementById('ai-key-eye-icon');
+            if (!input) return;
+            if (input.type === 'password') {
+                input.type = 'text';
+                if (eye) {
+                    eye.innerHTML = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line>';
+                }
+            } else {
+                input.type = 'password';
+                if (eye) {
+                    eye.innerHTML = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>';
+                }
+            }
+        }
+
+        async function testAiConnection() {
+            const btn = document.getElementById('ai-test-btn');
+            const resultBox = document.getElementById('ai-test-result');
+            const apiKey = document.getElementById('ai-api-key')?.value.trim() || '';
+            const baseUrl = document.getElementById('ai-api-base')?.value.trim() || '';
+            const model = document.getElementById('ai-model')?.value.trim() || '';
+
+            if (!apiKey && !(currentConfig && currentConfig.dashscopeApiKey)) {
+                showToast('请先输入 API Key 再进行连通性测试', 'warning');
+                return;
+            }
+
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner"></span> 正在测试连通性...';
+            }
+            if (resultBox) {
+                resultBox.style.display = 'block';
+                resultBox.innerHTML = '<div style="font-size: 0.82rem; color: var(--text-secondary); padding: 8px 12px; background: var(--bg-subtle); border-radius: var(--radius-sm); border: 1px solid var(--border-color);"><span class="spinner"></span> 正在连接 AI 端点测试...</div>';
+            }
+
+            try {
+                const resp = await fetch(`${API_BASE}?action=test_ai_config`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        api_key: apiKey,
+                        base_url: baseUrl,
+                        model: model
+                    })
+                });
+                const result = await resp.json();
+                if (result.success) {
+                    const data = result.data || {};
+                    showToast(`✓ API 连通成功！延迟: ${data.duration_ms}ms`, 'success');
+                    if (resultBox) {
+                        resultBox.innerHTML = `
+                            <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 0.84rem;">
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                                    <span style="font-weight: 600; color: #10b981;">✓ 连通成功 (HTTP ${data.http_code || 200})</span>
+                                    <span style="color: #10b981; font-weight: 600;">耗时: ${data.duration_ms} ms</span>
+                                </div>
+                                <div style="color: var(--text-secondary); font-size: 0.8rem;">
+                                    <strong>测试模型:</strong> <code>${escapeHtml(data.model || model || 'qwen3.8-max')}</code>
+                                    ${data.reply ? ` | <strong>回复:</strong> ${escapeHtml(data.reply)}` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }
+                } else {
+                    const errDetail = result.data?.error || result.error || '连通失败';
+                    const duration = result.data?.duration_ms ? ` (耗时 ${result.data.duration_ms}ms)` : '';
+                    showToast('连通失败: ' + errDetail, 'error');
+                    if (resultBox) {
+                        resultBox.innerHTML = `
+                            <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 0.84rem;">
+                                <div style="font-weight: 600; color: #ef4444; margin-bottom: 4px;">✗ 连通失败${duration}</div>
+                                <div style="color: #ef4444; font-size: 0.8rem; word-break: break-all;">${escapeHtml(errDetail)}</div>
+                            </div>
+                        `;
+                    }
+                }
+            } catch (err) {
+                showToast('请求异常: ' + err.message, 'error');
+                if (resultBox) {
+                    resultBox.innerHTML = `
+                        <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 0.84rem;">
+                            <div style="font-weight: 600; color: #ef4444; margin-bottom: 4px;">✗ 网络异常</div>
+                            <div style="color: #ef4444; font-size: 0.8rem;">${escapeHtml(err.message)}</div>
+                        </div>
+                    `;
+                }
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = `
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                        </svg>
+                        <span>测试 API 连通性</span>
+                    `;
+                }
+            }
+        }
+
         window.onRetestQrToggleChange = onRetestQrToggleChange;
         window.onSenderFlashToggleChange = onSenderFlashToggleChange;
+        window.toggleApiKeyVisibility = toggleApiKeyVisibility;
+        window.testAiConnection = testAiConnection;
 
 
 /* ============================================================================

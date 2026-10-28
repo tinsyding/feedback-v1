@@ -76,21 +76,26 @@ if ($imgW < 300 || $imgH < 200) {
     sendResponse(false, null, '截图尺寸过小，无法进行界面分析', 200);
 }
 
-// 视觉模型配置
+// 视觉模型配置（config.json 优先，环境变量次之，secret_key.local.php 兜底）
+$cfgFile = __DIR__ . '/../config.json';
+$cfgJson = file_exists($cfgFile) ? @json_decode(file_get_contents($cfgFile), true) : [];
+if (!is_array($cfgJson)) {
+    $cfgJson = [];
+}
 $keys = require __DIR__ . '/secret_key.php';
 $localKeys = is_array($keys) ? $keys : [];
-$visionKey = getenv('DASHSCOPE_API_KEY') ?: ($localKeys['dashscopeApiKey'] ?? '');
+$visionKey = trim((string)($cfgJson['dashscopeApiKey'] ?? '')) ?: (getenv('DASHSCOPE_API_KEY') ?: ($localKeys['dashscopeApiKey'] ?? ''));
 if ($visionKey === '') {
     sendResponse(false, null, '服务端视觉模型未配置，请联系管理员', 200);
 }
-$apiBase = getenv('IDENTIFY_API_BASE') ?: ($localKeys['identifyApiBase'] ?? '');
+$apiBase = trim((string)($cfgJson['identifyApiBase'] ?? '')) ?: (getenv('IDENTIFY_API_BASE') ?: ($localKeys['identifyApiBase'] ?? ''));
 if ($apiBase === '') {
     $apiBase = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
 } elseif (substr($apiBase, -17) !== '/chat/completions') {
     $apiBase = rtrim($apiBase, '/') . '/chat/completions';
 }
 // 场景 1 默认使用 Qwen 旗舰多模态模型 qwen3.8-max
-$model = getenv('IDENTIFY_MODEL') ?: ($localKeys['identifyModel'] ?? '') ?: 'qwen3.8-max';
+$model = trim((string)($cfgJson['identifyModel'] ?? '')) ?: (getenv('IDENTIFY_MODEL') ?: ($localKeys['identifyModel'] ?? '') ?: 'qwen3.8-max');
 
 if (!function_exists('curl_init')) {
     sendResponse(false, null, '服务端缺少 curl 扩展', 200);

@@ -92,14 +92,17 @@ if ($targetId === '' && $targetName === '') {
     sendResponse(false, null, 'target_id 与 target_name 不能同时为空', 400);
 }
 
+// ---- 全局配置读取（config.json 优先）----
+$cfgFile = __DIR__ . '/../config.json';
+$cfgJson = file_exists($cfgFile) ? @json_decode(file_get_contents($cfgFile), true) : [];
+if (!is_array($cfgJson)) {
+    $cfgJson = [];
+}
+
 // ---- 标题核验模式控制：若管理员已停用 Qwen3.8-Flash，强制客户端转走本地离线 OCR ----
 if ($mode === 'title') {
-    $cfgFile = __DIR__ . '/../config.json';
-    if (file_exists($cfgFile)) {
-        $cfgJson = @json_decode(file_get_contents($cfgFile), true);
-        if (!empty($cfgJson['disableQwenFlashTitle'])) {
-            sendResponse(false, null, 'ADMIN_FORCED_LOCAL_OCR: 管理员已开启强制本地OCR核验，云端Flash通道已停用', 200);
-        }
+    if (!empty($cfgJson['disableQwenFlashTitle'])) {
+        sendResponse(false, null, 'ADMIN_FORCED_LOCAL_OCR: 管理员已开启强制本地OCR核验，云端Flash通道已停用', 200);
     }
 }
 
@@ -123,23 +126,23 @@ foreach ($requiredFields as $field) {
     }
 }
 
-// ---- 视觉模型配置（环境变量优先，secret_key.local.php 次之，均无则 fail-closed）----
+// ---- 视觉模型配置（config.json 优先，环境变量次之，secret_key.local.php 兜底，均无则 fail-closed）----
 $keys = require __DIR__ . '/secret_key.php';
 $localKeys = is_array($keys) ? $keys : [];
-$visionKey = getenv('DASHSCOPE_API_KEY') ?: ($localKeys['dashscopeApiKey'] ?? '');
+$visionKey = trim((string)($cfgJson['dashscopeApiKey'] ?? '')) ?: (getenv('DASHSCOPE_API_KEY') ?: ($localKeys['dashscopeApiKey'] ?? ''));
 if ($visionKey === '') {
     sendResponse(false, null, '服务端视觉模型未配置，请联系管理员', 200);
 }
-$apiBase = getenv('IDENTIFY_API_BASE') ?: ($localKeys['identifyApiBase'] ?? '');
+$apiBase = trim((string)($cfgJson['identifyApiBase'] ?? '')) ?: (getenv('IDENTIFY_API_BASE') ?: ($localKeys['identifyApiBase'] ?? ''));
 if ($apiBase === '') {
     $apiBase = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
 } elseif (substr($apiBase, -17) !== '/chat/completions') {
     $apiBase = rtrim($apiBase, '/') . '/chat/completions';
 }
 // 场景 3、4 默认使用 qwen3.8-max；场景 2 (title) 默认使用 qwen3.8-flash
-$model = getenv('IDENTIFY_MODEL') ?: ($localKeys['identifyModel'] ?? '') ?: 'qwen3.8-max';
+$model = trim((string)($cfgJson['identifyModel'] ?? '')) ?: (getenv('IDENTIFY_MODEL') ?: ($localKeys['identifyModel'] ?? '') ?: 'qwen3.8-max');
 if ($mode === 'title') {
-    $fastModel = getenv('IDENTIFY_FAST_MODEL') ?: ($localKeys['identifyFastModel'] ?? '') ?: 'qwen3.8-flash';
+    $fastModel = trim((string)($cfgJson['identifyFastModel'] ?? '')) ?: (getenv('IDENTIFY_FAST_MODEL') ?: ($localKeys['identifyFastModel'] ?? '') ?: 'qwen3.8-flash');
     $model = $fastModel;
 }
 if (!function_exists('curl_init')) {
