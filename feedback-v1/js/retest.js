@@ -957,57 +957,6 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         return badge ? badge.dataUrl : null;
     }
 
-    /**
-     * 在作答留白区域绘制 5mm 高清淡雅点阵网格（像 Moleskine / Rhodia 笔记本点阵）
-     * @param {PDFPage} page pdf-lib 页面对象
-     * @param {number} x 左边界 (pt)
-     * @param {number} y 区域下边界 (pt)
-     * @param {number} width 区域宽度 (pt)
-     * @param {number} height 区域高度 (pt)
-     */
-    function drawDotGrid(page, x, y, width, height) {
-        if (!page || height < 20 || width < 50) return;
-        try {
-            // 5mm 间距 ≈ 14.173 pt (1 inch = 72 pt = 25.4 mm)
-            const DOT_PITCH = 14.173;
-            const padX = 8;
-            const padY = 6;
-            const startX = x + padX;
-            const endX = x + width - padX;
-            const startY = y + padY;
-            const endY = y + height - padY;
-            if (endX <= startX || endY <= startY) return;
-
-            // 优雅淡灰色点阵：RGB(0.78, 0.82, 0.88)，浅淡防干扰，书写清晰工整
-            const dotColor = PDFLib.rgb(0.78, 0.82, 0.88);
-            const dotSize = 0.7; // 半径 0.7pt，清晰细腻
-
-            const cols = Math.floor((endX - startX) / DOT_PITCH);
-            const rows = Math.floor((endY - startY) / DOT_PITCH);
-            if (cols < 1 || rows < 1) return;
-
-            const actualGridW = cols * DOT_PITCH;
-            const actualGridH = rows * DOT_PITCH;
-            const offsetX = startX + ((endX - startX) - actualGridW) / 2;
-            const offsetY = startY + ((endY - startY) - actualGridH) / 2;
-
-            for (let r = 0; r <= rows; r++) {
-                const py = offsetY + r * DOT_PITCH;
-                for (let c = 0; c <= cols; c++) {
-                    const px = offsetX + c * DOT_PITCH;
-                    page.drawCircle({
-                        x: px,
-                        y: py,
-                        size: dotSize,
-                        color: dotColor
-                    });
-                }
-            }
-        } catch (err) {
-            console.warn('drawDotGrid failed:', err);
-        }
-    }
-
     // Download & Merge PDFs with modal progress feedback
     async function downloadMergedPdf(type, allWeeks) {
         if (!retestData) return;
@@ -1322,8 +1271,6 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             const mergedPdf = await PDFLib.PDFDocument.create();
             let currentPage = null;
             let currentY = PAGE_HEIGHT - TOP_MARGIN;
-            let lastDrawX = 32;
-            let lastDrawW = PAGE_WIDTH - 64;
 
             for (let i = 0; i < pdfsToMerge.length; i++) {
                 modalDesc.textContent = '正在智能分析与排版切片 (' + (i + 1) + '/' + pdfsToMerge.length + ')...';
@@ -1377,16 +1324,10 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
                         if (!currentPage || (currentY - neededHWithBanner < BOTTOM_MARGIN) || (isFullPage && !isPageTop)) {
                             // 空间不足，或当前是整页大题且当前页已被占用 -> 开新 A4 页
-                            if (currentPage && (currentY - BOTTOM_MARGIN) >= 20) {
-                                drawDotGrid(currentPage, lastDrawX, BOTTOM_MARGIN + 6, lastDrawW, currentY - (BOTTOM_MARGIN + 6));
-                            }
                             currentPage = mergedPdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
                             currentY = PAGE_HEIGHT - TOP_MARGIN;
                         } else if (!isPageTop) {
-                            // 拼接在上一题下方：按作答间距留白并绘制 5mm 点阵网格
-                            if (SEPARATOR_HEIGHT >= 20) {
-                                drawDotGrid(currentPage, lastDrawX, currentY - SEPARATOR_HEIGHT, lastDrawW, SEPARATOR_HEIGHT);
-                            }
+                            // 拼接在上一题下方：按作答间距留白
                             currentY -= SEPARATOR_HEIGHT;
                         }
 
@@ -1445,8 +1386,6 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             height: drawH
                         });
                         currentY -= drawH;
-                        lastDrawX = drawX;
-                        lastDrawW = drawW;
 
                         // 在每道题的右下角添加视频讲解二维码与说明文字：第x题视频讲解（由系统全局开关控制）
                         if (window.retestQrCodeEnabled !== false && videoUrl && pIdx === pageCount - 1) {
@@ -1493,12 +1432,6 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 } catch (err) {
                     console.error('Failed to load/pack PDF chunk', err);
                 }
-            }
-
-            // 在最后一题下方（如果有剩余作答留白），绘制 5mm 点阵网格
-            if (currentPage && (currentY - BOTTOM_MARGIN) >= 20) {
-                const lastGridH = Math.min(SEPARATOR_HEIGHT * 1.5, currentY - (BOTTOM_MARGIN + 6));
-                drawDotGrid(currentPage, lastDrawX, currentY - lastGridH, lastDrawW, lastGridH);
             }
 
             // 底部自动标注优雅页码 - 1 -, - 2 -
