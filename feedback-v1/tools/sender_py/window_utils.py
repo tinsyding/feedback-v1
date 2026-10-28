@@ -285,10 +285,138 @@ def is_foreground_wecom() -> bool:
         return True
 
 
-def ensure_fully_visible(log=None) -> tuple:
-    """mss 截屏幕像素：窗口半截出屏则截不全。把企微 Clamp 回虚拟屏内（保尺寸只挪位置）。
+def restore_and_center_wecom(hwnd=None, log=None) -> tuple:
+    """将企业微信窗口恢复为「向下还原状态」，缩至其内置最小极限尺寸，并精准居中于其当前所在的显示器。
 
-    返回 (True, rect)；窗口比整块虚拟屏还大则 (False, reason)，请用户手动处理。
+    解决痛点：
+      1. 部分用户将企微手动拉扯得比屏幕还大，甚至跨越多屏，导致截图超出屏幕物理缓冲；
+      2. 企微处于最大化状态时占用整屏，不便对照与操作；
+      3. 企微在向下还原状态下具有物理最小尺寸门槛（四周都无法再往里缩）；
+      4. 多显示器环境下（存在负坐标、不同 DPI 或扩展屏），必须精准识别企微当前所在的屏幕工作区（排除任务栏）。
+
+    返回：
+      (True, (x, y, w, h)) 成功归位后的外接矩形
+      (False, reason) 失败原因
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+        import win32con
+        import win32gui
+        user32 = _user32()
+    except Exception:
+        return (False, "无 win32 环境")
+
+    hwnd = hwnd or get_wecom_hwnd()
+    if hwnd is None or not win32gui.IsWindow(hwnd):
+        return (False, "未找到有效的企业微信窗口")
+
+    try:
+        # 1. 向下还原状态：如果窗口处于最大化 (IsZoomed) 或最小化 (IsIconic)，触发还原
+        if win32gui.IsZoomed(hwnd) or win32gui.IsIconic(hwnd):
+            if log:
+                try:
+                    log("  📐 检测到企微处于最大化/最小化状态，正在自动向下还原...")
+                except Exception:
+                    pass
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            time.sleep(0.08)
+        else:
+            win32gui.ShowWindow(hwnd, win32con.SW_SHOWNORMAL)
+
+        # 2. 获取企微最小限制尺寸（四周都不能再往里缩了）：
+        # Windows 的 SetWindowPos 会向目标窗口触发 WM_GETMINMAXINFO。
+        # 当传入一个极小尺寸（如 100x100）时，企微底层会自动将其 Clamp（钳制）到其程序设定的最小 Tracking 尺寸。
+        win32gui.SetWindowPos(
+            hwnd, 0, 0, 0, 100, 100,
+            win32con.SWP_NOMOVE | win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE
+        )
+        time.sleep(0.06)
+
+        # 读取被企微自身钳制后的实际物理宽高
+        cur_l, cur_t, cur_r, cur_b = win32gui.GetWindowRect(hwnd)
+        min_w = cur_r - cur_l
+        min_h = cur_b - cur_t
+
+        # 兜底防御：若系统或底层未正常钳制（如异常小于 500x350），使用企微标准基准尺寸结合 DPI 换算
+        dpi_scale = get_dpi_scale(hwnd)
+        baseline_w = int(round(960 * dpi_scale))
+        baseline_h = int(round(640 * dpi_scale))
+        min_w = max(min_w, baseline_w)
+        min_h = max(min_h, baseline_h)
+
+        # 3. 屏幕识别（多显示器安全检测）：
+        # 使用 MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) 查找企微主要所在的显示器句柄，
+        # 无论副屏在主屏左侧（负坐标）、右侧还是上方，均能精准捕获对应显示器的工作区（排除任务栏）。
+        class _RECT(ctypes.Structure):
+            _fields_ = [
+                ("left", ctypes.c_long),
+                ("top", ctypes.c_long),
+                ("right", ctypes.c_long),
+                ("bottom", ctypes.c_long),
+            ]
+
+        class _MONITORINFO(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", wintypes.DWORD),
+                ("rcMonitor", _RECT),
+                ("rcWork", _RECT),
+                ("dwFlags", wintypes.DWORD),
+            ]
+
+        MONITOR_DEFAULTTONEAREST = 2
+        h_monitor = user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+
+        work_l, work_t, work_w, work_h = 0, 0, 1920, 1080
+        got_monitor = False
+
+        if h_monitor:
+            mi = _MONITORINFO()
+            mi.cbSize = ctypes.sizeof(_MONITORINFO)
+            if user32.GetMonitorInfoW(h_monitor, ctypes.byref(mi)):
+                work_l = mi.rcWork.left
+                work_t = mi.rcWork.top
+                work_w = mi.rcWork.right - mi.rcWork.left
+                work_h = mi.rcWork.bottom - mi.rcWork.top
+                got_monitor = True
+
+        if not got_monitor:
+            work_l = user32.GetSystemMetrics(76)  # SM_XVIRTUALSCREEN
+            work_t = user32.GetSystemMetrics(77)  # SM_YVIRTUALSCREEN
+            work_w = user32.GetSystemMetrics(78)  # SM_CXVIRTUALSCREEN
+            work_h = user32.GetSystemMetrics(79)  # SM_CYVIRTUALSCREEN
+
+        # 4. 计算居中坐标：保证窗口完全在工作区内，水平和垂直均精准居中
+        final_w = min(min_w, work_w)
+        final_h = min(min_h, work_h)
+        target_x = work_l + max(0, (work_w - final_w) // 2)
+        target_y = work_t + max(0, (work_h - final_h) // 2)
+
+        # 5. 移动窗口并激活前台
+        win32gui.MoveWindow(hwnd, target_x, target_y, final_w, final_h, True)
+        time.sleep(0.08)
+
+        # 抢前台保证焦点
+        user32.keybd_event(VK_MENU, 0, 0, 0)
+        win32gui.SetForegroundWindow(hwnd)
+        user32.keybd_event(VK_MENU, 0, _KEYEVENTF_KEYUP, 0)
+
+        final_l, final_t, final_r, final_b = win32gui.GetWindowRect(hwnd)
+        result_rect = (final_l, final_t, final_r - final_l, final_b - final_t)
+        if log:
+            try:
+                log(f"  ✓ 企微窗口已还原并居中至标准尺寸: {result_rect[2]}x{result_rect[3]} @ ({result_rect[0]}, {result_rect[1]})")
+            except Exception:
+                pass
+        return (True, result_rect)
+    except Exception as exc:
+        return (False, f"企微窗口还原居中失败：{exc}")
+
+
+def ensure_fully_visible(log=None) -> tuple:
+    """mss 截屏幕像素：窗口半截出屏则截不全。若窗口超出屏幕或位置异常，自动还原居中或 Clamp 回可见区。
+
+    返回 (True, rect)；窗口出现异常时自动恢复向下还原并居中。
     """
     try:
         import win32gui
@@ -299,6 +427,15 @@ def ensure_fully_visible(log=None) -> tuple:
     if hwnd is None:
         return (False, "找不到企微窗口")
     try:
+        # 如果窗口处于最大化，自动向下还原并居中
+        if win32gui.IsZoomed(hwnd):
+            if log:
+                try:
+                    log("⚠️ 检测到企业微信处于最大化状态，正在自动向下还原并居中...")
+                except Exception:
+                    pass
+            return restore_and_center_wecom(hwnd, log=log)
+
         vx = u32.GetSystemMetrics(76)
         vy = u32.GetSystemMetrics(77)
         vw = u32.GetSystemMetrics(78)
@@ -306,7 +443,14 @@ def ensure_fully_visible(log=None) -> tuple:
         l, t, r, b = win32gui.GetWindowRect(hwnd)
         w, h = r - l, b - t
         if w > vw or h > vh:
-            return (False, "企微窗口比屏幕还大，请先恢复/缩小窗口再跑")
+            # 窗口比整个虚拟屏还大（比最大化还大）：自动重置还原居中！
+            if log:
+                try:
+                    log("⚠️ 检测到企业微信窗口尺寸超标（比屏幕还大），正在自动向下还原至标准最小尺寸并居中...")
+                except Exception:
+                    pass
+            return restore_and_center_wecom(hwnd, log=log)
+
         nx = min(max(l, vx), vx + vw - w)
         ny = min(max(t, vy), vy + vh - h)
         if (nx, ny) != (l, t):

@@ -618,6 +618,13 @@ class WebController:
                 return {"success": False, "message": "未能激活企业微信窗口，请先打开企微。"}
 
             time.sleep(0.4)
+
+            # 自动将企业微信向下还原并收缩至最小标准尺寸、居中于当前屏幕
+            try:
+                wu.restore_and_center_wecom(log=self.emit)
+            except Exception as exc:
+                self.emit(f"企微窗口居中整理提示：{exc}")
+
             rect = wu.get_wecom_rect()
             if not rect or rect[2] < 200 or rect[3] < 150:
                 return {"success": False, "message": "未能获取有效的企微窗口尺寸，请确认企微未处于最小化。"}
@@ -659,6 +666,25 @@ class WebController:
             return {"success": False, "message": "AI 自动定位未通过（可能未点进具体聊天），建议打开聊天界面后重试。"}
         except Exception as exc:
             err = f"视野校准异常：{exc}"
+            self.emit(f"❌ {err}")
+            return {"success": False, "message": err}
+
+    def restore_and_center_wecom(self) -> dict:
+        """手动请求将企业微信向下还原、缩至最小极限尺寸并居中于当前屏幕。"""
+        self.emit("📐 正在将企业微信窗口恢复为向下还原状态并居中...")
+        try:
+            try:
+                from sender_py import window_utils as wu
+            except ModuleNotFoundError:
+                import window_utils as wu
+            ok, res = wu.restore_and_center_wecom(log=self.emit)
+            if ok:
+                msg = f"✓ 企微窗口已恢复为标准最小尺寸 ({res[2]}x{res[3]}) 并已在屏幕居中"
+                self.emit(msg)
+                return {"success": True, "rect": res, "message": msg}
+            return {"success": False, "message": str(res)}
+        except Exception as exc:
+            err = f"企微窗口居中异常：{exc}"
             self.emit(f"❌ {err}")
             return {"success": False, "message": err}
 

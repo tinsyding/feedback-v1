@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.8.14"
+APP_VERSION = "1.8.15"
 
 
 def asset_path(filename: str) -> str:
@@ -432,6 +432,11 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
             import window_utils as wu
         wu.find_and_activate_wecom()
         time.sleep(0.4)
+        # 尝试自动将企微向下还原、缩至最小极限尺寸并居中于当前屏幕
+        try:
+            wu.restore_and_center_wecom(log=log)
+        except Exception:
+            pass
         fresh = wu.get_wecom_rect()
         if fresh and fresh[2] >= 200 and fresh[3] >= 150:
             rect = fresh
@@ -1718,6 +1723,11 @@ class SenderApp:
                     return
 
                 time.sleep(0.4)
+                # 尝试自动将企微向下还原、缩至最小极限尺寸并居中于当前屏幕
+                try:
+                    wu.restore_and_center_wecom(log=self.emit)
+                except Exception:
+                    pass
                 rect = wu.get_wecom_rect()
                 if not rect or rect[2] < 200 or rect[3] < 150:
                     err_data = ("窗口尺寸异常", "未能获取有效的企业微信窗口尺寸，请确认企业微信未处于最小化。")

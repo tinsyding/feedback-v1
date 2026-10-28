@@ -159,7 +159,9 @@ def run_calibration(parent, base_image, example_max_w=EXAMPLE_MAX_W, initial_roi
     guide = ttk.Frame(win, padding=20)
     guide.pack(fill="both", expand=True)
     ttk.Label(guide, text="企业微信窗口校准", style="CalTitle.TLabel").pack(anchor="w")
-    ttk.Label(guide, text=GUIDE_TEXT, style="CalSection.TLabel").pack(anchor="w", pady=(4, 12))
+    ttk.Label(guide, text=GUIDE_TEXT, style="CalSection.TLabel").pack(anchor="w", pady=(4, 4))
+    ttk.Label(guide, text="💡 提示：若右侧展开了「查找聊天记录」或「学员详情侧边栏」，框选右侧止于聊天区分界线即可（不要包含右侧面板）。",
+              style="CalHint.TLabel").pack(anchor="w", pady=(0, 10))
     photo = _load_example_photo(tk, example_max_w)
     if photo is not None:
         lbl = ttk.Label(guide, image=photo)

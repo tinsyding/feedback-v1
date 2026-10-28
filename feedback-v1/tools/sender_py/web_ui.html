@@ -584,10 +584,11 @@
     <div class="brand" onclick="onBrandBadgeClick()" style="cursor:pointer;" title="极方每周反馈程序">
       <div class="logo-badge">极</div>
       <div class="brand-title">极方每周反馈程序</div>
-      <div class="brand-badge">Web版 v1.8.14</div>
+      <div class="brand-badge">Web版 v1.8.15</div>
     </div>
     <div class="nav-actions">
       <button class="btn btn-sm" id="calibNavBtn" onclick="triggerCalibrate()">校准视野</button>
+      <button class="btn btn-sm" onclick="centerWeComWindow()" title="将企微窗口恢复为向下还原状态、缩至最小尺寸并居中于当前屏幕">居中企微</button>
       <button class="btn btn-sm" onclick="openReplyNotesModal()">待回名单 <span id="navReplyCount" class="brand-badge" style="display:none">0</span></button>
       <button class="btn btn-sm" onclick="openSentFilesModal()">已发文件</button>
       <button class="btn btn-sm" onclick="openLogModal()">运行日志</button>
@@ -1934,6 +1935,21 @@
         }
         if (actionBox) actionBox.style.display = "block";
         if (hint) hint.style.display = "none";
+      }
+    }
+
+    async function centerWeComWindow() {
+      try {
+        showToast("正在将企业微信向下还原并居中...");
+        const res = await fetch("/api/wecom/center", { method: "POST" });
+        const data = await res.json();
+        if (data && data.success) {
+          showToast(data.message || "✓ 企微窗口已恢复为标准最小尺寸并居中！");
+        } else {
+          showToast("⚠️ " + (data.message || "未能居中企微窗口，请确认企微已打开"));
+        }
+      } catch (err) {
+        showToast("❌ 请求失败：" + err);
       }
     }
 

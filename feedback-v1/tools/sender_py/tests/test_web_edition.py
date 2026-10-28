@@ -192,6 +192,15 @@ class TestWebEdition(unittest.TestCase):
                         data = json.loads(resp.read().decode("utf-8"))
                         self.assertEqual(data.get("success"), True)
 
+                # 8.5 POST /api/wecom/center (测试企业微信居中接口)
+                with unittest.mock.patch("sender_py.window_utils.restore_and_center_wecom", return_value=(True, (100, 100, 960, 640))):
+                    req = urllib.request.Request(f"{base_url}/api/wecom/center", data=b"{}", headers={"Content-Type": "application/json"})
+                    with urllib.request.urlopen(req) as resp:
+                        self.assertEqual(resp.status, 200)
+                        data = json.loads(resp.read().decode("utf-8"))
+                        self.assertEqual(data.get("success"), True)
+                        self.assertEqual(data.get("rect"), [100, 100, 960, 640])
+
             finally:
                 server.shutdown()
                 server.server_close()
