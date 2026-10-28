@@ -28,8 +28,8 @@ def get_debug_dir() -> str:
     return d
 
 
-def _cleanup_old_snapshots(debug_dir: str, max_files: int = 60):
-    """自动清理过旧的调试截图，避免磁盘堆积。"""
+def _cleanup_old_snapshots(debug_dir: str, max_files: int = 120):
+    """自动清理过旧的调试截图，避免磁盘堆积（默认保留约 120 个文件，折合约 30 次核验现场）。"""
     try:
         all_files = glob.glob(os.path.join(debug_dir, "*.*"))
         # 排除 latest_* 快捷入口文件
@@ -146,13 +146,88 @@ def save_candidate_snapshot(full_img, roi: dict, title_img, target_id: str,
     return saved_info
 
 
-def get_latest_debug_info() -> dict:
-    """获取最新一次核验的调试信息与图片相对链接。"""
+def list_debug_snapshots(limit: int = 50) -> list:
+    """获取所有已保存的历史核验现场记录列表，按时间倒序排列。"""
     debug_dir = get_debug_dir()
-    meta_path = os.path.join(debug_dir, "latest_meta.json")
+    meta_files = glob.glob(os.path.join(debug_dir, "*_meta.json"))
+    # 排除 latest_meta.json
+    dated_meta_files = [f for f in meta_files if not os.path.basename(f).startswith("latest_")]
+    dated_meta_files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+
+    items = []
+    for meta_path in dated_meta_files[:limit]:
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            base_name = os.path.basename(meta_path)
+            prefix = base_name[:-10] if base_name.endswith("_meta.json") else base_name
+
+            ts = meta.get("timestamp", "")
+            target_id = meta.get("target_id", "")
+            target_name = meta.get("target_name", "")
+            cand = meta.get("candidate", 1)
+            diag = meta.get("diag_info", {})
+            judgment = diag.get("judgment", {}) if isinstance(diag, dict) else {}
+
+            has_title = os.path.isfile(os.path.join(debug_dir, f"{prefix}_title.png"))
+            has_annotated = os.path.isfile(os.path.join(debug_dir, f"{prefix}_annotated.png"))
+
+            # 格式化时间显示 (e.g. 20261028_204332 -> 10-28 20:43:32)
+            formatted_time = ts
+            if len(ts) == 15 and "_" in ts:
+                formatted_time = f"{ts[4:6]}-{ts[6:8]} {ts[9:11]}:{ts[11:13]}:{ts[13:15]}"
+
+            verdict_reason = ""
+            if isinstance(judgment, dict) and judgment.get("reason"):
+                verdict_reason = str(judgment["reason"])
+            elif isinstance(diag, dict) and diag.get("reason"):
+                verdict_reason = str(diag["reason"])
+
+            items.append({
+                "prefix": prefix,
+                "timestamp": ts,
+                "formatted_time": formatted_time,
+                "target_id": target_id,
+                "target_name": target_name,
+                "candidate": cand,
+                "matched": judgment.get("matched") if isinstance(judgment, dict) else None,
+                "verdict_reason": verdict_reason,
+                "has_title": has_title,
+                "has_annotated": has_annotated,
+                "title_url": f"/api/debug/image?name={prefix}_title.png" if has_title else None,
+                "annotated_url": f"/api/debug/image?name={prefix}_annotated.png" if has_annotated else None,
+            })
+        except Exception:
+            continue
+    return items
+
+
+def get_debug_info(prefix: str = None) -> dict:
+    """获取指定 prefix 或最新一次核验的调试信息与图片相对链接。"""
+    debug_dir = get_debug_dir()
+
+    # 若指定了特定 prefix
+    if prefix and prefix != "latest":
+        clean_prefix = os.path.basename(prefix).replace("..", "").replace("/", "").replace("\\", "")
+        meta_path = os.path.join(debug_dir, f"{clean_prefix}_meta.json")
+        title_file = f"{clean_prefix}_title.png"
+        annotated_file = f"{clean_prefix}_annotated.png"
+    else:
+        clean_prefix = "latest"
+        meta_path = os.path.join(debug_dir, "latest_meta.json")
+        title_file = "latest_title.png"
+        annotated_file = "latest_annotated.png"
+
     has_meta = os.path.isfile(meta_path)
-    has_title = os.path.isfile(os.path.join(debug_dir, "latest_title.png"))
-    has_annotated = os.path.isfile(os.path.join(debug_dir, "latest_annotated.png"))
+    has_title = os.path.isfile(os.path.join(debug_dir, title_file))
+    has_annotated = os.path.isfile(os.path.join(debug_dir, annotated_file))
+
+    # 若未指定 prefix 且 latest_meta.json 不存在，则回退尝试读取最新的历史记录
+    if not (has_meta or has_title or has_annotated) and (prefix is None or prefix == "latest"):
+        hist = list_debug_snapshots(limit=1)
+        if hist:
+            first_prefix = hist[0]["prefix"]
+            return get_debug_info(first_prefix)
 
     meta_data = {}
     if has_meta:
@@ -164,8 +239,14 @@ def get_latest_debug_info() -> dict:
 
     return {
         "available": has_title or has_annotated or has_meta,
+        "prefix": clean_prefix,
         "debug_dir": debug_dir,
-        "title_url": "/api/debug/image?name=latest_title.png" if has_title else None,
-        "annotated_url": "/api/debug/image?name=latest_annotated.png" if has_annotated else None,
+        "title_url": f"/api/debug/image?name={title_file}" if has_title else None,
+        "annotated_url": f"/api/debug/image?name={annotated_file}" if has_annotated else None,
         "meta": meta_data,
     }
+
+
+def get_latest_debug_info(prefix: str = None) -> dict:
+    """获取最新或指定一次核验的调试信息（兼容旧调用签名）。"""
+    return get_debug_info(prefix)

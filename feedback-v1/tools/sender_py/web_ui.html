@@ -582,9 +582,9 @@
   <!-- 顶部导航 -->
   <header>
     <div class="brand" onclick="onBrandBadgeClick()" style="cursor:pointer;" title="极方每周反馈程序">
-      <div class="logo-badge">极</div>
+      <img src="/favicon.ico" class="logo-badge" alt="极方每周反馈" style="object-fit:contain; background:transparent; box-shadow:none;" onerror="this.outerHTML='<div class=\'logo-badge\'>极</div>'">
       <div class="brand-title">极方每周反馈程序</div>
-      <div class="brand-badge">Web版 v1.8.18</div>
+      <div class="brand-badge">Web版 v1.8.19</div>
     </div>
     <div class="nav-actions">
       <button class="btn btn-sm" id="calibNavBtn" onclick="triggerCalibrate()">校准视野</button>
@@ -935,7 +935,6 @@
         <div style="display:flex; align-items:center; gap:10px;">
           <div>
             <h3 style="margin:0; font-size:16px;">企微搜索核验现场与截图诊断</h3>
-            <div style="font-size:12px; color:#64748b; margin-top:2px;">自动保存核验瞬间的视窗全景、标题裁切与 OCR 判定现场</div>
           </div>
         </div>
         <div style="display:flex; align-items:center; gap:8px;">
@@ -945,7 +944,15 @@
         </div>
       </div>
       <div class="modal-body" style="padding:16px 20px; max-height:calc(85vh - 120px); overflow-y:auto;">
-        <div id="debugLoading" style="text-align:center; padding:40px; color:#64748b;">正在加载最近核验现场信息...</div>
+        <!-- 历史核验记录切换栏 -->
+        <div id="debugHistoryBar" style="display:none; align-items:center; gap:10px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:8px 14px; margin-bottom:14px;">
+          <label for="debugHistorySelect" style="font-size:13px; font-weight:600; color:#334155; white-space:nowrap; margin:0;">历史核验记录:</label>
+          <select id="debugHistorySelect" style="flex:1; max-width:620px; font-size:13px; padding:6px 10px; border-radius:6px; border:1px solid #cbd5e1; background:#fff; color:#1e293b; outline:none;" onchange="onSelectDebugHistory(this.value)">
+          </select>
+          <span id="debugHistoryCount" style="font-size:12px; color:#64748b; white-space:nowrap;">共 0 条</span>
+        </div>
+
+        <div id="debugLoading" style="text-align:center; padding:40px; color:#64748b;">正在加载核验现场信息...</div>
         <div id="debugEmpty" style="display:none; text-align:center; padding:50px 20px;">
           <div style="font-size:16px; font-weight:600; color:#334155; margin-bottom:6px;">暂无核验现场截图</div>
           <div style="font-size:13px; color:#64748b;">当向学员发起搜索并进行标题栏匹配核验时，系统会自动将截图与坐标诊断留存至此。</div>
@@ -2251,21 +2258,106 @@
     }
 
     // 弹窗：核验现场诊断 (Debug Snapshots)
+    let currentDebugPrefix = null;
+
     async function openDebugModal() {
       openModal("debugModal");
       await loadDebugInfo();
     }
 
-    async function loadDebugInfo() {
+    async function loadDebugInfo(targetPrefix = null) {
       const loading = document.getElementById("debugLoading");
       const empty = document.getElementById("debugEmpty");
       const content = document.getElementById("debugContent");
+      const historyBar = document.getElementById("debugHistoryBar");
+      const historySelect = document.getElementById("debugHistorySelect");
+      const historyCount = document.getElementById("debugHistoryCount");
+
       if (loading) loading.style.display = "block";
       if (empty) empty.style.display = "none";
       if (content) content.style.display = "none";
 
       try {
-        const res = await fetch("/api/debug/latest?_t=" + Date.now());
+        // 1. 获取历史记录列表
+        const listRes = await fetch("/api/debug/list?_t=" + Date.now());
+        const listData = await listRes.json();
+        const snapshots = listData.snapshots || [];
+
+        if (snapshots.length === 0) {
+          if (historyBar) historyBar.style.display = "none";
+          // 兜底尝试请求 latest
+          const latestRes = await fetch("/api/debug/latest?_t=" + Date.now());
+          const latestData = await latestRes.json();
+          if (loading) loading.style.display = "none";
+          if (!latestData.available) {
+            if (empty) empty.style.display = "block";
+            return;
+          }
+          renderDebugDetail(latestData);
+          return;
+        }
+
+        // 渲染历史记录下拉选择器
+        if (historyBar) historyBar.style.display = "flex";
+        if (historyCount) historyCount.innerText = `共 ${snapshots.length} 条`;
+
+        if (historySelect) {
+          historySelect.innerHTML = "";
+          snapshots.forEach((item) => {
+            const opt = document.createElement("option");
+            opt.value = item.prefix;
+            let statusTag = "现场留存";
+            if (item.matched === true) {
+              statusTag = "✓ 成功";
+            } else if (item.matched === false) {
+              statusTag = "✗ 未通过";
+            }
+            const timeStr = item.formatted_time || item.timestamp || "";
+            const targetStr = `${item.target_name || "未知"} (${item.target_id || "-"})`;
+            opt.innerText = `[${timeStr}] ${targetStr} 候选${item.candidate || 1} · ${statusTag}`;
+            historySelect.appendChild(opt);
+          });
+
+          // 决定选中的 prefix
+          if (targetPrefix && snapshots.some(s => s.prefix === targetPrefix)) {
+            historySelect.value = targetPrefix;
+            currentDebugPrefix = targetPrefix;
+          } else if (currentDebugPrefix && snapshots.some(s => s.prefix === currentDebugPrefix)) {
+            historySelect.value = currentDebugPrefix;
+          } else {
+            historySelect.value = snapshots[0].prefix;
+            currentDebugPrefix = snapshots[0].prefix;
+          }
+        }
+
+        // 2. 加载选中的详细内容
+        await loadDebugDetailByPrefix(currentDebugPrefix);
+      } catch (err) {
+        if (loading) loading.style.display = "none";
+        if (empty) {
+          empty.style.display = "block";
+          const subText = empty.querySelector("div:nth-child(2)");
+          if (subText) subText.innerText = "获取诊断数据失败：" + err.message;
+        }
+      }
+    }
+
+    async function onSelectDebugHistory(prefix) {
+      currentDebugPrefix = prefix;
+      await loadDebugDetailByPrefix(prefix);
+    }
+
+    async function loadDebugDetailByPrefix(prefix) {
+      const loading = document.getElementById("debugLoading");
+      const empty = document.getElementById("debugEmpty");
+      const content = document.getElementById("debugContent");
+
+      if (loading) loading.style.display = "block";
+      if (content) content.style.display = "none";
+
+      try {
+        const url = prefix ? `/api/debug/latest?prefix=${encodeURIComponent(prefix)}&_t=${Date.now()}` : `/api/debug/latest?_t=${Date.now()}`;
+        const res = await fetch(url);
         const data = await res.json();
         if (loading) loading.style.display = "none";
 
@@ -2274,97 +2366,99 @@
           return;
         }
 
-        if (content) content.style.display = "flex";
-        const meta = data.meta || {};
-        const diag = meta.diag_info || {};
-        const local = diag.local_res || {};
-        const judgment = diag.judgment || {};
-
-        const targetEl = document.getElementById("debugTargetStudent");
-        if (targetEl) {
-          targetEl.innerText = `${meta.target_name || "未知"} (${meta.target_id || "无学号"})`;
-        }
-        const timeEl = document.getElementById("debugTimestamp");
-        if (timeEl) {
-          timeEl.innerText = `候选 ${meta.candidate || 1} · ${meta.timestamp || "-"}`;
-        }
-
-        const ocrStr = local.detected_title || judgment.detected_title || "(未提取到文字/未检测到)";
-        const ocrEl = document.getElementById("debugOcrText");
-        if (ocrEl) {
-          ocrEl.innerText = ocrStr;
-        }
-
-        const matched = judgment.matched;
-        const verdictEl = document.getElementById("debugVerdict");
-        if (verdictEl) {
-          if (matched === true) {
-            verdictEl.innerHTML = `<span style="color:#16a34a; font-weight:700;">✓ 核验匹配成功</span>`;
-          } else if (matched === false) {
-            verdictEl.innerHTML = `<span style="color:#dc2626; font-weight:700;">✗ 核验未通过 (${judgment.reason || "不匹配"})</span>`;
-          } else {
-            verdictEl.innerHTML = `<span style="color:#64748b;">${judgment.reason || "已记录现场"}</span>`;
-          }
-        }
-
-        // 标题栏裁切图
-        const titleImg = document.getElementById("debugTitleImg");
-        if (titleImg) {
-          if (data.title_url) {
-            titleImg.src = data.title_url + "&_t=" + Date.now();
-            titleImg.style.display = "inline-block";
-          } else {
-            titleImg.style.display = "none";
-          }
-        }
-
-        // 裁切绝对坐标
-        const titleDimEl = document.getElementById("debugTitleDim");
-        if (titleDimEl) {
-          const titleAbs = diag.title_abs;
-          if (Array.isArray(titleAbs) && titleAbs.length === 4) {
-            titleDimEl.innerText = `尺寸: ${titleAbs[2]}x${titleAbs[3]} (起点: ${titleAbs[0]}, ${titleAbs[1]})`;
-          } else {
-            titleDimEl.innerText = "";
-          }
-        }
-
-        // 全景标注图
-        const annotImg = document.getElementById("debugAnnotatedImg");
-        const annotLink = document.getElementById("debugAnnotatedLink");
-        if (annotImg) {
-          if (data.annotated_url) {
-            const u = data.annotated_url + "&_t=" + Date.now();
-            annotImg.src = u;
-            if (annotLink) {
-              annotLink.href = u;
-              annotLink.style.display = "inline";
-            }
-            annotImg.style.display = "inline-block";
-          } else {
-            annotImg.style.display = "none";
-            if (annotLink) annotLink.style.display = "none";
-          }
-        }
-
-        // 存档目录
-        const footerDir = document.getElementById("debugFooterDir");
-        if (footerDir && data.debug_dir) {
-          footerDir.innerText = `截图存档目录: ${data.debug_dir}`;
-        }
-
-        // 完整诊断 JSON
-        const jsonEl = document.getElementById("debugJson");
-        if (jsonEl) {
-          jsonEl.innerText = JSON.stringify(meta, null, 2);
-        }
+        renderDebugDetail(data);
       } catch (err) {
         if (loading) loading.style.display = "none";
-        if (empty) {
-          empty.style.display = "block";
-          const subText = empty.querySelector("div:nth-child(2)");
-          if (subText) subText.innerText = "获取诊断数据失败：" + err.message;
+        showToast("加载现场详情失败: " + err.message);
+      }
+    }
+
+    function renderDebugDetail(data) {
+      const content = document.getElementById("debugContent");
+      if (content) content.style.display = "flex";
+
+      const meta = data.meta || {};
+      const diag = meta.diag_info || {};
+      const local = diag.local_res || {};
+      const judgment = diag.judgment || {};
+
+      const targetEl = document.getElementById("debugTargetStudent");
+      if (targetEl) {
+        targetEl.innerText = `${meta.target_name || "未知"} (${meta.target_id || "无学号"})`;
+      }
+      const timeEl = document.getElementById("debugTimestamp");
+      if (timeEl) {
+        timeEl.innerText = `候选 ${meta.candidate || 1} · ${meta.timestamp || "-"}`;
+      }
+
+      const ocrStr = local.detected_title || judgment.detected_title || diag.raw_text || "(未提取到文字/未检测到)";
+      const ocrEl = document.getElementById("debugOcrText");
+      if (ocrEl) {
+        ocrEl.innerText = ocrStr;
+      }
+
+      const matched = judgment.matched;
+      const verdictEl = document.getElementById("debugVerdict");
+      if (verdictEl) {
+        if (matched === true) {
+          verdictEl.innerHTML = `<span style="color:#16a34a; font-weight:700;">✓ 核验匹配成功</span>`;
+        } else if (matched === false) {
+          verdictEl.innerHTML = `<span style="color:#dc2626; font-weight:700;">✗ 核验未通过 (${judgment.reason || diag.reason || "不匹配"})</span>`;
+        } else {
+          verdictEl.innerHTML = `<span style="color:#64748b;">${judgment.reason || diag.reason || "已记录现场"}</span>`;
         }
+      }
+
+      // 标题栏裁切图
+      const titleImg = document.getElementById("debugTitleImg");
+      if (titleImg) {
+        if (data.title_url) {
+          titleImg.src = data.title_url + "&_t=" + Date.now();
+          titleImg.style.display = "inline-block";
+        } else {
+          titleImg.style.display = "none";
+        }
+      }
+
+      // 裁切绝对坐标
+      const titleDimEl = document.getElementById("debugTitleDim");
+      if (titleDimEl) {
+        const titleAbs = diag.title_abs;
+        if (Array.isArray(titleAbs) && titleAbs.length === 4) {
+          titleDimEl.innerText = `尺寸: ${titleAbs[2]}x${titleAbs[3]} (起点: ${titleAbs[0]}, ${titleAbs[1]})`;
+        } else {
+          titleDimEl.innerText = "";
+        }
+      }
+
+      // 全景标注图
+      const annotImg = document.getElementById("debugAnnotatedImg");
+      const annotLink = document.getElementById("debugAnnotatedLink");
+      if (annotImg) {
+        if (data.annotated_url) {
+          const u = data.annotated_url + "&_t=" + Date.now();
+          annotImg.src = u;
+          if (annotLink) {
+            annotLink.href = u;
+            annotLink.style.display = "inline";
+          }
+          annotImg.style.display = "inline-block";
+        } else {
+          annotImg.style.display = "none";
+          if (annotLink) annotLink.style.display = "none";
+        }
+      }
+
+      // 存档目录
+      const footerDir = document.getElementById("debugFooterDir");
+      if (footerDir && data.debug_dir) {
+        footerDir.innerText = `截图存档目录: ${data.debug_dir}`;
+      }
+
+      // 完整诊断 JSON
+      const jsonEl = document.getElementById("debugJson");
+      if (jsonEl) {
+        jsonEl.innerText = JSON.stringify(meta, null, 2);
       }
     }
 

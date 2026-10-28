@@ -49,7 +49,7 @@ def get_web_ui_html_path() -> str:
 class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
     """处理 WebUI 静态资源与 REST API 请求。"""
 
-    server_version = "JiFangFeedbackWeb/1.8.18"
+    server_version = "JiFangFeedbackWeb/1.8.19"
 
     def log_message(self, format, *args):
         # 静默常规 HTTP 请求，避免终端滚屏刷屏
@@ -126,13 +126,25 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
             return
 
         # 2. REST API 接口
-        if path == "/api/debug/latest":
+        if path == "/api/debug/list":
             try:
                 try:
-                    from sender_py.debug_utils import get_latest_debug_info
+                    from sender_py.debug_utils import list_debug_snapshots
                 except ModuleNotFoundError:
-                    from debug_utils import get_latest_debug_info
-                self._send_json(get_latest_debug_info())
+                    from debug_utils import list_debug_snapshots
+                self._send_json({"snapshots": list_debug_snapshots()})
+            except Exception as exc:
+                self._send_json({"snapshots": [], "error": str(exc)})
+            return
+
+        if path in ("/api/debug/latest", "/api/debug/detail"):
+            prefix = query.get("prefix", [""])[0] or None
+            try:
+                try:
+                    from sender_py.debug_utils import get_debug_info
+                except ModuleNotFoundError:
+                    from debug_utils import get_debug_info
+                self._send_json(get_debug_info(prefix))
             except Exception as exc:
                 self._send_json({"available": False, "error": str(exc)})
             return

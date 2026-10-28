@@ -6,6 +6,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 import urllib.request
 
 from sender_py.store import SentFilesManager
@@ -236,6 +237,30 @@ class TestWebEdition(unittest.TestCase):
                         except urllib.error.HTTPError as exc:
                             self.assertEqual(exc.code, 404)
 
+                        # 测试 /api/debug/list 与按 prefix 查询
+                        with open(os.path.join(td, "20261028_120000_90001_张三_cand1_meta.json"), "w", encoding="utf-8") as f:
+                            json.dump({
+                                "timestamp": "20261028_120000",
+                                "target_id": "90001",
+                                "target_name": "张三",
+                                "candidate": 1,
+                                "diag_info": {"judgment": {"matched": True, "reason": "成功"}}
+                            }, f)
+
+                        with urllib.request.urlopen(f"{base_url}/api/debug/list") as resp:
+                            self.assertEqual(resp.status, 200)
+                            data = json.loads(resp.read().decode("utf-8"))
+                            self.assertIn("snapshots", data)
+                            self.assertEqual(len(data["snapshots"]), 1)
+                            self.assertEqual(data["snapshots"][0]["target_id"], "90001")
+
+                        quoted_prefix = urllib.parse.quote("20261028_120000_90001_张三_cand1")
+                        with urllib.request.urlopen(f"{base_url}/api/debug/latest?prefix={quoted_prefix}") as resp:
+                            self.assertEqual(resp.status, 200)
+                            data = json.loads(resp.read().decode("utf-8"))
+                            self.assertTrue(data.get("available"))
+                            self.assertEqual(data.get("prefix"), "20261028_120000_90001_张三_cand1")
+
                         # 测试 /api/debug/open_folder
                         with unittest.mock.patch("sender_py.store.open_folder_or_file", return_value=True):
                             req = urllib.request.Request(f"{base_url}/api/debug/open_folder", data=b"{}", headers={"Content-Type": "application/json"})
@@ -401,6 +426,7 @@ class TestWebEdition(unittest.TestCase):
         from sender_py.debug_utils import (
             save_candidate_snapshot,
             get_latest_debug_info,
+            list_debug_snapshots,
             _cleanup_old_snapshots,
         )
 
@@ -432,6 +458,14 @@ class TestWebEdition(unittest.TestCase):
                 self.assertTrue(info.get("available"))
                 self.assertEqual(info.get("meta", {}).get("target_id"), "90001")
                 self.assertIn("latest_title.png", info.get("title_url"))
+
+                # 测试 list_debug_snapshots 与按 prefix 查询
+                snaps = list_debug_snapshots()
+                self.assertEqual(len(snaps), 1)
+                self.assertEqual(snaps[0]["target_id"], "90001")
+                prefix_info = get_latest_debug_info(snaps[0]["prefix"])
+                self.assertTrue(prefix_info.get("available"))
+                self.assertEqual(prefix_info.get("prefix"), snaps[0]["prefix"])
 
                 # 测试自动清理逻辑：生成超过限制的文件
                 for i in range(10):
