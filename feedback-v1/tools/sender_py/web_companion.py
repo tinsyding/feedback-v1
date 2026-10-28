@@ -178,7 +178,7 @@ class WebCompanionWindow:
         # 3.1 核心主按钮：打开浏览器控制台
         self.btn_open_browser = tk.Button(
             btn_frame,
-            text="🌐 打开 / 重新打开浏览器界面",
+            text="打开 / 重新打开浏览器界面",
             font=("Microsoft YaHei", 10, "bold"),
             bg="#2563eb",
             fg="#ffffff",
@@ -197,7 +197,7 @@ class WebCompanionWindow:
 
         self.btn_add_files = tk.Button(
             sub_btn_row,
-            text="📂 添加反馈文件",
+            text="添加反馈文件",
             font=("Microsoft YaHei", 9),
             bg="#e2e8f0",
             fg="#1e293b",
@@ -211,7 +211,7 @@ class WebCompanionWindow:
 
         self.btn_stop = tk.Button(
             sub_btn_row,
-            text="🛑 紧急停止发送",
+            text="⏹ 紧急停止发送",
             font=("Microsoft YaHei", 9),
             bg="#fee2e2",
             fg="#dc2626",
@@ -226,7 +226,7 @@ class WebCompanionWindow:
 
         self.btn_exit = tk.Button(
             sub_btn_row,
-            text="❌ 退出程序",
+            text="退出程序",
             font=("Microsoft YaHei", 9),
             bg="#f1f5f9",
             fg="#475569",
@@ -241,7 +241,7 @@ class WebCompanionWindow:
         # 4. 底部友好提示
         hint_label = tk.Label(
             main_frame,
-            text="💡 提示：主操作界面在浏览器中。关闭此控制台将彻底退出程序与后台服务。",
+            text="提示：主操作界面在浏览器中。关闭此控制台将彻底退出程序与后台服务。",
             font=("Microsoft YaHei", 8),
             fg="#94a3b8",
             bg="#f8fafc",
@@ -284,7 +284,7 @@ class WebCompanionWindow:
                 self.controller.add_input_files(list(paths), replace=False)
                 self._update_status_display()
         except Exception as exc:
-            self.controller.emit(f"⚠️ 打开文件选择框失败：{exc}")
+            self.controller.emit(f"打开文件选择框失败：{exc}")
 
     def stop_send(self):
         """立即停止发送。"""
@@ -320,7 +320,7 @@ class WebCompanionWindow:
             self.status_badge.config(text="🟡 正在发送中...", fg="#d97706")
             self.btn_stop.config(state="normal")
             self.lbl_task_status.config(
-                text=f"当前任务：🚀 正在发送反馈 (已选 {selected_students} 位)",
+                text=f"当前任务：▶ 正在发送反馈 (已选 {selected_students} 位)",
                 fg="#2563eb"
             )
         else:

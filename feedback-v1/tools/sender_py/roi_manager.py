@@ -114,7 +114,8 @@ def save_roi(config_path: str, sig_key: str, title_rel, input_rel, chat_rel):
         except Exception:
             cfg = {}
     if not isinstance(cfg, dict) or not isinstance(cfg.get("signatures"), dict):
-        cfg = {"signatures": {}}
+        cfg = {"schema_v": 2, "signatures": {}}
+    cfg["schema_v"] = 2
     cfg["signatures"][sig_key] = {
         "title": list(title_rel),
         "input": list(input_rel),

@@ -11,7 +11,7 @@ import time
 import webbrowser
 
 APP_NAME = "极方每周反馈程序 (Web版)"
-APP_VERSION = "1.8.17"
+APP_VERSION = "1.8.18"
 
 
 def find_free_port(start: int = 8765, max_attempts: int = 100) -> int:
@@ -61,6 +61,32 @@ def run_smoke_test() -> int:
 
 
 def main():
+    # 1. 最优先启用 Per-Monitor DPI 感知（必须在创建任何窗口/Tk/Win32调用前执行，确保 GetWindowRect 与 mss 物理像素 1:1 对齐）
+    try:
+        try:
+            from sender_py.window_utils import set_per_monitor_dpi_awareness
+        except ModuleNotFoundError:
+            from window_utils import set_per_monitor_dpi_awareness
+        set_per_monitor_dpi_awareness()
+    except Exception:
+        pass
+
+    # 2. 自动清理旧版（未开启 DPI V2 时留存的偏移坐标）roi_config.json 缓存
+    try:
+        import json
+        try:
+            from sender_py.roi_manager import default_config_path
+        except ModuleNotFoundError:
+            from roi_manager import default_config_path
+        cfg_p = default_config_path()
+        if os.path.isfile(cfg_p):
+            with open(cfg_p, "r", encoding="utf-8") as f:
+                cfg_data = json.load(f)
+            if not isinstance(cfg_data, dict) or cfg_data.get("schema_v") != 2:
+                os.remove(cfg_p)
+    except Exception:
+        pass
+
     if "--smoke-test" in sys.argv:
         sys.exit(run_smoke_test())
 

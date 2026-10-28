@@ -584,12 +584,12 @@
     <div class="brand" onclick="onBrandBadgeClick()" style="cursor:pointer;" title="极方每周反馈程序">
       <div class="logo-badge">极</div>
       <div class="brand-title">极方每周反馈程序</div>
-      <div class="brand-badge">Web版 v1.8.17</div>
+      <div class="brand-badge">Web版 v1.8.18</div>
     </div>
     <div class="nav-actions">
       <button class="btn btn-sm" id="calibNavBtn" onclick="triggerCalibrate()">校准视野</button>
       <button class="btn btn-sm" onclick="centerWeComWindow()" title="将企微窗口恢复为向下还原状态、缩至最小尺寸并居中于当前屏幕">居中企微</button>
-      <button class="btn btn-sm" onclick="openDebugModal()" title="查看最近一次向企微搜索核验时的现场截图与比对诊断">📸 核验现场</button>
+      <button class="btn btn-sm" onclick="openDebugModal()" title="查看最近一次向企微搜索核验时的现场截图与比对诊断">核验现场</button>
       <button class="btn btn-sm" onclick="openReplyNotesModal()">待回名单 <span id="navReplyCount" class="brand-badge" style="display:none">0</span></button>
       <button class="btn btn-sm" onclick="openSentFilesModal()">已发文件</button>
       <button class="btn btn-sm" onclick="openLogModal()">运行日志</button>
@@ -618,7 +618,6 @@
 
     <!-- 运行环境贴士 -->
     <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:9px 14px; margin-bottom:12px; font-size:12px; color:#1e40af; display:flex; align-items:center; gap:8px;">
-      <span style="font-size:16px;">💡</span>
       <span><strong>温馨提示</strong>：发送与评测过程中，请勿将企业微信窗口拖出屏幕边缘（藏在边角），且任务开始后请勿随意改动企微窗口大小，以免遮挡或影响图像识别精准度。</span>
     </div>
 
@@ -797,7 +796,7 @@
         <div class="calib-ring-outer"></div>
         <div class="calib-ring" id="calibRing"></div>
         <div class="calib-pulse-bg"></div>
-        <div class="calib-center-icon" id="calibCenterIcon">🎯</div>
+        <div class="calib-center-icon" id="calibCenterIcon" style="font-size:16px; font-weight:700; color:#2563eb;">AI</div>
       </div>
       <div id="calibTitle" style="font-size:16px; font-weight:700; color:#0f172a; margin-bottom:6px;">正在智能校准企业微信视窗...</div>
       <div id="calibStatusText" style="font-size:13px; color:#2563eb; font-weight:500; min-height:18px;">正在激活企微窗口并检测尺寸...</div>
@@ -822,7 +821,7 @@
       </div>
 
       <div id="calibHint" style="font-size:11px; color:#94a3b8; margin-top:14px; line-height:1.5;">
-        💡 提示：校准全程约需 2~3 秒，期间请勿遮挡或移动企业微信窗口
+        提示：校准全程约需 2~3 秒，期间请勿遮挡或移动企业微信窗口
       </div>
 
       <div id="calibActionBox" style="display:none; margin-top:16px;">
@@ -836,7 +835,7 @@
     <div class="modal-card" style="max-width:1120px; width:95vw;">
       <div class="modal-header" style="background:#0f172a; color:#fff; border-top-left-radius:var(--radius-lg); border-top-right-radius:var(--radius-lg); padding:16px 20px;">
         <div style="display:flex; align-items:center; gap:10px;">
-          <span style="background:#2563eb; color:#fff; padding:3px 8px; border-radius:6px; font-size:12px; font-weight:700;">🧪 实验室功能</span>
+          <span style="background:#2563eb; color:#fff; padding:3px 8px; border-radius:6px; font-size:12px; font-weight:700;">实验室功能</span>
           <h3 style="margin:0; font-size:16px; font-weight:700; color:#fff;">多引擎识别基准评测 (Benchmark Dry-Run)</h3>
         </div>
         <button class="modal-close" style="color:#94a3b8;" onclick="closeModal('benchmarkModal')">&times;</button>
@@ -848,7 +847,6 @@
           <span>【物理安全保护已生效】本模式仅在企业微信中搜索联系人并对标题截图进行多引擎横向测算，严格不调用任何发送操作，绝不向家长发送消息！</span>
         </div>
         <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:8px 12px; margin-bottom:14px; font-size:12px; color:#1e40af; display:flex; align-items:center; gap:8px;">
-          <span>💡</span>
           <span><strong>操作须知</strong>：评测过程中请保持企业微信窗口在屏幕内完全可见，不要将窗口半截拖出屏幕外，任务开始后亦请勿随意改动企微大小。</span>
         </div>
 
@@ -895,7 +893,7 @@
           <div style="display:flex; align-items:center; gap:12px;">
             <label style="font-size:13px; color:#475569; display:flex; align-items:center; gap:6px; cursor:pointer;">
               <input type="checkbox" id="bmFilterDiscrepancy" onchange="renderBenchmarkTable()">
-              <span>⚠️ 仅看存在分歧的学生</span>
+              <span>仅看存在分歧的学生</span>
             </label>
             <span id="bmStatusText" style="font-size:12px; color:#64748b; font-weight:600;">就绪</span>
           </div>
@@ -935,22 +933,20 @@
     <div class="modal-card" style="max-width:1080px; width:95vw;">
       <div class="modal-header">
         <div style="display:flex; align-items:center; gap:10px;">
-          <span style="font-size:20px;">📸</span>
           <div>
             <h3 style="margin:0; font-size:16px;">企微搜索核验现场与截图诊断</h3>
             <div style="font-size:12px; color:#64748b; margin-top:2px;">自动保存核验瞬间的视窗全景、标题裁切与 OCR 判定现场</div>
           </div>
         </div>
         <div style="display:flex; align-items:center; gap:8px;">
-          <button class="btn btn-sm" onclick="openDebugFolder()" title="在系统文件管理器中打开 debug_snapshots 目录">📁 打开截图文件夹</button>
-          <button class="btn btn-sm" onclick="loadDebugInfo()">🔄 刷新</button>
+          <button class="btn btn-sm" onclick="openDebugFolder()" title="在系统文件管理器中打开 debug_snapshots 目录">打开截图文件夹</button>
+          <button class="btn btn-sm" onclick="loadDebugInfo()">刷新</button>
           <button class="modal-close" onclick="closeModal('debugModal')">&times;</button>
         </div>
       </div>
       <div class="modal-body" style="padding:16px 20px; max-height:calc(85vh - 120px); overflow-y:auto;">
         <div id="debugLoading" style="text-align:center; padding:40px; color:#64748b;">正在加载最近核验现场信息...</div>
         <div id="debugEmpty" style="display:none; text-align:center; padding:50px 20px;">
-          <div style="font-size:48px; margin-bottom:12px;">🔍</div>
           <div style="font-size:16px; font-weight:600; color:#334155; margin-bottom:6px;">暂无核验现场截图</div>
           <div style="font-size:13px; color:#64748b;">当向学员发起搜索并进行标题栏匹配核验时，系统会自动将截图与坐标诊断留存至此。</div>
         </div>
@@ -980,21 +976,21 @@
             <!-- 标题栏裁切图 -->
             <div style="border:1px solid #e2e8f0; border-radius:10px; padding:12px; background:#fff;">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                <span style="font-weight:700; font-size:13px; color:#1e293b;">🎯 标题栏实际裁切区域 (OCR 输入图)</span>
+                <span style="font-weight:700; font-size:13px; color:#1e293b;">标题栏实际裁切区域 (OCR 输入图)</span>
                 <span id="debugTitleDim" style="font-size:11px; color:#64748b;">-</span>
               </div>
               <div style="background:#f1f5f9; border-radius:6px; padding:8px; text-align:center; min-height:80px; display:flex; align-items:center; justify-content:center; overflow:hidden;">
                 <img id="debugTitleImg" src="" alt="标题栏裁切图" style="max-width:100%; max-height:140px; object-fit:contain; border:1px dashed #cbd5e1; border-radius:4px; background:#fff;">
               </div>
               <div style="margin-top:10px; font-size:12px; color:#64748b; line-height:1.6; background:#fffbeb; border:1px solid #fef3c7; border-radius:6px; padding:8px 10px;">
-                💡 <strong>诊断提示</strong>：如果此图为纯白/纯灰或截到了聊天记录，说明当前标题栏 ROI 坐标有偏差，或者搜索后企微尚未真正聚焦进入该联系人会话；如果此图能看清学员名字但 OCR 未认出，通常为字体轻微模糊或字形生僻。
+                <strong>诊断提示</strong>：如果此图为纯白/纯灰或截到了聊天记录，说明当前标题栏 ROI 坐标有偏差，或者搜索后企微尚未真正聚焦进入该联系人会话；如果此图能看清学员名字但 OCR 未认出，通常为字体轻微模糊或字形生僻。
               </div>
             </div>
 
             <!-- 全窗 ROI 标注图 -->
             <div style="border:1px solid #e2e8f0; border-radius:10px; padding:12px; background:#fff;">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                <span style="font-weight:700; font-size:13px; color:#1e293b;">🖼️ 企业微信视窗全景与 ROI 框标注</span>
+                <span style="font-weight:700; font-size:13px; color:#1e293b;">企业微信视窗全景与 ROI 框标注</span>
                 <span style="font-size:11px; color:#64748b;">
                   <span style="color:#2563eb; font-weight:700;">■ 蓝框:标题栏</span> &nbsp;
                   <span style="color:#dc2626; font-weight:700;">■ 红框:输入框</span> &nbsp;
@@ -1089,7 +1085,7 @@
       brandClickTimer = setTimeout(() => { brandClickCount = 0; }, 2500);
       if (brandClickCount >= 5) {
         brandClickCount = 0;
-        showToast("🧪 已激活隐藏功能：多引擎识别基准评测！");
+        showToast("已激活隐藏功能：多引擎识别基准评测！");
         openBenchmarkModal();
       }
     }
@@ -1206,7 +1202,7 @@
         };
 
         const discTag = r.has_discrepancy
-          ? `<span style="background:#fef3c7; color:#b45309; font-weight:700; padding:2px 6px; border-radius:4px; font-size:11px; white-space:nowrap;">⚠️ 有分歧</span>`
+          ? `<span style="background:#fef3c7; color:#b45309; font-weight:700; padding:2px 6px; border-radius:4px; font-size:11px; white-space:nowrap;">有分歧</span>`
           : `<span style="background:#f0fdf4; color:#15803d; font-weight:600; padding:2px 6px; border-radius:4px; font-size:11px; white-space:nowrap;">一致</span>`;
 
         html += `
@@ -1936,7 +1932,7 @@
       const actionBox = document.getElementById("calibActionBox");
       const ring = document.getElementById("calibRing");
 
-      if (icon) icon.innerText = "🎯";
+      if (icon) icon.innerText = "AI";
       if (title) title.innerText = "正在智能校准企业微信视窗...";
       if (statusText) {
         statusText.innerText = "正在激活企微窗口并检测尺寸...";
@@ -2008,7 +2004,7 @@
           }, 900);
         } else {
           // 失败 / 提醒状态过渡
-          if (icon) icon.innerText = "⚠️";
+          if (icon) icon.innerText = "!";
           if (ring) ring.style.display = "none";
           if (title) title.innerText = "视窗自动标定未完成";
           if (statusText) {
@@ -2021,7 +2017,7 @@
         }
       } catch (err) {
         if (calibInterval) clearInterval(calibInterval);
-        if (icon) icon.innerText = "❌";
+        if (icon) icon.innerText = "×";
         if (ring) ring.style.display = "none";
         if (title) title.innerText = "校准请求异常";
         if (statusText) {
@@ -2041,10 +2037,10 @@
         if (data && data.success) {
           showToast(data.message || "✓ 企微窗口已恢复为标准最小尺寸并居中！");
         } else {
-          showToast("⚠️ " + (data.message || "未能居中企微窗口，请确认企微已打开"));
+          showToast(data.message || "未能居中企微窗口，请确认企微已打开");
         }
       } catch (err) {
-        showToast("❌ 请求失败：" + err);
+        showToast("请求失败：" + err);
       }
     }
 

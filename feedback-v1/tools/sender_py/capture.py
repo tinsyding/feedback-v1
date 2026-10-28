@@ -17,6 +17,14 @@ def capture_wecom_window(rect=None):
 
     mss 只在函数内导入，Linux 无 mss 时返回 None 由调用方处理。
     """
+    try:
+        try:
+            from sender_py.window_utils import _ensure_thread_dpi_aware
+        except ModuleNotFoundError:
+            from window_utils import _ensure_thread_dpi_aware
+        _ensure_thread_dpi_aware()
+    except Exception:
+        pass
     if rect is None:
         try:
             from sender_py.window_utils import get_wecom_rect

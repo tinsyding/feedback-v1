@@ -3,36 +3,60 @@
 import time
 
 
+def _ensure_thread_dpi_aware():
+    """确保当前线程处于 Per-Monitor DPI Aware V2 (物理像素坐标空间)，与 mss 截屏坐标系严格一致。"""
+    try:
+        import ctypes
+        ctypes.windll.user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))
+    except Exception:
+        pass
+
+
 def set_per_monitor_dpi_awareness():
-    """启动时设置 Per-Monitor DPI 感知，三段兜底（与旧版一致）；非 Windows 返回 False。
+    """启动时设置 Per-Monitor DPI 感知，三段兜底 + 当前线程强制 V2；非 Windows 返回 False。
 
     顺序：SetProcessDpiAwarenessContext(-4, V2) → shcore.SetProcessDpiAwareness(2)
-    → user32.SetProcessDPIAware()。ctypes.windll 只在 Windows 存在，Linux 直接 False。
+    → user32.SetProcessDPIAware()，并同步设置当前线程 SetThreadDpiAwarenessContext(-4)。
+    ctypes.windll 只在 Windows 存在，Linux 直接 False。
     """
     try:
         import ctypes
         windll = ctypes.windll  # Linux 无此属性，直接抛 AttributeError 走 False
     except Exception:
         return False
+    ok = False
     try:
-        windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
-        return True
+        if windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
+            ok = True
     except Exception:
         pass
+    if not ok:
+        try:
+            if windll.shcore.SetProcessDpiAwareness(2) == 0:
+                ok = True
+        except Exception:
+            pass
+    if not ok:
+        try:
+            if windll.user32.SetProcessDPIAware():
+                ok = True
+        except Exception:
+            pass
     try:
-        windll.shcore.SetProcessDpiAwareness(2)
-        return True
+        if windll.user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4)):
+            ok = True
     except Exception:
         pass
-    try:
-        windll.user32.SetProcessDPIAware()
-        return True
-    except Exception:
-        return False
+    return ok
+
+
+# 模块导入时即自动初始化进程与主线程 DPI 感知
+set_per_monitor_dpi_awareness()
 
 
 def get_wecom_hwnd():
     """标题含企业微信/WeCom（兼容 WeCom），过滤 Wedoc/全局搜索，面积>300x300。无则返回 None。"""
+    _ensure_thread_dpi_aware()
     try:
         import win32gui
     except Exception:
@@ -144,6 +168,7 @@ def close_wecom_search_tab_wnd(search_hwnd=None) -> bool:
 
 def get_wecom_rect():
     """win32gui.GetWindowRect -> (x, y, w, h) 物理坐标；失败返回 None。"""
+    _ensure_thread_dpi_aware()
     try:
         import win32gui
     except Exception:
@@ -160,6 +185,7 @@ def get_wecom_rect():
 
 def get_dpi_scale(hwnd=None) -> float:
     """GetDpiForWindow → GetDpiForSystem → GetDeviceCaps(88) 兜底；clamp 到 [0.5, 4.0]。"""
+    _ensure_thread_dpi_aware()
     try:
         import ctypes
         user32 = ctypes.windll.user32
@@ -267,6 +293,7 @@ def tap_key(vk) -> bool:
 
 def click_xy(x, y) -> bool:
     """移动光标并左键单击一次（物理像素坐标）。"""
+    _ensure_thread_dpi_aware()
     try:
         u32 = _user32()
         u32.SetCursorPos(int(x), int(y))
@@ -332,6 +359,7 @@ def restore_and_center_wecom(hwnd=None, log=None) -> tuple:
       (True, (x, y, w, h)) 成功归位后的外接矩形
       (False, reason) 失败原因
     """
+    _ensure_thread_dpi_aware()
     try:
         import ctypes
         from ctypes import wintypes
@@ -350,7 +378,7 @@ def restore_and_center_wecom(hwnd=None, log=None) -> tuple:
         if is_window_zoomed(hwnd) or is_window_iconic(hwnd):
             if log:
                 try:
-                    log("  📐 检测到企微处于最大化/最小化状态，正在自动向下还原...")
+                    log("  检测到企微处于最大化/最小化状态，正在自动向下还原...")
                 except Exception:
                     pass
             win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
@@ -372,12 +400,13 @@ def restore_and_center_wecom(hwnd=None, log=None) -> tuple:
         min_w = cur_r - cur_l
         min_h = cur_b - cur_t
 
-        # 兜底防御：若系统或底层未正常钳制（如异常小于 500x350），使用企微标准基准尺寸结合 DPI 换算
-        dpi_scale = get_dpi_scale(hwnd)
-        baseline_w = int(round(960 * dpi_scale))
-        baseline_h = int(round(640 * dpi_scale))
-        min_w = max(min_w, baseline_w)
-        min_h = max(min_h, baseline_h)
+        # 兜底防御：仅当系统或底层未正常钳制（如异常小于 500x350）时，才使用企微标准基准尺寸结合 DPI 换算
+        if min_w < 500 or min_h < 350:
+            dpi_scale = get_dpi_scale(hwnd)
+            baseline_w = int(round(960 * dpi_scale))
+            baseline_h = int(round(640 * dpi_scale))
+            min_w = max(min_w, baseline_w)
+            min_h = max(min_h, baseline_h)
 
         # 3. 屏幕识别（多显示器安全检测）：
         # 使用 MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) 查找企微主要所在的显示器句柄，
@@ -452,6 +481,7 @@ def ensure_fully_visible(log=None) -> tuple:
 
     返回 (True, rect)；窗口出现异常时自动恢复向下还原并居中。
     """
+    _ensure_thread_dpi_aware()
     try:
         import win32gui
         u32 = _user32()
@@ -465,7 +495,7 @@ def ensure_fully_visible(log=None) -> tuple:
         if is_window_zoomed(hwnd):
             if log:
                 try:
-                    log("⚠️ 检测到企业微信处于最大化状态，正在自动向下还原并居中...")
+                    log("检测到企业微信处于最大化状态，正在自动向下还原并居中...")
                 except Exception:
                     pass
             return restore_and_center_wecom(hwnd, log=log)
@@ -480,7 +510,7 @@ def ensure_fully_visible(log=None) -> tuple:
             # 窗口比整个虚拟屏还大（比最大化还大）：自动重置还原居中！
             if log:
                 try:
-                    log("⚠️ 检测到企业微信窗口尺寸超标（比屏幕还大），正在自动向下还原至标准最小尺寸并居中...")
+                    log("检测到企业微信窗口尺寸超标（比屏幕还大），正在自动向下还原至标准最小尺寸并居中...")
                 except Exception:
                     pass
             return restore_and_center_wecom(hwnd, log=log)
@@ -490,7 +520,7 @@ def ensure_fully_visible(log=None) -> tuple:
         if (nx, ny) != (l, t):
             if log:
                 try:
-                    log("⚠️ 检测到企业微信窗口部分飘出屏幕，已自动拉回可见区域（提示：发送或评测中请勿将窗口移出屏幕或改动大小）")
+                    log("检测到企业微信窗口部分飘出屏幕，已自动拉回可见区域（提示：发送或评测中请勿将窗口移出屏幕或改动大小）")
                 except Exception:
                     pass
             win32gui.MoveWindow(hwnd, nx, ny, w, h, True)

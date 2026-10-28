@@ -115,9 +115,11 @@ class WebController:
             self._esc_watcher = None
 
     def _on_emergency_esc(self):
+        already = self._stop_requested and self._benchmark_stop_requested
         self._stop_requested = True
         self._benchmark_stop_requested = True
-        self.emit("⏹ 监听到全局 ESC 按键（已阻止企微最小化），正在安全停止任务并保持断点...")
+        if not already:
+            self.emit("⏹ 监听到全局 ESC 按键（已阻止企微最小化），正在安全停止任务并保持断点...")
 
     def _load_token(self):
         try:
@@ -197,7 +199,7 @@ class WebController:
         try:
             items, file_counts, duplicates = load_feedback_inputs(target_paths)
         except Exception as exc:
-            self.emit(f"❌ 文件解析失败：{exc}")
+            self.emit(f"文件解析失败：{exc}")
             return {"success": False, "message": f"文件解析失败: {exc}"}
 
         with self._lock:
@@ -216,7 +218,7 @@ class WebController:
                 it["_last_result"] = it.get("_last_result") or ""
             self.items = items
 
-        self.emit(f"📂 成功载入 {len(target_paths)} 个文件，共 {len(items)} 位学员（去重 {duplicates} 人）。")
+        self.emit(f"成功载入 {len(target_paths)} 个文件，共 {len(items)} 位学员（去重 {duplicates} 人）。")
         self._notify_state_change()
         return {"success": True, "count": len(items), "files": len(target_paths)}
 
@@ -253,7 +255,7 @@ class WebController:
             self.progress["total"] = 0
             self.progress["current_name"] = ""
             self.progress["step_text"] = "已清空"
-        self.emit("🗑️ 已清空文件池与学员列表。")
+        self.emit("已清空文件池与学员列表。")
         self._notify_state_change()
         return {"success": True}
 
@@ -399,15 +401,15 @@ class WebController:
                 verdict_str = note.get("verdict", "")
                 last_msg = note.get("last_message", "")
                 if note.get("needs_reply") is True:
-                    self.emit(f"🔔 [{student}] 后台留言分析：{verdict_str}（最后消息：{last_msg or '无'}）")
+                    self.emit(f"[{student}] 后台留言分析：{verdict_str}（最后消息：{last_msg or '无'}）")
                 elif note.get("needs_reply") is None:
-                    self.emit(f"⚠️ [{student}] 后台留言分析：{verdict_str}（{last_msg or '无'}）")
+                    self.emit(f"[{student}] 后台留言分析：{verdict_str}（{last_msg or '无'}）")
                 else:
                     self.emit(f"✓ [{student}] 后台留言分析：无需回复")
 
     def _run_worker(self, selected_ids: set, selected_count: int, total_count: int):
         """发送工作者主线程。"""
-        self.emit(f"🚀 发送任务已就绪（本次将发送 {selected_count} 人，共 {total_count} 人，发送中按 ESC 可停止）")
+        self.emit(f"▶ 发送任务已就绪（本次将发送 {selected_count} 人，共 {total_count} 人，发送中按 ESC 可停止）")
 
         # 1. 执行真实的 3 秒倒计时
         for sec in (3, 2, 1):
@@ -418,7 +420,7 @@ class WebController:
             with self._lock:
                 self.progress["countdown"] = sec
                 self.progress["step_text"] = f"3秒后即将开始发送（{sec}...），按ESC可取消"
-            self.emit(f"⏳ 距离开始发送还有 {sec} 秒，可随时按 ESC 键取消...")
+            self.emit(f"距离开始发送还有 {sec} 秒，可随时按 ESC 键取消...")
             self._notify_state_change()
             time.sleep(1.0)
 
@@ -426,6 +428,16 @@ class WebController:
             self.progress["countdown"] = 0
             self.progress["step_text"] = "正在发送中..."
         self._notify_state_change()
+
+        # 开跑前先统一将企微窗口向下还原、缩至最小极限尺寸并居中于当前屏幕，保证后续坐标恒定
+        try:
+            try:
+                from sender_py import window_utils as wu
+            except ModuleNotFoundError:
+                import window_utils as wu
+            wu.restore_and_center_wecom(log=self.emit)
+        except Exception:
+            pass
 
         processed = 0
         stopped = False
@@ -446,7 +458,7 @@ class WebController:
 
                 # 保护机制：如果当前学生已被标记为已发送，安全跳过
                 if item.get("_status") == "已发送":
-                    self.emit(f"⏭ [{name}] 该学生已发送成功，安全跳过，防止重复打扰家长")
+                    self.emit(f"[{name}] 该学生已发送成功，安全跳过，防止重复打扰家长")
                     continue
 
                 with self._lock:
@@ -500,15 +512,15 @@ class WebController:
                         self.history.mark_status(item_key, name, "✅已发送", item.get("message", ""))
                     except Exception:
                         pass
-                    self.emit(f"  ✅ [{name}] 状态更新：已发送")
+                    self.emit(f"  ✓ [{name}] 状态更新：已发送")
                 elif result == "blocked":
-                    self.emit(f"  🛑 [{name}] 状态更新：已拦截（{reason}）")
+                    self.emit(f"  ✗ [{name}] 状态更新：已拦截（{reason}）")
                 elif result == "unmatched":
-                    self.emit(f"  ⚠️ [{name}] 状态更新：未匹配（{reason}）")
+                    self.emit(f"  ✗ [{name}] 状态更新：未匹配（{reason}）")
                 elif result == "stopped":
                     self.emit(f"  ⏹ [{name}] 状态保持：已暂停（{reason}）")
                 else:
-                    self.emit(f"  ❌ [{name}] 状态更新：发送失败（{reason}）")
+                    self.emit(f"  ✗ [{name}] 状态更新：发送失败（{reason}）")
 
                 self._notify_state_change()
 
@@ -520,13 +532,13 @@ class WebController:
                 if processed < selected_count and not self._stop_requested:
                     if processed % BATCH_BREAK_EVERY == 0:
                         break_gap = random.uniform(*BATCH_BREAK_GAP)
-                        self.emit(f"  ☕ 已连续处理 {processed} 人，执行防风控停顿 {break_gap:.1f} 秒（按ESC可停止）...")
+                        self.emit(f"  已连续处理 {processed} 人，执行防风控停顿 {break_gap:.1f} 秒（按ESC可停止）...")
                         if not self._interruptible_pause(break_gap):
                             stopped = True
                             break
                     else:
                         gap = random.uniform(*STUDENT_GAP)
-                        self.emit(f"  ⏳ 随机停顿 {gap:.1f} 秒，模拟人工打字节奏...")
+                        self.emit(f"  随机停顿 {gap:.1f} 秒，模拟人工打字节奏...")
                         if not self._interruptible_pause(gap):
                             stopped = True
                             break
@@ -557,22 +569,9 @@ class WebController:
         self._record_sent_files_summary()
 
         counts = summarize_status_counts(it.get("_status", "") for it in self.items)
-        title = "已暂停" if stopped else "本批发送结束"
+        title = "⏹ 已暂停" if stopped else "本批发送结束"
         summary_msg = (
-            f"🏁 {title}（共 {len(self.items)} 人）："
-            f"成功 {counts['已发送']}，失败 {counts['发送失败']}，"
-            f"拦截 {counts['已拦截']}，未匹配 {counts['未匹配']}，"
-            f"跳过 {counts['已跳过']}"
-        )
-        self.emit(summary_msg)
-        self._notify_state_change()
-
-        self._record_sent_files_summary()
-
-        counts = summarize_status_counts(it.get("_status", "") for it in self.items)
-        title = "已停止" if stopped else "本批发送结束"
-        summary_msg = (
-            f"🏁 {title}（共 {len(self.items)} 人）："
+            f"{title}（共 {len(self.items)} 人）："
             f"成功 {counts['已发送']}，失败 {counts['发送失败']}，"
             f"拦截 {counts['已拦截']}，未匹配 {counts['未匹配']}，"
             f"跳过 {counts['已跳过']}"
@@ -591,14 +590,14 @@ class WebController:
                     any_sent = any(it.get("_status") == "已发送" for it in file_items)
                     if any_sent:
                         rec = self.sent_files.record_sent_file(path, file_items)
-                        self.emit(f"💾 已保存文件 [{os.path.basename(path)}] 发送记录：{os.path.basename(rec.get('html_record', ''))}")
+                        self.emit(f"已保存文件 [{os.path.basename(path)}] 发送记录：{os.path.basename(rec.get('html_record', ''))}")
             elif self.items:
                 any_sent = any(it.get("_status") == "已发送" for it in self.items)
                 if any_sent:
                     rec = self.sent_files.record_sent_file("已发学生反馈.json", self.items)
-                    self.emit(f"💾 已保存本次发送记录：{os.path.basename(rec.get('html_record', ''))}")
+                    self.emit(f"已保存本次发送记录：{os.path.basename(rec.get('html_record', ''))}")
         except Exception as exc:
-            self.emit(f"⚠️ 记录已发文件失败：{exc}")
+            self.emit(f"记录已发文件失败：{exc}")
 
     # ================= 视野校准 =================
 
@@ -607,7 +606,7 @@ class WebController:
         if self._running:
             return {"success": False, "message": "正在发送中，无法校准视野"}
 
-        self.emit("🎯 开始检测企业微信窗口视野...")
+        self.emit("开始检测企业微信窗口视野...")
         try:
             try:
                 from sender_py import window_utils as wu
@@ -641,6 +640,12 @@ class WebController:
             except Exception as exc:
                 self.emit(f"预打开会话提示：{exc}")
 
+            # 预打开会话后重新读取一次物理窗口矩形
+            fresh_rect = wu.get_wecom_rect()
+            if fresh_rect and fresh_rect[2] >= 200 and fresh_rect[3] >= 150:
+                rect = fresh_rect
+                scale = wu.get_dpi_scale()
+
             try:
                 from sender_py.capture import capture_wecom_window
                 from sender_py.vision_api import calibrate_roi
@@ -666,12 +671,12 @@ class WebController:
             return {"success": False, "message": "AI 自动定位未通过（可能未点进具体聊天），建议打开聊天界面后重试。"}
         except Exception as exc:
             err = f"视野校准异常：{exc}"
-            self.emit(f"❌ {err}")
+            self.emit(f"✗ {err}")
             return {"success": False, "message": err}
 
     def restore_and_center_wecom(self) -> dict:
         """手动请求将企业微信向下还原、缩至最小极限尺寸并居中于当前屏幕。"""
-        self.emit("📐 正在将企业微信窗口恢复为向下还原状态并居中...")
+        self.emit("正在将企业微信窗口恢复为向下还原状态并居中...")
         try:
             try:
                 from sender_py import window_utils as wu
@@ -685,7 +690,7 @@ class WebController:
             return {"success": False, "message": str(res)}
         except Exception as exc:
             err = f"企微窗口居中异常：{exc}"
-            self.emit(f"❌ {err}")
+            self.emit(f"✗ {err}")
             return {"success": False, "message": err}
 
     # ================= 状态序列化 =================
@@ -827,7 +832,7 @@ class WebController:
     def _run_benchmark_worker(self, items_to_run: list):
         """评测工作线程：全仿真运行企微搜索与截图核验，物理断路不发消息。"""
         total = len(items_to_run)
-        self.emit(f"🧪 [多引擎评测] 开始基准评测（共 {total} 人，全程只识别不发送，按 ESC 随时停止）")
+        self.emit(f"▶ [多引擎评测] 开始基准评测（共 {total} 人，全程只识别不发送，按 ESC 随时停止）")
         self._start_esc_watcher()
 
         try:
@@ -856,7 +861,7 @@ class WebController:
                     }
                 self._notify_state_change()
 
-                self.emit(f"🧪 [{idx}/{total}] 正在全仿真比对联系人: {name}...")
+                self.emit(f"▶ [{idx}/{total}] 正在全仿真比对联系人: {name}...")
                 res = benchmark_single_student(
                     item,
                     self.server,
@@ -875,9 +880,9 @@ class WebController:
                     self._notify_state_change()
                 else:
                     reason = res.get("reason", "")
-                    self.emit(f"  ⚠️ [{name}] 未能获取有效评测数据：{reason}")
+                    self.emit(f"  ✗ [{name}] 未能获取有效评测数据：{reason}")
                     if reason in ("ROI 校准未完成", "ROI 未校准", "用户停止"):
-                        self.emit("🛑 视野校准已放弃或用户终止，基准评测已停止。")
+                        self.emit("⏹ 视野校准已放弃或用户终止，基准评测已停止。")
                         break
 
                 time.sleep(0.4)
@@ -888,9 +893,9 @@ class WebController:
                 self.benchmark_state["progress"]["step_text"] = "评测已完成"
             self._notify_state_change()
 
-            self.emit(f"🎉 [多引擎评测] 评测任务全部完成！共测试 {len(records)} 人，发现分歧 {summary.get('discrepancy_count', 0)} 例。")
+            self.emit(f"[多引擎评测] 评测任务全部完成！共测试 {len(records)} 人，发现分歧 {summary.get('discrepancy_count', 0)} 例。")
         except Exception as exc:
-            self.emit(f"❌ [多引擎评测] 运行异常: {exc}")
+            self.emit(f"✗ [多引擎评测] 运行异常: {exc}")
         finally:
             with self._lock:
                 self.benchmark_state["running"] = False

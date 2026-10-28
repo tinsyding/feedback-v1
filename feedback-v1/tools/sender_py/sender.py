@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.8.17"
+APP_VERSION = "1.8.18"
 
 
 def asset_path(filename: str) -> str:
@@ -384,7 +384,7 @@ def open_sample_chat_for_calibration(sample_name: str = None, log=print) -> bool
     target = (sample_name or "").strip()
     candidate_target = target if target else "文件传输助手"
 
-    log(f"  🔍 正在预先搜索会话 [{candidate_target}] 以唤起右侧聊天窗口...")
+    log(f"  正在预先搜索会话 [{candidate_target}] 以唤起右侧聊天窗口...")
     time.sleep(0.2)
     search_and_enter(candidate_target, 1)
 
@@ -393,7 +393,7 @@ def open_sample_chat_for_calibration(sample_name: str = None, log=print) -> bool
     if search_tab:
         wu.close_wecom_search_tab_wnd(search_tab)
         if candidate_target != "文件传输助手":
-            log(f"  ℹ️ 联系人 [{candidate_target}] 未搜到，自动切换为系统内置 [文件传输助手] 唤起会话...")
+            log(f"  联系人 [{candidate_target}] 未搜到，自动切换为系统内置 [文件传输助手] 唤起会话...")
             time.sleep(0.3)
             search_and_enter("文件传输助手", 1)
             second_search = wu.find_wecom_search_tab_wnd()
@@ -440,6 +440,12 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
         fresh = wu.get_wecom_rect()
         if fresh and fresh[2] >= 200 and fresh[3] >= 150:
             rect = fresh
+            scale = wu.get_dpi_scale()
+            key = signature_key(rect[2], rect[3], scale)
+            if not force and not needs_calibration(config_path, key):
+                if loading:
+                    loading.close()
+                return load_roi(config_path, key)
     except Exception:
         pass
 
@@ -450,6 +456,15 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
         open_sample_chat_for_calibration(sample_name, log=log)
     except Exception as exc:
         log(f"预打开会话提示（可忽略）：{exc}")
+
+    try:
+        fresh = wu.get_wecom_rect()
+        if fresh and fresh[2] >= 200 and fresh[3] >= 150:
+            rect = fresh
+            scale = wu.get_dpi_scale()
+            key = signature_key(rect[2], rect[3], scale)
+    except Exception:
+        pass
 
     img = capture_wecom_window(rect)
     if img is None:
@@ -793,7 +808,7 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
     def _check_and_handle_search_tab():
         tab_hwnd = wu.find_wecom_search_tab_wnd()
         if tab_hwnd:
-            log(f"  🔍 检测到企业微信弹出【全局搜索】窗口 (SearchTabWnd2)，表明未搜到该学生 [{name}]")
+            log(f"  检测到企业微信弹出【全局搜索】窗口 (SearchTabWnd2)，表明未搜到该学生 [{name}]")
             log(f"  └ 自动关闭全局搜索窗口，直接跳过并开始处理下一位学生...")
             wu.close_wecom_search_tab_wnd(tab_hwnd)
             return True
@@ -831,8 +846,15 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         scale = wu.get_dpi_scale()
         roi = ensure_roi(parent, rect, scale, config_path, server=server, token=token, log=log, sample_name=name)
         if roi is None:
-            log("🛑 视野校准已放弃，安全中止后续发送任务。")
+            log("⏹ 视野校准已放弃，安全中止后续发送任务。")
             return {"result": "stopped", "reason": "ROI 校准未完成", "notes": notes}
+        # 校准过程可能将企微向下还原并居中，此处必须刷新最新物理坐标
+        try:
+            fresh_rect = wu.get_wecom_rect()
+            if fresh_rect and fresh_rect[2] >= 200 and fresh_rect[3] >= 150:
+                rect = fresh_rect
+        except Exception:
+            pass
         if should_stop is not None and should_stop():
             log(f"[{name}] 收到停止请求，候选{cand}未发送")
             return {"result": "stopped", "reason": "用户停止", "notes": notes}
@@ -866,6 +888,13 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
             return {"result": "stopped", "reason": "用户停止", "notes": notes}
         if _check_and_handle_search_tab():
             return {"result": "unmatched", "reason": "未找到学生（弹出全局搜索窗口）", "notes": notes}
+        # 截图核验前再次确认最新窗口矩形
+        try:
+            fresh_rect = wu.get_wecom_rect()
+            if fresh_rect and fresh_rect[2] >= 200 and fresh_rect[3] >= 150:
+                rect = fresh_rect
+        except Exception:
+            pass
         if reply_analyzer is not None:
             judgment, chat_title, err, chat_img = judge_candidate(
                 rect, roi, sid, sname, server, token, fast_title_only=True,
@@ -889,22 +918,22 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         snap = diag.get("snapshot") or {}
         local_res = diag.get("local_res") or {}
         if title_abs:
-            log(f"  🔍 [诊断] 标题栏裁切尺寸: {title_abs[2]}x{title_abs[3]} (位于原图坐标 x={title_abs[0]}, y={title_abs[1]})")
+            log(f"  [诊断] 标题栏裁切尺寸: {title_abs[2]}x{title_abs[3]} (位于原图坐标 x={title_abs[0]}, y={title_abs[1]})")
         if local_res:
-            log(f"  🔍 [诊断] 本地OCR识别原文: [{local_res.get('detected_title') or '未检测到文字'}] ({local_res.get('reason', '')})")
+            log(f"  [诊断] 本地OCR识别原文: [{local_res.get('detected_title') or '未检测到文字'}] ({local_res.get('reason', '')})")
         if snap.get("title_filename"):
-            log(f"  📸 [现场截图已存盘] 标题图: {snap['title_filename']} (存档目录: {snap.get('debug_dir')})")
+            log(f"  [现场截图已存盘] 标题图: {snap['title_filename']} (存档目录: {snap.get('debug_dir')})")
         if err is not None:
             log(f"  └ 候选 {cand} 校验异常：{err}，换下一候选")
             _paced(CANDIDATE_GAP)
             continue
         if judgment and "方案1容错放行" in str(judgment.get("reason", "")):
-            log(f"  💡 方案1智能容错生效：{judgment.get('reason')}")
+            log(f"  方案1智能容错生效：{judgment.get('reason')}")
         elif judgment and ("[备选方案: 本地OCR]" in str(judgment.get("reason", "")) or "[本地OCR模式]" in str(judgment.get("reason", "")) or "[强制本地OCR]" in str(judgment.get("reason", ""))):
             if "[强制本地OCR]" in str(judgment.get("reason", "")):
-                log(f"  └ ⚡ 管理员已开启强制本地OCR：{judgment.get('reason')}")
+                log(f"  └ 管理员已开启强制本地OCR：{judgment.get('reason')}")
             else:
-                log(f"  └ 💡 采用本地 OCR 备用通道核验：{judgment.get('reason')}")
+                log(f"  └ 采用本地 OCR 备用通道核验：{judgment.get('reason')}")
         decision = decide_action(judgment)
         if decision["action"] == "send":
             log(f"  ✓ 候选 {cand} 核验通过 (窗口标题: [{chat_title or '未知'}])，符合发送条件")
@@ -916,20 +945,20 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
                 log("  └ 已将聊天区截图投递至后台分析家长留言，立即开始发送反馈话术...")
             ok, why = paste_and_send(message)
             if ok:
-                log(f"  ✅ [{name}] 反馈话术已成功粘贴并回车发送！")
+                log(f"  ✓ [{name}] 反馈话术已成功粘贴并回车发送！")
             else:
-                log(f"  ❌ [{name}] 反馈话术发送失败：{why}")
+                log(f"  ✗ [{name}] 反馈话术发送失败：{why}")
             if should_stop is None or not should_stop():
                 _paced(AFTER_SEND_GAP)
             return {"result": "sent" if ok else "error",
                     "at_candidate": cand, "reason": why, "notes": notes}
         if decision["action"] == "intercept":
-            log(f"  🛑 候选 {cand} 命中安全红线拦截：检测为群聊 (窗口标题: [{chat_title or '未知'}])，安全拦截！")
+            log(f"  ✗ 候选 {cand} 命中安全红线拦截：检测为群聊 (窗口标题: [{chat_title or '未知'}])，安全拦截！")
             return {"result": "blocked", "at_candidate": cand,
                     "reason": decision["reason"], "notes": notes}
         log(f"  ✗ 候选 {cand} 核验未通过：学号或姓名不匹配 (实际窗口标题: [{chat_title or '未检测到'}])")
         _paced(CANDIDATE_GAP)
-    log(f"  ⚠️ [{name}] 前 {MAX_CANDIDATES} 个候选均未匹配到对应的私聊窗口")
+    log(f"  ✗ [{name}] 前 {MAX_CANDIDATES} 个候选均未匹配到对应的私聊窗口")
     return {"result": "unmatched", "reason": "3 候选均未 MATCH", "notes": notes}
 
 
