@@ -355,17 +355,21 @@ function getTopicLabel(w) {
 }
 
 function getBankType() {
-    return bankTypeSelect && bankTypeSelect.value === 'preview' ? 'preview' : 'homework';
+    return bankTypeSelect ? bankTypeSelect.value : '';
 }
 
 function getBankTypeLabel(type) {
-    return type === 'preview' ? '预习' : '课后巩固';
+    if (type === 'preview') return '预习';
+    if (type === 'homework') return '课后巩固';
+    return '';
 }
 
 function updateBankTypeUi() {
     const type = getBankType();
     const weekLabel = document.getElementById('qb-week-label');
-    if (weekLabel) weekLabel.textContent = type === 'preview' ? '预习专题' : '课后巩固专题';
+    if (weekLabel) {
+        weekLabel.textContent = type === 'preview' ? '预习专题' : (type === 'homework' ? '课后巩固专题' : '专题');
+    }
     const searchInput = document.getElementById('qb-search-input');
     if (searchInput) {
         searchInput.placeholder = type === 'preview'
@@ -539,8 +543,8 @@ function handleStepIndicatorClick(n) {
     }
     // Jumping forward: validate prerequisites
     if (n === 2) {
-        if (!subjectSelect.value || !gradeSelect.value || !tierSelect.value || !weekSelect.value) {
-            showToast('请先选择学科、年级、班层和专题');
+        if (!bankTypeSelect?.value || !subjectSelect.value || !gradeSelect.value || !tierSelect.value || !weekSelect.value) {
+            showToast('请先选择题库类型、学科、年级、班层和专题');
             return;
         }
         goToStep(2);
@@ -567,8 +571,8 @@ window.handleStepIndicatorClick = handleStepIndicatorClick;
 
 async function goNextFromStep1() {
     const isAssistant = Boolean(window.currentUser && window.currentUser.role === 'assistant');
-    if (!subjectSelect.value || !gradeSelect.value || !tierSelect.value || !weekSelect.value) {
-        showToast('请选择学科、年级、班层和课后巩固专题');
+    if (!bankTypeSelect?.value || !subjectSelect.value || !gradeSelect.value || !tierSelect.value || !weekSelect.value) {
+        showToast('请选择题库类型、学科、年级、班层和专题');
         return;
     }
     await loadCurrentData();
@@ -1422,7 +1426,7 @@ async function loadCurrentData() {
     const tier = tierSelect ? tierSelect.value : '';
     const week = weekSelect ? weekSelect.value : '';
 
-    if (!subject || !grade || !tier || !week) {
+    if (!bankType || !subject || !grade || !tier || !week) {
         currentQuestions = [];
         isDirty = false;
         renderQuestionList();
@@ -2295,7 +2299,7 @@ function renderQuestionList() {
 }
 
 function updateStatus() {
-    const hasAllSelectors = Boolean(subjectSelect && subjectSelect.value && gradeSelect && gradeSelect.value && tierSelect && tierSelect.value && weekSelect && weekSelect.value);
+    const hasAllSelectors = Boolean(bankTypeSelect && bankTypeSelect.value && subjectSelect && subjectSelect.value && gradeSelect && gradeSelect.value && tierSelect && tierSelect.value && weekSelect && weekSelect.value);
 
     if (isDirty) {
         statusEl.className = 'qb-status unsaved';
@@ -2313,7 +2317,7 @@ function updateStatus() {
 
     if (saveInfo) {
         if (!hasAllSelectors) {
-            saveInfo.textContent = `请先选择学科、年级、班层和${getBankTypeLabel(getBankType())}专题`;
+            saveInfo.textContent = '请先选择题库类型、学科、年级、班层和专题';
         } else {
             saveInfo.textContent = `${getBankTypeLabel(getBankType())} · ${subjectSelect.value} · ${gradeSelect.value} · ${tierSelect.value} · ${getTopicLabel(weekSelect.value)} · ${currentQuestions.length}道题`;
         }

@@ -3185,6 +3185,9 @@
                 prevWeakPointsDesc = `• 预习错题题号：第 ${prevErrs.join('、')} 题`;
             }
 
+            const hasPrevErrors = prevErrs.length > 0;
+            const previewSuffix = hasPrevErrors ? '（预习的错题也在这个里面）' : '';
+
             const sName = r.student_name || '同学';
             const hwScore = (r.homework_score !== null && r.homework_score !== undefined && r.homework_score !== '') ? `${r.homework_score}分` : '已按时提交';
             const totalScore = (r.total_score !== null && r.total_score !== undefined && r.total_score !== '') ? ` (满分${r.total_score}分)` : '';
@@ -3193,7 +3196,7 @@
 
             let previewFeedbackBlock = '';
             if (prevScore || prevWeakPointsDesc || (r.preview_comment && String(r.preview_comment).trim())) {
-                previewFeedbackBlock = `\n\n【课前预习情况】：` +
+                previewFeedbackBlock = `\n【课前预习情况】：` +
                     (prevScore ? `\n预习得分：${prevScore}` : '') +
                     (prevWeakPointsDesc ? `\n预习错题与薄弱点：\n${prevWeakPointsDesc}` : '') +
                     ((r.preview_comment && String(r.preview_comment).trim()) ? `\n预习评语：${String(r.preview_comment).trim()}` : '');
@@ -3202,13 +3205,12 @@
             const text = 
 `【极方学员本周学情反馈】
 家长您好！以下是 ${sName} 同学${wDesc}的学习情况反馈：
-
 【课后巩固情况】：
 作业巩固成绩：${hwScore}${totalScore}
 错题考点与薄弱知识点：
 ${weakPointsDesc}
 教师巩固评语：
-${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_comment).trim() : '学习态度认真，继续加油！'}${previewFeedbackBlock}${link ? `\n\n专属个性化错题本与微课巩固：\n${link}` : ''}`;
+${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_comment).trim() : '学习态度认真，继续加油！'}${previewFeedbackBlock}${link ? `\n专属个性化错题本与微课巩固：\n${link}${previewSuffix}` : ''}`.replace(/\n{2,}/g, '\n');
 
             copyTextToClipboard(text, '家校学情完整反馈语已复制到剪贴板！');
         }

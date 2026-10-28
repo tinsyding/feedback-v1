@@ -1518,7 +1518,8 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                         || (!studentId ? (plusTokens[fullName] || plusTokens[studentName]) : '');
                     if (token) {
                         const retestBase = getRetestBaseUrl();
-                        plusFeedbackPart += `${retestBase}?token=${token}\n`;
+                        const previewSuffix = hasPreviewErrors ? '（预习的错题也在这个里面）' : '';
+                        plusFeedbackPart += `${retestBase}?token=${token}${previewSuffix}\n`;
                     } else {
                         plusFeedbackPart += `(生成链接失败，请联系老师)\n`;
                     }
@@ -1548,7 +1549,8 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                         || (!studentId ? (plusTokens[fullName] || plusTokens[studentName]) : '');
                     if (token) {
                         const retestBase = getRetestBaseUrl();
-                        plusFeedbackPart += `${retestBase}?token=${token}\n`;
+                        const previewSuffix = hasPreviewErrors ? '（预习的错题也在这个里面）' : '';
+                        plusFeedbackPart += `${retestBase}?token=${token}${previewSuffix}\n`;
                     } else {
                         plusFeedbackPart += `(生成链接失败，请联系老师)\n`;
                     }
@@ -1729,14 +1731,15 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
         }
 
         // Build separated versions for mode switching
-        const academicFeedback = feedback.trim();
+        const academicFeedback = feedback.trim().replace(/\n{2,}/g, '\n');
         let fullFeedback = academicFeedback;
         // 【课后复习建议】、个人薄弱点、错题本链接等统一放置在最末尾
         if (plusFeedbackPart && plusFeedbackPart.trim()) {
-            fullFeedback += `\n\n${plusFeedbackPart.trim()}`;
+            fullFeedback += `\n${plusFeedbackPart.trim()}`;
         }
-        const plusFeedbackWithName = plusFeedbackPart.trim() ? `${studentName}家长您好，\n\n${plusFeedbackPart.trim()}` : fullFeedback;
-        const plusFeedbackPure = plusFeedbackPart.trim() || fullFeedback;
+        fullFeedback = fullFeedback.replace(/\n{2,}/g, '\n');
+        const plusFeedbackWithName = (plusFeedbackPart.trim() ? `${studentName}家长您好，\n${plusFeedbackPart.trim()}` : fullFeedback).replace(/\n{2,}/g, '\n');
+        const plusFeedbackPure = (plusFeedbackPart.trim() || fullFeedback).replace(/\n{2,}/g, '\n');
 
         let currentDisplayFeedback = fullFeedback;
         if (currentFeedbackViewMode === 'plus-with-name') {
@@ -2168,7 +2171,8 @@ async function doGeneratePreviewOnlyFeedback() {
             previewOnlyPlusPart += `【错题本】：点击链接查看本专题的错题\n`;
             if (token) {
                 const retestBase = getRetestBaseUrl();
-                previewOnlyPlusPart += `${retestBase}?token=${token}\n`;
+                const previewSuffix = '（预习的错题也在这个里面）';
+                previewOnlyPlusPart += `${retestBase}?token=${token}${previewSuffix}\n`;
             } else {
                 previewOnlyPlusPart += `(生成链接失败，请联系老师)\n`;
             }
@@ -2344,8 +2348,9 @@ async function doGeneratePreviewOnlyFeedback() {
         }
 
         if (previewOnlyPlusPart && previewOnlyPlusPart.trim()) {
-            feedback = feedback.trim() + `\n\n${previewOnlyPlusPart.trim()}`;
+            feedback = feedback.trim() + `\n${previewOnlyPlusPart.trim()}`;
         }
+        feedback = feedback.trim().replace(/\n{2,}/g, '\n');
 
         const tr = document.createElement('tr');
         tr.setAttribute('data-row-index', index.toString());
@@ -2875,7 +2880,7 @@ function applyFeedbackViewMode(mode, silent = false) {
         if (targetText !== null && targetText !== undefined) {
             let finalTargetText = targetText;
             if (globalAppendText && mode !== 'plus-pure' && !targetText.endsWith(globalAppendText)) {
-                finalTargetText = finalTargetText + '\n\n' + globalAppendText;
+                finalTargetText = (finalTargetText + '\n' + globalAppendText).replace(/\n{2,}/g, '\n');
             }
             const fc = tr.querySelector('.feedback-content');
             if (fc) fc.textContent = finalTargetText;
@@ -2913,7 +2918,7 @@ function applyGlobalAppend(txt) {
     document.querySelectorAll('#result-body tr').forEach(row => {
         const fc = row.querySelector('.feedback-content');
         if (fc && !fc.textContent.endsWith(txt)) { 
-            const nt = fc.textContent + '\n\n' + txt; 
+            const nt = (fc.textContent + '\n' + txt).replace(/\n{2,}/g, '\n'); 
             fc.textContent = nt; 
             const ed = row.querySelector('.feedback-editor'); 
             if(ed) ed.value = nt; 
