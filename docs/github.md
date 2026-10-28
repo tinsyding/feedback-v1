@@ -6,7 +6,10 @@
 
 ## 一、GitHub 仓库与分支规划
 
-- **远程仓库**：`git@github.com:tinsyding/feedback-v1.git`
+- **远程仓库**：
+  - GitHub 主源：`git@github.com:tinsyding/feedback-v1.git`
+  - Gitee 国内镜像源：`git@gitee.com:tinsysakura/feedback-v1.git`
+  - **双推送机制**：本地 `origin` 远程已配置双 `pushurl`，每次执行 `git push` 会同时、自动将提交推送到 GitHub 与 Gitee 两端。
 - **核心分支规范**：
   - **`main`**：生产环境主干分支。受保护分支，所有合并至 `main` 的提交将直接触发线上生产环境自动发版。
   - **`staging`**：测试与预发环境分支。用于汇聚各类特性（如预习题库、双专题选择、OCR离线增强等）并在测试站（`feedbacktest.wxjifang.cn`）进行全真验证。
