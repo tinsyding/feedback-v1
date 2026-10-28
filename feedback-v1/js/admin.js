@@ -1,7 +1,7 @@
 /**
  * ============================================================================
  * 极方管理后台 (Admin Console) 前端运行脚本 - 生产环境合并包
- * 自动生成时间: 2026-10-29 00:45:39
+ * 自动生成时间: 2026-10-29 00:59:22
  * 源码模块目录: js/admin/
  * 请勿直接手动修改此文件，开发时请修改 js/admin/ 中的子模块并执行本打包脚本。
  * ============================================================================
@@ -4883,6 +4883,10 @@
                         srcList = String(record.source_files).split(/\r?\n+/).map(s => s.trim()).filter(Boolean);
                     }
                 }
+
+                // 考点与薄弱知识点数据
+                const weakPointsText = record.weak_points_text || (record.weak_points ? record.weak_points.join('、') : '');
+                const previewWeakPointsText = record.preview_weak_points_text || (record.preview_weak_points ? record.preview_weak_points.join('、') : '');
 
                 // 满分/全对判定
                 const isHwFullScore = (record.homework_score !== null && record.homework_score !== undefined && record.homework_score !== '' && ((totScore && parseFloat(record.homework_score) >= parseFloat(totScore)) || parseFloat(record.homework_score) >= 100)) || /全对|全部正确|满分|零失误|无错题/i.test(commentText);

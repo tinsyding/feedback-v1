@@ -2348,6 +2348,10 @@
                     }
                 }
 
+                // 考点与薄弱知识点数据
+                const weakPointsText = record.weak_points_text || (record.weak_points ? record.weak_points.join('、') : '');
+                const previewWeakPointsText = record.preview_weak_points_text || (record.preview_weak_points ? record.preview_weak_points.join('、') : '');
+
                 // 满分/全对判定
                 const isHwFullScore = (record.homework_score !== null && record.homework_score !== undefined && record.homework_score !== '' && ((totScore && parseFloat(record.homework_score) >= parseFloat(totScore)) || parseFloat(record.homework_score) >= 100)) || /全对|全部正确|满分|零失误|无错题/i.test(commentText);
                 const pvScoreVal = (record.preview_score !== null && record.preview_score !== undefined && record.preview_score !== '') ? parseFloat(record.preview_score) : null;
