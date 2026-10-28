@@ -1392,6 +1392,7 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
 
         // --- Preview homework section ---
         let previewParsed = null;
+        let previewTopics = [];
         if (previewData && pvLesson) {
             const pvInfo = previewMap[studentName];
             previewParsed = pvInfo?.comment ? parseErrorQuestionsFromComment(String(pvInfo.comment)) : null;
@@ -1406,19 +1407,19 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
 
             // 预习作业个人薄弱点展示
             if (sessionPayload.plusData?.enabled && previewParsed && previewParsed.errorNums.length > 0) {
-                const previewQuestions = sessionPayload.plusData.previewQuestions || [];
+                const previewQuestions = sessionPayload.plusData.previewQuestions || sessionPayload.plusData.questions || [];
                 if (previewQuestions.length > 0) {
                     const previewQuestionMap = {};
                     previewQuestions.forEach(q => {
-                        const ids = String(q.id).split(/[,、，]/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+                        const ids = String(q.id || q.question_num || '').split(/[,、，]/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
                         const cleanT = typeof cleanTopicTrailingPunctuation === 'function' 
                             ? cleanTopicTrailingPunctuation(q.topic) 
                             : (q.topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
                         ids.forEach(id => { previewQuestionMap[id] = cleanT; });
                     });
-                    const previewTopics = [...new Set(previewParsed.errorNums.map(num => previewQuestionMap[num] || `第${num}题`).filter(Boolean))];
+                    previewTopics = [...new Set(previewParsed.errorNums.map(num => previewQuestionMap[num] || `第${num}题`).filter(Boolean))];
                     if (previewTopics.length > 0) {
-                        feedback += `【个人薄弱点】：${previewTopics.join('、')}\n`;
+                        feedback += `【预习薄弱点】：${previewTopics.join('、')}\n`;
                     }
                 }
             }
@@ -1479,24 +1480,21 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
             // Plus: add targeted consolidation suggestions
             if (plusData && plusData.enabled) {
                 const hasHomeworkErrors = errorQuestionNums.length > 0;
-                const hasPreviewErrors = Boolean(previewParsed && previewParsed.errorNums && previewParsed.errorNums.length > 0);
+                const hasPreviewErrors = previewTopics.length > 0 || Boolean(previewParsed && previewParsed.errorNums && previewParsed.errorNums.length > 0);
                 const hasAnyErrors = hasHomeworkErrors || hasPreviewErrors;
 
+                let homeworkTopics = [];
                 if (hasHomeworkErrors && plusData.questions) {
                     const questionMap = {};
                     plusData.questions.forEach(q => {
-                        const ids = String(q.id).split(/[,、，]/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+                        const ids = String(q.id || q.question_num || '').split(/[,、，]/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
                         const cleanT = typeof cleanTopicTrailingPunctuation === 'function' 
                             ? cleanTopicTrailingPunctuation(q.topic) 
                             : (q.topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
                         ids.forEach(id => { questionMap[id] = cleanT; });
                     });
                     
-                    const errorTopics = [...new Set(errorQuestionNums.map(num => questionMap[num] || `第${num}题`).filter(Boolean))];
-                    
-                    if (errorTopics.length > 0) {
-                        plusFeedbackPart += `【个人薄弱点】：${errorTopics.join('、')}\n`;
-                    }
+                    homeworkTopics = [...new Set(errorQuestionNums.map(num => questionMap[num] || `第${num}题`).filter(Boolean))];
                     
                     errorQuestionNums.forEach(num => {
                         const topic = questionMap[num];
@@ -1509,6 +1507,15 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                             cachedPlusErrorStats[num].students.push(studentDisplayName);
                         }
                     });
+                }
+
+                if (homeworkTopics.length > 0) {
+                    const hwLabel = (previewTopics.length > 0 || (previewData && pvLesson)) ? '【巩固薄弱点】' : '【个人薄弱点】';
+                    plusFeedbackPart += `${hwLabel}：${homeworkTopics.join('、')}\n`;
+                }
+
+                if (previewTopics.length > 0) {
+                    plusFeedbackPart += `【预习薄弱点】：${previewTopics.join('、')}\n`;
                 }
 
                 if (hasAnyErrors) {
@@ -1541,15 +1548,19 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
         } else {
             const plusData = sessionPayload.plusData;
             if (plusData && plusData.enabled) {
-                const hasPreviewErrors = Boolean(previewParsed && previewParsed.errorNums && previewParsed.errorNums.length > 0);
+                const hasPreviewErrors = previewTopics.length > 0 || Boolean(previewParsed && previewParsed.errorNums && previewParsed.errorNums.length > 0);
                 if (hasPreviewErrors) {
-                    plusFeedbackPart = `第${hwLesson}${getLessonUnit()}${getHomeworkLabelFull()}未提交。\n【错题本】：点击链接查看本专题的错题\n`;
+                    plusFeedbackPart = `第${hwLesson}${getLessonUnit()}${getHomeworkLabelFull()}未提交。\n`;
+                    if (previewTopics.length > 0) {
+                        plusFeedbackPart += `【预习薄弱点】：${previewTopics.join('、')}\n`;
+                    }
+                    plusFeedbackPart += `【错题本】：点击链接查看本专题的错题\n`;
                     const token = plusTokens[studentKey]
                         || plusTokens[legacyStudentKey]
                         || (!studentId ? (plusTokens[fullName] || plusTokens[studentName]) : '');
                     if (token) {
                         const retestBase = getRetestBaseUrl();
-                        const previewSuffix = hasPreviewErrors ? '（预习的错题也在这个里面）' : '';
+                        const previewSuffix = '（预习的错题也在这个里面）';
                         plusFeedbackPart += `${retestBase}?token=${token}${previewSuffix}\n`;
                     } else {
                         plusFeedbackPart += `(生成链接失败，请联系老师)\n`;
@@ -1735,7 +1746,14 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
         let fullFeedback = academicFeedback;
         // 【课后复习建议】、个人薄弱点、错题本链接等统一放置在最末尾
         if (plusFeedbackPart && plusFeedbackPart.trim()) {
-            fullFeedback += `\n${plusFeedbackPart.trim()}`;
+            let fullPlusPart = plusFeedbackPart;
+            // 若学术反馈正文中已单独列出【预习薄弱点】，完整模式下末尾避免重复展示该行
+            if (academicFeedback.includes('【预习薄弱点】：') && fullPlusPart.includes('【预习薄弱点】：')) {
+                fullPlusPart = fullPlusPart.replace(/【预习薄弱点】：[^\n]*\n?/, '').trim();
+            }
+            if (fullPlusPart) {
+                fullFeedback += `\n${fullPlusPart}`;
+            }
         }
         fullFeedback = fullFeedback.replace(/\n{2,}/g, '\n');
         const plusFeedbackWithName = (plusFeedbackPart.trim() ? `${studentName}家长您好，\n${plusFeedbackPart.trim()}` : fullFeedback).replace(/\n{2,}/g, '\n');
@@ -2156,7 +2174,8 @@ async function doGeneratePreviewOnlyFeedback() {
                 });
                 const previewTopics = [...new Set(previewParsed.errorNums.map(num => previewQuestionMap[num] || `第${num}题`).filter(Boolean))];
                 if (previewTopics.length > 0) {
-                    feedback += `【个人薄弱点】：${previewTopics.join('、')}\n`;
+                    feedback += `【预习薄弱点】：${previewTopics.join('、')}\n`;
+                    previewOnlyPlusPart += `【预习薄弱点】：${previewTopics.join('、')}\n`;
                 }
             }
             const tokenIdMatch = fullName.match(/^(\d+)/);
@@ -2347,10 +2366,28 @@ async function doGeneratePreviewOnlyFeedback() {
             }
         }
 
+        const previewAcademicFeedback = feedback.trim().replace(/\n{2,}/g, '\n');
+        let previewFullFeedback = previewAcademicFeedback;
         if (previewOnlyPlusPart && previewOnlyPlusPart.trim()) {
-            feedback = feedback.trim() + `\n${previewOnlyPlusPart.trim()}`;
+            let fullPlus = previewOnlyPlusPart.trim();
+            if (previewAcademicFeedback.includes('【预习薄弱点】：') && fullPlus.includes('【预习薄弱点】：')) {
+                fullPlus = fullPlus.replace(/【预习薄弱点】：[^\n]*\n?/, '').trim();
+            }
+            if (fullPlus) {
+                previewFullFeedback = (previewFullFeedback + '\n' + fullPlus).replace(/\n{2,}/g, '\n');
+            }
         }
-        feedback = feedback.trim().replace(/\n{2,}/g, '\n');
+        const previewPlusWithName = (previewOnlyPlusPart.trim() ? `${studentName}家长您好，\n${previewOnlyPlusPart.trim()}` : previewFullFeedback).replace(/\n{2,}/g, '\n');
+        const previewPlusPure = (previewOnlyPlusPart.trim() || previewFullFeedback).replace(/\n{2,}/g, '\n');
+
+        let currentDisplayFeedback2 = previewFullFeedback;
+        if (currentFeedbackViewMode === 'plus-with-name') {
+            currentDisplayFeedback2 = previewPlusWithName;
+        } else if (currentFeedbackViewMode === 'plus-pure') {
+            currentDisplayFeedback2 = previewPlusPure;
+        } else if (currentFeedbackViewMode === 'academic-only') {
+            currentDisplayFeedback2 = previewAcademicFeedback;
+        }
 
         const tr = document.createElement('tr');
         tr.setAttribute('data-row-index', index.toString());
@@ -2364,14 +2401,17 @@ async function doGeneratePreviewOnlyFeedback() {
         tr.setAttribute('data-note-submitted', noteInfo?.isSubmitted ? '1' : '0');
         const ctInfo = classTestMap[studentName];
         tr.setAttribute('data-class-test-submitted', ctInfo?.isSubmitted ? '1' : '0');
-        tr.setAttribute('data-full-feedback', feedback);
+        tr.setAttribute('data-full-feedback', previewFullFeedback);
+        tr.setAttribute('data-plus-name-feedback', previewPlusWithName);
+        tr.setAttribute('data-plus-pure-feedback', previewPlusPure);
+        tr.setAttribute('data-academic-feedback', previewAcademicFeedback);
 
         // 防 XSS：姓名与评语均来自 CSV/教师输入，渲染前必须转义；onclick 字符串参数单独做 JS 转义
         const escFullName2 = escapeHtml(String(fullName ?? ''));
         const escStudentName2 = escapeHtml(String(studentName ?? ''));
         const jsFullName2 = escapeJsString(fullName);
         const jsStudentName2 = escapeJsString(studentName);
-        const escFeedback2 = escapeHtml(String(feedback ?? ''));
+        const escFeedback2 = escapeHtml(String(currentDisplayFeedback2 ?? ''));
 
         const nameTd = document.createElement('td');
         nameTd.className = 'name-td';

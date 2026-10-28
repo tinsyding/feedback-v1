@@ -359,7 +359,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 } else if (counts.preview > 0) {
                     tileInner += '<span class="topic-tile-count">预习' + counts.preview + '道错题</span>';
                 } else {
-                    tileInner += '<span class="topic-tile-count">' + counts.homework + '道错题</span>';
+                    tileInner += '<span class="topic-tile-count">巩固' + counts.homework + '道错题</span>';
                 }
                 tile.innerHTML = tileInner;
                 gridListContainer.appendChild(tile);
@@ -767,15 +767,16 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         return lines.length > 0 ? lines : [text];
     }
 
-    // 错题本每道题前的标题：优先显示“专题五：勾股定理”，没有专题时退回知识点。
+    // 错题本每道题前的标题：优先显示“巩固·专题五：勾股定理”或“预习·专题五：勾股定理”，没有专题时退回知识点。
     function formatQuestionTopicLabel(week, topic, sourceType) {
         const weekNum = parseInt(week, 10);
+        const typePrefix = sourceType === 'preview' ? '预习' : '巩固';
         let weekLabel = weekNum > 0 ? ('专题' + numToChinese(weekNum)) : '';
-        if (weekLabel && sourceType === 'preview') weekLabel = '预习·' + weekLabel;
+        if (weekLabel) weekLabel = typePrefix + '·' + weekLabel;
         const topicText = String(topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
         if (weekLabel && topicText) return weekLabel + '：' + topicText;
         if (weekLabel) return weekLabel;
-        if (topicText) return '知识点：' + topicText;
+        if (topicText) return typePrefix + '知识点：' + topicText;
         return '';
     }
 
