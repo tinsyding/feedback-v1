@@ -49,7 +49,7 @@ def get_web_ui_html_path() -> str:
 class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
     """处理 WebUI 静态资源与 REST API 请求。"""
 
-    server_version = "JiFangFeedbackWeb/1.8.11"
+    server_version = "JiFangFeedbackWeb/1.8.12"
 
     def log_message(self, format, *args):
         # 静默常规 HTTP 请求，避免终端滚屏刷屏
@@ -366,8 +366,8 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
 
         # 8. 视野校准
         if path == "/api/calibrate":
-            threading.Thread(target=self.controller.run_calibration, daemon=True).start()
-            self._send_json({"success": True, "message": "已在后台启动视野校准"})
+            res = self.controller.run_calibration()
+            self._send_json(res)
             return
 
         # 9. 打开已发文件记录目录

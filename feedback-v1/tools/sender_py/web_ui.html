@@ -443,6 +443,138 @@
       transform: translateX(-50%) translateY(0);
       opacity: 1;
     }
+    /* 视野校准智能过渡动画 */
+    .calib-card {
+      max-width: 440px !important;
+      padding: 30px 26px !important;
+      text-align: center;
+      position: relative;
+    }
+    .calib-anim-box {
+      width: 76px;
+      height: 76px;
+      margin: 0 auto 18px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .calib-ring {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      border: 3px solid transparent;
+      border-top-color: #2563eb;
+      border-right-color: #60a5fa;
+      animation: calibSpin 1.3s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    }
+    .calib-ring-outer {
+      position: absolute;
+      inset: -6px;
+      border-radius: 50%;
+      border: 2px dashed #93c5fd;
+      animation: calibSpin 9s linear infinite reverse;
+      opacity: 0.6;
+    }
+    .calib-pulse-bg {
+      position: absolute;
+      inset: 6px;
+      border-radius: 50%;
+      background: #eff6ff;
+      animation: calibPulse 2s ease-in-out infinite;
+    }
+    .calib-center-icon {
+      position: relative;
+      font-size: 30px;
+      z-index: 2;
+      user-select: none;
+      transition: all 0.3s ease;
+    }
+    @keyframes calibSpin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    @keyframes calibPulse {
+      0%, 100% { transform: scale(0.94); opacity: 0.7; }
+      50% { transform: scale(1.05); opacity: 1; }
+    }
+    .calib-track {
+      width: 100%;
+      height: 6px;
+      background: #e2e8f0;
+      border-radius: 999px;
+      overflow: hidden;
+      margin: 16px 0 18px;
+      position: relative;
+    }
+    .calib-fill {
+      height: 100%;
+      width: 25%;
+      background: linear-gradient(90deg, #3b82f6, #2563eb, #1d4ed8);
+      border-radius: 999px;
+      transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s ease;
+      position: relative;
+    }
+    .calib-fill::after {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent);
+      animation: calibShimmer 1.5s infinite;
+    }
+    @keyframes calibShimmer {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
+    }
+    .calib-steps-list {
+      text-align: left;
+      background: #f8fafc;
+      border: 1px solid #f1f5f9;
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .calib-step-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: #94a3b8;
+      transition: all 0.3s ease;
+    }
+    .calib-step-item.active {
+      color: #1e293b;
+      font-weight: 600;
+    }
+    .calib-step-item.done {
+      color: #16a34a;
+      font-weight: 600;
+    }
+    .calib-step-badge {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      background: #e2e8f0;
+      color: #64748b;
+      font-family: monospace;
+      flex-shrink: 0;
+      transition: all 0.3s ease;
+    }
+    .calib-step-item.active .calib-step-badge {
+      background: #2563eb;
+      color: #fff;
+      box-shadow: 0 0 0 3px rgba(37,99,235,0.2);
+    }
+    .calib-step-item.done .calib-step-badge {
+      background: #16a34a;
+      color: #fff;
+    }
   </style>
 </head>
 <body>
@@ -452,7 +584,7 @@
     <div class="brand" onclick="onBrandBadgeClick()" style="cursor:pointer;" title="极方每周反馈程序">
       <div class="logo-badge">极</div>
       <div class="brand-title">极方每周反馈程序</div>
-      <div class="brand-badge">Web版 v1.8.11</div>
+      <div class="brand-badge">Web版 v1.8.12</div>
     </div>
     <div class="nav-actions">
       <button class="btn btn-sm" id="calibNavBtn" onclick="triggerCalibrate()">校准视野</button>
@@ -656,12 +788,43 @@
     </div>
   </div>
 
-  <!-- 弹窗 5：视野校准加载提示 -->
+  <!-- 弹窗 5：视野校准加载提示与智能过渡动画 -->
   <div class="modal-overlay" id="calibratingModal">
-    <div class="modal-card" style="max-width:340px; text-align:center; padding:24px 20px;">
-      <div style="font-size:15px; font-weight:700; color:#1e293b; margin-bottom:12px;">正在加载，请稍候...</div>
-      <div class="progress-bar-wrap" style="height:6px; margin-bottom:6px;">
-        <div class="progress-bar-fill" style="width:100%; animation:pulse 1s infinite;"></div>
+    <div class="modal-card calib-card">
+      <div class="calib-anim-box">
+        <div class="calib-ring-outer"></div>
+        <div class="calib-ring" id="calibRing"></div>
+        <div class="calib-pulse-bg"></div>
+        <div class="calib-center-icon" id="calibCenterIcon">🎯</div>
+      </div>
+      <div id="calibTitle" style="font-size:16px; font-weight:700; color:#0f172a; margin-bottom:6px;">正在智能校准企业微信视窗...</div>
+      <div id="calibStatusText" style="font-size:13px; color:#2563eb; font-weight:500; min-height:18px;">正在激活企微窗口并检测尺寸...</div>
+      
+      <div class="calib-track">
+        <div class="calib-fill" id="calibFill"></div>
+      </div>
+
+      <div class="calib-steps-list">
+        <div class="calib-step-item active" id="calibStep1">
+          <span class="calib-step-badge">1</span>
+          <span>唤起企业微信并自愈屏幕安全视区</span>
+        </div>
+        <div class="calib-step-item" id="calibStep2">
+          <span class="calib-step-badge">2</span>
+          <span>自动预热检索会话以打开聊天窗口</span>
+        </div>
+        <div class="calib-step-item" id="calibStep3">
+          <span class="calib-step-badge">3</span>
+          <span>Qwen3.8-Max 多模态几何识别与保存</span>
+        </div>
+      </div>
+
+      <div id="calibHint" style="font-size:11px; color:#94a3b8; margin-top:14px; line-height:1.5;">
+        💡 提示：校准全程约需 2~3 秒，期间请勿遮挡或移动企业微信窗口
+      </div>
+
+      <div id="calibActionBox" style="display:none; margin-top:16px;">
+        <button class="btn btn-sm btn-primary" onclick="closeModal('calibratingModal')">知道了</button>
       </div>
     </div>
   </div>
@@ -1662,22 +1825,115 @@
       } catch (err) {}
     }
 
+    let calibInterval = null;
+
     async function triggerCalibrate() {
+      // 1. 初始化弹窗与动画状态
+      const icon = document.getElementById("calibCenterIcon");
+      const title = document.getElementById("calibTitle");
+      const statusText = document.getElementById("calibStatusText");
+      const fill = document.getElementById("calibFill");
+      const s1 = document.getElementById("calibStep1");
+      const s2 = document.getElementById("calibStep2");
+      const s3 = document.getElementById("calibStep3");
+      const hint = document.getElementById("calibHint");
+      const actionBox = document.getElementById("calibActionBox");
+      const ring = document.getElementById("calibRing");
+
+      if (icon) icon.innerText = "🎯";
+      if (title) title.innerText = "正在智能校准企业微信视窗...";
+      if (statusText) {
+        statusText.innerText = "正在激活企微窗口并检测尺寸...";
+        statusText.style.color = "#2563eb";
+      }
+      if (fill) {
+        fill.style.width = "22%";
+        fill.style.background = "linear-gradient(90deg, #3b82f6, #2563eb, #1d4ed8)";
+      }
+      if (ring) {
+        ring.style.display = "block";
+        ring.style.borderTopColor = "#2563eb";
+        ring.style.borderRightColor = "#60a5fa";
+      }
+      if (s1) { s1.className = "calib-step-item active"; s1.querySelector(".calib-step-badge").innerText = "1"; }
+      if (s2) { s2.className = "calib-step-item"; s2.querySelector(".calib-step-badge").innerText = "2"; }
+      if (s3) { s3.className = "calib-step-item"; s3.querySelector(".calib-step-badge").innerText = "3"; }
+      if (hint) hint.style.display = "block";
+      if (actionBox) actionBox.style.display = "none";
+
       openModal("calibratingModal");
+
+      // 2. 动态推进视觉过渡阶段，防止用户误以为卡死
+      let elapsed = 0;
+      if (calibInterval) clearInterval(calibInterval);
+      calibInterval = setInterval(() => {
+        elapsed += 400;
+        if (elapsed >= 900 && elapsed < 2200) {
+          if (s1) { s1.className = "calib-step-item done"; s1.querySelector(".calib-step-badge").innerText = "✓"; }
+          if (s2) { s2.className = "calib-step-item active"; }
+          if (statusText) statusText.innerText = "正在预热进入会话 (打开聊天窗口)...";
+          if (fill) fill.style.width = "55%";
+        } else if (elapsed >= 2200) {
+          if (s2) { s2.className = "calib-step-item done"; s2.querySelector(".calib-step-badge").innerText = "✓"; }
+          if (s3) { s3.className = "calib-step-item active"; }
+          if (statusText) statusText.innerText = "正在调用 Qwen3.8-Max 多模态模型分析视窗...";
+          if (fill) fill.style.width = "85%";
+        }
+      }, 400);
+
+      // 3. 请求后端执行真实校准
       try {
         const res = await fetch("/api/calibrate", { method: "POST" });
         const data = await res.json();
-        setTimeout(() => {
-          closeModal("calibratingModal");
-          if (data.success) {
-            showToast("✓ 视野校准完成！");
-          } else {
-            alert(data.message || "校准未完成");
+        if (calibInterval) clearInterval(calibInterval);
+
+        if (data && data.success) {
+          // 成功过渡状态
+          if (s1) { s1.className = "calib-step-item done"; s1.querySelector(".calib-step-badge").innerText = "✓"; }
+          if (s2) { s2.className = "calib-step-item done"; s2.querySelector(".calib-step-badge").innerText = "✓"; }
+          if (s3) { s3.className = "calib-step-item done"; s3.querySelector(".calib-step-badge").innerText = "✓"; }
+          if (fill) {
+            fill.style.width = "100%";
+            fill.style.background = "#16a34a";
           }
-        }, 1500);
+          if (icon) icon.innerText = "✓";
+          if (ring) {
+            ring.style.borderTopColor = "#16a34a";
+            ring.style.borderRightColor = "#86efac";
+          }
+          if (title) title.innerText = "✓ 视窗智能校准成功！";
+          if (statusText) {
+            statusText.innerText = data.message || "企业微信视野配置已自动保存并生效";
+            statusText.style.color = "#16a34a";
+          }
+          setTimeout(() => {
+            closeModal("calibratingModal");
+            showToast("✓ 视野智能校准成功，已自动保存！");
+          }, 900);
+        } else {
+          // 失败 / 提醒状态过渡
+          if (icon) icon.innerText = "⚠️";
+          if (ring) ring.style.display = "none";
+          if (title) title.innerText = "视窗自动标定未完成";
+          if (statusText) {
+            statusText.innerText = (data && data.message) ? data.message : "未能自动识别企业微信窗口";
+            statusText.style.color = "#dc2626";
+          }
+          if (fill) fill.style.background = "#dc2626";
+          if (actionBox) actionBox.style.display = "block";
+          if (hint) hint.style.display = "none";
+        }
       } catch (err) {
-        closeModal("calibratingModal");
-        alert(`校准异常: ${err}`);
+        if (calibInterval) clearInterval(calibInterval);
+        if (icon) icon.innerText = "❌";
+        if (ring) ring.style.display = "none";
+        if (title) title.innerText = "校准请求异常";
+        if (statusText) {
+          statusText.innerText = String(err);
+          statusText.style.color = "#dc2626";
+        }
+        if (actionBox) actionBox.style.display = "block";
+        if (hint) hint.style.display = "none";
       }
     }
 

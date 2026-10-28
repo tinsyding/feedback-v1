@@ -397,7 +397,7 @@ Windows 真机验收建议至少覆盖：
 
 > 💡 **本地一键打包**：直接双击 `tools/sender_py/build_all.bat`，即可呼出控制面板自由选择一键打包上述对应版本。
 >
-> 🚀 **CI/CD 自动构建**：向仓库推送 tag（如 `sender-v1.8.11`）或在 GitHub Actions 手动执行工作流时，均会自动编译并发布全套产物。
+> 🚀 **CI/CD 自动构建**：向仓库推送 tag（如 `sender-v1.8.12`）或在 GitHub Actions 手动执行工作流时，均会自动编译并发布全套产物。
 
 ---
 
