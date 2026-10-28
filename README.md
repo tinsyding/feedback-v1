@@ -4,8 +4,18 @@
 
 ```text
 feedback/
-└── feedback-v1/   # 当前系统 (PHP 8.2 + 原生 HTML/CSS/JS + MySQL)
+├── docs/          # 架构、API、多环境与 GitHub 工具链文档
+└── feedback-v1/   # 当前运行系统 (PHP 8.2 + 原生 HTML/CSS/JS + MySQL)
 ```
+
+---
+
+## 项目文档导航
+
+- 📘 [多环境架构与运维指南 (主站 / 测试站 / 备份站)](./docs/environments.md)
+- 🛠️ [GitHub 配置与 CI/CD 工具链指南 (Actions / Releases / gh CLI / MCP)](./docs/github.md)
+- 🔌 [后端 API 接口设计文档](./docs/api.md)
+- 📦 [桌面端微信反馈发送器说明](./feedback-v1/tools/sender_py/README.md)
 
 ---
 
@@ -25,6 +35,34 @@ feedback/
 - **线上对应**：
   - 教师端：`https://feedback.wxjifang.cn`
   - VIP 家长学生端：`https://vip.wxjifang.cn`
+
+---
+
+## 站点环境架构 (主站 / 测试站 / 备份站)
+
+系统在生产服务器上规划并运行了三套相互隔离的站点环境：
+
+| 环境 | 域名 | 对应分支 | 部署目录 | 核心职责 |
+| :--- | :--- | :---: | :--- | :--- |
+| **主站 (生产站)** | `feedback.wxjifang.cn`<br>`vip.wxjifang.cn` | `main` | `/www/wwwroot/JF/feedback-git` | 正式生产环境，push `main` 自动触发 CI/CD 部署与冒烟测试 |
+| **测试站 (预览站)** | `feedbacktest.wxjifang.cn` | `staging` | `/www/wwwroot/JF/feedback-test` | 独立数据库（`feedback_test`），承载新特性提前验证 |
+| **备份站 (应急暖备)** | `feedbackbackup.wxjifang.cn` | `main` | `/www/wwwroot/JF/feedback-backup` | 每天 03:00 自动热快照与文件增量同步，作为主站容灾回退站 |
+
+> 完整的多环境域名解析、数据库隔离策略与 Cron 同步机制详见：[多环境架构与运维指南](./docs/environments.md)。
+
+---
+
+## GitHub 配置与自动化流水线
+
+1. **GitHub Actions 持续集成**：
+   - 生产自动部署：[`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml)（监听 `main` push，SSH 到服务器执行 `git pull` + 权限修复 + 10 项冒烟检查）。
+   - 客户端打包：[`.github/workflows/build-sender.yml`](./.github/workflows/build-sender.yml)（监听 `sender-*` tag，自动编译 Windows 单文件与 WebUI 双版本并发布 GitHub Releases）。
+2. **本机开发工具链**：
+   - **Git SSH**：已绑定 `tinsyding` 账号免密连接；
+   - **GitHub CLI (`gh`)**：已就绪，可在终端直接执行 `gh run list`、`gh release view`；
+   - **GitHub MCP Server**：已配置官方 Go 原生版 MCP（`github-mcp-server`），为 AI 助手提供原生的 GitHub Actions、Releases 与 Issue 操作工具。
+
+> 完整的工具链配置与使用范例详见：[GitHub 配置与 CI/CD 工具链指南](./docs/github.md)。
 
 ---
 
