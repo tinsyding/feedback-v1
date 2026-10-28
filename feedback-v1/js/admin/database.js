@@ -520,10 +520,10 @@
                         <th style="width: 115px; min-width: 110px;">年级</th>
                         <th style="width: 65px;">学科</th>
                         <th style="width: 65px;">班型</th>
-                        <th class="th-sortable ${dbSortField === 'week_num' ? 'active' : ''}" onclick="setDbSort('week_num')" style="width: 65px; text-align: center;">周次 ${sortIcon('week_num')}</th>
-                        <th class="th-sortable ${dbSortField === 'homework_score' ? 'active' : ''}" onclick="setDbSort('homework_score')" style="width: 110px;">成绩 (巩固/预习) ${sortIcon('homework_score')}</th>
-                        <th class="th-sortable ${dbSortField === 'error_count' ? 'active' : ''}" onclick="setDbSort('error_count')" style="width: 190px;">错题题号 (巩固/预习) ${sortIcon('error_count')}</th>
-                        <th style="width: 155px; max-width: 165px;">评语 (巩固/预习)</th>
+                        <th class="th-sortable ${dbSortField === 'week_num' ? 'active' : ''}" onclick="setDbSort('week_num')" style="width: 105px;">周次 (巩固/预习) ${sortIcon('week_num')}</th>
+                        <th class="th-sortable ${dbSortField === 'homework_score' ? 'active' : ''}" onclick="setDbSort('homework_score')" style="width: 115px;">成绩 (巩固/预习) ${sortIcon('homework_score')}</th>
+                        <th class="th-sortable ${dbSortField === 'error_count' ? 'active' : ''}" onclick="setDbSort('error_count')" style="width: 185px;">错题题号 (巩固/预习) ${sortIcon('error_count')}</th>
+                        <th style="width: 175px; max-width: 185px;">评语 (巩固/预习)</th>
                         <th class="th-sortable ${dbSortField === 'created_by' ? 'active' : ''}" onclick="setDbSort('created_by')" style="width: 105px;">生成教师 ${sortIcon('created_by')}</th>
                         <th class="th-sortable ${dbSortField === 'created_at' ? 'active' : ''}" onclick="setDbSort('created_at')" style="width: 120px;">录入时间 ${sortIcon('created_at')}</th>
                         <th style="width: 205px; text-align: right;">操作</th>
@@ -715,6 +715,9 @@
                     const pvScoreDisplay = (r.preview_score !== null && r.preview_score !== undefined && r.preview_score !== '') ? formatScore(r.preview_score) : null;
                     const hasPreviewWeek = r.preview_week_num && r.preview_week_num != r.week_num;
 
+                    const hwTag = `<span style="display:inline-block; font-size:0.68rem; font-weight:600; padding:1px 5px; border-radius:4px; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); flex-shrink:0; line-height:1.3;">巩固</span>`;
+                    const pvTag = `<span style="display:inline-block; font-size:0.68rem; font-weight:600; padding:1px 5px; border-radius:4px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); flex-shrink:0; line-height:1.3;">预习</span>`;
+
                     return `
                         <tr>
                             <td style="text-align: center;">
@@ -734,13 +737,29 @@
                             <td style="white-space: nowrap;"><span style="font-weight:600; color: var(--text-secondary);">${escapeHtml(gradeVal)}</span></td>
                             <td><b style="color:#a78bfa;">${escapeHtml(subjectVal)}</b></td>
                             <td><span style="background:rgba(255,255,255,0.08); padding:2px 7px; border-radius:4px; font-size:0.8rem; font-weight:600; color: var(--text-secondary);">${escapeHtml(tierVal)}</span></td>
-                            <td style="text-align: center;">
-                                <span style="font-weight:700; color:#93c5fd; font-family:var(--font-mono); font-size:0.95rem;">${r.week_num ?? '-'}</span>
-                                ${hasPreviewWeek ? `<div style="font-size:0.72rem; color:#f59e0b; font-family:var(--font-mono); margin-top:2px;" title="预习周次: 第${r.preview_week_num}周">(预${r.preview_week_num})</div>` : ''}
+                            <td style="white-space: nowrap;">
+                                <div style="display:flex; flex-direction:column; gap:4px; justify-content:center;">
+                                    <div style="display:flex; align-items:center; gap:5px;">
+                                        ${hwTag}
+                                        <span style="font-weight:700; color:#93c5fd; font-family:var(--font-mono); font-size:0.92rem;">第${r.week_num ?? '-'}周</span>
+                                    </div>
+                                    <div style="display:flex; align-items:center; gap:5px;">
+                                        ${pvTag}
+                                        <span style="font-weight:600; color:#fbbf24; font-family:var(--font-mono); font-size:0.88rem;">${(r.preview_week_num !== null && r.preview_week_num !== undefined && r.preview_week_num !== '') ? `第${r.preview_week_num}周` : '-'}</span>
+                                    </div>
+                                </div>
                             </td>
-                            <td>
-                                <span style="font-weight:700; color:#38bdf8; font-family:var(--font-mono); font-size:0.95rem;">${hwScoreDisplay}</span>
-                                ${pvScoreDisplay !== null ? `<div style="font-size:0.74rem; color:#f59e0b; font-family:var(--font-mono); font-weight:600; margin-top:2px;" title="预习得分">预: ${pvScoreDisplay}</div>` : ''}
+                            <td style="white-space: nowrap;">
+                                <div style="display:flex; flex-direction:column; gap:4px; justify-content:center;">
+                                    <div style="display:flex; align-items:center; gap:5px;">
+                                        ${hwTag}
+                                        <span style="font-weight:700; color:#38bdf8; font-family:var(--font-mono); font-size:0.95rem;">${hwScoreDisplay}${hwScoreDisplay !== '-' ? '分' : ''}</span>
+                                    </div>
+                                    <div style="display:flex; align-items:center; gap:5px;">
+                                        ${pvTag}
+                                        <span style="font-weight:600; color:#f59e0b; font-family:var(--font-mono); font-size:0.92rem;">${pvScoreDisplay !== null ? `${pvScoreDisplay}分` : '-'}</span>
+                                    </div>
+                                </div>
                             </td>
                             <td>${errBadges}</td>
                             <td>${commentPreview}</td>
@@ -1103,7 +1122,10 @@
                                     </div>
                                 </div>
                                 <div class="db-card-head-right">
-                                    <span class="db-card-week-badge" title="第 ${r.week_num || '-'} 周">第 ${r.week_num ?? '-'} 周${hasPreviewWeek ? ` (预${r.preview_week_num})` : ''}</span>
+                                    <div style="display:flex; flex-direction:column; gap:3px; align-items:flex-end;">
+                                        <span class="db-card-week-badge" title="课后巩固周次: 第${r.week_num ?? '-'}周" style="font-size:0.75rem; background:rgba(56,189,248,0.15); color:#38bdf8; border-color:rgba(56,189,248,0.3);">巩固: 第${r.week_num ?? '-'}周</span>
+                                        <span class="db-card-week-badge" title="课前预习周次: 第${r.preview_week_num ?? '-'}周" style="font-size:0.75rem; background:rgba(245,158,11,0.15); color:#f59e0b; border-color:rgba(245,158,11,0.3);">预习: 第${r.preview_week_num ?? '-'}周</span>
+                                    </div>
                                 </div>
                             </div>
 
@@ -1116,12 +1138,12 @@
                                 </div>
                                 <div class="db-card-meta-cell">
                                     <span class="db-card-meta-label">成绩 (巩固 / 预习)</span>
-                                    <div>
-                                        <b style="color:#38bdf8; font-family:var(--font-mono); font-size:1.05rem;" title="巩固得分">${hwScoreDisplay}</b>
-                                        ${pvScoreDisplay !== null ? `
-                                            <span style="color:var(--text-muted); font-size:0.78rem; margin:0 4px;">/</span>
-                                            <b style="color:#f59e0b; font-family:var(--font-mono); font-size:0.95rem;" title="预习得分">预: ${pvScoreDisplay}</b>
-                                        ` : ''}
+                                    <div style="display:flex; align-items:center; gap:6px;">
+                                        <span style="font-size:0.68rem; font-weight:600; padding:1px 4px; border-radius:3px; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3);">巩固</span>
+                                        <b style="color:#38bdf8; font-family:var(--font-mono); font-size:1.02rem;">${hwScoreDisplay}${hwScoreDisplay !== '-' ? '分' : ''}</b>
+                                        <span style="color:var(--text-muted); font-size:0.78rem; margin:0 2px;">/</span>
+                                        <span style="font-size:0.68rem; font-weight:600; padding:1px 4px; border-radius:3px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3);">预习</span>
+                                        <b style="color:#f59e0b; font-family:var(--font-mono); font-size:0.95rem;">${pvScoreDisplay !== null ? `${pvScoreDisplay}分` : '-'}</b>
                                     </div>
                                 </div>
                                 <div class="db-card-meta-cell">
@@ -2326,65 +2348,14 @@
                     }
                 }
 
-                // 考点与薄弱知识点数据
-                const weakPointsText = record.weak_points_text || (record.weak_points ? record.weak_points.join('、') : '');
-                const previewWeakPointsText = record.preview_weak_points_text || (record.preview_weak_points ? record.preview_weak_points.join('、') : '');
+                // 满分/全对判定
+                const isHwFullScore = (record.homework_score !== null && record.homework_score !== undefined && record.homework_score !== '' && ((totScore && parseFloat(record.homework_score) >= parseFloat(totScore)) || parseFloat(record.homework_score) >= 100)) || /全对|全部正确|满分|零失误|无错题/i.test(commentText);
+                const pvScoreVal = (record.preview_score !== null && record.preview_score !== undefined && record.preview_score !== '') ? parseFloat(record.preview_score) : null;
+                const isPvFullScore = (pvScoreVal !== null && pvScoreVal >= 100) || /全对|满分|零失误|无错题/i.test(previewCommentText);
 
-                // 构建错题考点区块 HTML（课后巩固与课前预习薄弱点）
-                let weakSections = [];
-
-                // 1. 巩固薄弱点/错题
-                if (weakPointsText) {
-                    weakSections.push(`
-                        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;">
-                            <div style="display: flex; align-items: flex-start; gap: 8px; flex: 1; min-width: 0;">
-                                <span style="color: var(--primary); font-size: 0.88rem; flex-shrink: 0; font-weight: 700;">【巩固薄弱点】：</span>
-                                <span id="modal-weak-points-text" style="color: var(--text-primary); font-size: 0.88rem; font-weight: 500; line-height: 1.6;">${escapeHtml(weakPointsText)}</span>
-                            </div>
-                            <button type="button" class="btn secondary" style="padding: 4px 10px; font-size: 0.78rem; display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;" onclick="copyWeakPointsFromModal()">
-                                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path></svg>
-                                <span>复制巩固薄弱点</span>
-                            </button>
-                        </div>
-                    `);
-                } else if (errList.length > 0) {
-                    weakSections.push(`
-                        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 16px; display: flex; align-items: flex-start; gap: 8px;">
-                            <span style="color: var(--primary); font-size: 0.88rem; flex-shrink: 0; font-weight: 700;">【巩固错题】：</span>
-                            <span style="color: var(--text-primary); font-size: 0.88rem; font-weight: 500; line-height: 1.5;">第 ${errList.join('、')} 题</span>
-                        </div>
-                    `);
-                }
-
-                // 2. 预习薄弱点/错题
-                if (previewWeakPointsText) {
-                    weakSections.push(`
-                        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;">
-                            <div style="display: flex; align-items: flex-start; gap: 8px; flex: 1; min-width: 0;">
-                                <span style="color: #6366f1; font-size: 0.88rem; flex-shrink: 0; font-weight: 700;">【预习薄弱点】：</span>
-                                <span id="modal-preview-weak-points-text" style="color: var(--text-primary); font-size: 0.88rem; font-weight: 500; line-height: 1.6;">${escapeHtml(previewWeakPointsText)}</span>
-                            </div>
-                            <button type="button" class="btn secondary" style="padding: 4px 10px; font-size: 0.78rem; display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;" onclick="copyPreviewWeakPointsFromModal()">
-                                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path></svg>
-                                <span>复制预习薄弱点</span>
-                            </button>
-                        </div>
-                    `);
-                } else if (previewErrList.length > 0) {
-                    weakSections.push(`
-                        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 16px; display: flex; align-items: flex-start; gap: 8px;">
-                            <span style="color: #6366f1; font-size: 0.88rem; flex-shrink: 0; font-weight: 700;">【预习错题】：</span>
-                            <span style="color: var(--text-primary); font-size: 0.88rem; font-weight: 500; line-height: 1.5;">第 ${previewErrList.join('、')} 题</span>
-                        </div>
-                    `);
-                }
-
-                const weakSectionHtml = weakSections.length > 0 ? weakSections.join('') : `
-                    <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 18px; display: flex; align-items: center; gap: 8px; color: #10b981; font-size: 0.88rem; font-weight: 500;">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                        <span>本次巩固与预习均全部正确，未发现薄弱错题！</span>
-                    </div>
-                `;
+                // 来源文件分类：预习来源文件 vs 巩固来源文件
+                const previewSrcFiles = srcList.filter(f => /预习|preview/i.test(f));
+                const hwSrcFiles = srcList.filter(f => /巩固|课后|homework/i.test(f) || (!/预习|preview/i.test(f) && previewSrcFiles.length > 0));
 
                 body.innerHTML = `
                     <div style="display: flex; flex-direction: column; gap: 14px;">
@@ -2400,10 +2371,14 @@
                                         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                                             <span style="font-size: 1.18rem; font-weight: 700; color: var(--text-primary);">${escapeHtml(sName)}</span>
                                             ${sId ? `<span style="font-family: var(--font-mono); font-size: 0.76rem; background: var(--bg-subtle); border: 1px solid var(--border-color); color: var(--text-secondary); padding: 1px 6px; border-radius: 4px;" title="学号">${escapeHtml(sId)}</span>` : ''}
-                                            <span style="background: var(--bg-subtle); color: var(--text-secondary); border: 1px solid var(--border-color); font-size: 0.76rem; font-weight: 600; padding: 1px 7px; border-radius: 4px; font-family: var(--font-mono);">
-                                                第 ${record.week_num ?? '-'} 周${(record.preview_week_num && String(record.preview_week_num) !== String(record.week_num)) ? ` (预习第${record.preview_week_num}周)` : ''}
-                                            </span>
                                             <span style="font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono);">#${record.id}</span>
+                                            ${record.batch_code ? `
+                                                <span style="font-size: 0.74rem; background: var(--bg-subtle); border: 1px solid var(--border-color); color: var(--text-secondary); padding: 1px 7px; border-radius: 4px; display:inline-flex; align-items:center; gap:5px; font-family:var(--font-mono);" title="生成批次号: ${escapeHtml(record.batch_code)}">
+                                                    <span>批次: ${escapeHtml(record.batch_code)}</span>
+                                                    <span style="color:var(--primary); cursor:pointer;" onclick="copyTextToClipboard('${escapeHtml(record.batch_code)}', '批次号已复制！')">复制</span>
+                                                    <span style="color:var(--primary); cursor:pointer; font-weight:600;" onclick="closeDbDetailModal(); filterByBatchCode('${escapeHtml(record.batch_code)}')">筛选</span>
+                                                </span>
+                                            ` : ''}
                                         </div>
                                         <div style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--text-secondary); flex-wrap: wrap;">
                                             <span style="font-weight: 500;">${escapeHtml(gradeVal)}</span>
@@ -2411,6 +2386,10 @@
                                             <span style="font-weight: 500;">${escapeHtml(subjectVal)}</span>
                                             <span style="color: var(--text-muted);">•</span>
                                             <span style="font-weight: 500;">${escapeHtml(tierVal)}</span>
+                                            ${batchDesc !== '-' ? `
+                                                <span style="color: var(--text-muted);">•</span>
+                                                <span style="color: var(--text-secondary);">${batchDesc}</span>
+                                            ` : ''}
                                             ${record.creator_name || record.created_by ? `
                                                 <span style="color: var(--text-muted);">•</span>
                                                 <span style="color: var(--text-secondary); font-size: 0.8rem; display: inline-flex; align-items: center; gap: 4px;"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>${(record.creator_owner_username && (!record.creator_role || record.creator_role==='assistant') ? escapeHtml(record.creator_name||record.created_by) + ' [助教｜所属：' + escapeHtml(record.creator_owner_name||record.creator_owner_username) + ' (' + escapeHtml(record.creator_owner_username) + ')]' : escapeHtml(record.creator_name || record.created_by))}</span>
@@ -2431,6 +2410,10 @@
                                             <span>管理员错题本</span>
                                         </button>
                                     ` : ''}
+                                    <button type="button" class="btn secondary" style="padding: 6px 11px; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 4px;" onclick="copyParentFullFeedback(currentDetailModalRecord, 'student_records')" title="复制家校完整学情反馈语">
+                                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path></svg>
+                                        <span>复制反馈</span>
+                                    </button>
                                     <button type="button" class="btn secondary" style="padding: 6px 10px; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 4px;" onclick="closeDbDetailModal(); openRecordEditModal(${record.id})" title="编辑此记录">
                                         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                                         <span>编辑</span>
@@ -2443,100 +2426,208 @@
                             </div>
                         </div>
 
-                        <!-- 2. 成绩与批次指标看板 (统一中性风格) -->
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
-                            <!-- 课后巩固成绩 -->
-                            <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 16px;">
-                                <div style="font-size: 0.76rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
-                                    <span style="display: flex; align-items: center; gap: 5px;">
-                                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
-                                        课后巩固成绩
+                        <!-- 2. 中间两列：左列为预习（分数、薄弱点、评语、文件来源）；第二列为巩固 -->
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; align-items: start;">
+                            <!-- 左列：课前预习 -->
+                            <div style="display: flex; flex-direction: column; gap: 12px; background: rgba(245,158,11,0.03); border: 1px solid rgba(245,158,11,0.22); border-radius: var(--radius-md); padding: 14px;">
+                                <div style="display: flex; align-items: center; justify-content: space-between; padding-bottom: 8px; border-bottom: 1px solid rgba(245,158,11,0.2);">
+                                    <div style="font-size: 0.95rem; font-weight: 700; color: #f59e0b; display: flex; align-items: center; gap: 6px;">
+                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+                                        <span>【课前预习档案】</span>
+                                    </div>
+                                    <span style="font-size: 0.76rem; background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); padding: 2px 8px; border-radius: 4px; font-weight: 600; font-family: var(--font-mono);">
+                                        第 ${record.preview_week_num ?? (record.week_num ?? '-')} 周
                                     </span>
-                                    ${totScore ? `<span style="font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono);">满分 ${totScore}分</span>` : ''}
                                 </div>
-                                <div style="display: flex; align-items: baseline; gap: 4px;">
-                                    <span style="font-size: 1.55rem; font-weight: 700; color: var(--text-primary); font-family: var(--font-mono);">${hwScore}</span>
-                                    ${hwScore !== '-' ? '<span style="font-size: 0.8rem; color: var(--text-muted); font-weight: 500;">分</span>' : ''}
-                                </div>
-                            </div>
 
-                            <!-- 课前预习表现 -->
-                            <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 16px;">
-                                <div style="font-size: 0.76rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px;">
-                                    <span style="display: flex; align-items: center; gap: 5px;">
-                                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
-                                        课前预习得分
-                                    </span>
+                                <!-- 预习分数 -->
+                                <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 14px;">
+                                    <div style="font-size: 0.76rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; display:flex; align-items:center; justify-content:space-between;">
+                                        <span style="display:flex; align-items:center; gap:5px;">
+                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+                                            预习得分
+                                        </span>
+                                        <span style="font-size:0.72rem; color:var(--text-muted); font-family:var(--font-mono);">预习周次: 第${record.preview_week_num ?? (record.week_num ?? '-')}周</span>
+                                    </div>
+                                    <div style="display: flex; align-items: baseline; gap: 4px;">
+                                        <span style="font-size: 1.55rem; font-weight: 700; color: #f59e0b; font-family: var(--font-mono);">${prevScore}</span>
+                                        ${prevScore !== '-' ? '<span style="font-size: 0.8rem; color: var(--text-muted); font-weight: 500;">分</span>' : ''}
+                                    </div>
                                 </div>
-                                <div style="display: flex; align-items: baseline; gap: 4px;">
-                                    <span style="font-size: 1.55rem; font-weight: 700; color: var(--text-primary); font-family: var(--font-mono);">${prevScore}</span>
-                                    ${prevScore !== '-' ? '<span style="font-size: 0.8rem; color: var(--text-muted); font-weight: 500;">分</span>' : ''}
-                                </div>
-                            </div>
 
-                            <!-- 生成批次 -->
-                            <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 16px;">
-                                <div style="font-size: 0.76rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
-                                    <span style="display: flex; align-items: center; gap: 5px;">
-                                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
-                                        学情生成批次
-                                    </span>
-                                    ${record.batch_code ? `
-                                        <div style="display:flex; align-items:center; gap:8px;">
-                                            <span style="font-size: 0.72rem; color: var(--primary); cursor: pointer;" onclick="copyTextToClipboard('${escapeHtml(record.batch_code)}', '批次号已复制！')">复制</span>
-                                            <span style="font-size: 0.72rem; color: var(--primary); cursor: pointer; font-weight: 600;" onclick="closeDbDetailModal(); filterByBatchCode('${escapeHtml(record.batch_code)}')">筛选</span>
+                                <!-- 预习薄弱点 -->
+                                <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 14px; display:flex; flex-direction:column; gap:8px;">
+                                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                                        <div style="font-size: 0.82rem; font-weight: 700; color: #f59e0b; display: flex; align-items: center; gap: 5px;">
+                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                                            预习薄弱点与错题
+                                        </div>
+                                        ${previewWeakPointsText ? `
+                                            <button type="button" class="btn secondary" style="padding: 2px 7px; font-size: 0.72rem; display: inline-flex; align-items: center; gap: 4px;" onclick="copyPreviewWeakPointsFromModal()">
+                                                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path></svg>
+                                                <span>复制预习薄弱点</span>
+                                            </button>
+                                        ` : ''}
+                                    </div>
+                                    ${previewWeakPointsText ? `
+                                        <div>
+                                            <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:2px;">薄弱考点归纳：</div>
+                                            <span id="modal-preview-weak-points-text" style="color: var(--text-primary); font-size: 0.85rem; font-weight: 500; line-height: 1.5;">${escapeHtml(previewWeakPointsText)}</span>
                                         </div>
                                     ` : ''}
+                                    ${previewErrList.length > 0 ? `
+                                        <div style="display:flex; align-items:center; flex-wrap:wrap; gap:4px;">
+                                            <span style="font-size:0.75rem; color:var(--text-muted);">错题题号：</span>
+                                            ${previewErrList.map(q => `<span class="q-badge" style="border-color:rgba(245,158,11,0.4); color:#fbbf24;">${escapeHtml(String(q))}</span>`).join('')}
+                                            <span style="font-size:0.75rem; color:var(--text-muted);">(共${previewErrList.length}题)</span>
+                                        </div>
+                                    ` : (isPvFullScore ? `
+                                        <div style="color: #10b981; font-size: 0.82rem; font-weight: 500; display:flex; align-items:center; gap:4px;">
+                                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                            <span>预习全部正确，无薄弱错题！</span>
+                                        </div>
+                                    ` : (!previewWeakPointsText ? `<span style="color:var(--text-muted); font-size:0.82rem;">（暂无预习错题记录）</span>` : ''))}
                                 </div>
-                                <div style="font-size: 0.88rem; font-weight: 600; color: var(--text-primary); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: all; cursor: pointer;" title="点击复制批次号: ${escapeHtml(record.batch_code || '-')}" onclick="copyTextToClipboard('${escapeHtml(record.batch_code)}', '批次号已复制！')">
-                                    ${escapeHtml(record.batch_code || '（暂无批次）')}
+
+                                <!-- 预习评语 -->
+                                <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px;">
+                                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                                        <div style="font-size: 0.82rem; font-weight: 700; color: #f59e0b; display: flex; align-items: center; gap: 5px;">
+                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                                            预习针对性评语
+                                        </div>
+                                        ${previewCommentText ? `
+                                            <button type="button" class="btn secondary" style="font-size: 0.72rem; padding: 2px 7px; display: inline-flex; align-items: center; gap: 4px;" onclick="copyPreviewCommentFromModal()">
+                                                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path></svg>
+                                                <span>复制预习评语</span>
+                                            </button>
+                                        ` : ''}
+                                    </div>
+                                    <div id="modal-preview-comment-text" style="font-size: 0.84rem; color: var(--text-primary); line-height: 1.5; white-space: pre-wrap; background: var(--bg-subtle); border-radius: var(--radius-sm); padding: 8px 12px; border: 1px solid var(--border-color); flex: 1; min-height: 50px;">
+                                        ${escapeHtml(previewCommentText || '（暂无课前预习评语）')}
+                                    </div>
+                                </div>
+
+                                <!-- 预习文件来源 -->
+                                <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 14px;">
+                                    <div style="font-size: 0.82rem; font-weight: 700; color: #f59e0b; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
+                                        <span>预习文件来源</span>
+                                    </div>
+                                    ${previewSrcFiles.length > 0 ? `
+                                        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                                            ${previewSrcFiles.map(fn => `
+                                                <span style="font-size: 0.76rem; background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.3); color: #fbbf24; padding: 2px 7px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; word-break: break-all;">
+                                                    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
+                                                    <span>${escapeHtml(fn)}</span>
+                                                </span>
+                                            `).join('')}
+                                        </div>
+                                    ` : `<span style="color: var(--text-muted); font-size: 0.78rem;">（未匹配到独立预习文件，可能为合并录入）</span>`}
+                                </div>
+                            </div>
+
+                            <!-- 右列：课后巩固 -->
+                            <div style="display: flex; flex-direction: column; gap: 12px; background: rgba(56,189,248,0.03); border: 1px solid rgba(56,189,248,0.22); border-radius: var(--radius-md); padding: 14px;">
+                                <div style="display: flex; align-items: center; justify-content: space-between; padding-bottom: 8px; border-bottom: 1px solid rgba(56,189,248,0.2);">
+                                    <div style="font-size: 0.95rem; font-weight: 700; color: #38bdf8; display: flex; align-items: center; gap: 6px;">
+                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+                                        <span>【课后巩固档案】</span>
+                                    </div>
+                                    <span style="font-size: 0.76rem; background: rgba(56,189,248,0.15); color: #38bdf8; border: 1px solid rgba(56,189,248,0.3); padding: 2px 8px; border-radius: 4px; font-weight: 600; font-family: var(--font-mono);">
+                                        第 ${record.week_num ?? '-'} 周
+                                    </span>
+                                </div>
+
+                                <!-- 巩固分数 -->
+                                <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 14px;">
+                                    <div style="font-size: 0.76rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; display:flex; align-items:center; justify-content:space-between;">
+                                        <span style="display:flex; align-items:center; gap:5px;">
+                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+                                            巩固得分
+                                        </span>
+                                        <span style="font-size:0.72rem; color:var(--text-muted); font-family:var(--font-mono);">巩固周次: 第${record.week_num ?? '-'}周 ${totScore ? `· 满分${totScore}分` : ''}</span>
+                                    </div>
+                                    <div style="display: flex; align-items: baseline; gap: 4px;">
+                                        <span style="font-size: 1.55rem; font-weight: 700; color: #38bdf8; font-family: var(--font-mono);">${hwScore}</span>
+                                        ${hwScore !== '-' ? '<span style="font-size: 0.8rem; color: var(--text-muted); font-weight: 500;">分</span>' : ''}
+                                    </div>
+                                </div>
+
+                                <!-- 巩固薄弱点 -->
+                                <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 14px; display:flex; flex-direction:column; gap:8px;">
+                                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                                        <div style="font-size: 0.82rem; font-weight: 700; color: #38bdf8; display: flex; align-items: center; gap: 5px;">
+                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                                            巩固薄弱点与错题
+                                        </div>
+                                        ${weakPointsText ? `
+                                            <button type="button" class="btn secondary" style="padding: 2px 7px; font-size: 0.72rem; display: inline-flex; align-items: center; gap: 4px;" onclick="copyWeakPointsFromModal()">
+                                                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path></svg>
+                                                <span>复制巩固薄弱点</span>
+                                            </button>
+                                        ` : ''}
+                                    </div>
+                                    ${weakPointsText ? `
+                                        <div>
+                                            <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:2px;">薄弱考点归纳：</div>
+                                            <span id="modal-weak-points-text" style="color: var(--text-primary); font-size: 0.85rem; font-weight: 500; line-height: 1.5;">${escapeHtml(weakPointsText)}</span>
+                                        </div>
+                                    ` : ''}
+                                    ${errList.length > 0 ? `
+                                        <div style="display:flex; align-items:center; flex-wrap:wrap; gap:4px;">
+                                            <span style="font-size:0.75rem; color:var(--text-muted);">错题题号：</span>
+                                            ${errList.map(q => `<span class="q-badge">${escapeHtml(String(q))}</span>`).join('')}
+                                            <span style="font-size:0.75rem; color:var(--text-muted);">(共${errList.length}题)</span>
+                                        </div>
+                                    ` : (isHwFullScore ? `
+                                        <div style="color: #10b981; font-size: 0.82rem; font-weight: 500; display:flex; align-items:center; gap:4px;">
+                                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                            <span>巩固全部正确，无薄弱错题！</span>
+                                        </div>
+                                    ` : (!weakPointsText ? `<span style="color:var(--text-muted); font-size:0.82rem;">（暂无巩固错题记录）</span>` : ''))}
+                                </div>
+
+                                <!-- 巩固评语 -->
+                                <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px;">
+                                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                                        <div style="font-size: 0.82rem; font-weight: 700; color: #38bdf8; display: flex; align-items: center; gap: 5px;">
+                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                                            巩固针对性评语
+                                        </div>
+                                        ${commentText ? `
+                                            <button type="button" class="btn secondary" style="font-size: 0.72rem; padding: 2px 7px; display: inline-flex; align-items: center; gap: 4px;" onclick="copyCommentFromModal()">
+                                                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path></svg>
+                                                <span>复制巩固评语</span>
+                                            </button>
+                                        ` : ''}
+                                    </div>
+                                    <div id="modal-comment-text" style="font-size: 0.84rem; color: var(--text-primary); line-height: 1.5; white-space: pre-wrap; background: var(--bg-subtle); border-radius: var(--radius-sm); padding: 8px 12px; border: 1px solid var(--border-color); flex: 1; min-height: 50px;">
+                                        ${escapeHtml(commentText || '（暂无课后巩固评语）')}
+                                    </div>
+                                </div>
+
+                                <!-- 巩固文件来源 -->
+                                <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 14px;">
+                                    <div style="font-size: 0.82rem; font-weight: 700; color: #38bdf8; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
+                                        <span>巩固文件来源</span>
+                                    </div>
+                                    ${hwSrcFiles.length > 0 ? `
+                                        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                                            ${hwSrcFiles.map(fn => `
+                                                <span style="font-size: 0.76rem; background: rgba(56,189,248,0.08); border: 1px solid rgba(56,189,248,0.3); color: #38bdf8; padding: 2px 7px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; word-break: break-all;">
+                                                    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
+                                                    <span>${escapeHtml(fn)}</span>
+                                                </span>
+                                            `).join('')}
+                                        </div>
+                                    ` : `<span style="color: var(--text-muted); font-size: 0.78rem;">（未匹配到独立巩固文件）</span>`}
                                 </div>
                             </div>
                         </div>
 
-                        <!-- 3. 核心板块：薄弱知识点与错题归纳 (巩固 & 预习) -->
-                        ${weakSectionHtml}
-
-                        <!-- 4. 评语 (课后巩固与课前预习) -->
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px;">
-                            <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px;">
-                                <div style="display: flex; align-items: center; justify-content: space-between;">
-                                    <div style="font-size: 0.82rem; font-weight: 700; color: var(--primary); display: flex; align-items: center; gap: 5px;">
-                                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-                                        课后巩固教师针对性评语
-                                    </div>
-                                    ${commentText ? `
-                                        <button type="button" class="btn secondary" style="font-size: 0.72rem; padding: 2px 7px; display: inline-flex; align-items: center; gap: 4px;" onclick="copyCommentFromModal()">
-                                            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path></svg>
-                                            <span>复制巩固评语</span>
-                                        </button>
-                                    ` : ''}
-                                </div>
-                                <div id="modal-comment-text" style="font-size: 0.84rem; color: var(--text-primary); line-height: 1.5; white-space: pre-wrap; background: var(--bg-subtle); border-radius: var(--radius-sm); padding: 8px 12px; border: 1px solid var(--border-color); flex: 1;">
-                                    ${escapeHtml(commentText || '（暂无课后巩固评语）')}
-                                </div>
-                            </div>
-
-                            <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px;">
-                                <div style="display: flex; align-items: center; justify-content: space-between;">
-                                    <div style="font-size: 0.82rem; font-weight: 700; color: #6366f1; display: flex; align-items: center; gap: 5px;">
-                                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-                                        课前预习教师针对性评语
-                                    </div>
-                                    ${previewCommentText ? `
-                                        <button type="button" class="btn secondary" style="font-size: 0.72rem; padding: 2px 7px; display: inline-flex; align-items: center; gap: 4px;" onclick="copyPreviewCommentFromModal()">
-                                            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path></svg>
-                                            <span>复制预习评语</span>
-                                        </button>
-                                    ` : ''}
-                                </div>
-                                <div id="modal-preview-comment-text" style="font-size: 0.84rem; color: var(--text-primary); line-height: 1.5; white-space: pre-wrap; background: var(--bg-subtle); border-radius: var(--radius-sm); padding: 8px 12px; border: 1px solid var(--border-color); flex: 1;">
-                                    ${escapeHtml(previewCommentText || '（暂无课前预习评语）')}
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- 5. 录入来源文件名 -->
+                        <!-- 3. 原本录入文件方框正常放那里 -->
                         <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 14px 16px;">
                             <div style="font-size: 0.82rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
                                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
@@ -2554,7 +2645,7 @@
                             ` : '<span style="color: var(--text-muted); font-size: 0.78rem;">（暂无记录来源文件名，历史数据或手动录入）</span>'}
                         </div>
 
-                        <!-- 6. 历史版本快照与变更记录 -->
+                        <!-- 4. 历史版本快照与变更记录 -->
                         <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 14px 16px;">
                             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
                                 <div style="font-size: 0.84rem; font-weight: 700; color: var(--text-secondary); display: flex; align-items: center; gap: 6px;">

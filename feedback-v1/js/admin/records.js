@@ -439,70 +439,78 @@
             const isHwFullScore = (hw !== null && ((tot && hw >= tot && hw > 0) || hw >= 100))
                 || /全对|全部正确|满分|零失误|无错题|免除加练/i.test(hwComment);
 
+            const pvScoreVal = (r.preview_score !== null && r.preview_score !== undefined && r.preview_score !== '') ? parseFloat(r.preview_score) : null;
+            const isPvFullScore = (pvScoreVal !== null && pvScoreVal >= 100) || /全对|满分|零失误|无错题/i.test(r.preview_comment || '');
+
             const hasPreview = (r.preview_score !== null && r.preview_score !== undefined && r.preview_score !== '')
                 || (r.preview_week_num !== null && r.preview_week_num !== undefined)
                 || pvErrList.length > 0
                 || (r.preview_comment && r.preview_comment.trim() !== '');
 
-            let hwBadgeHtml = '';
+            let hwContent = '';
             if (hwErrList.length > 0) {
-                hwBadgeHtml = `<div style="display:flex; align-items:center; flex-wrap:wrap; gap:3px;">${hasPreview ? '<span class="q-badge" style="background:rgba(56,189,248,0.15); color:#38bdf8; border-color:rgba(56,189,248,0.3); font-size:0.7rem; padding:1px 5px;">巩固</span>' : ''}${hwErrList.map(q => `<span class="q-badge">${escapeHtml(String(q))}</span>`).join('')}<span style="font-size:0.75rem; color:var(--text-muted);">(${hwErrList.length}题)</span></div>`;
+                hwContent = `${hwErrList.map(q => `<span class="q-badge">${escapeHtml(String(q))}</span>`).join('')}<span style="font-size:0.75rem; color:var(--text-muted);">(${hwErrList.length}题)</span>`;
             } else if (isHwFullScore) {
-                hwBadgeHtml = `<div style="display:flex; align-items:center; gap:4px;">${hasPreview ? '<span class="q-badge" style="background:rgba(56,189,248,0.15); color:#38bdf8; border-color:rgba(56,189,248,0.3); font-size:0.7rem; padding:1px 5px;">巩固</span>' : ''}<span class="q-badge-none"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:3px;vertical-align:-1px;"><polyline points="20 6 9 17 4 12"></polyline></svg>全对</span></div>`;
+                hwContent = `<span class="q-badge-none"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:3px;vertical-align:-1px;"><polyline points="20 6 9 17 4 12"></polyline></svg>全对</span>`;
             } else if (hw !== null) {
-                hwBadgeHtml = `<div style="display:flex; align-items:center; gap:4px;">${hasPreview ? '<span class="q-badge" style="background:rgba(56,189,248,0.15); color:#38bdf8; border-color:rgba(56,189,248,0.3); font-size:0.7rem; padding:1px 5px;">巩固</span>' : ''}<span class="q-badge-unlisted" title="非满分且未记录具体错题号">未列出</span></div>`;
+                hwContent = `<span class="q-badge-unlisted" title="非满分且未记录具体错题号">未列出</span>`;
+            } else {
+                hwContent = `<span style="color:var(--text-muted); font-size:0.78rem;">-</span>`;
             }
 
-            let pvBadgeHtml = '';
+            let pvContent = '';
             if (pvErrList.length > 0) {
-                pvBadgeHtml = `<div style="display:flex; align-items:center; flex-wrap:wrap; gap:3px; margin-top:2px;"><span class="q-badge" style="background:rgba(245,158,11,0.15); color:#f59e0b; border-color:rgba(245,158,11,0.3); font-size:0.7rem; padding:1px 5px;">预习</span>${pvErrList.map(q => `<span class="q-badge" style="border-color:rgba(245,158,11,0.4); color:#fbbf24;">${escapeHtml(String(q))}</span>`).join('')}<span style="font-size:0.75rem; color:var(--text-muted);">(${pvErrList.length}题)</span></div>`;
-            } else if (hasPreview) {
-                const pvScoreVal = (r.preview_score !== null && r.preview_score !== undefined && r.preview_score !== '') ? parseFloat(r.preview_score) : null;
-                const isPvFullScore = (pvScoreVal !== null && pvScoreVal >= 100) || /全对|满分|零失误|无错题/i.test(r.preview_comment || '');
-                if (isPvFullScore) {
-                    pvBadgeHtml = `<div style="display:flex; align-items:center; gap:4px; margin-top:2px;"><span class="q-badge" style="background:rgba(245,158,11,0.15); color:#f59e0b; border-color:rgba(245,158,11,0.3); font-size:0.7rem; padding:1px 5px;">预习</span><span class="q-badge-none" style="color:#fbbf24; border-color:rgba(245,158,11,0.3); background:rgba(245,158,11,0.1);"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:3px;vertical-align:-1px;"><polyline points="20 6 9 17 4 12"></polyline></svg>全对</span></div>`;
-                }
+                pvContent = `${pvErrList.map(q => `<span class="q-badge" style="border-color:rgba(245,158,11,0.4); color:#fbbf24;">${escapeHtml(String(q))}</span>`).join('')}<span style="font-size:0.75rem; color:var(--text-muted);">(${pvErrList.length}题)</span>`;
+            } else if (isPvFullScore || (hasPreview && pvErrList.length === 0 && pvScoreVal !== null)) {
+                pvContent = `<span class="q-badge-none" style="color:#fbbf24; border-color:rgba(245,158,11,0.3); background:rgba(245,158,11,0.1);"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:3px;vertical-align:-1px;"><polyline points="20 6 9 17 4 12"></polyline></svg>全对</span>`;
+            } else {
+                pvContent = `<span style="color:var(--text-muted); font-size:0.78rem;">-</span>`;
             }
 
-            return (hwBadgeHtml || pvBadgeHtml) ? `<div style="display:flex; flex-direction:column; gap:2px;">${hwBadgeHtml}${pvBadgeHtml}</div>` : `<span class="q-badge-none">全对</span>`;
+            const hwTag = `<span style="display:inline-block; font-size:0.68rem; font-weight:600; padding:1px 5px; border-radius:4px; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); flex-shrink:0; line-height:1.3;">巩固</span>`;
+            const pvTag = `<span style="display:inline-block; font-size:0.68rem; font-weight:600; padding:1px 5px; border-radius:4px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); flex-shrink:0; line-height:1.3;">预习</span>`;
+
+            return `
+                <div style="display:flex; flex-direction:column; gap:4px; justify-content:center;">
+                    <div style="display:flex; align-items:center; flex-wrap:wrap; gap:3px;">
+                        ${hwTag}
+                        ${hwContent}
+                    </div>
+                    <div style="display:flex; align-items:center; flex-wrap:wrap; gap:3px;">
+                        ${pvTag}
+                        ${pvContent}
+                    </div>
+                </div>
+            `;
         }
         window.formatRecordErrorBadges = formatRecordErrorBadges;
 
         function formatRecordCommentPreview(r, idx, clickFn = 'openRecordDetailModal') {
-            const hasHwComment = Boolean(r.teacher_comment && r.teacher_comment.trim());
-            const hasPvComment = Boolean(r.preview_comment && r.preview_comment.trim());
-            const hasPreview = (r.preview_score !== null && r.preview_score !== undefined && r.preview_score !== '')
-                || (r.preview_week_num !== null && r.preview_week_num !== undefined)
-                || (r.preview_error_questions && r.preview_error_questions !== '[]' && r.preview_error_questions !== null)
-                || hasPvComment;
+            const hwComment = (r.teacher_comment || '').trim();
+            const pvComment = (r.preview_comment || '').trim();
 
-            if (hasHwComment && hasPvComment) {
-                return `
-                    <div style="max-width: 155px; font-size: 0.78rem; line-height: 1.35; cursor: pointer;" onclick="${clickFn}(${idx})" title="点击查看完整巩固与预习评语">
-                        <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary);">
-                            <span style="font-size:0.7rem; color:#38bdf8; font-weight:600;">[巩固]</span> ${escapeHtml(r.teacher_comment)}
+            const hwTag = `<span style="display:inline-block; font-size:0.68rem; font-weight:600; padding:1px 5px; border-radius:4px; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); flex-shrink:0; line-height:1.3;">巩固</span>`;
+            const pvTag = `<span style="display:inline-block; font-size:0.68rem; font-weight:600; padding:1px 5px; border-radius:4px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); flex-shrink:0; line-height:1.3;">预习</span>`;
+
+            const hwText = hwComment ? escapeHtml(hwComment) : '<span style="color:var(--text-muted);">-</span>';
+            const pvText = pvComment ? escapeHtml(pvComment) : '<span style="color:var(--text-muted);">-</span>';
+
+            return `
+                <div style="display:flex; flex-direction:column; gap:4px; justify-content:center; max-width:180px;">
+                    <div style="display:flex; align-items:center; gap:5px; cursor:pointer;" onclick="${clickFn}(${idx})" title="点击查看完整巩固评语: ${escapeHtml(hwComment || '无')}">
+                        ${hwTag}
+                        <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-secondary); font-size:0.78rem; flex:1;">
+                            ${hwText}
                         </div>
-                        <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fbbf24; margin-top: 2px;">
-                            <span style="font-size:0.7rem; color:#f59e0b; font-weight:600;">[预习]</span> ${escapeHtml(r.preview_comment)}
+                    </div>
+                    <div style="display:flex; align-items:center; gap:5px; cursor:pointer;" onclick="${clickFn}(${idx})" title="点击查看完整预习评语: ${escapeHtml(pvComment || '无')}">
+                        ${pvTag}
+                        <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#fbbf24; font-size:0.78rem; flex:1;">
+                            ${pvText}
                         </div>
                     </div>
-                `;
-            }
-            if (hasHwComment) {
-                return `
-                    <div style="max-width: 155px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; color: var(--text-secondary); font-size: 0.8rem;" onclick="${clickFn}(${idx})" title="点击查看完整巩固评语">
-                        ${hasPreview ? '<span style="font-size:0.7rem; color:#38bdf8; font-weight:600;">[巩固]</span> ' : ''}${escapeHtml(r.teacher_comment)}
-                    </div>
-                `;
-            }
-            if (hasPvComment) {
-                return `
-                    <div style="max-width: 155px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; color: #fbbf24; font-size: 0.8rem;" onclick="${clickFn}(${idx})" title="点击查看完整预习评语">
-                        <span style="font-size:0.7rem; color:#f59e0b; font-weight:600;">[预习]</span> ${escapeHtml(r.preview_comment)}
-                    </div>
-                `;
-            }
-            return '<span style="color:var(--text-muted);">-</span>';
+                </div>
+            `;
         }
         window.formatRecordCommentPreview = formatRecordCommentPreview;
 
@@ -516,12 +524,12 @@
                     <th style="width: 42px; text-align: center;">
                         <input type="checkbox" id="rec-select-all" onchange="toggleSelectAllRecords(this.checked)" style="accent-color: var(--primary); cursor: pointer;">
                     </th>
-                    <th class="th-sortable ${recSortField === 'student_name' ? 'active' : ''}" style="width: 130px;" onclick="setRecordsSort('student_name')">学生姓名 ${sortIcon('student_name')}</th>
-                    <th style="width: 175px;">年级 / 班层 / 学科</th>
-                    <th class="th-sortable ${recSortField === 'week_num' ? 'active' : ''}" style="width: 75px; text-align: center;" onclick="setRecordsSort('week_num')">周次 ${sortIcon('week_num')}</th>
-                    <th class="th-sortable ${recSortField === 'homework_score' ? 'active' : ''}" style="width: 125px; text-align: center;" onclick="setRecordsSort('homework_score')">成绩 (巩固/预习) ${sortIcon('homework_score')}</th>
-                    <th class="th-sortable ${recSortField === 'error_count' ? 'active' : ''}" style="width: 200px;" onclick="setRecordsSort('error_count')">错题题号 (巩固/预习) ${sortIcon('error_count')}</th>
-                    <th style="width: 155px; max-width: 165px;">评语 (巩固/预习)</th>
+                    <th class="th-sortable ${recSortField === 'student_name' ? 'active' : ''}" style="width: 125px;" onclick="setRecordsSort('student_name')">学生姓名 ${sortIcon('student_name')}</th>
+                    <th style="width: 165px;">年级 / 班层 / 学科</th>
+                    <th class="th-sortable ${recSortField === 'week_num' ? 'active' : ''}" style="width: 110px;" onclick="setRecordsSort('week_num')">周次 (巩固/预习) ${sortIcon('week_num')}</th>
+                    <th class="th-sortable ${recSortField === 'homework_score' ? 'active' : ''}" style="width: 120px;" onclick="setRecordsSort('homework_score')">成绩 (巩固/预习) ${sortIcon('homework_score')}</th>
+                    <th class="th-sortable ${recSortField === 'error_count' ? 'active' : ''}" style="width: 185px;" onclick="setRecordsSort('error_count')">错题题号 (巩固/预习) ${sortIcon('error_count')}</th>
+                    <th style="width: 180px; max-width: 190px;">评语 (巩固/预习)</th>
                     <th class="th-sortable ${recSortField === 'created_by' ? 'active' : ''}" style="width: 115px;" onclick="setRecordsSort('created_by')">责任教师 ${sortIcon('created_by')}</th>
                     <th class="th-sortable cell-mono ${recSortField === 'updated_at' ? 'active' : ''}" style="width: 100px;" onclick="setRecordsSort('updated_at')">更改时间 ${sortIcon('updated_at')}</th>
                     <th style="width: 80px; text-align: right;">快捷操作</th>
@@ -566,7 +574,8 @@
                 const hwScoreDisplay = (r.homework_score !== null && r.homework_score !== undefined && r.homework_score !== '') ? formatScore(r.homework_score) : '-';
                 const pvScoreDisplay = (r.preview_score !== null && r.preview_score !== undefined && r.preview_score !== '') ? formatScore(r.preview_score) : null;
 
-                const hasPreviewWeek = r.preview_week_num && r.preview_week_num != r.week_num;
+                const hwTag = `<span style="display:inline-block; font-size:0.68rem; font-weight:600; padding:1px 5px; border-radius:4px; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); flex-shrink:0; line-height:1.3;">巩固</span>`;
+                const pvTag = `<span style="display:inline-block; font-size:0.68rem; font-weight:600; padding:1px 5px; border-radius:4px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); flex-shrink:0; line-height:1.3;">预习</span>`;
 
                 return `
                     <tr>
@@ -589,23 +598,29 @@
                             <b style="color:#a78bfa;">${escapeHtml(subjectVal)}</b> · 
                             <span style="background:rgba(255,255,255,0.08); padding:2px 7px; border-radius:4px; font-size:0.8rem; font-weight:600; color: var(--text-secondary);">${escapeHtml(tierVal)}</span>
                         </td>
-                        <td style="text-align: center;">
-                            <span style="font-weight:700; color:#93c5fd; font-family:var(--font-mono); font-size:0.95rem;" title="课后巩固周次">${r.week_num ?? '-'}</span>
-                            ${hasPreviewWeek ? `
-                                <div style="font-size:0.72rem; color:#f59e0b; font-family:var(--font-mono); margin-top:2px;" title="预习周次: 第${r.preview_week_num}周">
-                                    (预${r.preview_week_num})
+                        <td style="white-space: nowrap;">
+                            <div style="display:flex; flex-direction:column; gap:4px; justify-content:center;">
+                                <div style="display:flex; align-items:center; gap:5px;">
+                                    ${hwTag}
+                                    <span style="font-weight:700; color:#93c5fd; font-family:var(--font-mono); font-size:0.92rem;">第${r.week_num ?? '-'}周</span>
                                 </div>
-                            ` : ''}
+                                <div style="display:flex; align-items:center; gap:5px;">
+                                    ${pvTag}
+                                    <span style="font-weight:600; color:#fbbf24; font-family:var(--font-mono); font-size:0.88rem;">${(r.preview_week_num !== null && r.preview_week_num !== undefined && r.preview_week_num !== '') ? `第${r.preview_week_num}周` : '-'}</span>
+                                </div>
+                            </div>
                         </td>
-                        <td style="text-align: center;">
-                            <span style="font-weight: 700; color: #38bdf8; font-family: var(--font-mono); font-size: 1.05rem;" title="课后巩固成绩">
-                                ${hwScoreDisplay}
-                            </span>
-                            ${pvScoreDisplay !== null ? `
-                                <div style="font-size:0.75rem; color:#f59e0b; font-family:var(--font-mono); font-weight:600; margin-top:2px;" title="课前预习成绩">
-                                    预: ${pvScoreDisplay}
+                        <td style="white-space: nowrap;">
+                            <div style="display:flex; flex-direction:column; gap:4px; justify-content:center;">
+                                <div style="display:flex; align-items:center; gap:5px;">
+                                    ${hwTag}
+                                    <span style="font-weight:700; color:#38bdf8; font-family:var(--font-mono); font-size:0.95rem;">${hwScoreDisplay}${hwScoreDisplay !== '-' ? '分' : ''}</span>
                                 </div>
-                            ` : ''}
+                                <div style="display:flex; align-items:center; gap:5px;">
+                                    ${pvTag}
+                                    <span style="font-weight:600; color:#f59e0b; font-family:var(--font-mono); font-size:0.92rem;">${pvScoreDisplay !== null ? `${pvScoreDisplay}分` : '-'}</span>
+                                </div>
+                            </div>
                         </td>
                         <td>${errBadges}</td>
                         <td>${commentPreview}</td>
@@ -669,7 +684,10 @@
                                 </div>
                             </div>
                             <div class="db-card-head-right">
-                                <span class="db-card-week-badge" title="第 ${r.week_num || '-'} 周">第 ${r.week_num ?? '-'} 周${hasPreviewWeek ? ` (预${r.preview_week_num})` : ''}</span>
+                                <div style="display:flex; flex-direction:column; gap:3px; align-items:flex-end;">
+                                    <span class="db-card-week-badge" title="课后巩固周次: 第${r.week_num ?? '-'}周" style="font-size:0.75rem; background:rgba(56,189,248,0.15); color:#38bdf8; border-color:rgba(56,189,248,0.3);">巩固: 第${r.week_num ?? '-'}周</span>
+                                    <span class="db-card-week-badge" title="课前预习周次: 第${r.preview_week_num ?? '-'}周" style="font-size:0.75rem; background:rgba(245,158,11,0.15); color:#f59e0b; border-color:rgba(245,158,11,0.3);">预习: 第${r.preview_week_num ?? '-'}周</span>
+                                </div>
                             </div>
                         </div>
 
@@ -683,12 +701,12 @@
                             </div>
                             <div class="db-card-meta-cell">
                                 <span class="db-card-meta-label">成绩 (巩固 / 预习)</span>
-                                <div>
-                                    <b style="color:#38bdf8; font-family:var(--font-mono); font-size:1.05rem;" title="巩固得分">${hwScoreDisplay}</b>
-                                    ${pvScoreDisplay !== null ? `
-                                        <span style="color:var(--text-muted); font-size:0.78rem; margin:0 4px;">/</span>
-                                        <b style="color:#f59e0b; font-family:var(--font-mono); font-size:0.95rem;" title="预习得分">预: ${pvScoreDisplay}</b>
-                                    ` : ''}
+                                <div style="display:flex; align-items:center; gap:6px;">
+                                    <span style="font-size:0.68rem; font-weight:600; padding:1px 4px; border-radius:3px; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3);">巩固</span>
+                                    <b style="color:#38bdf8; font-family:var(--font-mono); font-size:1.02rem;">${hwScoreDisplay}${hwScoreDisplay !== '-' ? '分' : ''}</b>
+                                    <span style="color:var(--text-muted); font-size:0.78rem; margin:0 2px;">/</span>
+                                    <span style="font-size:0.68rem; font-weight:600; padding:1px 4px; border-radius:3px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3);">预习</span>
+                                    <b style="color:#f59e0b; font-family:var(--font-mono); font-size:0.95rem;">${pvScoreDisplay !== null ? `${pvScoreDisplay}分` : '-'}</b>
                                 </div>
                             </div>
                             <div class="db-card-meta-cell">
