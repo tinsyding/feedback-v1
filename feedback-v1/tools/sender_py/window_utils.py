@@ -213,6 +213,40 @@ def _user32():
     return ctypes.windll.user32
 
 
+def is_window_zoomed(hwnd) -> bool:
+    """判断窗口是否处于最大化状态（安全兼容 user32.IsZoomed 与 pywin32 GetWindowPlacement）。"""
+    if not hwnd:
+        return False
+    try:
+        u32 = _user32()
+        return bool(u32.IsZoomed(hwnd))
+    except Exception:
+        pass
+    try:
+        import win32gui
+        import win32con
+        placement = win32gui.GetWindowPlacement(hwnd)
+        return placement[1] == win32con.SW_SHOWMAXIMIZED
+    except Exception:
+        return False
+
+
+def is_window_iconic(hwnd) -> bool:
+    """判断窗口是否处于最小化状态。"""
+    if not hwnd:
+        return False
+    try:
+        u32 = _user32()
+        return bool(u32.IsIconic(hwnd))
+    except Exception:
+        pass
+    try:
+        import win32gui
+        return bool(win32gui.IsIconic(hwnd))
+    except Exception:
+        return False
+
+
 def tap_keys(*vks) -> bool:
     """依次按下又松开一组键（如 Ctrl+V 传 (VK_CONTROL, VK_V)）；按住修饰键再按主键。"""
     try:
@@ -255,7 +289,7 @@ def find_and_activate_wecom() -> bool:
     if hwnd is None:
         return False
     try:
-        if win32gui.IsIconic(hwnd):
+        if is_window_iconic(hwnd):
             win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
         else:
             win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
@@ -313,7 +347,7 @@ def restore_and_center_wecom(hwnd=None, log=None) -> tuple:
 
     try:
         # 1. 向下还原状态：如果窗口处于最大化 (IsZoomed) 或最小化 (IsIconic)，触发还原
-        if win32gui.IsZoomed(hwnd) or win32gui.IsIconic(hwnd):
+        if is_window_zoomed(hwnd) or is_window_iconic(hwnd):
             if log:
                 try:
                     log("  📐 检测到企微处于最大化/最小化状态，正在自动向下还原...")
@@ -428,7 +462,7 @@ def ensure_fully_visible(log=None) -> tuple:
         return (False, "找不到企微窗口")
     try:
         # 如果窗口处于最大化，自动向下还原并居中
-        if win32gui.IsZoomed(hwnd):
+        if is_window_zoomed(hwnd):
             if log:
                 try:
                     log("⚠️ 检测到企业微信处于最大化状态，正在自动向下还原并居中...")

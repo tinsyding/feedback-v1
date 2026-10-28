@@ -29,6 +29,8 @@ class TestStage2(unittest.TestCase):
         self.assertIsNone(window_utils.get_wecom_rect())
         self.assertEqual(window_utils.get_dpi_scale(), 1.0)
         self.assertFalse(window_utils.set_per_monitor_dpi_awareness())
+        self.assertFalse(window_utils.is_window_zoomed(None))
+        self.assertFalse(window_utils.is_window_iconic(None))
         ok, res = window_utils.restore_and_center_wecom()
         self.assertFalse(ok)
         self.assertIn("win32", res)
