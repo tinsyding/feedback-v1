@@ -225,7 +225,7 @@ def benchmark_single_student(
         return {"success": False, "reason": "未找到企业微信窗口", "record": None}
 
     scale = wu.get_dpi_scale()
-    roi = ensure_roi(None, rect, scale, config_path, server=server, token=token, log=log)
+    roi = ensure_roi(None, rect, scale, config_path, server=server, token=token, log=log, sample_name=name)
     if not roi:
         return {"success": False, "reason": "ROI 校准未完成", "record": None}
 

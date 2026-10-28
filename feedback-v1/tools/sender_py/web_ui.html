@@ -570,11 +570,11 @@
         <table style="width:100%;">
           <thead>
             <tr>
-              <th style="width:100px;">学号</th>
+              <th style="width:90px;">学号</th>
               <th style="width:110px;">姓名</th>
-              <th style="width:90px;">判定</th>
-              <th style="width:160px;">企微窗口标题</th>
+              <th style="width:80px;">判定</th>
               <th>最新家长留言</th>
+              <th style="width:100px; text-align:center;">操作</th>
             </tr>
           </thead>
           <tbody id="replyNotesTableBody">
@@ -1750,6 +1750,9 @@
       copyText(currentModalMessage, "✓ 话术已复制到剪贴板！");
     }
 
+    // 跟踪已点击复制的待回学员 Key
+    const copiedReplyNotes = new Set();
+
     // 弹窗：待回学员
     async function openReplyNotesModal() {
       try {
@@ -1760,15 +1763,31 @@
         if (notes.length === 0) {
           tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:#94a3b8; padding:30px;">暂无待回学员记录</td></tr>`;
         } else {
-          tbody.innerHTML = notes.map(n => `
-            <tr>
-              <td style="font-family:monospace; font-weight:600; color:#3b82f6;">${n.sid || '-'}</td>
-              <td style="font-weight:600;">${n.sname || '-'}</td>
+          tbody.innerHTML = notes.map((n, idx) => {
+            const sid = (n.sid || "").trim();
+            const sname = (n.sname || "").trim();
+            const copyTextValue = (sid && sid !== "-") ? `${sid}${sname}` : sname;
+            const itemKey = `${sid}_${sname}` || `idx_${idx}`;
+            const isCopied = copiedReplyNotes.has(itemKey);
+            const rowStyle = isCopied ? 'style="background-color: #f0fdf4;"' : '';
+            const btnClass = isCopied ? 'btn btn-sm btn-copied' : 'btn btn-sm';
+            const btnStyle = isCopied 
+              ? 'style="background:#dcfce7; color:#15803d; border-color:#86efac; font-weight:600;"' 
+              : '';
+            const btnText = isCopied ? '✓ 已复制' : '复制';
+
+            return `
+            <tr id="replyRow_${idx}" ${rowStyle}>
+              <td style="font-family:monospace; font-weight:600; color:#3b82f6;">${sid || '-'}</td>
+              <td style="font-weight:600; ${isCopied ? 'color:#15803d;' : ''}">${sname || '-'}</td>
               <td><span class="badge ${n.verdict === '需回' ? 'badge-failed' : 'badge-blocked'}">${n.verdict || '需回'}</span></td>
-              <td style="color:#64748b; font-size:12px;">${n.chat_title || '-'}</td>
               <td style="color:#0f172a; line-height:1.6;">${n.last_message || n.parent_reply || '-'}</td>
+              <td style="text-align:center;">
+                <button class="${btnClass}" id="copyBtn_${idx}" ${btnStyle} onclick="copySingleReplyNote('${escapeJs(copyTextValue)}', '${escapeJs(itemKey)}', ${idx})">${btnText}</button>
+              </td>
             </tr>
-          `).join("");
+            `;
+          }).join("");
         }
         openModal("replyNotesModal");
       } catch (err) {
@@ -1776,22 +1795,52 @@
       }
     }
 
+    function copySingleReplyNote(text, itemKey, idx) {
+      if (!text) return;
+      copyText(text, `✓ 已复制：${text}`);
+      copiedReplyNotes.add(itemKey);
+      const row = document.getElementById(`replyRow_${idx}`);
+      if (row) {
+        row.style.backgroundColor = "#f0fdf4";
+      }
+      const btn = document.getElementById(`copyBtn_${idx}`);
+      if (btn) {
+        btn.innerText = "✓ 已复制";
+        btn.style.background = "#dcfce7";
+        btn.style.color = "#15803d";
+        btn.style.borderColor = "#86efac";
+        btn.style.fontWeight = "600";
+      }
+    }
+
     function copyReplyNotesList() {
       const rows = document.querySelectorAll("#replyNotesTableBody tr");
       const lines = [];
-      rows.forEach(r => {
+      rows.forEach((r, idx) => {
         const cells = r.querySelectorAll("td");
         if (cells.length >= 5 && cells[0].innerText !== '-') {
           const sid = cells[0].innerText.trim();
           const sname = cells[1].innerText.trim();
-          lines.push(sid && sid !== '-' ? `${sid} ${sname}` : sname);
+          const text = (sid && sid !== '-') ? `${sid}${sname}` : sname;
+          lines.push(text);
+          const itemKey = `${sid}_${sname}` || `idx_${idx}`;
+          copiedReplyNotes.add(itemKey);
+          r.style.backgroundColor = "#f0fdf4";
+          const btn = r.querySelector("button");
+          if (btn) {
+            btn.innerText = "✓ 已复制";
+            btn.style.background = "#dcfce7";
+            btn.style.color = "#15803d";
+            btn.style.borderColor = "#86efac";
+            btn.style.fontWeight = "600";
+          }
         }
       });
       if (lines.length === 0) {
         showToast("暂无可复制的待回学员记录。");
         return;
       }
-      copyText(lines.join("\n"), `已复制全部 ${lines.length} 位待回学员名单（学号 姓名）！`);
+      copyText(lines.join("\n"), `已复制全部 ${lines.length} 位待回学员名单（学号姓名）！`);
     }
 
     // 弹窗：已发文件

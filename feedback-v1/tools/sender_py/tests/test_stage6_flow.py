@@ -12,9 +12,9 @@ from sender_py.reply_notes import (
     actionable, dedupe_add, export_csv, make_note, should_record, verdict,
 )
 from sender_py.sender import (
-    archive_key_for_input, candidate_search_plan, decide_action, load_feedback_inputs,
-    run_candidate_outcomes, search_and_enter, send_student, status_matches_filter,
-    summarize_status_counts,
+    archive_key_for_input, candidate_search_plan, decide_action, ensure_roi,
+    load_feedback_inputs, open_sample_chat_for_calibration, run_candidate_outcomes,
+    search_and_enter, send_student, status_matches_filter, summarize_status_counts,
 )
 from sender_py.store import HistoryManager, SentFilesManager
 from sender_py.utils import load_feedback_items
@@ -757,6 +757,45 @@ class TestStage6(unittest.TestCase):
             log_str = "\n".join(logs)
             self.assertIn("SearchTabWnd2", log_str)
             self.assertIn("自动关闭全局搜索窗口，直接跳过并开始处理下一位学生", log_str)
+
+    def test_open_sample_chat_for_calibration_with_student(self):
+        """测试校准前预搜索：提供了有效学生姓名时优先检索该学生。"""
+        logs = []
+        with mock.patch.object(wu, "find_and_activate_wecom", return_value=True), \
+             mock.patch("sender_py.sender.search_and_enter", return_value=True) as mock_search, \
+             mock.patch.object(wu, "find_wecom_search_tab_wnd", return_value=None):
+            ok = open_sample_chat_for_calibration("90001张三", log=logs.append)
+            self.assertTrue(ok)
+            mock_search.assert_called_once_with("90001张三", 1)
+            self.assertTrue(any("90001张三" in l for l in logs))
+
+    def test_open_sample_chat_for_calibration_fallback_to_file_helper(self):
+        """测试校准前预搜索：若搜学生未找到弹出全局搜索，自动回退到 [文件传输助手]。"""
+        logs = []
+        with mock.patch.object(wu, "find_and_activate_wecom", return_value=True), \
+             mock.patch("sender_py.sender.search_and_enter", return_value=True) as mock_search, \
+             mock.patch.object(wu, "find_wecom_search_tab_wnd") as mock_find_tab, \
+             mock.patch.object(wu, "close_wecom_search_tab_wnd", return_value=True) as mock_close_tab:
+            # 第一次搜学生返回弹窗句柄，第二次搜文件传输助手返回 None
+            mock_find_tab.side_effect = [0x9999, None]
+            ok = open_sample_chat_for_calibration("90001张三", log=logs.append)
+            self.assertTrue(ok)
+            self.assertEqual(mock_search.call_count, 2)
+            mock_search.assert_any_call("90001张三", 1)
+            mock_search.assert_any_call("文件传输助手", 1)
+            mock_close_tab.assert_called_with(0x9999)
+            self.assertTrue(any("文件传输助手" in l for l in logs))
+
+    def test_open_sample_chat_for_calibration_default_helper(self):
+        """测试校准前预搜索：未提供姓名时默认检索 [文件传输助手]。"""
+        logs = []
+        with mock.patch.object(wu, "find_and_activate_wecom", return_value=True), \
+             mock.patch("sender_py.sender.search_and_enter", return_value=True) as mock_search, \
+             mock.patch.object(wu, "find_wecom_search_tab_wnd", return_value=None):
+            ok = open_sample_chat_for_calibration(None, log=logs.append)
+            self.assertTrue(ok)
+            mock_search.assert_called_once_with("文件传输助手", 1)
+            self.assertTrue(any("文件传输助手" in l for l in logs))
 
 
 if __name__ == "__main__":

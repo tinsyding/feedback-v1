@@ -352,8 +352,49 @@ class CalibrationLoadingDialog:
             self.top = None
 
 
+def open_sample_chat_for_calibration(sample_name: str = None, log=print) -> bool:
+    """在执行 ROI 视窗校准前，预先检索并进入一个真实聊天会话，确保企业微信右侧打开具体的聊天窗口。
+
+    解决痛点：当企业微信刚启动或未选定任何联系人时，右侧主区域无聊天会话，导致 Qwen3.8-Max
+    识别不到标题栏和输入框。
+
+    优先级：
+      1. 若传入有效样本姓名 (sample_name)，优先在企微搜索该姓名；
+      2. 若未搜到该联系人（弹出全局搜索）或未传入姓名，自动回退到 100% 存在的系统内置联系人「文件传输助手」。
+    """
+    try:
+        from sender_py import window_utils as wu
+    except ModuleNotFoundError:
+        import window_utils as wu
+
+    if not wu.find_and_activate_wecom():
+        return False
+
+    target = (sample_name or "").strip()
+    candidate_target = target if target else "文件传输助手"
+
+    log(f"  🔍 正在预先搜索会话 [{candidate_target}] 以唤起右侧聊天窗口...")
+    time.sleep(0.2)
+    search_and_enter(candidate_target, 1)
+
+    # 检查是否弹出了全局搜索窗口（说明未在本地联系人中搜到）
+    search_tab = wu.find_wecom_search_tab_wnd()
+    if search_tab:
+        wu.close_wecom_search_tab_wnd(search_tab)
+        if candidate_target != "文件传输助手":
+            log(f"  ℹ️ 联系人 [{candidate_target}] 未搜到，自动切换为系统内置 [文件传输助手] 唤起会话...")
+            time.sleep(0.3)
+            search_and_enter("文件传输助手", 1)
+            second_search = wu.find_wecom_search_tab_wnd()
+            if second_search:
+                wu.close_wecom_search_tab_wnd(second_search)
+
+    time.sleep(0.6)  # 等待右侧聊天窗口渲染完成
+    return True
+
+
 def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
-               token=None, log=print, force: bool = False):
+               token=None, log=print, force: bool = False, sample_name: str = None):
     """每个候选处理前检查窗口签名；变了先校准再截图。优先 AI 自动框选，失败优雅回退手动校准。返回 rel roi 或 None（放弃）。"""
     config_path = config_path or default_config_path()
     key = signature_key(rect[2], rect[3], scale)
@@ -385,6 +426,14 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
             rect = fresh
     except Exception:
         pass
+
+    # 预先检索并进入一个聊天会话，确保企业微信右侧界面处于打开聊天的状态
+    try:
+        if loading:
+            loading.set_status("正在打开聊天窗口...", "正在预先唤起会话以确保右侧界面完整...")
+        open_sample_chat_for_calibration(sample_name, log=log)
+    except Exception as exc:
+        log(f"预打开会话提示（可忽略）：{exc}")
 
     img = capture_wecom_window(rect)
     if img is None:
@@ -714,7 +763,7 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         if not rect:
             return {"result": "error", "reason": "找不到企微窗口", "notes": notes}
         scale = wu.get_dpi_scale()
-        roi = ensure_roi(parent, rect, scale, config_path, server=server, token=token, log=log)
+        roi = ensure_roi(parent, rect, scale, config_path, server=server, token=token, log=log, sample_name=name)
         if roi is None:
             log("🛑 视野校准已放弃，安全中止后续发送任务。")
             return {"result": "stopped", "reason": "ROI 校准未完成", "notes": notes}
@@ -1654,7 +1703,7 @@ class SenderApp:
 
             try:
                 if not wu.find_and_activate_wecom():
-                    err_data = ("未能激活企业微信", "未能激活企业微信窗口，请先打开企微并点进任意聊天后重试。")
+                    err_data = ("未能激活企业微信", "未能激活企业微信窗口，请先打开企业微信后重试。")
                     return
 
                 time.sleep(0.4)
@@ -1664,6 +1713,19 @@ class SenderApp:
                     return
 
                 scale = wu.get_dpi_scale()
+
+                # 优先检索并进入一个会话，确保企业微信右侧界面打开了具体的聊天界面
+                sample_name = None
+                try:
+                    if hasattr(self, "items") and self.items:
+                        sample_name = self.items[0].get("studentName")
+                except Exception:
+                    pass
+                try:
+                    loading.set_status("正在打开聊天窗口...", "正在唤起会话以确保右侧界面完整...")
+                    open_sample_chat_for_calibration(sample_name, log=self.emit)
+                except Exception as exc:
+                    self.emit(f"预打开会话提示：{exc}")
 
                 try:
                     from sender_py.capture import capture_wecom_window
@@ -2387,8 +2449,9 @@ class SenderApp:
         tree_frame.pack(fill="both", expand=True)
 
         cols = [
-            ("sid", "学号", 200),
-            ("sname", "姓名", 460),
+            ("sid", "学号", 180),
+            ("sname", "姓名", 340),
+            ("status", "复制状态", 140),
         ]
 
         tree = ttk.Treeview(tree_frame, columns=[c for c, _, _ in cols],
@@ -2396,6 +2459,8 @@ class SenderApp:
         for c, label, width in cols:
             tree.heading(c, text=label)
             tree.column(c, width=width, anchor="w")
+
+        tree.tag_configure("copied", background="#dcfce7", foreground="#15803d")
 
         seen_students = set()
         student_rows = []
@@ -2411,7 +2476,7 @@ class SenderApp:
                 continue
             seen_students.add(key)
             student_rows.append((sid, sname))
-            tree.insert("", "end", values=(sid, sname))
+            tree.insert("", "end", values=(sid, sname, "未复制"))
 
         scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=scroll.set)
@@ -2423,14 +2488,16 @@ class SenderApp:
                 messagebox.showinfo("提示", "当前没有需要回复的学生。", parent=win)
                 return
             lines = []
-            for sid, sname in student_rows:
-                if sid and sid != "-":
-                    lines.append(f"{sid} {sname}".strip())
-                else:
-                    lines.append(sname)
+            for item_id in tree.get_children():
+                vals = tree.item(item_id, "values")
+                if vals:
+                    sid, sname = vals[0], vals[1]
+                    text = f"{sid}{sname}".strip() if sid != "-" else sname
+                    lines.append(text)
+                    tree.item(item_id, values=(sid, sname, "✓ 已复制"), tags=("copied",))
             content = "\n".join(lines)
             self.copy_to_clipboard(content, "待回学员名单")
-            messagebox.showinfo("复制成功", f"已复制全部 {len(lines)} 位待回学员名单（学号 姓名）！", parent=win)
+            messagebox.showinfo("复制成功", f"已复制全部 {len(lines)} 位待回学员名单（学号姓名）！", parent=win)
 
         def copy_selected(_event=None):
             sel = tree.selection()
@@ -2440,8 +2507,9 @@ class SenderApp:
             if not values:
                 return
             sid, sname = values[0], values[1]
-            text = f"{sid} {sname}".strip() if sid != "-" else sname
+            text = f"{sid}{sname}".strip() if sid != "-" else sname
             self.copy_to_clipboard(text, "学号姓名")
+            tree.item(sel[0], values=(sid, sname, "✓ 已复制"), tags=("copied",))
 
         def do_export():
             path = filedialog.asksaveasfilename(

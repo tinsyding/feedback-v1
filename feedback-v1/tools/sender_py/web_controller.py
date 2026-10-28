@@ -20,7 +20,7 @@ try:
     from sender_py.roi_manager import default_config_path, save_roi, signature_key, validate_rel
     from sender_py.sender import (
         AsyncReplyAnalyzer, archive_key_for_input, load_feedback_inputs,
-        safe_copy, send_student, summarize_status_counts
+        open_sample_chat_for_calibration, safe_copy, send_student, summarize_status_counts
     )
     from sender_py.store import HistoryManager, SentFilesManager
     from sender_py.utils import parse_student_identifier
@@ -34,7 +34,7 @@ except ModuleNotFoundError:
     from roi_manager import default_config_path, save_roi, signature_key, validate_rel
     from sender import (
         AsyncReplyAnalyzer, archive_key_for_input, load_feedback_inputs,
-        safe_copy, send_student, summarize_status_counts
+        open_sample_chat_for_calibration, safe_copy, send_student, summarize_status_counts
     )
     from store import HistoryManager, SentFilesManager
     from utils import parse_student_identifier
@@ -615,7 +615,7 @@ class WebController:
                 import window_utils as wu
 
             if not wu.find_and_activate_wecom():
-                return {"success": False, "message": "未能激活企业微信窗口，请先打开企微并点进任意具体聊天。"}
+                return {"success": False, "message": "未能激活企业微信窗口，请先打开企微。"}
 
             time.sleep(0.4)
             rect = wu.get_wecom_rect()
@@ -623,6 +623,16 @@ class WebController:
                 return {"success": False, "message": "未能获取有效的企微窗口尺寸，请确认企微未处于最小化。"}
 
             scale = wu.get_dpi_scale()
+
+            # 优先检索并进入一个会话，确保企业微信右侧界面打开了具体的聊天界面
+            sample_name = None
+            with self._lock:
+                if self.items:
+                    sample_name = self.items[0].get("studentName")
+            try:
+                open_sample_chat_for_calibration(sample_name, log=self.emit)
+            except Exception as exc:
+                self.emit(f"预打开会话提示：{exc}")
 
             try:
                 from sender_py.capture import capture_wecom_window
