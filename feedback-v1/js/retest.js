@@ -780,8 +780,9 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
     }
 
     /**
-     * 把专题/知识点文字渲染成横条 PNG DataURL（pdf-lib 内置字体无中文，走 canvas）。
-     * 支持超长考点智能换行（单行 20pt，多行自适应撑高），返回 { dataUrl, heightPt, blockPt, widthPt, lineCount }。
+     * 把专题/知识点文字渲染成精致“胶囊考点卡” PNG DataURL（pdf-lib 内置字体无中文，走 canvas）。
+     * 左侧为专属分类胶囊药丸（巩固为极方深宝蓝，预习为活力琥珀橙），右侧为核心考点正文。
+     * 支持超长考点智能换行（单行 25pt，多行自适应撑高），返回 { dataUrl, heightPt, blockPt, widthPt, lineCount }。
      */
     function generateQuestionTopicBadge(labelText, widthPt) {
         const label = String(labelText || '').trim().slice(0, 300);
@@ -795,37 +796,76 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         try {
             const K = 2; // 2 倍超采样，保证打印清晰
             const wpx = Math.max(240, Math.round(wPt * K));
-            const padL = 10 * K;
-            const padR = 8 * K;
-            const maxW = wpx - padL - padR;
+
+            // 解析标签文本：拆分为左侧胶囊文本（tagText）与右侧核心考点（contentText）
+            const colonIdx = label.indexOf('：') >= 0 ? label.indexOf('：') : label.indexOf(':');
+            let tagText = '';
+            let contentText = '';
+            if (colonIdx > 0) {
+                tagText = label.slice(0, colonIdx).trim();
+                contentText = label.slice(colonIdx + 1).trim();
+            } else {
+                tagText = label.includes('预习') ? '预习' : (label.includes('巩固') ? '巩固' : '考点');
+                contentText = label.trim();
+            }
+
+            // 规范化胶囊文字（避免出现“巩固知识点”或“预习知识点”这样冗长的药丸）
+            if (tagText === '巩固知识点') tagText = '巩固·考点';
+            if (tagText === '预习知识点') tagText = '预习·考点';
+            if (tagText === '知识点') tagText = '重点考点';
+
+            const isPreview = tagText.includes('预习');
 
             const testCanvas = document.createElement('canvas');
             const testCtx = testCanvas.getContext('2d');
-            const fontSingle = '700 ' + (12 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
-            const fontMulti = '700 ' + (11 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
 
-            testCtx.font = fontSingle;
+            // 胶囊字体（粗体紧凑）
+            const fontPill = '700 ' + Math.round(10.5 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+            // 考点内容字体（清晰典雅）
+            const fontContent = '600 ' + Math.round(11 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+
+            testCtx.font = fontPill;
+            const pillTextW = testCtx.measureText(tagText).width;
+            const pillPadX = 9 * K;
+            const pillWidth = Math.round(pillTextW + pillPadX * 2);
+            const pillHeight = Math.round(17 * K);
+            const pillRadius = Math.round(pillHeight / 2);
+
+            // 考点文字准备
+            let displayContent = contentText;
+            if (displayContent && !displayContent.startsWith('考点') && !displayContent.startsWith('知识点')) {
+                displayContent = '考点：' + displayContent;
+            }
+
+            const cardPadL = 6 * K;
+            const pillToTextGap = 8 * K;
+            const cardPadR = 10 * K;
+            const maxContentW = wpx - cardPadL - pillWidth - pillToTextGap - cardPadR;
+
+            testCtx.font = fontContent;
             let lines = [];
             let isSingleLine = false;
 
-            if (testCtx.measureText(label).width <= maxW) {
-                lines = [label];
+            if (!displayContent) {
+                isSingleLine = true;
+                lines = [];
+            } else if (testCtx.measureText(displayContent).width <= maxContentW) {
+                lines = [displayContent];
                 isSingleLine = true;
             } else {
-                testCtx.font = fontMulti;
-                lines = splitQuestionTopicLines(testCtx, label, maxW, 4);
+                lines = splitQuestionTopicLines(testCtx, displayContent, maxContentW, 4);
                 if (lines.length <= 1) {
                     isSingleLine = true;
                 }
             }
 
-            let heightPt = 20;
-            let linePitchPt = 14;
-            let padYPt = 4.5;
+            let heightPt = 25;
+            let linePitchPt = 15;
+            let padYPt = 5;
             if (!isSingleLine) {
-                linePitchPt = 14;
-                padYPt = 5;
-                heightPt = padYPt * 2 + lines.length * linePitchPt;
+                linePitchPt = 15;
+                padYPt = 5.5;
+                heightPt = Math.max(25, padYPt * 2 + lines.length * linePitchPt);
             }
             const hpx = Math.round(heightPt * K);
 
@@ -834,34 +874,65 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             badgeCanvas.height = hpx;
             const ctx = badgeCanvas.getContext('2d');
 
-            // 浅蓝底 + 描边
-            const borderRadius = isSingleLine ? (8 * K) : Math.min(8 * K, Math.round(hpx / 3.5));
-            questionTopicBadgeRoundRect(ctx, 1, 1, wpx - 2, hpx - 2, borderRadius);
-            ctx.fillStyle = '#eff6ff';
-            ctx.fill();
-            ctx.lineWidth = 2;
-            ctx.strokeStyle = '#bfdbfe';
-            ctx.stroke();
-
-            // 左侧蓝色色条
-            const barMarginY = isSingleLine ? (4.5 * K) : (4 * K);
-            ctx.fillStyle = '#2563eb';
-            ctx.fillRect(0, barMarginY, 3 * K, hpx - barMarginY * 2);
-
-            // 文字绘制
-            ctx.fillStyle = '#1e40af';
-            if (isSingleLine) {
-                ctx.font = fontSingle;
-                ctx.textBaseline = 'middle';
-                ctx.fillText(lines[0], padL, hpx / 2 + K);
+            // 1. 卡片底色与微边框 (Card Background & Hairline Border)
+            const cardRadius = 6 * K;
+            questionTopicBadgeRoundRect(ctx, 1, 1, wpx - 2, hpx - 2, cardRadius);
+            if (isPreview) {
+                ctx.fillStyle = '#fffdfa'; // 温暖柔和暖白天色
+                ctx.fill();
+                ctx.lineWidth = 1.5;
+                ctx.strokeStyle = '#fed7aa'; // 浅琥珀色精致微边框
+                ctx.stroke();
             } else {
-                ctx.font = fontMulti;
+                ctx.fillStyle = '#f8fafc'; // 现代浅蓝灰卡片底色
+                ctx.fill();
+                ctx.lineWidth = 1.5;
+                ctx.strokeStyle = '#cbd5e1'; // 优雅微灰边框
+                ctx.stroke();
+            }
+
+            // 2. 左侧胶囊药丸 (Left Capsule Pill)
+            const pillX = cardPadL;
+            const pillY = isSingleLine ? Math.round((hpx - pillHeight) / 2) : Math.round(padYPt * K + 0.5 * K);
+
+            questionTopicBadgeRoundRect(ctx, pillX, pillY, pillWidth, pillHeight, pillRadius);
+            if (isPreview) {
+                const pillGrad = ctx.createLinearGradient(pillX, pillY, pillX + pillWidth, pillY + pillHeight);
+                pillGrad.addColorStop(0, '#f59e0b');
+                pillGrad.addColorStop(1, '#d97706');
+                ctx.fillStyle = pillGrad;
+            } else {
+                const pillGrad = ctx.createLinearGradient(pillX, pillY, pillX + pillWidth, pillY + pillHeight);
+                pillGrad.addColorStop(0, '#2563eb');
+                pillGrad.addColorStop(1, '#1d4ed8');
+                ctx.fillStyle = pillGrad;
+            }
+            ctx.fill();
+
+            // 胶囊内文字（纯白色、居中对齐）
+            ctx.font = fontPill;
+            ctx.fillStyle = '#ffffff';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(tagText, pillX + pillWidth / 2, pillY + pillHeight / 2 + 0.5 * K);
+
+            // 3. 右侧考点正文 (Right Topic Text)
+            if (lines.length > 0) {
+                ctx.font = fontContent;
+                ctx.fillStyle = '#0f172a'; // 考点深色墨感字色
+                ctx.textAlign = 'left';
                 ctx.textBaseline = 'middle';
-                const padYPx = padYPt * K;
-                const linePitchPx = linePitchPt * K;
-                for (let i = 0; i < lines.length; i++) {
-                    const textY = padYPx + (i + 0.5) * linePitchPx;
-                    ctx.fillText(lines[i], padL, textY);
+
+                const textStartX = pillX + pillWidth + pillToTextGap;
+                if (isSingleLine) {
+                    ctx.fillText(lines[0], textStartX, hpx / 2 + 0.5 * K);
+                } else {
+                    const padYPx = padYPt * K;
+                    const linePitchPx = linePitchPt * K;
+                    for (let i = 0; i < lines.length; i++) {
+                        const textY = padYPx + (i + 0.5) * linePitchPx;
+                        ctx.fillText(lines[i], textStartX, textY);
+                    }
                 }
             }
 
@@ -884,6 +955,57 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
     function generateQuestionTopicBadgeDataUrl(labelText, widthPt) {
         const badge = generateQuestionTopicBadge(labelText, widthPt);
         return badge ? badge.dataUrl : null;
+    }
+
+    /**
+     * 在作答留白区域绘制 5mm 高清淡雅点阵网格（像 Moleskine / Rhodia 笔记本点阵）
+     * @param {PDFPage} page pdf-lib 页面对象
+     * @param {number} x 左边界 (pt)
+     * @param {number} y 区域下边界 (pt)
+     * @param {number} width 区域宽度 (pt)
+     * @param {number} height 区域高度 (pt)
+     */
+    function drawDotGrid(page, x, y, width, height) {
+        if (!page || height < 20 || width < 50) return;
+        try {
+            // 5mm 间距 ≈ 14.173 pt (1 inch = 72 pt = 25.4 mm)
+            const DOT_PITCH = 14.173;
+            const padX = 8;
+            const padY = 6;
+            const startX = x + padX;
+            const endX = x + width - padX;
+            const startY = y + padY;
+            const endY = y + height - padY;
+            if (endX <= startX || endY <= startY) return;
+
+            // 优雅淡灰色点阵：RGB(0.78, 0.82, 0.88)，浅淡防干扰，书写清晰工整
+            const dotColor = PDFLib.rgb(0.78, 0.82, 0.88);
+            const dotSize = 0.7; // 半径 0.7pt，清晰细腻
+
+            const cols = Math.floor((endX - startX) / DOT_PITCH);
+            const rows = Math.floor((endY - startY) / DOT_PITCH);
+            if (cols < 1 || rows < 1) return;
+
+            const actualGridW = cols * DOT_PITCH;
+            const actualGridH = rows * DOT_PITCH;
+            const offsetX = startX + ((endX - startX) - actualGridW) / 2;
+            const offsetY = startY + ((endY - startY) - actualGridH) / 2;
+
+            for (let r = 0; r <= rows; r++) {
+                const py = offsetY + r * DOT_PITCH;
+                for (let c = 0; c <= cols; c++) {
+                    const px = offsetX + c * DOT_PITCH;
+                    page.drawCircle({
+                        x: px,
+                        y: py,
+                        size: dotSize,
+                        color: dotColor
+                    });
+                }
+            }
+        } catch (err) {
+            console.warn('drawDotGrid failed:', err);
+        }
     }
 
     // Download & Merge PDFs with modal progress feedback
@@ -1192,14 +1314,16 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             const TOP_MARGIN = 26;
             const BOTTOM_MARGIN = 28;
             const SEPARATOR_HEIGHT = (window.retestQuestionSpacing && window.retestQuestionSpacing >= 8) ? window.retestQuestionSpacing : 85;
-            // 每道题首切片上方的“专题X：知识点”横条（高 20pt + 下间距 6pt）
-            const QUESTION_TOPIC_BANNER_H = 20;
+            // 每道题首切片上方的“胶囊考点卡”（卡高 25pt + 下间距 6pt）
+            const QUESTION_TOPIC_BANNER_H = 25;
             const QUESTION_TOPIC_BANNER_GAP = 6;
             const QUESTION_TOPIC_BANNER_BLOCK = QUESTION_TOPIC_BANNER_H + QUESTION_TOPIC_BANNER_GAP;
 
             const mergedPdf = await PDFLib.PDFDocument.create();
             let currentPage = null;
             let currentY = PAGE_HEIGHT - TOP_MARGIN;
+            let lastDrawX = 32;
+            let lastDrawW = PAGE_WIDTH - 64;
 
             for (let i = 0; i < pdfsToMerge.length; i++) {
                 modalDesc.textContent = '正在智能分析与排版切片 (' + (i + 1) + '/' + pdfsToMerge.length + ')...';
@@ -1253,10 +1377,16 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
                         if (!currentPage || (currentY - neededHWithBanner < BOTTOM_MARGIN) || (isFullPage && !isPageTop)) {
                             // 空间不足，或当前是整页大题且当前页已被占用 -> 开新 A4 页
+                            if (currentPage && (currentY - BOTTOM_MARGIN) >= 20) {
+                                drawDotGrid(currentPage, lastDrawX, BOTTOM_MARGIN + 6, lastDrawW, currentY - (BOTTOM_MARGIN + 6));
+                            }
                             currentPage = mergedPdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
                             currentY = PAGE_HEIGHT - TOP_MARGIN;
                         } else if (!isPageTop) {
-                            // 拼接在上一题下方：按作答间距留白
+                            // 拼接在上一题下方：按作答间距留白并绘制 5mm 点阵网格
+                            if (SEPARATOR_HEIGHT >= 20) {
+                                drawDotGrid(currentPage, lastDrawX, currentY - SEPARATOR_HEIGHT, lastDrawW, SEPARATOR_HEIGHT);
+                            }
                             currentY -= SEPARATOR_HEIGHT;
                         }
 
@@ -1315,6 +1445,8 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             height: drawH
                         });
                         currentY -= drawH;
+                        lastDrawX = drawX;
+                        lastDrawW = drawW;
 
                         // 在每道题的右下角添加视频讲解二维码与说明文字：第x题视频讲解（由系统全局开关控制）
                         if (window.retestQrCodeEnabled !== false && videoUrl && pIdx === pageCount - 1) {
@@ -1361,6 +1493,12 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 } catch (err) {
                     console.error('Failed to load/pack PDF chunk', err);
                 }
+            }
+
+            // 在最后一题下方（如果有剩余作答留白），绘制 5mm 点阵网格
+            if (currentPage && (currentY - BOTTOM_MARGIN) >= 20) {
+                const lastGridH = Math.min(SEPARATOR_HEIGHT * 1.5, currentY - (BOTTOM_MARGIN + 6));
+                drawDotGrid(currentPage, lastDrawX, currentY - lastGridH, lastDrawW, lastGridH);
             }
 
             // 底部自动标注优雅页码 - 1 -, - 2 -
