@@ -55,6 +55,16 @@ switch ($action) {
                 } else {
                     $h['error_questions_list'] = [];
                 }
+                if (!empty($h['preview_error_questions'])) {
+                    if (is_string($h['preview_error_questions'])) {
+                        $decoded = json_decode($h['preview_error_questions'], true);
+                        $h['preview_error_questions_list'] = is_array($decoded) ? $decoded : [];
+                    } else {
+                        $h['preview_error_questions_list'] = $h['preview_error_questions'];
+                    }
+                } else {
+                    $h['preview_error_questions_list'] = [];
+                }
                 if (!empty($h['source_files'])) {
                     if (is_string($h['source_files'])) {
                         $decoded = json_decode($h['source_files'], true);
@@ -128,12 +138,12 @@ switch ($action) {
                         INSERT INTO `student_record_history` (
                             record_id, batch_id, batch_code, student_id, student_name, student_key,
                             week_num, preview_week_num, homework_score, preview_score, total_score, error_count,
-                            error_questions, preview_error_questions, teacher_comment, source_files, retest_token,
+                            error_questions, preview_error_questions, teacher_comment, preview_comment, source_files, retest_token,
                             created_by, operator, operation_type, record_created_at, record_updated_at, archived_at
                         ) VALUES (
                             ?, ?, ?, ?, ?, ?,
                             ?, ?, ?, ?, ?, ?,
-                            ?, ?, ?, ?, ?,
+                            ?, ?, ?, ?, ?, ?,
                             ?, ?, 'before_rollback', ?, ?, NOW()
                         )
                     ", [
@@ -152,6 +162,7 @@ switch ($action) {
                         $currentRec['error_questions'],
                         $currentRec['preview_error_questions'] ?? null,
                         $currentRec['teacher_comment'],
+                        $currentRec['preview_comment'] ?? null,
                         $currentRec['source_files'] ?? null,
                         $currentRec['retest_token'] ?? null,
                         $curGen['created_by'] ?? '',
@@ -174,6 +185,7 @@ switch ($action) {
                             error_questions = ?,
                             preview_error_questions = ?,
                             teacher_comment = ?,
+                            preview_comment = ?,
                             source_files = ?,
                             retest_token = ?,
                             updated_at = NOW()
@@ -190,6 +202,7 @@ switch ($action) {
                         $h['error_questions'],
                         $h['preview_error_questions'] ?? null,
                         $h['teacher_comment'],
+                        $h['preview_comment'] ?? null,
                         $h['source_files'],
                         $h['retest_token'],
                         $currentRec['id']
@@ -200,12 +213,12 @@ switch ($action) {
                         INSERT INTO `student_records` (
                             batch_id, student_id, student_name, student_key, week_num, preview_week_num,
                             homework_score, preview_score, total_score, error_count,
-                            error_questions, preview_error_questions, teacher_comment, source_files, retest_token,
+                            error_questions, preview_error_questions, teacher_comment, preview_comment, source_files, retest_token,
                             created_at, updated_at
                         ) VALUES (
                             ?, ?, ?, ?, ?, ?,
                             ?, ?, ?, ?,
-                            ?, ?, ?, ?, ?,
+                            ?, ?, ?, ?, ?, ?,
                             ?, NOW()
                         )
                     ", [
@@ -222,6 +235,7 @@ switch ($action) {
                         $h['error_questions'],
                         $h['preview_error_questions'] ?? null,
                         $h['teacher_comment'],
+                        $h['preview_comment'] ?? null,
                         $h['source_files'],
                         $h['retest_token'],
                         $h['record_created_at'] ?: date('Y-m-d H:i:s')

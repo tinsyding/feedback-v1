@@ -316,6 +316,7 @@ switch ($action) {
             // 附带学情记录的个人薄弱点详细考点与来源文件解析 (student_records, student_record_history)
             if (($table === 'student_records' || $table === 'student_record_history') && !empty($rows)) {
                 $qbankQueries = [];
+                $previewQbankQueries = [];
                 foreach ($rows as $r) {
                     $errs = [];
                     if (!empty($r['error_questions'])) {
@@ -334,8 +335,36 @@ switch ($action) {
                             'week'    => $sWk
                         ];
                     }
+
+                    $pErrs = [];
+                    if (!empty($r['preview_error_questions'])) {
+                        $pErrs = is_array($r['preview_error_questions']) ? $r['preview_error_questions'] : json_decode($r['preview_error_questions'], true);
+                    }
+                    $pWk = (int)($r['preview_week_num'] ?? $sWk);
+                    if (!empty($pErrs) && !empty($sSub) && !empty($sGrd) && $pWk > 0) {
+                        $pKey = $sSub . '___' . $sGrd . '___' . $sTier . '___' . $pWk;
+                        $previewQbankQueries[$pKey] = [
+                            'subject' => $sSub,
+                            'grade'   => $sGrd,
+                            'tier'    => $sTier,
+                            'week'    => $pWk
+                        ];
+                    }
                 }
                 $topicMap = [];
+                $previewTopicMap = [];
+                $gradeAliasMap = [
+                    '初一' => ['七年级', '初一年级', '七年级先学'],
+                    '初二' => ['八年级', '初二年级'],
+                    '初三' => ['九年级', '初三年级'],
+                    '七年级' => ['初一', '初一年级', '七年级先学'],
+                    '八年级' => ['初二', '初二年级'],
+                    '九年级' => ['初三', '初三年级'],
+                    '高一' => ['高一年级'],
+                    '高二' => ['高二年级'],
+                    '高三' => ['高三年级'],
+                ];
+
                 foreach ($qbankQueries as $qItem) {
                     $cleanGrade = preg_replace('/(化学|物理|数学|英语|语文)$/u', '', $qItem['grade']);
                     $cleanGrade = preg_replace('/(班|层)$/u', '', $cleanGrade);
@@ -345,17 +374,6 @@ switch ($action) {
                         $cleanGrade,
                         $cleanGrade . '年级',
                         preg_replace('/年级$/u', '', $cleanGrade)
-                    ];
-                    $gradeAliasMap = [
-                        '初一' => ['七年级', '初一年级', '七年级先学'],
-                        '初二' => ['八年级', '初二年级'],
-                        '初三' => ['九年级', '初三年级'],
-                        '七年级' => ['初一', '初一年级', '七年级先学'],
-                        '八年级' => ['初二', '初二年级'],
-                        '九年级' => ['初三', '初三年级'],
-                        '高一' => ['高一年级'],
-                        '高二' => ['高二年级'],
-                        '高三' => ['高三年级'],
                     ];
                     foreach ($gradeCandidates as $gc) {
                         if (isset($gradeAliasMap[$gc])) {
@@ -382,6 +400,41 @@ switch ($action) {
                     }
                 }
 
+                foreach ($previewQbankQueries as $qItem) {
+                    $cleanGrade = preg_replace('/(化学|物理|数学|英语|语文)$/u', '', $qItem['grade']);
+                    $cleanGrade = preg_replace('/(班|层)$/u', '', $cleanGrade);
+
+                    $gradeCandidates = [
+                        $qItem['grade'],
+                        $cleanGrade,
+                        $cleanGrade . '年级',
+                        preg_replace('/年级$/u', '', $cleanGrade)
+                    ];
+                    foreach ($gradeCandidates as $gc) {
+                        if (isset($gradeAliasMap[$gc])) {
+                            $gradeCandidates = array_merge($gradeCandidates, $gradeAliasMap[$gc]);
+                        }
+                    }
+                    $gradeCandidates = array_values(array_unique(array_filter($gradeCandidates)));
+
+                    $tierVal = trim($qItem['tier']);
+                    $tierCandidates = array_values(array_unique(array_filter([$tierVal, str_replace('班', '', $tierVal)])));
+
+                    $inGrades = implode(',', array_fill(0, count($gradeCandidates), '?'));
+                    $inTiers = implode(',', array_fill(0, count($tierCandidates), '?'));
+                    $params = array_merge([$qItem['subject']], $gradeCandidates, $tierCandidates, [$qItem['week']]);
+
+                    $tRows = DB::fetchAll(
+                        "SELECT `question_num`, `topic` FROM `qbank_questions` 
+                         WHERE `bank_type` = 'preview' AND `subject` = ? AND `grade` IN ($inGrades) AND `tier` IN ($inTiers) AND `week` = ?",
+                        $params
+                    );
+                    $subKey = $qItem['subject'] . '___' . $qItem['grade'] . '___' . $qItem['tier'] . '___' . $qItem['week'];
+                    foreach ($tRows as $tr) {
+                        $previewTopicMap[$subKey . '___' . (int)$tr['question_num']] = trim($tr['topic']);
+                    }
+                }
+
                 foreach ($rows as &$r) {
                     // 解析来源文件名
                     $srcFiles = [];
@@ -395,7 +448,7 @@ switch ($action) {
                     }
                     $r['source_files_list'] = array_values(array_unique(array_filter($srcFiles)));
 
-                    // 解析薄弱点考点
+                    // 解析课后巩固薄弱点考点
                     $errs = [];
                     if (!empty($r['error_questions'])) {
                         $errs = is_array($r['error_questions']) ? $r['error_questions'] : json_decode($r['error_questions'], true);
@@ -424,6 +477,33 @@ switch ($action) {
                     $r['error_details'] = $details;
                     $r['weak_points'] = array_values(array_unique($weakList));
                     $r['weak_points_text'] = implode('、', array_unique($weakList));
+
+                    // 解析课前预习薄弱点考点
+                    $pErrs = [];
+                    if (!empty($r['preview_error_questions'])) {
+                        $pErrs = is_array($r['preview_error_questions']) ? $r['preview_error_questions'] : json_decode($r['preview_error_questions'], true);
+                    }
+                    $pDetails = [];
+                    $pWeakList = [];
+                    $pWk = (int)($r['preview_week_num'] ?? $sWk);
+                    if (!empty($pErrs) && !empty($sSub) && !empty($sGrd) && $pWk > 0) {
+                        $pSubKey = $sSub . '___' . $sGrd . '___' . $sTier . '___' . $pWk;
+                        foreach ($pErrs as $num) {
+                            $qNum = (int)$num;
+                            $tName = $previewTopicMap[$pSubKey . '___' . $qNum] ?? '';
+                            $cleanT = preg_replace('/[\s,，.。;；:：、\-_—]+$/u', '', $tName);
+                            $pDetails[] = [
+                                'num'   => $qNum,
+                                'topic' => $cleanT ?: '未标注考点'
+                            ];
+                            if ($cleanT) {
+                                $pWeakList[] = $cleanT;
+                            }
+                        }
+                    }
+                    $r['preview_error_details'] = $pDetails;
+                    $r['preview_weak_points'] = array_values(array_unique($pWeakList));
+                    $r['preview_weak_points_text'] = implode('、', array_unique($pWeakList));
                 }
                 unset($r);
             }
@@ -566,6 +646,28 @@ switch ($action) {
                     $input['error_questions'] = json_encode($eqArr, JSON_UNESCAPED_UNICODE);
                     if (!isset($input['error_count'])) {
                         $input['error_count'] = count($eqArr);
+                    }
+                }
+                if (isset($input['preview_error_questions'])) {
+                    $peq = $input['preview_error_questions'];
+                    if ($peq === null || $peq === '') {
+                        $input['preview_error_questions'] = null;
+                    } else {
+                        if (is_string($peq)) {
+                            $peqTrim = trim($peq);
+                            if ($peqTrim === '' || $peqTrim === '[]') {
+                                $input['preview_error_questions'] = json_encode([], JSON_UNESCAPED_UNICODE);
+                            } elseif (str_starts_with($peqTrim, '[')) {
+                                $peqArr = json_decode($peqTrim, true) ?: [];
+                                $input['preview_error_questions'] = json_encode($peqArr, JSON_UNESCAPED_UNICODE);
+                            } else {
+                                $peqArr = array_values(array_filter(array_map('intval', preg_split('/[,、，\s]+/', $peqTrim))));
+                                $input['preview_error_questions'] = json_encode($peqArr, JSON_UNESCAPED_UNICODE);
+                            }
+                        } elseif (is_array($peq)) {
+                            $peqArr = array_values(array_filter(array_map('intval', $peq)));
+                            $input['preview_error_questions'] = json_encode($peqArr, JSON_UNESCAPED_UNICODE);
+                        }
                     }
                 }
                 if (empty($input['retest_token']) || $input['retest_token'] === 'auto') {
@@ -718,6 +820,28 @@ switch ($action) {
                         $input['error_count'] = count($eqArr);
                     }
                 }
+                if (isset($input['preview_error_questions'])) {
+                    $peq = $input['preview_error_questions'];
+                    if ($peq === null || $peq === '') {
+                        $input['preview_error_questions'] = null;
+                    } else {
+                        if (is_string($peq)) {
+                            $peqTrim = trim($peq);
+                            if ($peqTrim === '' || $peqTrim === '[]') {
+                                $input['preview_error_questions'] = json_encode([], JSON_UNESCAPED_UNICODE);
+                            } elseif (str_starts_with($peqTrim, '[')) {
+                                $peqArr = json_decode($peqTrim, true) ?: [];
+                                $input['preview_error_questions'] = json_encode($peqArr, JSON_UNESCAPED_UNICODE);
+                            } else {
+                                $peqArr = array_values(array_filter(array_map('intval', preg_split('/[,、，\s]+/', $peqTrim))));
+                                $input['preview_error_questions'] = json_encode($peqArr, JSON_UNESCAPED_UNICODE);
+                            }
+                        } elseif (is_array($peq)) {
+                            $peqArr = array_values(array_filter(array_map('intval', $peq)));
+                            $input['preview_error_questions'] = json_encode($peqArr, JSON_UNESCAPED_UNICODE);
+                        }
+                    }
+                }
             }
 
             // 若更新的是 qbank_weeks 表，记录修改前的基础信息以便清理/重命名旧的 JSON 灾备文件
@@ -769,13 +893,13 @@ switch ($action) {
                             INSERT INTO `student_record_history` (
                                 record_id, batch_id, batch_code, student_id, student_name, student_key,
                                 week_num, preview_week_num, homework_score, preview_score, total_score, error_count,
-                                error_questions, preview_error_questions, teacher_comment, source_files, retest_token,
+                                error_questions, preview_error_questions, teacher_comment, preview_comment, source_files, retest_token,
                                 created_by, operator, operation_type, record_created_at, record_updated_at, archived_at
                             ) VALUES (
                                 ?, ?, ?, ?, ?, ?,
                                 ?, ?,
                                 ?, ?, ?, ?,
-                                ?, ?, ?, ?, ?,
+                                ?, ?, ?, ?, ?, ?,
                                 ?, ?, 'admin_edit', ?, ?, NOW()
                             )
                         ", [
@@ -794,6 +918,7 @@ switch ($action) {
                             $oldRec['error_questions'],
                             $oldRec['preview_error_questions'] ?? null,
                             $oldRec['teacher_comment'],
+                            $oldRec['preview_comment'] ?? null,
                             $oldRec['source_files'] ?? null,
                             $oldRec['retest_token'] ?? null,
                             $bInfo['created_by'] ?? '',

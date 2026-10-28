@@ -732,9 +732,9 @@ if ($action === 'encrypt_batch') {
                     $histStmt = "INSERT INTO `student_record_history`
                         (`record_id`, `batch_id`, `batch_code`, `student_id`, `student_name`, `student_key`, `week_num`,
                          `preview_week_num`, `homework_score`, `preview_score`, `total_score`, `error_count`, `error_questions`,
-                         `preview_error_questions`, `teacher_comment`,
+                         `preview_error_questions`, `teacher_comment`, `preview_comment`,
                          `source_files`, `retest_token`, `created_by`, `operator`, `operation_type`, `record_created_at`, `record_updated_at`, `archived_at`)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'batch_overwrite', ?, ?, NOW())";
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'batch_overwrite', ?, ?, NOW())";
                     foreach ($existingRows as $ex) {
                         $db->execute($histStmt, [
                             $ex['id'],
@@ -752,6 +752,7 @@ if ($action === 'encrypt_batch') {
                             $ex['error_questions'],
                             $ex['preview_error_questions'] ?? null,
                             $ex['teacher_comment'],
+                            $ex['preview_comment'] ?? null,
                             $ex['source_files'] ?? null,
                             $ex['retest_token'] ?? null,
                             $prevCreator,
@@ -924,9 +925,10 @@ if ($action === 'encrypt_batch') {
                 $errCount = count($errors);
                 $errJson = json_encode($errors, JSON_UNESCAPED_UNICODE);
                 $previewErrCount = count($previewErrors);
-                // 未携带预习数据时写 NULL，配合 COALESCE 保留数据库里已有的预习错题
+                // 未携带预习数据时写 NULL，配合 COALESCE 保留数据库里已有的预习错题与评语
                 $previewErrJson = $studentHasPreview ? json_encode($previewErrors, JSON_UNESCAPED_UNICODE) : null;
                 $previewWeekForDb = $studentHasPreview ? $previewWeekValue : null;
+                $previewCommentForDb = $studentHasPreview ? $previewComment : null;
                 // 迁移过渡期自愈：若该生本周还是旧格式 Key 的旧行，先原地升级 Key，
                 // 再走 ON DUPLICATE KEY UPDATE，避免同一学生同一周出现新旧两行。
                 if ($legacyKey !== $studentKey) {
@@ -942,6 +944,7 @@ if ($action === 'encrypt_batch') {
                     "`preview_week_num` = COALESCE(VALUES(`preview_week_num`), `preview_week_num`)",
                     "`preview_score` = COALESCE(VALUES(`preview_score`), `preview_score`)",
                     "`preview_error_questions` = COALESCE(VALUES(`preview_error_questions`), `preview_error_questions`)",
+                    "`preview_comment` = COALESCE(VALUES(`preview_comment`), `preview_comment`)",
                     "`retest_token` = VALUES(`retest_token`)",
                     "`created_by` = IF(VALUES(`created_by`) != '', VALUES(`created_by`), `created_by`)",
                     "`updated_at` = CURRENT_TIMESTAMP"
@@ -960,8 +963,8 @@ if ($action === 'encrypt_batch') {
                 $updateClause = implode(",\n                            ", $updateParts);
                 $db->execute(
                     "INSERT INTO student_records
-                        (`batch_id`, `batch_code`, `source_files`, `student_id`, `student_name`, `student_key`, `week_num`, `preview_week_num`, `homework_score`, `preview_score`, `total_score`, `error_count`, `error_questions`, `preview_error_questions`, `teacher_comment`, `retest_token`, `created_by`)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (`batch_id`, `batch_code`, `source_files`, `student_id`, `student_name`, `student_key`, `week_num`, `preview_week_num`, `homework_score`, `preview_score`, `total_score`, `error_count`, `error_questions`, `preview_error_questions`, `teacher_comment`, `preview_comment`, `retest_token`, `created_by`)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON DUPLICATE KEY UPDATE
                             {$updateClause}",
                     [
@@ -980,6 +983,7 @@ if ($action === 'encrypt_batch') {
                         $errJson,
                         $previewErrJson,
                         $comment,
+                        $previewCommentForDb,
                         $shortToken,
                         $currentTeacher
                     ]
@@ -1492,7 +1496,7 @@ if ($action === 'decrypt') {
         }
         $dbWhere .= ")";
         $dbRecords = $db->fetchAll(
-            "SELECT sr.batch_id, sr.week_num, sr.preview_week_num, sr.homework_score, sr.preview_score, sr.total_score, sr.teacher_comment, sr.error_questions, sr.preview_error_questions, cb.tier AS batch_tier
+            "SELECT sr.batch_id, sr.week_num, sr.preview_week_num, sr.homework_score, sr.preview_score, sr.total_score, sr.teacher_comment, sr.preview_comment, sr.error_questions, sr.preview_error_questions, cb.tier AS batch_tier
              FROM student_records sr
              JOIN class_batches cb ON sr.batch_id = cb.id
              WHERE {$dbWhere}
@@ -1515,7 +1519,8 @@ if ($action === 'decrypt') {
                     'homeworkScore' => $r['homework_score'],
                     'previewScore' => $r['preview_score'],
                     'totalScore' => $r['total_score'],
-                    'comment' => $r['teacher_comment']
+                    'comment' => $r['teacher_comment'],
+                    'previewComment' => $r['preview_comment'] ?? ''
                 ];
                 $dbWeekTiers[(string)$wn] = trim((string)($r['batch_tier'] ?? ''));
                 $dbWeekBatchIds[(string)$wn] = (int)$r['batch_id'];

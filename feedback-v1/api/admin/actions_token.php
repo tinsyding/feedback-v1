@@ -83,6 +83,15 @@ switch ($action) {
                                     $errList = is_array($decoded) ? $decoded : [];
                                 }
                             }
+                            $previewErrList = [];
+                            if (!empty($r['preview_error_questions'])) {
+                                if (is_array($r['preview_error_questions'])) {
+                                    $previewErrList = $r['preview_error_questions'];
+                                } else {
+                                    $decoded = json_decode($r['preview_error_questions'], true);
+                                    $previewErrList = is_array($decoded) ? $decoded : [];
+                                }
+                            }
                             $rToken = $r['retest_token'] ?: $token;
                             $nowTs = time();
                             $sig = hash_hmac('sha256', "{$rToken}_{$nowTs}", $retestSecret);
@@ -99,12 +108,15 @@ switch ($action) {
                                 'subject'          => $r['subject'] ?? '',
                                 'class_name'       => $r['class_name'] ?? '',
                                 'week_num'         => $r['week_num'] !== null ? (int)$r['week_num'] : null,
+                                'preview_week_num' => $r['preview_week_num'] !== null ? (int)$r['preview_week_num'] : null,
                                 'homework_score'   => $r['homework_score'] !== null ? (float)$r['homework_score'] : null,
                                 'preview_score'    => $r['preview_score'] !== null ? (float)$r['preview_score'] : null,
                                 'total_score'      => $r['total_score'] !== null ? (float)$r['total_score'] : null,
                                 'error_count'      => isset($r['error_count']) ? (int)$r['error_count'] : count($errList),
                                 'error_questions'  => $errList,
+                                'preview_error_questions' => $previewErrList,
                                 'teacher_comment'  => $r['teacher_comment'] ?? '',
+                                'preview_comment'  => $r['preview_comment'] ?? '',
                                 'created_by'       => $r['created_by'] ?? ($r['batch_creator'] ?? ''),
                                 'created_at'       => $r['created_at'] ?? '',
                                 'updated_at'       => $r['updated_at'] ?? '',

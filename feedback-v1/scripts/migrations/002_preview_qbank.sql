@@ -28,8 +28,11 @@ ALTER TABLE `student_records`
   ADD COLUMN `preview_week_num` int(11) DEFAULT NULL
     COMMENT '预习作业对应周次/讲次，可与课后巩固不同' AFTER `week_num`,
   ADD COLUMN `preview_error_questions` json DEFAULT NULL
-    COMMENT '预习错题具体题号数组，如 [2, 4]' AFTER `error_questions`;
+    COMMENT '预习错题具体题号数组，如 [2, 4]' AFTER `error_questions`,
+  ADD COLUMN `preview_comment` text COLLATE utf8mb4_unicode_ci DEFAULT NULL
+    COMMENT '预习针对性评语' AFTER `teacher_comment`;
 
 ALTER TABLE `student_record_history`
   ADD COLUMN `preview_week_num` int(11) DEFAULT NULL AFTER `week_num`,
-  ADD COLUMN `preview_error_questions` json DEFAULT NULL AFTER `error_questions`;
+  ADD COLUMN `preview_error_questions` json DEFAULT NULL AFTER `error_questions`,
+  ADD COLUMN `preview_comment` text COLLATE utf8mb4_unicode_ci DEFAULT NULL AFTER `teacher_comment`;
