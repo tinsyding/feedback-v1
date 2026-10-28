@@ -31,6 +31,7 @@
 ```text
 feedback-v1/tools/sender_py/
 ├── web_main.py            # Web 版启动入口（本地 HTTP + 自动打开浏览器）
+├── web_companion.py       # Web 版桌面微型伴随控制台（提供桌面窗口常驻、误关一键恢复与退出联动）
 ├── web_server.py          # 标准库 REST API 与 SSE 实时事件流服务
 ├── web_controller.py      # Web 端状态管理、文件去重与任务控制
 ├── web_ui.html            # Web 控制面板前端页面（原生 JS/CSS）
@@ -285,7 +286,7 @@ Windows 真机回归建议覆盖：
 | 2. Nuitka 编译版 | ZIP 压缩包（原生二进制目录） | 转译为 C++ 编译为本地机器码 | 极低 | 杀软策略严格的机房或终端 | `build_nuitka.bat` |
 | 3. 单文件版 (`--onefile`) | 单个 `.exe` 文件 | 启动时自解压至 `AppData\Local\Temp` | 较高（易触发启发式拦截） | 临时单文件拷贝测试 | `build_onefile.bat` |
 
-本地可运行 `tools/sender_py/build_all.bat` 选择打包模式；推送 `sender-*` tag（如 `sender-v1.8.13`）或手动触发 GitHub Actions 工作流时会自动构建对应产物。
+本地可运行 `tools/sender_py/build_all.bat` 选择打包模式；推送 `sender-*` tag（如 `sender-v1.8.14`）或手动触发 GitHub Actions 工作流时会自动构建对应产物。
 
 ## 13. 已知限制
 

@@ -263,6 +263,87 @@ class TestWebEdition(unittest.TestCase):
         state = ctrl.get_state()
         self.assertEqual(state["reply_notes_count"], 2)
 
+    def test_launch_web_gui_companion_headless_fallback(self):
+        """测试在无头/无图形环境（如 Linux WSL / CI）下，伴随窗启动安全回退返回 False。"""
+        from sender_py.web_companion import launch_web_gui_companion
+        ctrl = WebController()
+        mock_server = unittest.mock.MagicMock()
+        ok = launch_web_gui_companion(ctrl, mock_server, 8765, "http://127.0.0.1:8765")
+        self.assertFalse(ok)
+
+    def test_web_companion_window_interactions(self):
+        """测试 WebCompanionWindow 伴随控制台的界面构建、状态轮询与联动退出逻辑。"""
+        import sys
+        mock_tk = unittest.mock.MagicMock()
+        mock_ttk = unittest.mock.MagicMock()
+        mock_mb = unittest.mock.MagicMock()
+        mock_fd = unittest.mock.MagicMock()
+
+        # 确保每个 Label / Button 拥有独立的 Mock 实例
+        mock_tk.Label.side_effect = lambda *args, **kwargs: unittest.mock.MagicMock()
+        mock_tk.Button.side_effect = lambda *args, **kwargs: unittest.mock.MagicMock()
+        mock_tk.Frame.side_effect = lambda *args, **kwargs: unittest.mock.MagicMock()
+
+        modules_patch = {
+            "tkinter": mock_tk,
+            "tkinter.ttk": mock_ttk,
+            "tkinter.messagebox": mock_mb,
+            "tkinter.filedialog": mock_fd,
+        }
+
+        with unittest.mock.patch.dict(sys.modules, modules_patch):
+            from sender_py.web_companion import WebCompanionWindow
+
+            ctrl = WebController()
+            mock_server = unittest.mock.MagicMock()
+            mock_root = unittest.mock.MagicMock()
+
+            # 实例化伴随窗口
+            win = WebCompanionWindow(ctrl, mock_server, 8765, "http://127.0.0.1:8765", root=mock_root)
+
+            # 1. 验证窗口初始化与协议绑定
+            mock_root.title.assert_called_with("极方每周反馈程序 (Web版) - 控制台")
+            mock_root.protocol.assert_called_with("WM_DELETE_WINDOW", win.on_close)
+            self.assertTrue(callable(ctrl.native_file_picker))
+
+            # 2. 验证打开浏览器
+            with unittest.mock.patch("webbrowser.open") as mock_open:
+                win.open_browser()
+                mock_open.assert_called_once_with("http://127.0.0.1:8765")
+
+            # 3. 验证停止发送
+            with unittest.mock.patch.object(ctrl, "stop_send") as mock_stop:
+                win.stop_send()
+                mock_stop.assert_called_once()
+
+            # 4. 验证状态更新展示
+            win._update_status_display()
+            self.assertEqual(win.status_badge.config.call_args[1]["text"], "🟢 服务就绪")
+            self.assertEqual(win.btn_stop.config.call_args[1]["state"], "disabled")
+
+            # 模拟正在发送状态
+            ctrl.is_running = True
+            with unittest.mock.patch.object(ctrl, "get_state", return_value={"running": True, "files": ["a.json"], "summary": {"total": 10, "selected": 5, "sent": 2, "failed": 0, "mismatch": 0, "skipped": 0}}):
+                win._update_status_display()
+                self.assertEqual(win.status_badge.config.call_args[1]["text"], "🟡 正在发送中...")
+                self.assertEqual(win.btn_stop.config.call_args[1]["state"], "normal")
+
+            # 5. 验证点击退出逻辑（发送中 vs 空闲）
+            # 5.1 发送中用户取消退出
+            mock_mb.askyesno.return_value = False
+            win.on_close()
+            mock_server.shutdown.assert_not_called()
+
+            # 5.2 空闲时用户确认退出
+            ctrl.is_running = False
+            mock_mb.askyesno.return_value = True
+            with unittest.mock.patch("os._exit") as mock_exit:
+                win.on_close()
+                mock_server.shutdown.assert_called_once()
+                mock_server.server_close.assert_called_once()
+                mock_root.destroy.assert_called_once()
+                mock_exit.assert_called_once_with(0)
+
 
 if __name__ == "__main__":
     unittest.main()

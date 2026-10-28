@@ -11,7 +11,7 @@ import time
 import webbrowser
 
 APP_NAME = "极方每周反馈程序 (Web版)"
-APP_VERSION = "1.8.13"
+APP_VERSION = "1.8.14"
 
 
 def find_free_port(start: int = 8765, max_attempts: int = 100) -> int:
@@ -105,13 +105,27 @@ def main():
 
     threading.Thread(target=_open_browser, daemon=True).start()
 
-    try:
-        while server_thread.is_alive():
-            time.sleep(1.0)
-    except (KeyboardInterrupt, SystemExit):
-        print("\n正在停止本地服务...")
-        server.shutdown()
-        server.server_close()
+    # 尝试启动桌面微型伴随控制台（提供托盘/窗口驻留，解决关闭浏览器后后台无感知残留的问题）
+    gui_started = False
+    if "--headless" not in sys.argv and "--no-gui" not in sys.argv:
+        try:
+            try:
+                from sender_py.web_companion import launch_web_gui_companion
+            except ModuleNotFoundError:
+                from web_companion import launch_web_gui_companion
+            gui_started = launch_web_gui_companion(controller, server, port, url)
+        except Exception as exc:
+            print(f"伴随控制台未启动 ({exc})，继续以纯后台/终端模式运行。")
+            gui_started = False
+
+    if not gui_started:
+        try:
+            while server_thread.is_alive():
+                time.sleep(1.0)
+        except (KeyboardInterrupt, SystemExit):
+            print("\n正在停止本地服务...")
+            server.shutdown()
+            server.server_close()
 
 
 if __name__ == "__main__":

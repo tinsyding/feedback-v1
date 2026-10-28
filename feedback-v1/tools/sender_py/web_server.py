@@ -49,7 +49,7 @@ def get_web_ui_html_path() -> str:
 class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
     """处理 WebUI 静态资源与 REST API 请求。"""
 
-    server_version = "JiFangFeedbackWeb/1.8.13"
+    server_version = "JiFangFeedbackWeb/1.8.14"
 
     def log_message(self, format, *args):
         # 静默常规 HTTP 请求，避免终端滚屏刷屏
@@ -326,7 +326,10 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
 
         # 2.5 弹出原生 Windows 文件选择器（支持 Ctrl+A 全选多文件）
         if path == "/api/files/choose_native":
-            threading.Thread(target=self._choose_native_files, daemon=True).start()
+            if getattr(self.controller, "native_file_picker", None):
+                self.controller.native_file_picker()
+            else:
+                threading.Thread(target=self._choose_native_files, daemon=True).start()
             self._send_json({"success": True})
             return
 
