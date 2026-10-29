@@ -12,7 +12,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261029';
+            const v = '20261029_v3';
             document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/question-bank.css?v=${v}">`);
@@ -93,7 +93,7 @@
                 <div class="step-line"></div>
                 <div class="step-item" data-step="3" onclick="handleStepIndicatorClick(3)">
                     <div class="step-dot"><span>3</span></div>
-                    <span class="step-label">标注题号</span>
+                    <span class="step-label" id="step3-tab-label">标注题号</span>
                 </div>
                 <div class="step-line"></div>
                 <div class="step-item" data-step="4" onclick="handleStepIndicatorClick(4)">
@@ -124,6 +124,7 @@
                                         <option value="" selected>请选择题库类型</option>
                                         <option value="homework">课后巩固</option>
                                         <option value="preview">预习</option>
+                                        <option value="variation">课后举一反三</option>
                                     </select>
                                 </div>
                                 <div class="qb-select-group" style="display: none;">
@@ -382,10 +383,10 @@
                                     <line x1="9" y1="21" x2="9" y2="9"></line>
                                 </svg>
                             </div>
-                            <h3 style="flex:1; margin:0;">页面标注</h3>
+                            <h3 style="flex:1; margin:0;" id="step3-title">页面标注</h3>
                             <div class="mapping-toolbar-actions">
                                 <span class="qb-auto-status" id="auto-detect-status" style="display:none;" title="系统会尝试从 PDF 每页左上角自动识别印刷题号"></span>
-                                <label class="cascade-toggle-label" title="开启后，修改多页题目的题号时，会自动顺延调整后续页面的题号，无需逐页手动修改">
+                                <label class="cascade-toggle-label" id="cascade-toggle-wrap" title="开启后，修改多页题目的题号时，会自动顺延调整后续页面的题号，无需逐页手动修改">
                                     <input type="checkbox" id="auto-cascade-numbers" checked onchange="toggleAutoCascade(this.checked)">
                                     <span>题号智能顺延</span>
                                 </label>
@@ -399,7 +400,27 @@
                             </div>
                         </div>
                         <div class="config-card-body">
-                            <p class="qb-step-hint">系统会先尝试从每页左上角的印刷文字中自动识别作业题号，并填入下方；<b>没有印刷题号的续页会自动沿用上一页题号</b>，并标注「沿用上页」供核对。<b>自动识别结果仍可直接手动修改</b>，未识别或识别错误的页面请手动填写。跨多页的题目/答案，填成同一个题号即可（已开启 <b>题号智能顺延</b>：当把多页题目的第 2 页改成 5 时，后续原本的 7 会自动换回 6 并整体顺延）。点击任意缩略图可全屏放大查阅。</p>
+                            <p class="qb-step-hint" id="step3-standard-hint">系统会先尝试从每页左上角的印刷文字中自动识别作业题号，并填入下方；<b>没有印刷题号的续页会自动沿用上一页题号</b>，并标注「沿用上页」供核对。<b>自动识别结果仍可直接手动修改</b>，未识别或识别错误的页面请手动填写。跨多页的题目/答案，填成同一个题号即可（已开启 <b>题号智能顺延</b>：当把多页题目的第 2 页改成 5 时，后续原本的 7 会自动换回 6 并整体顺延）。点击任意缩略图可全屏放大查阅。</p>
+                            <p class="qb-step-hint" id="step3-variation-hint" style="display:none;">
+                                <b>举一反三卡槽分配模式：</b>请点击下方卡槽选定目标课后原题，再点击 PDF 页面将其分配给该题（支持一题对应多个同类变式题）；亦可点击<b>「1页对1题快速匹配」</b>按顺序一键对齐。题目考点将在导入后自动从课后原题继承。点击卡片放大镜可全屏查看。
+                            </p>
+
+                            <!-- 举一反三课后原题卡槽栏 -->
+                            <div class="variation-bucket-panel" id="variation-bucket-panel" style="display:none;">
+                                <div class="bucket-header">
+                                    <div class="bucket-title-wrap">
+                                        <span class="bucket-main-title">🎯 关联课后原题卡槽</span>
+                                        <span class="bucket-sub-title" id="bucket-active-prompt">当前选定：<b id="active-bucket-name">课后第 1 题</b>（点击下方 PDF 页面即可归入或移出）</span>
+                                    </div>
+                                    <div class="bucket-actions">
+                                        <button type="button" class="btn sm" onclick="autoAssignVariationPages1to1()" title="按页码顺序将每页依次分配给课后第1题、第2题...">⚡ 1页对1题快速匹配</button>
+                                        <button type="button" class="btn sm secondary" onclick="clearAllVariationAssignments()">清空分配</button>
+                                    </div>
+                                </div>
+                                <div class="variation-bucket-cards" id="variation-bucket-cards">
+                                    <!-- 动态渲染课后原题卡槽 -->
+                                </div>
+                            </div>
 
                             <div class="mapping-sections-container view-split" id="mapping-sections-container">
                                 <div class="mapping-section" id="section-exercise">
@@ -445,7 +466,8 @@
                                     <circle cx="4" cy="18" r="1"></circle>
                                 </svg>
                             </div>
-                            <h3 style="flex:1; margin:0;">题目列表</h3>
+                            <h3 style="flex:1; margin:0;" id="step4-title">题目列表</h3>
+                            <span class="variation-step4-hint" id="step4-variation-hint" style="display:none;">🎯 举一反三模式：考点已自动从对应课后原题继承，支持微调；错题本中将自动穿插于对应原题后</span>
                             <span class="qb-status unsaved" id="qb-status">
                                 <span class="qb-status-dot"></span>
                                 <span id="qb-status-text">未保存</span>
@@ -556,7 +578,7 @@
             <div class="page-lightbox-header">
                 <div class="page-lightbox-title-wrap">
                     <h3 class="dialog-title" id="lightbox-title">页面高清预览</h3>
-                    <div class="lightbox-label-editor">
+                    <div class="lightbox-label-editor" id="lightbox-label-editor-standard">
                         <label for="lightbox-page-label">对应题号</label>
                         <div class="lightbox-stepper-controls">
                             <button type="button" class="stepper-btn sm" onclick="stepLightboxLabel(-1, event)" title="题号减 1">
@@ -567,6 +589,11 @@
                                 <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                             </button>
                         </div>
+                    </div>
+                    <div class="lightbox-variation-editor" id="lightbox-label-editor-variation" style="display:none; align-items:center; gap:8px;">
+                        <label for="lightbox-variation-select" style="font-size:0.85rem; font-weight:600; color:var(--text-secondary);">归入课后：</label>
+                        <select id="lightbox-variation-select" class="qb-select sm" style="height:32px; padding:2px 8px; font-size:0.85rem;" onchange="onLightboxVariationChange(this.value)">
+                        </select>
                     </div>
                 </div>
                 <div class="page-lightbox-controls">
@@ -614,7 +641,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261029';
+            const v = '20261029_v3';
             document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
             document.write(`<script src="js/common.js?v=${v}"><\/script>`);
             document.write(`<script src="js/auth.js?v=${v}"><\/script>`);

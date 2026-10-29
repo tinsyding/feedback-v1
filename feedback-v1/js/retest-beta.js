@@ -767,17 +767,18 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         return lines.length > 0 ? lines : [text];
     }
 
-    // 错题本每道题前的标题：优先显示“巩固·专题五：勾股定理”或“预习·专题五：勾股定理”，没有专题时退回知识点。
+    // 错题本每道题前的标题：优先显示“巩固·专题五：勾股定理”或“预习·专题五：勾股定理”或“举一反三·专题五：勾股定理”，没有专题时退回知识点。
     function formatQuestionTopicLabel(week, topic, sourceType) {
         const weekNum = parseInt(week, 10);
-        const typePrefix = sourceType === 'preview' ? '预习' : '巩固';
+        const isVar = sourceType === 'variation';
+        const typePrefix = isVar ? '举一反三' : (sourceType === 'preview' ? '预习' : '巩固');
         let weekLabel = weekNum > 0 ? ('专题' + numToChinese(weekNum)) : '';
         if (weekLabel) weekLabel = typePrefix + '·' + weekLabel;
         const topicText = String(topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
         if (weekLabel && topicText) return weekLabel + '：' + topicText;
         if (weekLabel) return weekLabel;
-        if (topicText) return typePrefix + '知识点：' + topicText;
-        return '';
+        if (topicText) return (isVar ? '举一反三·考点：' : (typePrefix + '知识点：')) + topicText;
+        return isVar ? '举一反三' : '';
     }
 
     /**
@@ -806,16 +807,18 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 tagText = label.slice(0, colonIdx).trim();
                 contentText = label.slice(colonIdx + 1).trim();
             } else {
-                tagText = label.includes('预习') ? '预习' : (label.includes('巩固') ? '巩固' : '考点');
+                tagText = label.includes('举一反三') ? '举一反三' : (label.includes('预习') ? '预习' : (label.includes('巩固') ? '巩固' : '考点'));
                 contentText = label.trim();
             }
 
             // 规范化胶囊文字（避免出现“巩固知识点”或“预习知识点”这样冗长的药丸）
             if (tagText === '巩固知识点') tagText = '巩固·考点';
             if (tagText === '预习知识点') tagText = '预习·考点';
+            if (tagText === '举一反三知识点' || tagText === '举一反三·知识点') tagText = '举一反三';
             if (tagText === '知识点') tagText = '重点考点';
 
-            const isPreview = tagText.includes('预习');
+            const isVariation = tagText.includes('举一反三');
+            const isPreview = !isVariation && tagText.includes('预习');
 
             const testCanvas = document.createElement('canvas');
             const testCtx = testCanvas.getContext('2d');
@@ -878,7 +881,13 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             // 1. 卡片底色与微边框 (Card Background & Hairline Border)
             const cardRadius = 6 * K;
             topicBadgeRoundRect(ctx, 1, 1, wpx - 2, hpx - 2, cardRadius);
-            if (isPreview) {
+            if (isVariation) {
+                ctx.fillStyle = '#f0fdf4'; // 雅致清新浅绿底色
+                ctx.fill();
+                ctx.lineWidth = 1.5;
+                ctx.strokeStyle = '#a7f3d0'; // 精致浅翡翠边框
+                ctx.stroke();
+            } else if (isPreview) {
                 ctx.fillStyle = '#fffdfa'; // 温暖柔和暖白天色
                 ctx.fill();
                 ctx.lineWidth = 1.5;
@@ -897,7 +906,12 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             const pillY = isSingleLine ? Math.round((hpx - pillHeight) / 2) : Math.round(padYPt * K + 0.5 * K);
 
             topicBadgeRoundRect(ctx, pillX, pillY, pillWidth, pillHeight, pillRadius);
-            if (isPreview) {
+            if (isVariation) {
+                const pillGrad = ctx.createLinearGradient(pillX, pillY, pillX + pillWidth, pillY + pillHeight);
+                pillGrad.addColorStop(0, '#059669'); // 翡翠绿
+                pillGrad.addColorStop(1, '#047857'); // 深翡翠绿
+                ctx.fillStyle = pillGrad;
+            } else if (isPreview) {
                 const pillGrad = ctx.createLinearGradient(pillX, pillY, pillX + pillWidth, pillY + pillHeight);
                 pillGrad.addColorStop(0, '#f59e0b');
                 pillGrad.addColorStop(1, '#d97706');
@@ -920,7 +934,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             // 3. 右侧考点正文 (Right Topic Text)
             if (lines.length > 0) {
                 ctx.font = fontContent;
-                ctx.fillStyle = '#0f172a'; // 考点深色墨感字色
+                ctx.fillStyle = isVariation ? '#064e3b' : '#0f172a'; // 考点深色墨感字色
                 ctx.textAlign = 'left';
                 ctx.textBaseline = 'middle';
 
@@ -984,30 +998,44 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 list.forEach(p => {
                     const url = type === 'exercise' ? p.exercisePdf : p.answerPdf;
                     if (url) {
+                        const actualSourceType = p.sourceType || sourceType;
+                        const isVar = actualSourceType === 'variation' || Boolean(p.isVariation);
                         validItems.push({
                             url: url,
                             errorNum: p.errorNum,
+                            subNum: p.subNum || 1,
                             videoUrl: p.videoUrl || p.video_url || '',
                             topic: p.topic || '',
                             week: headerWeek,
-                            sourceType: sourceType
+                            sourceType: actualSourceType,
+                            isVariation: isVar
                         });
                     }
                 });
                 if (validItems.length === 0) return;
 
-                // 同知识点错题合并归类：
-                // 若一个学生多道错题属于同一知识点，将这些错题聚合在该知识点下，仅首题展示知识点横条
                 const parseQNum = val => {
                     if (typeof val === 'number') return val;
                     const m = String(val || '').match(/\d+/);
                     return m ? parseInt(m[0], 10) : 0;
                 };
 
+                // 确保原题在前、变式题紧随其后排版
+                validItems.sort((a, b) => {
+                    const diff = parseQNum(a.errorNum) - parseQNum(b.errorNum);
+                    if (diff !== 0) return diff;
+                    const rankA = a.isVariation ? (10 + (a.subNum || 1)) : 0;
+                    const rankB = b.isVariation ? (10 + (b.subNum || 1)) : 0;
+                    return rankA - rankB;
+                });
+
+                // 同知识点错题合并归类（举一反三每题独立展示胶囊卡）
                 const topicGroups = new Map();
                 validItems.forEach((item, idx) => {
                     const cleanT = String(item.topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
-                    const groupKey = cleanT ? ('topic:' + cleanT) : ('__no_topic_' + (item.errorNum || idx) + '__');
+                    const groupKey = item.isVariation
+                        ? ('__var_' + item.errorNum + '_' + (item.subNum || idx) + '__')
+                        : (cleanT ? ('topic:' + cleanT) : ('__no_topic_' + (item.errorNum || idx) + '__'));
                     if (!topicGroups.has(groupKey)) {
                         topicGroups.set(groupKey, []);
                     }
@@ -1015,11 +1043,10 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 });
 
                 topicGroups.forEach(groupItems => {
-                    groupItems.sort((a, b) => parseQNum(a.errorNum) - parseQNum(b.errorNum));
                     groupItems.forEach((item, idx) => {
                         pdfsToMerge.push({
                             ...item,
-                            isFirstInTopicGroup: idx === 0,
+                            isFirstInTopicGroup: item.isVariation ? true : (idx === 0),
                             topicGroupSize: groupItems.length
                         });
                     });

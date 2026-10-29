@@ -2390,3 +2390,295 @@ input[type=number] {
     color: #0f172a;
 }
 
+/* ========================================================
+   举一反三 (Variation) 卡槽分配交互样式
+   ======================================================== */
+.variation-bucket-panel {
+    background: var(--bg-card, rgba(255, 255, 255, 0.03));
+    border: 1.5px solid var(--border-color, rgba(255, 255, 255, 0.1));
+    border-radius: var(--radius-lg, 12px);
+    padding: 16px 18px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .variation-bucket-panel {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+}
+
+.bucket-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+}
+
+[data-theme="light"] .bucket-header {
+    border-bottom-color: #e2e8f0;
+}
+
+.bucket-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
+.bucket-main-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.bucket-sub-title {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.bucket-sub-title b {
+    color: #059669;
+}
+
+.bucket-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.variation-bucket-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 12px;
+}
+
+.variation-bucket-card {
+    background: var(--bg-primary, rgba(255, 255, 255, 0.05));
+    border: 1.5px solid var(--border-color, rgba(255, 255, 255, 0.12));
+    border-radius: var(--radius-md, 8px);
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    user-select: none;
+    position: relative;
+}
+
+[data-theme="light"] .variation-bucket-card {
+    background: #ffffff;
+    border-color: #cbd5e1;
+}
+
+.variation-bucket-card:hover {
+    border-color: #059669;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 14px rgba(5, 150, 105, 0.15);
+}
+
+.variation-bucket-card.active {
+    border-color: #059669;
+    background: rgba(5, 150, 105, 0.08);
+    box-shadow: 0 0 0 2px #059669, 0 4px 14px rgba(5, 150, 105, 0.2);
+}
+
+[data-theme="light"] .variation-bucket-card.active {
+    background: #f0fdf4;
+    border-color: #059669;
+}
+
+.bucket-card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.bucket-card-title {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.variation-bucket-card.active .bucket-card-title {
+    color: #059669;
+}
+
+.bucket-count-badge {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 9999px;
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.08));
+    color: var(--text-secondary, #94a3b8);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+}
+
+[data-theme="light"] .bucket-count-badge {
+    background: #f1f5f9;
+    color: #64748b;
+    border-color: #cbd5e1;
+}
+
+.bucket-count-badge.has-items {
+    background: rgba(5, 150, 105, 0.15);
+    color: #059669;
+    border-color: #34d399;
+}
+
+[data-theme="light"] .bucket-count-badge.has-items {
+    background: #ecfdf5;
+    color: #059669;
+    border-color: #a7f3d0;
+}
+
+.bucket-card-topic {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    line-height: 1.35;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    min-height: 2.1em;
+}
+
+/* 页面卡片中的举一反三卡槽标签 */
+.variation-slot-overlay {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    right: 8px;
+    padding: 7px 10px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    z-index: 5;
+    backdrop-filter: blur(8px);
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.variation-slot-overlay.assigned {
+    background: rgba(5, 150, 105, 0.92);
+    color: #ffffff;
+    border: 1px solid #34d399;
+}
+
+.variation-slot-overlay.unassigned {
+    background: rgba(15, 23, 42, 0.78);
+    color: #f1f5f9;
+    border: 1px dashed rgba(255, 255, 255, 0.4);
+}
+
+[data-theme="light"] .variation-slot-overlay.unassigned {
+    background: rgba(30, 41, 59, 0.82);
+    color: #ffffff;
+}
+
+.page-card.variation-assigned {
+    border-color: #059669 !important;
+    box-shadow: 0 0 0 1px #059669, 0 4px 12px rgba(5, 150, 105, 0.15) !important;
+}
+
+.v-slot-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.v-unassign-btn {
+    background: rgba(0, 0, 0, 0.28);
+    border: none;
+    color: #ffffff;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    margin-left: 6px;
+    flex-shrink: 0;
+    transition: background 0.15s;
+}
+
+.v-unassign-btn:hover {
+    background: rgba(239, 68, 68, 0.9);
+}
+
+/* Step 4: 举一反三题目展示胶囊 */
+.variation-id-capsule {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: center;
+    justify-content: center;
+    min-width: 90px;
+}
+
+.v-badge-parent {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #059669;
+    background: #ecfdf5;
+    border: 1px solid #a7f3d0;
+    border-radius: 4px;
+    padding: 2px 8px;
+    white-space: nowrap;
+}
+
+[data-theme="dark"] .v-badge-parent {
+    background: rgba(5, 150, 105, 0.18);
+    border-color: #059669;
+    color: #34d399;
+}
+
+.v-badge-sub {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #047857;
+    background: #d1fae5;
+    border-radius: 9999px;
+    padding: 1px 7px;
+    white-space: nowrap;
+}
+
+[data-theme="dark"] .v-badge-sub {
+    background: rgba(5, 150, 105, 0.3);
+    color: #6ee7b7;
+}
+
+.variation-step4-hint {
+    font-size: 0.82rem;
+    color: #059669;
+    background: #ecfdf5;
+    border: 1px solid #a7f3d0;
+    border-radius: 6px;
+    padding: 4px 10px;
+    margin-left: 10px;
+    font-weight: normal;
+}
+
+[data-theme="dark"] .variation-step4-hint {
+    background: rgba(5, 150, 105, 0.15);
+    border-color: #059669;
+    color: #34d399;
+}
+
+

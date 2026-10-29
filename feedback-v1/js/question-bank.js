@@ -361,6 +361,7 @@ function getBankType() {
 function getBankTypeLabel(type) {
     if (type === 'preview') return '预习';
     if (type === 'homework') return '课后巩固';
+    if (type === 'variation') return '课后举一反三';
     return '';
 }
 
@@ -368,11 +369,15 @@ function updateBankTypeUi() {
     const type = getBankType();
     const weekLabel = document.getElementById('qb-week-label');
     if (weekLabel) {
-        weekLabel.textContent = type === 'preview' ? '预习专题' : (type === 'homework' ? '课后巩固专题' : '专题');
+        weekLabel.textContent = type === 'preview' ? '预习专题' : (type === 'variation' ? '举一反三专题' : (type === 'homework' ? '课后巩固专题' : '专题'));
+    }
+    const step3TabLabel = document.getElementById('step3-tab-label');
+    if (step3TabLabel) {
+        step3TabLabel.textContent = type === 'variation' ? '分配卡槽' : '标注题号';
     }
     const searchInput = document.getElementById('qb-search-input');
     if (searchInput) {
-        searchInput.placeholder = type === 'preview'
+        searchInput.placeholder = (type === 'preview' || type === 'variation')
             ? '按题号或知识点过滤...'
             : '按题号、知识点或微课链接过滤...';
     }
@@ -507,7 +512,40 @@ function goToStep(n) {
         applyAssistantReadOnlyModeIfNeed();
     }
 
+    const isVar = getBankType() === 'variation';
+    const varBucketPanel = document.getElementById('variation-bucket-panel');
+    const varHint = document.getElementById('step3-variation-hint');
+    const stdHint = document.getElementById('step3-standard-hint');
+    const cascadeWrap = document.getElementById('cascade-toggle-wrap');
+    const autoDetectStatus = document.getElementById('auto-detect-status');
+    const undoCascadeBtn = document.getElementById('undo-cascade-btn');
+    const step3Title = document.getElementById('step3-title');
+    const step4VarHint = document.getElementById('step4-variation-hint');
+
+    if (n === 3) {
+        if (isVar) {
+            if (varBucketPanel) varBucketPanel.style.display = 'block';
+            if (varHint) varHint.style.display = 'block';
+            if (stdHint) stdHint.style.display = 'none';
+            if (cascadeWrap) cascadeWrap.style.display = 'none';
+            if (autoDetectStatus) autoDetectStatus.style.display = 'none';
+            if (undoCascadeBtn) undoCascadeBtn.style.display = 'none';
+            if (step3Title) step3Title.textContent = '举一反三卡槽分配';
+            renderVariationBucketCards();
+        } else {
+            if (varBucketPanel) varBucketPanel.style.display = 'none';
+            if (varHint) varHint.style.display = 'none';
+            if (stdHint) stdHint.style.display = 'block';
+            if (cascadeWrap) cascadeWrap.style.display = 'inline-flex';
+            if (step3Title) step3Title.textContent = '页面标注';
+            updateAutoDetectStatus();
+        }
+    }
+
     if (n === 4) {
+        if (step4VarHint) {
+            step4VarHint.style.display = isVar ? 'inline-block' : 'none';
+        }
         requestAnimationFrame(() => {
             if (typeof resizeAllTopicTextareas === 'function') resizeAllTopicTextareas();
         });
@@ -588,6 +626,187 @@ async function goNextFromStep1() {
     }
 }
 
+// ========== 举一反三 (Variation) 卡槽分配管理 ==========
+let homeworkQuestionsForVariation = [];
+let selectedBucketParentNum = 1;
+let variationAssignments = { q: [], a: [] };
+
+async function loadHomeworkQuestionsForVariation() {
+    const year = yearSelect ? parseInt(yearSelect.value, 10) : 2026;
+    const season = seasonSelect ? seasonSelect.value : '春';
+    const subject = subjectSelect ? subjectSelect.value : '';
+    const grade = gradeSelect ? gradeSelect.value : '';
+    const tier = tierSelect ? tierSelect.value : '';
+    const week = weekSelect ? weekSelect.value : '';
+
+    try {
+        const res = await apiGet('get', {
+            year, season, bankType: 'homework', subject, grade, tier, week
+        });
+        if (res && res.success && res.data && Array.isArray(res.data.questions) && res.data.questions.length > 0) {
+            homeworkQuestionsForVariation = res.data.questions;
+        } else {
+            homeworkQuestionsForVariation = [];
+        }
+    } catch (e) {
+        console.warn('获取课后巩固题库失败:', e);
+        homeworkQuestionsForVariation = [];
+    }
+}
+
+function getConsolidationBuckets() {
+    if (homeworkQuestionsForVariation && homeworkQuestionsForVariation.length > 0) {
+        return homeworkQuestionsForVariation.map((q, idx) => ({
+            parentNum: parseInt(q.id || (idx + 1), 10),
+            topic: (q.topic || '').trim()
+        }));
+    }
+    // 若当前周次尚未录入课后题库，默认根据页面数或最少6题创建卡槽
+    const count = Math.max(6, batchQuestionPageCount || 6);
+    const buckets = [];
+    for (let i = 1; i <= count; i++) {
+        buckets.push({
+            parentNum: i,
+            topic: '（未录入课后题库，导入后可手动微调考点）'
+        });
+    }
+    return buckets;
+}
+
+function initVariationAssignments() {
+    variationAssignments.q = new Array(batchQuestionPageCount).fill(null);
+    variationAssignments.a = new Array(batchAnswerPageCount).fill(null);
+    const buckets = getConsolidationBuckets();
+    if (buckets.length > 0) {
+        selectedBucketParentNum = buckets[0].parentNum;
+    } else {
+        selectedBucketParentNum = 1;
+    }
+}
+
+function selectVariationBucket(parentNum) {
+    selectedBucketParentNum = Number(parentNum);
+    renderVariationBucketCards();
+    renderPageGrid('qpdf-page-grid', batchQuestionThumbs, batchQuestionLabels, 'q');
+    renderPageGrid('apdf-page-grid', batchAnswerThumbs, batchAnswerLabels, 'a');
+}
+
+function renderVariationBucketCards() {
+    const container = document.getElementById('variation-bucket-cards');
+    if (!container) return;
+    const buckets = getConsolidationBuckets();
+    const promptName = document.getElementById('active-bucket-name');
+    if (promptName) {
+        promptName.textContent = `课后第 ${selectedBucketParentNum} 题`;
+    }
+
+    const counts = {};
+    buckets.forEach(b => { counts[b.parentNum] = 0; });
+    (variationAssignments.q || []).forEach(pNum => {
+        if (pNum) counts[pNum] = (counts[pNum] || 0) + 1;
+    });
+
+    container.innerHTML = buckets.map(b => {
+        const isActive = Number(b.parentNum) === Number(selectedBucketParentNum);
+        const count = counts[b.parentNum] || 0;
+        return `
+            <div class="variation-bucket-card ${isActive ? 'active' : ''}" onclick="selectVariationBucket(${b.parentNum})">
+                <div class="bucket-card-top">
+                    <span class="bucket-card-title">课后第 ${b.parentNum} 题</span>
+                    <span class="bucket-count-badge ${count > 0 ? 'has-items' : ''}">${count > 0 ? `已分 ${count} 题` : '未分配'}</span>
+                </div>
+                <div class="bucket-card-topic" title="${escapeHtml(b.topic || '')}">${escapeHtml(b.topic || '（未设置考点）')}</div>
+            </div>
+        `;
+    }).join('');
+}
+
+function getVariationSubNum(kind, pageIndex) {
+    const parentNum = variationAssignments[kind] ? variationAssignments[kind][pageIndex] : null;
+    if (!parentNum) return 0;
+    let sub = 0;
+    for (let i = 0; i <= pageIndex; i++) {
+        if (variationAssignments[kind][i] === parentNum) {
+            sub++;
+        }
+    }
+    return sub;
+}
+
+function toggleVariationAssignment(kind, pageIndex) {
+    const curr = variationAssignments[kind][pageIndex];
+    if (curr === selectedBucketParentNum) {
+        variationAssignments[kind][pageIndex] = null;
+        if (kind === 'q' && variationAssignments.a[pageIndex] === selectedBucketParentNum) {
+            variationAssignments.a[pageIndex] = null;
+        }
+    } else {
+        variationAssignments[kind][pageIndex] = selectedBucketParentNum;
+        if (kind === 'q' && pageIndex < batchAnswerPageCount) {
+            variationAssignments.a[pageIndex] = selectedBucketParentNum;
+        }
+    }
+    renderVariationBucketCards();
+    renderPageGrid('qpdf-page-grid', batchQuestionThumbs, batchQuestionLabels, 'q');
+    renderPageGrid('apdf-page-grid', batchAnswerThumbs, batchAnswerLabels, 'a');
+    updateAnnotationStatus();
+}
+
+function unassignVariationPage(kind, pageIndex, e) {
+    if (e) {
+        e.stopPropagation();
+        e.preventDefault();
+    }
+    const oldParent = variationAssignments[kind][pageIndex];
+    variationAssignments[kind][pageIndex] = null;
+    if (kind === 'q' && variationAssignments.a[pageIndex] === oldParent) {
+        variationAssignments.a[pageIndex] = null;
+    }
+    renderVariationBucketCards();
+    renderPageGrid('qpdf-page-grid', batchQuestionThumbs, batchQuestionLabels, 'q');
+    renderPageGrid('apdf-page-grid', batchAnswerThumbs, batchAnswerLabels, 'a');
+    updateAnnotationStatus();
+}
+
+function autoAssignVariationPages1to1() {
+    const buckets = getConsolidationBuckets();
+    const maxCount = Math.min(batchQuestionPageCount, buckets.length);
+    for (let i = 0; i < maxCount; i++) {
+        const pNum = buckets[i].parentNum;
+        variationAssignments.q[i] = pNum;
+        if (i < batchAnswerPageCount) {
+            variationAssignments.a[i] = pNum;
+        }
+    }
+    renderVariationBucketCards();
+    renderPageGrid('qpdf-page-grid', batchQuestionThumbs, batchQuestionLabels, 'q');
+    renderPageGrid('apdf-page-grid', batchAnswerThumbs, batchAnswerLabels, 'a');
+    updateAnnotationStatus();
+    showToast(`已按 1 页对 1 题快速分配前 ${maxCount} 页`);
+}
+
+function clearAllVariationAssignments() {
+    variationAssignments.q = new Array(batchQuestionPageCount).fill(null);
+    variationAssignments.a = new Array(batchAnswerPageCount).fill(null);
+    renderVariationBucketCards();
+    renderPageGrid('qpdf-page-grid', batchQuestionThumbs, batchQuestionLabels, 'q');
+    renderPageGrid('apdf-page-grid', batchAnswerThumbs, batchAnswerLabels, 'a');
+    updateAnnotationStatus();
+    showToast('已清空全部题目的卡槽分配');
+}
+
+function onLightboxVariationChange(parentVal) {
+    const pNum = parentVal ? Number(parentVal) : null;
+    variationAssignments[lightboxKind][lightboxIndex] = pNum;
+    if (lightboxKind === 'q' && lightboxIndex < batchAnswerPageCount) {
+        variationAssignments.a[lightboxIndex] = pNum;
+    }
+    renderVariationBucketCards();
+    renderPageGrid('qpdf-page-grid', batchQuestionThumbs, batchQuestionLabels, 'q');
+    renderPageGrid('apdf-page-grid', batchAnswerThumbs, batchAnswerLabels, 'a');
+    updateAnnotationStatus();
+}
+
 async function goNextFromStep2() {
     if (!batchExerciseFile || !batchAnswerFile) {
         showToast('请先上传题目 PDF 和答案 PDF');
@@ -599,7 +818,12 @@ async function goNextFromStep2() {
         const ok = await loadBatchPreviews();
         if (!ok) return;
         batchImported = false;
-        buildDefaultLabels();
+        if (getBankType() === 'variation') {
+            await loadHomeworkQuestionsForVariation();
+            initVariationAssignments();
+        } else {
+            buildDefaultLabels();
+        }
         renderAnnotationList();
         updateAnnotationStatus();
         goToStep(3);
@@ -859,16 +1083,66 @@ function renderAnnotationList() {
     if (aCount) aCount.textContent = batchAnswerPageCount;
     if (tabQ) tabQ.textContent = batchQuestionPageCount;
     if (tabA) tabA.textContent = batchAnswerPageCount;
+    if (getBankType() === 'variation') {
+        renderVariationBucketCards();
+    }
     renderPageGrid('qpdf-page-grid', batchQuestionThumbs, batchQuestionLabels, 'q');
     renderPageGrid('apdf-page-grid', batchAnswerThumbs, batchAnswerLabels, 'a');
     setThumbSize(currentThumbSize);
-    updateAutoDetectStatus();
+    if (getBankType() !== 'variation') {
+        updateAutoDetectStatus();
+    }
 }
 
 function renderPageGrid(containerId, thumbs, labels, kind) {
     const el = document.getElementById(containerId);
     if (!el) return;
     el.innerHTML = '';
+    const isVar = getBankType() === 'variation';
+
+    if (isVar) {
+        thumbs.forEach((thumb, i) => {
+            const card = document.createElement('div');
+            const parentNum = variationAssignments[kind] ? variationAssignments[kind][i] : null;
+            const isAssigned = parentNum !== null && parentNum !== undefined;
+            const subNum = getVariationSubNum(kind, i);
+
+            card.className = `page-card page-card-${kind}${isAssigned ? ' variation-assigned' : ''}`;
+            card.dataset.pageIndex = String(i);
+            card.onclick = () => toggleVariationAssignment(kind, i);
+            card.innerHTML = `
+                <div class="page-thumb-wrap" title="点击分配/移出卡槽；点击右上角放大镜查看高清原题">
+                    <img class="page-thumb" src="${thumb}" alt="第 ${i + 1} 页" loading="lazy">
+                    <div class="page-zoom-badge" onclick="event.stopPropagation(); openPageLightbox('${kind}', ${i});" title="点击放大查看">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            <line x1="11" y1="8" x2="11" y2="14"></line>
+                            <line x1="8" y1="11" x2="14" y2="11"></line>
+                        </svg>
+                        <span>放大</span>
+                    </div>
+                    ${isAssigned ? `
+                        <div class="variation-slot-overlay assigned" onclick="event.stopPropagation();">
+                            <span class="v-slot-text">🟢 课后第 ${parentNum} 题 · 变式 ${subNum}</span>
+                            <button type="button" class="v-unassign-btn" onclick="unassignVariationPage('${kind}', ${i}, event)" title="移出卡槽">×</button>
+                        </div>
+                    ` : `
+                        <div class="variation-slot-overlay unassigned">
+                            <span class="v-slot-text">⚪ 待分配（点击归入第 ${selectedBucketParentNum} 题）</span>
+                        </div>
+                    `}
+                </div>
+                <div class="page-card-footer">
+                    <span class="page-no-tag">第 ${i + 1} 页</span>
+                    <span class="page-status-badge ${isAssigned ? 'paired' : ''}">${isAssigned ? `课后第 ${parentNum} 题` : '待分配'}</span>
+                </div>
+            `;
+            el.appendChild(card);
+        });
+        return;
+    }
+
     const otherLabels = kind === 'q' ? batchAnswerLabels : batchQuestionLabels;
     const autoFlags = kind === 'q' ? batchQuestionAutoFlags : batchAnswerAutoFlags;
     const inheritedFlags = kind === 'q' ? batchQuestionInheritedFlags : batchAnswerInheritedFlags;
@@ -960,7 +1234,29 @@ function updateLightboxContent() {
         img.src = thumbs[lightboxIndex];
         img.style.transform = `scale(${lightboxZoom})`;
     }
-    if (labelInput) labelInput.value = labels[lightboxIndex] || '';
+
+    const isVar = getBankType() === 'variation';
+    const stdEditor = document.getElementById('lightbox-label-editor-standard');
+    const varEditor = document.getElementById('lightbox-label-editor-variation');
+    const varSelect = document.getElementById('lightbox-variation-select');
+
+    if (isVar) {
+        if (stdEditor) stdEditor.style.display = 'none';
+        if (varEditor) varEditor.style.display = 'inline-flex';
+        if (varSelect) {
+            const buckets = getConsolidationBuckets();
+            const currentPNum = variationAssignments[lightboxKind] ? variationAssignments[lightboxKind][lightboxIndex] : null;
+            varSelect.innerHTML = `<option value="">未分配</option>` + buckets.map(b => {
+                const topicSnip = b.topic ? ` (${b.topic.slice(0, 12)}...)` : '';
+                return `<option value="${b.parentNum}" ${Number(currentPNum) === Number(b.parentNum) ? 'selected' : ''}>课后第 ${b.parentNum} 题${topicSnip}</option>`;
+            }).join('');
+        }
+    } else {
+        if (stdEditor) stdEditor.style.display = 'inline-flex';
+        if (varEditor) varEditor.style.display = 'none';
+        if (labelInput) labelInput.value = labels[lightboxIndex] || '';
+    }
+
     if (navInfo) navInfo.textContent = `第 ${lightboxIndex + 1} / ${total} 页`;
 
     if (prevBtn) prevBtn.disabled = lightboxIndex <= 0;
@@ -1311,11 +1607,179 @@ function onPageLabelChange(kind, index, value) {
 function updateAnnotationStatus() {
     const el = document.getElementById('mapping-status-text');
     if (!el) return;
+    if (getBankType() === 'variation') {
+        const assignedQ = (variationAssignments.q || []).filter(Boolean).length;
+        el.textContent = `题目 ${batchQuestionPageCount} 页 (已分配 ${assignedQ} 页) / 答案 ${batchAnswerPageCount} 页`;
+        return;
+    }
     const qSet = new Set(batchQuestionLabels.filter(n => Number.isInteger(n) && n > 0));
     el.textContent = `题目 ${batchQuestionPageCount} 页 → ${qSet.size} 道题 / 答案 ${batchAnswerPageCount} 页`;
 }
 
+async function goNextFromVariationMapping() {
+    const unassignedEx = [];
+    for (let i = 0; i < batchQuestionPageCount; i++) {
+        if (!variationAssignments.q || !variationAssignments.q[i]) {
+            unassignedEx.push(i + 1);
+        }
+    }
+    if (unassignedEx.length > 0) {
+        showToast(`题目第 ${unassignedEx.join('、')} 页尚未分配到课后原题卡槽，请先分配完整！`, 'warn');
+        return;
+    }
+
+    const buckets = getConsolidationBuckets();
+    const bucketTopicMap = {};
+    buckets.forEach(b => { bucketTopicMap[b.parentNum] = b.topic || ''; });
+
+    const parentExPages = {};
+    for (let i = 0; i < batchQuestionPageCount; i++) {
+        const pNum = variationAssignments.q[i];
+        if (!parentExPages[pNum]) parentExPages[pNum] = [];
+        parentExPages[pNum].push(i);
+    }
+
+    const parentAnPages = {};
+    for (let i = 0; i < batchAnswerPageCount; i++) {
+        const pNum = variationAssignments.a ? variationAssignments.a[i] : null;
+        if (pNum) {
+            if (!parentAnPages[pNum]) parentAnPages[pNum] = [];
+            parentAnPages[pNum].push(i);
+        }
+    }
+
+    const sortedParents = Object.keys(parentExPages).map(Number).sort((a, b) => a - b);
+    if (sortedParents.length === 0) {
+        showToast('未分配任何题目', 'warn');
+        return;
+    }
+
+    const varItems = [];
+    let globalQNum = 1;
+
+    sortedParents.forEach(pNum => {
+        const exPages = parentExPages[pNum];
+        const anPages = parentAnPages[pNum] || [];
+        const inheritedTopic = bucketTopicMap[pNum] || '';
+
+        exPages.forEach((exPageIdx, subIdx) => {
+            const subNum = subIdx + 1;
+            let pairedAnPages = [];
+            if (anPages.length > subIdx) {
+                pairedAnPages = [anPages[subIdx]];
+            } else if (exPageIdx < batchAnswerPageCount) {
+                pairedAnPages = [exPageIdx];
+            }
+
+            varItems.push({
+                id: globalQNum++,
+                parentQuestionNum: pNum,
+                subNum: subNum,
+                topic: inheritedTopic,
+                videoUrl: '',
+                exercisePages: [exPageIdx],
+                answerPages: pairedAnPages
+            });
+        });
+    });
+
+    const btn = document.getElementById('mapping-next-btn');
+    if (btn) btn.disabled = true;
+
+    try {
+        showToast('正在切分并导入举一反三题目...');
+        const [exBuf, anBuf] = await Promise.all([
+            batchExerciseFile.arrayBuffer(),
+            batchAnswerFile.arrayBuffer()
+        ]);
+        const exerciseSrc = await PDFLib.PDFDocument.load(exBuf);
+        const answerSrc = await PDFLib.PDFDocument.load(anBuf);
+
+        currentQuestions = varItems.map(item => {
+            const qThumb = batchQuestionThumbs[item.exercisePages[0]] || null;
+            const aThumb = item.answerPages.length > 0 ? (batchAnswerThumbs[item.answerPages[0]] || null) : null;
+            return {
+                id: item.id,
+                parentQuestionNum: item.parentQuestionNum,
+                subNum: item.subNum,
+                topic: item.topic,
+                videoUrl: '',
+                exercisePdf: { status: 'uploading', name: `课后第${item.parentQuestionNum}题_变式${item.subNum}_题目.pdf`, thumb: qThumb },
+                answerPdf: aThumb ? { status: 'uploading', name: `课后第${item.parentQuestionNum}题_变式${item.subNum}_答案.pdf`, thumb: aThumb } : null
+            };
+        });
+
+        isDirty = true;
+        renderQuestionList();
+        updateStatus();
+
+        let failCount = 0;
+        for (let idx = 0; idx < varItems.length; idx++) {
+            const item = varItems[idx];
+            showToast(`正在切分上传 ${idx + 1}/${varItems.length}...`);
+
+            // 题目切分
+            try {
+                const exBlob = await mergePages(exerciseSrc, item.exercisePages);
+                const exFile = new File([exBlob], `课后第${item.parentQuestionNum}题_变式${item.subNum}_题目.pdf`, { type: 'application/pdf' });
+                const exRes = await uploadPdfBlob(exFile);
+                currentQuestions[idx].exercisePdf = {
+                    url: exRes.url,
+                    name: exRes.originalName,
+                    status: 'uploaded',
+                    thumb: batchQuestionThumbs[item.exercisePages[0]] || null
+                };
+            } catch (e) {
+                console.error('举一反三题目切片上传失败', item, e);
+                currentQuestions[idx].exercisePdf = null;
+                failCount++;
+            }
+
+            // 答案切分
+            if (item.answerPages.length > 0) {
+                try {
+                    const anBlob = await mergePages(answerSrc, item.answerPages);
+                    const anFile = new File([anBlob], `课后第${item.parentQuestionNum}题_变式${item.subNum}_答案.pdf`, { type: 'application/pdf' });
+                    const anRes = await uploadPdfBlob(anFile);
+                    currentQuestions[idx].answerPdf = {
+                        url: anRes.url,
+                        name: anRes.originalName,
+                        status: 'uploaded',
+                        thumb: batchAnswerThumbs[item.answerPages[0]] || null
+                    };
+                } catch (e) {
+                    console.error('举一反三答案切片上传失败', item, e);
+                    currentQuestions[idx].answerPdf = null;
+                    failCount++;
+                }
+            }
+        }
+
+        batchImported = currentQuestions.length > 0;
+        renderQuestionList();
+        updateStatus();
+        if (failCount > 0) {
+            showToast(`导入完成，但有 ${failCount} 个切片上传失败`);
+        } else {
+            showToast(`已成功导入 ${currentQuestions.length} 道举一反三变式题`);
+        }
+        if (currentQuestions.length > 0) {
+            goToStep(4);
+        }
+    } catch (e) {
+        console.error('举一反三导入失败:', e);
+        showToast('导入失败，请检查 PDF 文件');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 async function goNextFromMapping() {
+    if (getBankType() === 'variation') {
+        await goNextFromVariationMapping();
+        return;
+    }
+
     const isValid = n => Number.isInteger(n) && n > 0;
 
     for (let i = 0; i < batchQuestionLabels.length; i++) {
@@ -1589,8 +2053,8 @@ async function saveQuestions() {
     }
 
     const bankType = getBankType();
-    // 预习题库只需要知识点，不保存微课讲解链接
-    const questionsForSave = bankType === 'preview'
+    // 预习题库及举一反三题库不需要微课讲解链接
+    const questionsForSave = (bankType === 'preview' || bankType === 'variation')
         ? currentQuestions.map(q => ({ ...q, videoUrl: '', video_url: '' }))
         : currentQuestions;
     const data = {
@@ -1863,7 +2327,7 @@ function deleteStoredData(subject, grade, tier, week, year, season, bankType) {
     }
     const delYear = year || (yearSelect ? parseInt(yearSelect.value) : 2026);
     const delSeason = season || (seasonSelect ? seasonSelect.value : '春');
-    const delBankType = bankType === 'preview' ? 'preview' : 'homework';
+    const delBankType = (bankType === 'preview' || bankType === 'variation') ? bankType : 'homework';
     showCustomDialog({
         title: '删除数据',
         body: `确定要删除「${getBankTypeLabel(delBankType)} · ${delYear} ${delSeason}季 · ${subject} · ${grade} · ${tier} · ${getTopicLabel(week)}」的题目数据吗？此操作不可恢复。`,
@@ -1922,7 +2386,20 @@ function addQuestion() {
         return;
     }
     const nextId = getMaxId() + 1;
-    currentQuestions.push({ id: nextId, topic: '', videoUrl: '' });
+    const isVar = getBankType() === 'variation';
+    if (isVar) {
+        const maxParent = currentQuestions.reduce((m, q) => Math.max(m, q.parentQuestionNum || 1), 1);
+        const subCount = currentQuestions.filter(q => (q.parentQuestionNum || 1) === maxParent).length;
+        currentQuestions.push({
+            id: nextId,
+            parentQuestionNum: maxParent,
+            subNum: subCount + 1,
+            topic: '',
+            videoUrl: ''
+        });
+    } else {
+        currentQuestions.push({ id: nextId, topic: '', videoUrl: '' });
+    }
     isDirty = true;
     renderQuestionList();
     updateStatus();
@@ -2209,12 +2686,14 @@ function renderQuestionList() {
     }
 
     const isPreviewBank = getBankType() === 'preview';
+    const isVariationBank = getBankType() === 'variation';
     const filtered = currentQuestions.map((q, index) => ({ q, originalIndex: index })).filter(({ q }) => {
         if (!questionSearchFilter) return true;
         const idStr = String(q.id).toLowerCase();
         const topicStr = (q.topic || '').toLowerCase();
-        const videoStr = isPreviewBank ? '' : (q.videoUrl || q.video_url || '').toLowerCase();
-        return idStr.includes(questionSearchFilter) || topicStr.includes(questionSearchFilter) || videoStr.includes(questionSearchFilter);
+        const videoStr = (isPreviewBank || isVariationBank) ? '' : (q.videoUrl || q.video_url || '').toLowerCase();
+        const varStr = (q.parentQuestionNum ? `第${q.parentQuestionNum}题 变式${q.subNum || 1}` : '').toLowerCase();
+        return idStr.includes(questionSearchFilter) || topicStr.includes(questionSearchFilter) || videoStr.includes(questionSearchFilter) || varStr.includes(questionSearchFilter);
     });
 
     if (filtered.length === 0) {
@@ -2236,7 +2715,7 @@ function renderQuestionList() {
         item.className = 'question-item' + (isAssistant ? ' readonly-item' : '');
         item.dataset.index = originalIndex;
         const videoVal = q.videoUrl || q.video_url || '';
-        const videoRowHtml = isPreviewBank ? '' : `
+        const videoRowHtml = (isPreviewBank || isVariationBank) ? '' : `
                 <div class="question-field-row">
                     <label class="question-field-label video-label">微课链接：</label>
                     <div class="question-video-input-wrap">
@@ -2253,9 +2732,17 @@ function renderQuestionList() {
                     </div>
                 </div>
         `;
+        const idTagHtml = (isVariationBank || q.parentQuestionNum) ? `
+            <div class="variation-id-capsule">
+                <span class="v-badge-parent">课后第 ${q.parentQuestionNum || q.id} 题</span>
+                <span class="v-badge-sub">变式 ${q.subNum || 1}</span>
+            </div>
+        ` : `
+            <input type="number" class="question-id-input" min="1" step="1" value="${escapeHtml(q.id)}" onwheel="this.blur()" onchange="onIdChange(${originalIndex}, this.value)" ${idReadonlyAttr}>
+        `;
         item.innerHTML = `
             <div class="question-id-tags">
-                <input type="number" class="question-id-input" min="1" step="1" value="${escapeHtml(q.id)}" onwheel="this.blur()" onchange="onIdChange(${originalIndex}, this.value)" ${idReadonlyAttr}>
+                ${idTagHtml}
             </div>
             <div class="question-main-fields">
                 <div class="question-field-row question-topic-row">
@@ -2393,23 +2880,26 @@ function renderSavedBankTypeTabs() {
     const tabsContainer = document.getElementById('saved-bank-type-tabs');
     if (!tabsContainer) return;
 
-    const counts = { homework: 0, preview: 0 };
+    const counts = { homework: 0, preview: 0, variation: 0 };
     allSavedDataList.forEach(item => {
         if (savedSubjectFilter !== 'all' && item.subject !== savedSubjectFilter) return;
         if (savedTierFilter !== 'all' && item.tier !== savedTierFilter) return;
         if (savedGradeFilter !== 'all' && item.grade !== savedGradeFilter) return;
         if (savedWeekFilter !== 'all' && String(item.week) !== String(savedWeekFilter)) return;
-        const type = item.bankType === 'preview' ? 'preview' : 'homework';
+        const type = item.bankType === 'preview' ? 'preview' : (item.bankType === 'variation' ? 'variation' : 'homework');
         counts[type] = (counts[type] || 0) + 1;
     });
 
-    const total = counts.homework + counts.preview;
+    const total = counts.homework + counts.preview + counts.variation;
     let html = `
         <button type="button" class="ui-pill ${savedBankTypeFilter === 'all' ? 'active' : ''}" onclick="setSavedBankTypeFilter('all')">
             全部类型 <span class="pill-count">${total}</span>
         </button>
         <button type="button" class="ui-pill ${savedBankTypeFilter === 'homework' ? 'active' : ''}" onclick="setSavedBankTypeFilter('homework')">
             课后巩固 <span class="pill-count">${counts.homework}</span>
+        </button>
+        <button type="button" class="ui-pill ${savedBankTypeFilter === 'variation' ? 'active' : ''}" onclick="setSavedBankTypeFilter('variation')">
+            课后举一反三 <span class="pill-count">${counts.variation}</span>
         </button>
         <button type="button" class="ui-pill ${savedBankTypeFilter === 'preview' ? 'active' : ''}" onclick="setSavedBankTypeFilter('preview')">
             预习 <span class="pill-count">${counts.preview}</span>
@@ -2419,7 +2909,7 @@ function renderSavedBankTypeTabs() {
 }
 
 function setSavedBankTypeFilter(type) {
-    savedBankTypeFilter = type === 'preview' || type === 'homework' ? type : 'all';
+    savedBankTypeFilter = (type === 'preview' || type === 'homework' || type === 'variation') ? type : 'all';
     renderAllCategoryTabs();
     applySavedDataFilter();
 }
@@ -2720,13 +3210,15 @@ function applySavedDataFilter() {
         const itemYear = item.year || 2026;
         const itemSeason = item.season || '春';
         const itemGrade = item.grade || '未指定年级';
-        const itemBankType = item.bankType === 'preview' ? 'preview' : 'homework';
+        const itemBankType = item.bankType === 'preview' ? 'preview' : (item.bankType === 'variation' ? 'variation' : 'homework');
         const isActive = itemBankType === currentBankType && item.year === currentYear && item.season === currentSeason && item.subject === currentSubject && item.grade === currentGrade && item.tier === currentTier && String(item.week) === currentWeek;
         const topicName = getTopicLabel(item.week);
         const subjectClass = getSubjectBadgeClass(item.subject);
         const typeBadge = itemBankType === 'preview'
             ? '<span class="saved-badge badge-preview">预习</span>'
-            : '<span class="saved-badge badge-homework">课后巩固</span>';
+            : (itemBankType === 'variation'
+                ? '<span class="saved-badge badge-variation" style="background:#ecfdf5;color:#059669;border-color:#a7f3d0;">举一反三</span>'
+                : '<span class="saved-badge badge-homework">课后巩固</span>');
 
         const card = document.createElement('div');
         card.className = 'saved-data-card' + (isActive ? ' active' : '');
@@ -2777,7 +3269,7 @@ async function editSavedItem(subject, grade, tier, week, year, season, bankType)
     if (year && yearSelect) yearSelect.value = String(year);
     if (season && seasonSelect) seasonSelect.value = season;
     if (bankType && bankTypeSelect) {
-        bankTypeSelect.value = bankType === 'preview' ? 'preview' : 'homework';
+        bankTypeSelect.value = (bankType === 'preview' || bankType === 'variation') ? bankType : 'homework';
         updateBankTypeUi();
     }
     if (subjectSelect) subjectSelect.value = subject;
@@ -2852,6 +3344,11 @@ window.goNextFromMapping = goNextFromMapping;
 window.onPageLabelChange = onPageLabelChange;
 window.selectBatchPdf = selectBatchPdf;
 window.updateBatchPdfStatus = updateBatchPdfStatus;
+window.selectVariationBucket = selectVariationBucket;
+window.unassignVariationPage = unassignVariationPage;
+window.autoAssignVariationPages1to1 = autoAssignVariationPages1to1;
+window.clearAllVariationAssignments = clearAllVariationAssignments;
+window.onLightboxVariationChange = onLightboxVariationChange;
 
 // ========== PDF Upload Logic ==========
 let currentUploadContext = null;

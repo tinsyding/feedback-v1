@@ -57,19 +57,21 @@ function normalizeSeason($season, $fallback = '秋') {
 $defaultSeasonZh = normalizeSeason($defaultSeasonCode, '春');
 
 /**
- * 规范题库类型：homework=课后巩固（旧数据默认），preview=预习
+ * 规范题库类型：homework=课后巩固（旧数据默认），preview=预习，variation=课后举一反三
  */
 function normalizeBankType($bankType) {
-    return $bankType === 'preview' ? 'preview' : 'homework';
+    if ($bankType === 'preview') return 'preview';
+    if ($bankType === 'variation') return 'variation';
+    return 'homework';
 }
 
 /**
  * 获取备份 JSON 文件路径 (兼容带年份/学期与老版不带年份/学期格式)
- * 课后巩固沿用旧文件名，预习使用带 _preview 的新文件名，避免两类题库互相覆盖。
+ * 课后巩固沿用旧文件名，预习使用带 _preview，举一反三使用带 _variation 的新文件名。
  */
 function getFilePath($dataDir, $subject, $grade, $tier, $week, $year = null, $season = null, $bankType = 'homework') {
     $bankType = normalizeBankType($bankType);
-    $typeSegment = $bankType === 'preview' ? '_preview' : '';
+    $typeSegment = $bankType === 'preview' ? '_preview' : ($bankType === 'variation' ? '_variation' : '');
     if ($year !== null && $season !== null) {
         $yearSeasonName = rawurlencode($year) . '_' . rawurlencode($season) . '_' . rawurlencode($subject) . '_' . rawurlencode($grade) . '_' . rawurlencode($tier) . $typeSegment . '_week' . intval($week);
         $fullPath = $dataDir . '/' . $yearSeasonName . '.json';
@@ -96,8 +98,8 @@ function getFilePath($dataDir, $subject, $grade, $tier, $week, $year = null, $se
  */
 function parseFileName($filename, $defaultYear, $defaultSeason) {
     $name = pathinfo($filename, PATHINFO_FILENAME);
-    // 新版格式（预习）: {year}_{season}_{subject}_{grade}_{tier}_preview_week{N}.json
-    if (preg_match('/^(\d+)_(.+)_(.+)_(.+)_(.+?)_(preview|homework)_week(\d+)$/', $name, $matches)) {
+    // 新版格式: {year}_{season}_{subject}_{grade}_{tier}_(preview|homework|variation)_week{N}.json
+    if (preg_match('/^(\d+)_(.+)_(.+)_(.+)_(.+?)_(preview|homework|variation)_week(\d+)$/', $name, $matches)) {
         return [
             'year' => intval($matches[1]),
             'season' => normalizeSeason(rawurldecode($matches[2])),
@@ -289,7 +291,8 @@ try {
 
                     if ($qbank) {
                         $qRows = DB::fetchAll(
-                            "SELECT `question_num` AS `id`, `topic`, `video_url`, `exercise_pdf`, `exercise_name`, `exercise_thumb`,
+                            "SELECT `question_num` AS `id`, `parent_question_num` AS `parentQuestionNum`, `sub_num` AS `subNum`,
+                                    `topic`, `video_url`, `exercise_pdf`, `exercise_name`, `exercise_thumb`,
                                     `answer_pdf`, `answer_name`, `answer_thumb`
                              FROM `qbank_questions`
                              WHERE `qbank_id` = ?
@@ -301,6 +304,8 @@ try {
                         foreach ($qRows as $qr) {
                             $questions[] = [
                                 'id' => intval($qr['id']),
+                                'parentQuestionNum' => $qr['parentQuestionNum'] !== null ? intval($qr['parentQuestionNum']) : null,
+                                'subNum' => intval($qr['subNum'] ?? 1),
                                 'topic' => $qr['topic'] ?? '',
                                 'videoUrl' => $qr['video_url'] ?? '',
                                 'exercisePdf' => [
@@ -468,11 +473,13 @@ try {
                         $keepQnums = [];
                         $stmtQuestion = $db->prepare("
                             INSERT INTO `qbank_questions`
-                                (`qbank_id`, `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week`, `question_num`, `topic`, `video_url`,
+                                (`qbank_id`, `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week`, `question_num`, `parent_question_num`, `sub_num`, `topic`, `video_url`,
                                  `exercise_pdf`, `exercise_name`, `exercise_thumb`,
                                  `answer_pdf`, `answer_name`, `answer_thumb`, `created_by`, `updated_by`, `updated_at`)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                             ON DUPLICATE KEY UPDATE
+                                `parent_question_num` = VALUES(`parent_question_num`),
+                                `sub_num` = VALUES(`sub_num`),
                                 `topic` = VALUES(`topic`),
                                 `video_url` = VALUES(`video_url`),
                                 `exercise_pdf` = VALUES(`exercise_pdf`),
@@ -491,6 +498,11 @@ try {
                             if ($qNum <= 0) continue;
                             $keepQnums[] = $qNum;
 
+                            $parentQNum = isset($q['parentQuestionNum']) && $q['parentQuestionNum'] !== null && $q['parentQuestionNum'] !== ''
+                                ? intval($q['parentQuestionNum'])
+                                : (isset($q['parent_question_num']) && $q['parent_question_num'] !== null && $q['parent_question_num'] !== '' ? intval($q['parent_question_num']) : null);
+                            $subNum = intval($q['subNum'] ?? ($q['sub_num'] ?? 1));
+
                             $topic = trim($q['topic'] ?? '');
                             if (mb_strlen($topic, 'UTF-8') > 60000) {
                                 $topic = mb_substr($topic, 0, 60000, 'UTF-8');
@@ -505,7 +517,7 @@ try {
 
                             $stmtQuestion->execute([
                                 $qbankId, $bankType, $year, $season, $subject, $grade, $tier, $week,
-                                $qNum, $topic, $videoUrl, $exUrl, $exName, $exThumb, $ansUrl, $ansName, $ansThumb,
+                                $qNum, $parentQNum, $subNum, $topic, $videoUrl, $exUrl, $exName, $exThumb, $ansUrl, $ansName, $ansThumb,
                                 $currentTeacher, $currentTeacher
                             ]);
                         }

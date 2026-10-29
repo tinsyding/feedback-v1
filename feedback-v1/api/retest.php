@@ -140,6 +140,38 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                     ORDER BY `question_num` ASC";
             $rows = $db->fetchAll($sql, $params);
 
+            // 若为课后巩固题，查询是否有对应的举一反三变式题
+            $varMap = [];
+            if ($bankType === 'homework') {
+                try {
+                    $varWhereParts = ["`bank_type` = 'variation'", "`subject` = ?", "`grade` = ?", "`tier` = ?", "`week` = ?", "`parent_question_num` IN ({$inNums})"];
+                    $varParams = [$subject, $grade, $tier, intval($weekNum)];
+                    if ($year) {
+                        $varWhereParts[] = "`year` = ?";
+                        $varParams[] = intval($year);
+                    }
+                    if ($season) {
+                        $varWhereParts[] = "(`season` = ? OR `season` = ?)";
+                        $varParams[] = $season;
+                        $varParams[] = $seasonMap[$season] ?? $season;
+                    }
+                    $varSql = "SELECT `parent_question_num`, `sub_num`, `topic`, `exercise_pdf`, `answer_pdf`
+                               FROM `qbank_questions`
+                               WHERE " . implode(' AND ', $varWhereParts) . "
+                               ORDER BY `parent_question_num` ASC, `sub_num` ASC, `id` ASC";
+                    $varRows = $db->fetchAll($varSql, $varParams);
+                    if (!empty($varRows)) {
+                        foreach ($varRows as $vr) {
+                            $pNum = intval($vr['parent_question_num']);
+                            if (!isset($varMap[$pNum])) $varMap[$pNum] = [];
+                            $varMap[$pNum][] = $vr;
+                        }
+                    }
+                } catch (Throwable $varErr) {
+                    error_log("Query variation questions error: " . $varErr->getMessage());
+                }
+            }
+
             if (!empty($rows)) {
                 $rowMap = [];
                 foreach ($rows as $r) {
@@ -147,6 +179,7 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                 }
                 foreach ($errorNums as $errNum) {
                     $qNum = intval($errNum);
+                    // 1. 先加入课后巩固原题
                     if (isset($rowMap[$qNum])) {
                         $r = $rowMap[$qNum];
                         $exerciseUrl = $r['exercise_pdf'] ?: null;
@@ -156,9 +189,29 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                                 'topic' => $r['topic'] ?? '',
                                 'videoUrl' => $r['video_url'] ?: null,
                                 'exercisePdf' => $exerciseUrl,
-                                'answerPdf' => $r['answer_pdf'] ?: null
+                                'answerPdf' => $r['answer_pdf'] ?: null,
+                                'sourceType' => 'homework'
                             ];
                             $uniquePdfs[$exerciseUrl] = true;
+                        }
+                    }
+                    // 2. 紧接着排入该题对应的举一反三题目
+                    if (isset($varMap[$qNum])) {
+                        foreach ($varMap[$qNum] as $vRow) {
+                            $vExUrl = $vRow['exercise_pdf'] ?: null;
+                            if ($vExUrl && !isset($uniquePdfs[$vExUrl])) {
+                                $pdfList[] = [
+                                    'errorNum' => $errNum,
+                                    'subNum' => intval($vRow['sub_num'] ?? 1),
+                                    'topic' => $vRow['topic'] ?? '',
+                                    'videoUrl' => null,
+                                    'exercisePdf' => $vExUrl,
+                                    'answerPdf' => $vRow['answer_pdf'] ?: null,
+                                    'sourceType' => 'variation',
+                                    'isVariation' => true
+                                ];
+                                $uniquePdfs[$vExUrl] = true;
+                            }
                         }
                     }
                 }
