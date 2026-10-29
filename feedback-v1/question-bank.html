@@ -12,7 +12,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261029_v6';
+            const v = '20261029_v7';
             document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/question-bank.css?v=${v}">`);
@@ -511,7 +511,7 @@
         </main>
     </div>
 
-    <!-- 全屏沉浸式教研工作台 (形态1) -->
+    <!-- 全屏沉浸式教研工作台 (两阶段流水线) -->
     <div class="variation-workbench" id="variation-workbench" style="display:none;">
         <!-- Top Nav Bar -->
         <header class="wb-header">
@@ -522,106 +522,205 @@
                 </button>
                 <div class="wb-title-wrap">
                     <span class="wb-badge">举一反三工作台</span>
-                    <h2 class="wb-title" id="wb-header-title">举一反三装配</h2>
+                    <h2 class="wb-title" id="wb-header-title">举一反三两阶段流水线</h2>
                     <span class="wb-sub-meta" id="wb-sub-meta">初二数学 · 培优班</span>
                 </div>
             </div>
 
-            <!-- Question Stepper Dots in Center -->
-            <div class="wb-header-center">
-                <div class="wb-stepper-wrap" id="wb-stepper-wrap">
-                    <!-- Pills / Dots for questions 1..N -->
-                </div>
+            <!-- Two-Stage Switcher in Top Nav -->
+            <div class="wb-stage-tabs">
+                <button type="button" class="wb-stage-tab-btn active" id="wb-tab-stage-1" onclick="switchWbStage(1)">
+                    <span class="stage-step-num">1</span>
+                    <span class="stage-step-title">切分题目与关联原题</span>
+                    <span class="stage-step-badge" id="wb-s1-status-pill">0 题</span>
+                </button>
+                <div class="wb-stage-arrow">➔</div>
+                <button type="button" class="wb-stage-tab-btn" id="wb-tab-stage-2" onclick="switchWbStage(2)">
+                    <span class="stage-step-num">2</span>
+                    <span class="stage-step-title">分配每题答案解析</span>
+                    <span class="stage-step-badge" id="wb-s2-status-pill">待分配</span>
+                </button>
             </div>
 
-            <!-- Actions -->
+            <!-- Header Right Tools -->
             <div class="wb-header-right">
-                <button type="button" class="btn sm secondary" onclick="wbAutoMatch1to1()" title="按 1 题对 1 题快速分配所有页面">1页对1题快速匹配</button>
+                <button type="button" class="btn sm secondary" id="wb-tool-auto-questions" onclick="wbAutoFillQuestions()" title="按 1 页对应 1 题自动重置并铺满题目">⚡ 1页1题铺满题目</button>
+                <button type="button" class="btn sm secondary" id="wb-tool-auto-answers" onclick="wbAutoFillAnswers()" style="display:none;" title="按题目顺序依次顺延分配答案页">⚡ 顺延分配答案</button>
                 <button type="button" class="btn sm secondary" onclick="openPipelineSummaryDialog()" title="查看所有变式题的分配汇总">核对总览清单 (<span id="wb-summary-count">0</span>)</button>
-                <button type="button" class="btn sm primary wb-finish-btn" id="wb-top-finish-btn" onclick="doImportFromPipeline()">完成并切片导入 ✓</button>
+                <button type="button" class="btn sm primary wb-finish-btn" id="wb-top-primary-btn" onclick="wbHeaderPrimaryAction()">下一步：配置答案 ➔</button>
             </div>
         </header>
 
-        <!-- Main Three-Column Workspace -->
-        <div class="wb-main-layout">
-            <!-- Left Column: Homework Question Navigator -->
-            <aside class="wb-col wb-col-homework">
-                <div class="wb-col-header">
-                    <div class="wb-col-title-wrap">
-                        <span class="wb-col-title">课后原题导航</span>
-                        <span class="wb-col-subtitle">点击选择当前变式归属的原题</span>
+        <!-- STAGE 1 VIEW: 题目切分与关联原题 -->
+        <div class="wb-stage-view" id="wb-stage-1-view">
+            <!-- Stage 1 Subnav Bar (Question Stepper Pills + Add/Delete Tools) -->
+            <div class="wb-subnav-bar">
+                <div class="wb-subnav-left">
+                    <span class="wb-subnav-label">变式题号：</span>
+                    <div class="wb-stepper-wrap" id="wb-s1-stepper-wrap">
+                        <!-- Dynamic Pills: 变式 1, 变式 2... -->
                     </div>
-                    <span class="wb-count-tag" id="wb-hw-count-tag">共 0 题</span>
-                </div>
-                <div class="wb-hw-list" id="wb-hw-list">
-                    <!-- Homework Question Cards rendered dynamically -->
-                </div>
-            </aside>
-
-            <!-- Middle Column: Variation Exercise Big View -->
-            <section class="wb-col wb-col-exercise">
-                <div class="wb-col-header">
-                    <div class="wb-col-title-wrap">
-                        <span class="wb-col-title" id="wb-ex-title">变式题目 · 第 1 / 0 题</span>
-                        <span class="wb-active-hw-indicator" id="wb-active-hw-indicator">已归入：课后第 1 题 · 变式 1</span>
-                    </div>
-                    <div class="wb-header-tools">
-                        <button type="button" class="btn xs secondary" onclick="openPipePageLightbox('q')" title="全屏高清放大">
-                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line></svg>
-                            全屏放大
-                        </button>
-                    </div>
-                </div>
-                <div class="wb-preview-viewport" onclick="openPipePageLightbox('q')" title="点击全屏放大查看">
-                    <img id="wb-ex-img" class="wb-preview-image" src="" alt="变式题目">
-                    <div class="wb-zoom-hint">点击可全屏放大</div>
-                </div>
-                <div class="wb-ex-footer">
-                    <div class="wb-ex-nav">
-                        <button type="button" class="btn sm secondary" id="wb-ex-prev-btn" onclick="pipePrevQuestion()">
-                            ◀ 上一题 (←)
-                        </button>
-                    </div>
-                    <div class="wb-ex-pages-control">
-                        <span class="wb-control-label">题目 PDF 页码：</span>
-                        <div class="wb-ex-tags" id="wb-ex-tags">
-                            <!-- e.g. [第 1 页] -->
-                        </div>
-                        <button type="button" class="btn xs secondary" onclick="promptToggleExPage()">增减续页</button>
-                    </div>
-                    <div class="wb-ex-nav">
-                        <button type="button" class="btn sm secondary" id="wb-ex-next-btn" onclick="pipeNextQuestion()">
-                            下一题 (→) ▶
-                        </button>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Right Column: Answer Filmstrip & Multi-Page Selection -->
-            <section class="wb-col wb-col-answer">
-                <div class="wb-col-header">
-                    <div class="wb-col-title-wrap">
-                        <span class="wb-col-title">对应答案解析</span>
-                        <span class="wb-an-status-badge" id="wb-an-badge">已选 1 页答案</span>
-                    </div>
-                    <div class="wb-header-tools">
-                        <button type="button" class="btn xs secondary" onclick="clearCurrentPipeAnswers()" title="清空本题所选答案">清空选中</button>
-                    </div>
-                </div>
-                <div class="wb-answer-scroll-area">
-                    <div class="wb-answer-grid" id="wb-answer-grid">
-                        <!-- Dynamic Answer Cards -->
-                    </div>
-                </div>
-                <div class="wb-an-footer">
-                    <div class="wb-an-summary-text" id="wb-an-summary-text">
-                        当前绑定：答案第 1 页
-                    </div>
-                    <button type="button" class="btn primary wb-step-next-btn" id="wb-confirm-next-btn" onclick="pipeNextQuestion()">
-                        确认，下一题 (Space) ➔
+                    <button type="button" class="btn xs secondary wb-add-q-btn" onclick="wbAddNewQuestion()" title="在末尾添加一道新变式题">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                        增加题目
+                    </button>
+                    <button type="button" class="btn xs secondary wb-del-q-btn" onclick="wbDeleteCurrentQuestion()" title="删除当前变式题">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                        删除此题
                     </button>
                 </div>
-            </section>
+                <div class="wb-subnav-right">
+                    <span class="wb-subnav-stat" id="wb-s1-page-stat">已分配 0 / 0 页题目</span>
+                </div>
+            </div>
+
+            <!-- Stage 1 Two-Column Main Content -->
+            <div class="wb-s1-main-layout">
+                <!-- Left Column: 课后原题卡片导航 -->
+                <aside class="wb-s1-col-hw">
+                    <div class="wb-col-header">
+                        <div class="wb-col-title-wrap">
+                            <span class="wb-col-title">关联课后原题</span>
+                            <span class="wb-col-subtitle">点击卡片归属当前变式</span>
+                        </div>
+                        <span class="wb-count-tag" id="wb-s1-hw-count-tag">共 0 题</span>
+                    </div>
+                    <div class="wb-hw-list" id="wb-s1-hw-list">
+                        <!-- Homework Question Cards rendered dynamically -->
+                    </div>
+                </aside>
+
+                <!-- Right Column: 变式题目编排与预览 -->
+                <section class="wb-s1-col-exercise">
+                    <!-- Exercise Header -->
+                    <div class="wb-col-header">
+                        <div class="wb-col-title-wrap">
+                            <span class="wb-col-title" id="wb-s1-ex-title">变式第 1 题 · 题目预览</span>
+                            <span class="wb-active-hw-indicator" id="wb-s1-hw-indicator">已归入：课后第 1 题</span>
+                            <span class="wb-ex-pages-badge" id="wb-s1-ex-pages-badge">包含 1 页题目</span>
+                        </div>
+                        <div class="wb-header-tools">
+                            <button type="button" class="btn xs secondary" onclick="openS1PageLightbox()" title="全屏高清放大查看当前题目">
+                                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line></svg>
+                                全屏高清查看
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Top HD Preview Viewport (Supports single & multi-page stacked) -->
+                    <div class="wb-s1-preview-viewport" id="wb-s1-preview-viewport">
+                        <div class="wb-s1-preview-pages-container" id="wb-s1-pages-container">
+                            <!-- Image(s) rendered dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Bottom Exercise Filmstrip Section -->
+                    <div class="wb-s1-filmstrip-section">
+                        <div class="wb-filmstrip-header">
+                            <div class="wb-filmstrip-title-wrap">
+                                <span class="wb-filmstrip-title">题目 PDF 全部页面</span>
+                                <span class="wb-filmstrip-hint">💡 点击缩略图勾选/取消。单题占多页直接点选多个页面即可组合为一题。</span>
+                            </div>
+                            <span class="wb-filmstrip-count" id="wb-s1-filmstrip-count">共 0 页</span>
+                        </div>
+                        <div class="wb-s1-filmstrip-scroll" id="wb-s1-filmstrip-scroll">
+                            <!-- Flat list of all Exercise PDF pages -->
+                        </div>
+                    </div>
+
+                    <!-- Stage 1 Footer Action Bar -->
+                    <div class="wb-s1-footer">
+                        <div class="wb-footer-left">
+                            <button type="button" class="btn sm secondary" id="wb-s1-prev-btn" onclick="wbS1PrevQuestion()">
+                                ◀ 上一题 (Q)
+                            </button>
+                        </div>
+                        <div class="wb-footer-center" id="wb-s1-footer-summary">
+                            变式第 1 题 · 关联课后第 1 题 · 包含 1 页题目
+                        </div>
+                        <div class="wb-footer-right">
+                            <button type="button" class="btn primary sm" id="wb-s1-next-btn" onclick="wbS1NextQuestion()">
+                                确认本题，下一题 (Space) ➔
+                            </button>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        <!-- STAGE 2 VIEW: 分配每题答案解析 -->
+        <div class="wb-stage-view" id="wb-stage-2-view" style="display:none;">
+            <!-- Stage 2 Subnav Bar (Question Stepper Pills + Back to Stage 1) -->
+            <div class="wb-subnav-bar">
+                <div class="wb-subnav-left">
+                    <button type="button" class="btn xs secondary wb-back-stage-btn" onclick="switchWbStage(1)">
+                        ‹ 返回修改题目配置
+                    </button>
+                    <span class="wb-subnav-label" style="margin-left:8px;">变式题目：</span>
+                    <div class="wb-stepper-wrap" id="wb-s2-stepper-wrap">
+                        <!-- Dynamic Pills: 变式 1 (1页答案), 变式 2 (未选) ... -->
+                    </div>
+                </div>
+                <div class="wb-subnav-right">
+                    <span class="wb-subnav-stat" id="wb-s2-answer-stat">已配 0 / 0 题答案</span>
+                </div>
+            </div>
+
+            <!-- Stage 2 Two-Column (50% / 50%) Main Content -->
+            <div class="wb-s2-main-layout">
+                <!-- Left Column: 当前题目回顾与大图预览 -->
+                <section class="wb-s2-col-preview">
+                    <div class="wb-col-header">
+                        <div class="wb-col-title-wrap">
+                            <span class="wb-col-title" id="wb-s2-preview-title">变式第 1 题 · 题目预览</span>
+                            <span class="wb-active-hw-indicator" id="wb-s2-hw-indicator">关联课后第 1 题</span>
+                        </div>
+                        <div class="wb-header-tools">
+                            <button type="button" class="btn xs secondary" onclick="openS2PageLightbox()" title="全屏高清查看">
+                                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line></svg>
+                                全屏高清查看
+                            </button>
+                        </div>
+                    </div>
+                    <div class="wb-s2-preview-viewport" id="wb-s2-preview-viewport">
+                        <div class="wb-s2-preview-pages-container" id="wb-s2-pages-container">
+                            <!-- HD Question Image(s) -->
+                        </div>
+                    </div>
+                    <div class="wb-s2-preview-footer" id="wb-s2-preview-footer-meta">
+                        题目 PDF 页码：第 1 页
+                    </div>
+                </section>
+
+                <!-- Right Column: 答案 PDF 页面胶片网格 -->
+                <section class="wb-s2-col-answers">
+                    <div class="wb-col-header">
+                        <div class="wb-col-title-wrap">
+                            <span class="wb-col-title">对应答案解析</span>
+                            <span class="wb-an-status-badge" id="wb-s2-an-badge">已选 1 页答案</span>
+                        </div>
+                        <div class="wb-header-tools">
+                            <button type="button" class="btn xs secondary" onclick="clearCurrentS2Answers()" title="清空本题所选答案">清空选中</button>
+                        </div>
+                    </div>
+                    <div class="wb-answer-scroll-area">
+                        <div class="wb-answer-grid" id="wb-s2-answer-grid">
+                            <!-- Answer PDF Page Cards -->
+                        </div>
+                    </div>
+                    <div class="wb-an-footer">
+                        <div class="wb-an-summary-text" id="wb-s2-an-summary-text">
+                            当前绑定：答案第 1 页
+                        </div>
+                        <div class="wb-footer-nav-btns">
+                            <button type="button" class="btn sm secondary" id="wb-s2-prev-btn" onclick="wbS2PrevQuestion()">◀ 上一题 (Q)</button>
+                            <button type="button" class="btn primary sm wb-step-next-btn" id="wb-s2-confirm-next-btn" onclick="wbS2NextQuestion()">
+                                确认此题答案，下一题 (Space) ➔
+                            </button>
+                        </div>
+                    </div>
+                </section>
+            </div>
         </div>
     </div>
 
@@ -810,7 +909,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261029_v6';
+            const v = '20261029_v7';
             document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
             document.write(`<script src="js/common.js?v=${v}"><\/script>`);
             document.write(`<script src="js/auth.js?v=${v}"><\/script>`);

@@ -821,9 +821,11 @@ if (!window._hwPreviewEscBound) {
     });
 }
 
-// ========== 形态 1：全屏沉浸式教研工作台 (Full-Screen Immersive Workbench) ==========
+// ========== 举一反三：两阶段分步流水线工作台 (Two-Stage Pipeline Workbench) ==========
 let pipelineItems = [];
-let pipelineCurrentIndex = 0;
+let currentWbStage = 1; // 1: 题目切分与关联原题; 2: 分配每题答案解析
+let currentS1QIndex = 0;
+let currentS2QIndex = 0;
 
 function openVariationWorkbench() {
     const wb = document.getElementById('variation-workbench');
@@ -837,7 +839,7 @@ function openVariationWorkbench() {
     if (!pipelineItems || pipelineItems.length === 0) {
         initVariationPipeline();
     } else {
-        renderVariationWorkbench();
+        switchWbStage(currentWbStage || 1);
     }
 
     wb.style.display = 'flex';
@@ -853,15 +855,10 @@ function initVariationPipeline() {
     const buckets = getConsolidationBuckets();
     const count = batchQuestionPageCount || 0;
     pipelineItems = [];
-    let currentAnPagePointer = 0;
 
     for (let i = 0; i < count; i++) {
         const pNum = (buckets[i] ? buckets[i].parentNum : (buckets[0] ? buckets[0].parentNum : 1));
-        let anPages = [];
-        if (currentAnPagePointer < batchAnswerPageCount) {
-            anPages = [currentAnPagePointer];
-            currentAnPagePointer++;
-        }
+        const anPages = (i < batchAnswerPageCount) ? [i] : [];
         pipelineItems.push({
             id: i + 1,
             parentQuestionNum: Number(pNum),
@@ -870,47 +867,93 @@ function initVariationPipeline() {
         });
     }
 
-    pipelineCurrentIndex = 0;
-    renderVariationWorkbench();
+    if (pipelineItems.length === 0) {
+        pipelineItems.push({
+            id: 1,
+            parentQuestionNum: (buckets[0] ? buckets[0].parentNum : 1),
+            exercisePages: [],
+            answerPages: []
+        });
+    }
+
+    currentWbStage = 1;
+    currentS1QIndex = 0;
+    currentS2QIndex = 0;
+    switchWbStage(1);
 }
 
-function renderVariationWorkbench() {
-    const total = pipelineItems.length;
-    if (total === 0) return;
-    if (pipelineCurrentIndex < 0) pipelineCurrentIndex = 0;
-    if (pipelineCurrentIndex >= total) pipelineCurrentIndex = total - 1;
+function switchWbStage(stage) {
+    if (stage === 2) {
+        // 校验：每道题目必须至少包含 1 页题目 PDF
+        const emptyExIdx = pipelineItems.findIndex(it => !it.exercisePages || it.exercisePages.length === 0);
+        if (emptyExIdx >= 0) {
+            currentS1QIndex = emptyExIdx;
+            renderStage1();
+            showToast(`变式第 ${emptyExIdx + 1} 题尚未配置题目页面，请先为其选择题目页面`, 'warn');
+            return false;
+        }
+    }
 
-    renderWbStepper();
-    renderWbHomeworkList();
-    renderWbExerciseView();
-    renderWbAnswerGrid();
-    updateWbNavButtons();
+    currentWbStage = stage;
 
+    const tab1 = document.getElementById('wb-tab-stage-1');
+    const tab2 = document.getElementById('wb-tab-stage-2');
+    const view1 = document.getElementById('wb-stage-1-view');
+    const view2 = document.getElementById('wb-stage-2-view');
+    const toolAutoQ = document.getElementById('wb-tool-auto-questions');
+    const toolAutoA = document.getElementById('wb-tool-auto-answers');
+    const topPrimaryBtn = document.getElementById('wb-top-primary-btn');
+
+    if (stage === 1) {
+        if (tab1) tab1.className = 'wb-stage-tab-btn active';
+        if (tab2) tab2.className = 'wb-stage-tab-btn';
+        if (view1) view1.style.display = 'flex';
+        if (view2) view2.style.display = 'none';
+        if (toolAutoQ) toolAutoQ.style.display = 'inline-flex';
+        if (toolAutoA) toolAutoA.style.display = 'none';
+        if (topPrimaryBtn) {
+            topPrimaryBtn.textContent = '下一步：配置答案 ➔';
+            topPrimaryBtn.style.background = '';
+        }
+        renderStage1();
+    } else {
+        if (tab1) tab1.className = 'wb-stage-tab-btn completed';
+        if (tab2) tab2.className = 'wb-stage-tab-btn active';
+        if (view1) view1.style.display = 'none';
+        if (view2) view2.style.display = 'flex';
+        if (toolAutoQ) toolAutoQ.style.display = 'none';
+        if (toolAutoA) toolAutoA.style.display = 'inline-flex';
+        if (topPrimaryBtn) {
+            topPrimaryBtn.textContent = '全部完成，切片导入 ✓';
+            topPrimaryBtn.style.background = '#059669';
+        }
+        if (currentS2QIndex >= pipelineItems.length) currentS2QIndex = pipelineItems.length - 1;
+        if (currentS2QIndex < 0) currentS2QIndex = 0;
+        renderStage2();
+    }
+
+    updateStageHeaderStats();
+    return true;
+}
+
+function updateStageHeaderStats() {
+    const s1Pill = document.getElementById('wb-s1-status-pill');
+    const s2Pill = document.getElementById('wb-s2-status-pill');
     const sumCount = document.getElementById('wb-summary-count');
-    if (sumCount) sumCount.textContent = String(total);
+
+    if (s1Pill) s1Pill.textContent = `${pipelineItems.length} 题`;
+    const assignedCount = pipelineItems.filter(it => it.answerPages && it.answerPages.length > 0).length;
+    if (s2Pill) {
+        s2Pill.textContent = assignedCount === pipelineItems.length ? '全部已配' : `已配 ${assignedCount}/${pipelineItems.length} 题`;
+    }
+    if (sumCount) sumCount.textContent = String(pipelineItems.length);
 }
 
-// 顶部题号指示器胶囊
-function renderWbStepper() {
-    const wrap = document.getElementById('wb-stepper-wrap');
-    if (!wrap) return;
-
-    wrap.innerHTML = pipelineItems.map((item, idx) => {
-        const isActive = idx === pipelineCurrentIndex;
-        const anCount = item.answerPages ? item.answerPages.length : 0;
-        const hasAnswer = anCount > 0;
-        return `
-            <div class="wb-step-pill ${isActive ? 'active' : ''} ${hasAnswer ? '' : 'missing-answer'}"
-                 onclick="wbJumpToQuestion(${idx})" title="切换至变式第 ${idx + 1} 题 (课后第 ${item.parentQuestionNum} 题)">
-                <span>${idx + 1}. 课后第 ${item.parentQuestionNum} 题</span>
-                <span style="font-size:0.7rem; opacity:0.8;">(${anCount}页)</span>
-            </div>
-        `;
-    }).join('');
-
-    const activeEl = wrap.querySelector('.wb-step-pill.active');
-    if (activeEl && typeof activeEl.scrollIntoView === 'function') {
-        activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+function wbHeaderPrimaryAction() {
+    if (currentWbStage === 1) {
+        switchWbStage(2);
+    } else {
+        doImportFromPipeline();
     }
 }
 
@@ -926,16 +969,66 @@ function getPipelineSubNum(targetIdx) {
     return Math.max(1, sub);
 }
 
-// 左栏：课后原题导航列表 (常驻原题缩略图)
-function renderWbHomeworkList() {
-    const container = document.getElementById('wb-hw-list');
-    const countTag = document.getElementById('wb-hw-count-tag');
+// ========== 第 1 阶段：切分题目与关联原题 ==========
+function renderStage1() {
+    const total = pipelineItems.length;
+    if (total === 0) return;
+    if (currentS1QIndex < 0) currentS1QIndex = 0;
+    if (currentS1QIndex >= total) currentS1QIndex = total - 1;
+
+    renderS1Stepper();
+    renderS1HomeworkList();
+    renderS1ExerciseView();
+    renderS1ExerciseFilmstrip();
+    updateS1NavButtons();
+    updateStageHeaderStats();
+}
+
+function renderS1Stepper() {
+    const wrap = document.getElementById('wb-s1-stepper-wrap');
+    const pageStat = document.getElementById('wb-s1-page-stat');
+    if (!wrap) return;
+
+    wrap.innerHTML = pipelineItems.map((item, idx) => {
+        const isActive = idx === currentS1QIndex;
+        const exCount = item.exercisePages ? item.exercisePages.length : 0;
+        const hasPages = exCount > 0;
+        return `
+            <div class="wb-step-pill ${isActive ? 'active' : ''} ${hasPages ? '' : 'missing-pages'}"
+                 onclick="wbJumpToS1Question(${idx})" title="切换至变式第 ${idx + 1} 题 (课后第 ${item.parentQuestionNum} 题)">
+                <span>${idx + 1}. 课后第 ${item.parentQuestionNum} 题</span>
+                <span style="font-size:0.7rem; opacity:0.85;">(${exCount}页)</span>
+            </div>
+        `;
+    }).join('');
+
+    const activeEl = wrap.querySelector('.wb-step-pill.active');
+    if (activeEl && typeof activeEl.scrollIntoView === 'function') {
+        activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    }
+
+    if (pageStat) {
+        const usedPages = new Set(pipelineItems.flatMap(it => it.exercisePages || []));
+        pageStat.textContent = `已分配 ${usedPages.size} / ${batchQuestionPageCount} 页题目 (共 ${pipelineItems.length} 题)`;
+    }
+}
+
+function wbJumpToS1Question(idx) {
+    if (idx >= 0 && idx < pipelineItems.length) {
+        currentS1QIndex = idx;
+        renderStage1();
+    }
+}
+
+function renderS1HomeworkList() {
+    const container = document.getElementById('wb-s1-hw-list');
+    const countTag = document.getElementById('wb-s1-hw-count-tag');
     if (!container) return;
 
     const buckets = getConsolidationBuckets();
     if (countTag) countTag.textContent = `共 ${buckets.length} 题`;
 
-    const currItem = pipelineItems[pipelineCurrentIndex];
+    const currItem = pipelineItems[currentS1QIndex];
     const currParent = currItem ? currItem.parentQuestionNum : (buckets[0]?.parentNum || 1);
 
     const counts = {};
@@ -951,73 +1044,379 @@ function renderWbHomeworkList() {
         const count = counts[b.parentNum] || 0;
         const thumbUrl = (b.exercisePdf && b.exercisePdf.thumb) ? b.exercisePdf.thumb : '';
         return `
-            <div class="wb-hw-card ${isActive ? 'active' : ''}" onclick="selectWbHomework(${b.parentNum})" title="点击将当前变式题指定给课后第 ${b.parentNum} 题">
+            <div class="wb-hw-card ${isActive ? 'active' : ''}" onclick="selectS1Homework(${b.parentNum})" title="点击将当前变式题关联至课后第 ${b.parentNum} 题">
                 <div class="wb-hw-card-top">
                     <span class="wb-hw-no">课后第 ${b.parentNum} 题</span>
-                    <span class="wb-hw-assigned-badge ${count > 0 ? 'has-items' : ''}">${count > 0 ? `已配 ${count} 变式` : '未分配'}</span>
+                    <span class="wb-hw-assigned-badge ${count > 0 ? 'has-items' : ''}">
+                        ${isActive ? '✓ 当前选定 · ' : ''}${count > 0 ? `已配 ${count} 变式` : '未挂载'}
+                    </span>
                 </div>
                 <div class="wb-hw-topic" title="${escapeHtml(b.topic || '')}">${escapeHtml(b.topic || '（未设考点）')}</div>
                 <div class="wb-hw-thumb-wrap">
                     ${thumbUrl 
                         ? `<img src="${thumbUrl}" alt="原题第 ${b.parentNum} 题" loading="lazy">` 
                         : `<span style="font-size:0.75rem; color:var(--text-tertiary);">课后原题切片图</span>`}
+                    <button type="button" class="wb-hw-preview-btn" onclick="previewHomeworkQuestion(${b.parentNum}, event)" title="查阅原题大图与解析">
+                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line></svg>
+                        查阅原题
+                    </button>
                 </div>
             </div>
         `;
     }).join('');
-
-    selectedBucketParentNum = Number(currParent);
 }
 
-function selectWbHomework(parentNum) {
-    if (!pipelineItems[pipelineCurrentIndex]) return;
-    pipelineItems[pipelineCurrentIndex].parentQuestionNum = Number(parentNum);
-    renderWbStepper();
-    renderWbHomeworkList();
-    renderWbExerciseView();
+function selectS1Homework(parentNum) {
+    if (!pipelineItems[currentS1QIndex]) return;
+    pipelineItems[currentS1QIndex].parentQuestionNum = Number(parentNum);
+    renderS1Stepper();
+    renderS1HomeworkList();
+    renderS1ExerciseView();
+    updateS1NavButtons();
 }
 
-// 中栏：变式题目大图展示区
-function renderWbExerciseView() {
-    const item = pipelineItems[pipelineCurrentIndex];
+function renderS1ExerciseView() {
+    const item = pipelineItems[currentS1QIndex];
     if (!item) return;
 
-    const titleEl = document.getElementById('wb-ex-title');
-    const indicatorEl = document.getElementById('wb-active-hw-indicator');
-    const imgEl = document.getElementById('wb-ex-img');
-    const tagsEl = document.getElementById('wb-ex-tags');
+    const titleEl = document.getElementById('wb-s1-ex-title');
+    const indicatorEl = document.getElementById('wb-s1-hw-indicator');
+    const pagesBadge = document.getElementById('wb-s1-ex-pages-badge');
+    const container = document.getElementById('wb-s1-pages-container');
 
     if (titleEl) {
-        titleEl.textContent = `变式题目 · 第 ${pipelineCurrentIndex + 1} / ${pipelineItems.length} 题`;
+        titleEl.textContent = `变式第 ${currentS1QIndex + 1} 题 · 题目预览`;
     }
 
     const buckets = getConsolidationBuckets();
     const b = buckets.find(it => Number(it.parentNum) === Number(item.parentQuestionNum));
-    const subNum = getPipelineSubNum(pipelineCurrentIndex);
+    const subNum = getPipelineSubNum(currentS1QIndex);
     if (indicatorEl) {
         indicatorEl.textContent = `已归入：课后第 ${item.parentQuestionNum} 题 · 变式 ${subNum}${b && b.topic ? ` (${b.topic})` : ''}`;
     }
 
-    const firstExPage = item.exercisePages[0] || 0;
-    if (imgEl) {
-        imgEl.src = batchQuestionThumbs[firstExPage] || '';
+    const exCount = item.exercisePages ? item.exercisePages.length : 0;
+    if (pagesBadge) {
+        if (exCount > 0) {
+            pagesBadge.textContent = `包含 ${exCount} 页题目 (第 ${item.exercisePages.map(p => p + 1).join('、')} 页)`;
+            pagesBadge.style.color = '#2563eb';
+            pagesBadge.style.background = '#eff6ff';
+            pagesBadge.style.borderColor = '#bfdbfe';
+        } else {
+            pagesBadge.textContent = `⚠️ 尚未为此题配置任何题目页面`;
+            pagesBadge.style.color = '#ef4444';
+            pagesBadge.style.background = '#fef2f2';
+            pagesBadge.style.borderColor = '#fecaca';
+        }
     }
 
-    if (tagsEl) {
-        tagsEl.innerHTML = item.exercisePages.map(p => `
-            <span class="wb-tag-pill">第 ${p + 1} 页</span>
+    if (container) {
+        if (exCount === 0) {
+            container.innerHTML = `
+                <div style="text-align:center; color:var(--text-tertiary); padding:40px 20px;">
+                    <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom:12px; opacity:0.6;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                    <div style="font-size:0.95rem; font-weight:700; color:var(--text-secondary); margin-bottom:6px;">尚未为此变式题选择题目页面</div>
+                    <div style="font-size:0.8rem; color:var(--text-tertiary);">请在下方【题目 PDF 全部页面】胶片中直接点击缩略图勾选。<br>支持单题多页：点击多个页面即可合成一道完整题目。</div>
+                </div>
+            `;
+        } else {
+            container.innerHTML = item.exercisePages.map((pIdx, order) => `
+                <div class="wb-s1-page-preview-card">
+                    <img src="${batchQuestionThumbs[pIdx] || ''}" alt="题目第 ${pIdx + 1} 页" onclick="openPageLightbox('q', ${pIdx})" title="点击全屏高清放大查看">
+                    <div class="wb-s1-page-pill">题目第 ${pIdx + 1} 页 (本题第 ${order + 1} 页)</div>
+                </div>
+            `).join('');
+        }
+    }
+}
+
+function renderS1ExerciseFilmstrip() {
+    const item = pipelineItems[currentS1QIndex];
+    if (!item) return;
+
+    const scrollEl = document.getElementById('wb-s1-filmstrip-scroll');
+    const countEl = document.getElementById('wb-s1-filmstrip-count');
+    if (countEl) countEl.textContent = `共 ${batchQuestionPageCount} 页`;
+    if (!scrollEl) return;
+
+    scrollEl.innerHTML = '';
+    for (let exIdx = 0; exIdx < batchQuestionPageCount; exIdx++) {
+        const isCurrent = item.exercisePages.includes(exIdx);
+        const otherIdx = pipelineItems.findIndex((it, idx) => idx !== currentS1QIndex && it.exercisePages && it.exercisePages.includes(exIdx));
+        
+        const card = document.createElement('div');
+        card.className = `wb-ex-page-card ${isCurrent ? 'selected-current' : (otherIdx >= 0 ? 'used-other' : 'unassigned')}`;
+        card.onclick = () => toggleS1ExercisePage(exIdx);
+        card.title = isCurrent 
+            ? `已包含在当前变式题中 (本题第 ${item.exercisePages.indexOf(exIdx) + 1} 页)，点击可取消` 
+            : (otherIdx >= 0 
+                ? `已被变式第 ${otherIdx + 1} 题使用，点击将转移到本题` 
+                : `点击加入当前变式题`);
+
+        card.innerHTML = `
+            <div class="wb-card-thumb-wrap">
+                <img src="${batchQuestionThumbs[exIdx]}" alt="题目第 ${exIdx + 1} 页" loading="lazy">
+                <div class="wb-card-badge">
+                    ${isCurrent 
+                        ? `<span class="badge-sel">✓ 本题第 ${item.exercisePages.indexOf(exIdx) + 1} 页</span>` 
+                        : (otherIdx >= 0 
+                            ? `<span class="badge-used">变式 ${otherIdx + 1} 已用</span>` 
+                            : `<span class="badge-empty">待选</span>`)}
+                </div>
+                <div class="wb-card-zoom" onclick="event.stopPropagation(); openPageLightbox('q', ${exIdx});" title="点击放大查看页面">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line></svg>
+                </div>
+            </div>
+            <div class="wb-card-footer">
+                <span>第 ${exIdx + 1} 页</span>
+                <span>${isCurrent ? '✓ 已选' : (otherIdx >= 0 ? '已用' : '+ 选用')}</span>
+            </div>
+        `;
+        scrollEl.appendChild(card);
+    }
+}
+
+function toggleS1ExercisePage(exIdx) {
+    const item = pipelineItems[currentS1QIndex];
+    if (!item) return;
+    if (!item.exercisePages) item.exercisePages = [];
+
+    const pos = item.exercisePages.indexOf(exIdx);
+    if (pos >= 0) {
+        item.exercisePages.splice(pos, 1);
+    } else {
+        // 如果已被其他变式题占用，则从该题剔除
+        pipelineItems.forEach((other, oIdx) => {
+            if (oIdx !== currentS1QIndex && other.exercisePages) {
+                const oPos = other.exercisePages.indexOf(exIdx);
+                if (oPos >= 0) {
+                    other.exercisePages.splice(oPos, 1);
+                }
+            }
+        });
+        item.exercisePages.push(exIdx);
+        item.exercisePages.sort((a, b) => a - b);
+    }
+
+    renderS1Stepper();
+    renderS1ExerciseView();
+    renderS1ExerciseFilmstrip();
+    updateS1NavButtons();
+}
+
+function updateS1NavButtons() {
+    const isFirst = currentS1QIndex <= 0;
+    const isLast = currentS1QIndex >= pipelineItems.length - 1;
+
+    const prevBtn = document.getElementById('wb-s1-prev-btn');
+    const nextBtn = document.getElementById('wb-s1-next-btn');
+    const summaryEl = document.getElementById('wb-s1-footer-summary');
+
+    if (prevBtn) prevBtn.disabled = isFirst;
+
+    const currItem = pipelineItems[currentS1QIndex];
+    if (summaryEl && currItem) {
+        summaryEl.innerHTML = `<span>当前：变式第 <b>${currentS1QIndex + 1}</b> / ${pipelineItems.length} 题 · 关联课后第 <b>${currItem.parentQuestionNum}</b> 题 · 包含 <b>${currItem.exercisePages.length}</b> 页题目</span>`;
+    }
+
+    if (nextBtn) {
+        if (isLast) {
+            nextBtn.innerHTML = `题目已配完，进入阶段 2：配置答案 ➔`;
+            nextBtn.style.background = '#059669';
+            nextBtn.style.borderColor = '#059669';
+        } else {
+            nextBtn.innerHTML = `确认本题，下一题 (Space) ➔`;
+            nextBtn.style.background = '';
+            nextBtn.style.borderColor = '';
+        }
+    }
+}
+
+function wbS1PrevQuestion() {
+    if (currentS1QIndex > 0) {
+        currentS1QIndex--;
+        renderStage1();
+    }
+}
+
+function wbS1NextQuestion() {
+    if (currentS1QIndex < pipelineItems.length - 1) {
+        currentS1QIndex++;
+        renderStage1();
+    } else {
+        switchWbStage(2);
+    }
+}
+
+function wbAddNewQuestion() {
+    const buckets = getConsolidationBuckets();
+    const defaultParent = buckets.length > 0 ? buckets[0].parentNum : 1;
+
+    // 寻找第一个尚未分配的题目页码
+    const usedPages = new Set(pipelineItems.flatMap(it => it.exercisePages || []));
+    let nextUnusedPage = -1;
+    for (let i = 0; i < batchQuestionPageCount; i++) {
+        if (!usedPages.has(i)) {
+            nextUnusedPage = i;
+            break;
+        }
+    }
+
+    const newQuestion = {
+        id: pipelineItems.length + 1,
+        parentQuestionNum: defaultParent,
+        exercisePages: nextUnusedPage >= 0 ? [nextUnusedPage] : [],
+        answerPages: []
+    };
+
+    pipelineItems.push(newQuestion);
+    currentS1QIndex = pipelineItems.length - 1;
+    renderStage1();
+    showToast(`已新增变式第 ${pipelineItems.length} 题`);
+}
+
+function wbDeleteCurrentQuestion() {
+    if (pipelineItems.length <= 1) {
+        showToast('至少需要保留 1 道变式题', 'warn');
+        return;
+    }
+
+    const delId = currentS1QIndex + 1;
+    pipelineItems.splice(currentS1QIndex, 1);
+    pipelineItems.forEach((it, idx) => {
+        it.id = idx + 1;
+    });
+
+    if (currentS1QIndex >= pipelineItems.length) {
+        currentS1QIndex = pipelineItems.length - 1;
+    }
+
+    renderStage1();
+    showToast(`已删除变式第 ${delId} 题`);
+}
+
+function wbAutoFillQuestions() {
+    const buckets = getConsolidationBuckets();
+    const count = batchQuestionPageCount || 0;
+    if (count === 0) {
+        showToast('当前未检测到题目页面', 'warn');
+        return;
+    }
+
+    pipelineItems = [];
+    for (let i = 0; i < count; i++) {
+        const pNum = (buckets[i] ? buckets[i].parentNum : (buckets[0] ? buckets[0].parentNum : 1));
+        pipelineItems.push({
+            id: i + 1,
+            parentQuestionNum: Number(pNum),
+            exercisePages: [i],
+            answerPages: (i < batchAnswerPageCount) ? [i] : []
+        });
+    }
+
+    currentS1QIndex = 0;
+    renderStage1();
+    showToast('已按 1 页题目对应 1 题自动铺满');
+}
+
+function openS1PageLightbox() {
+    const item = pipelineItems[currentS1QIndex];
+    if (!item) return;
+    const pIdx = item.exercisePages[0] || 0;
+    openPageLightbox('q', pIdx);
+}
+
+// ========== 第 2 阶段：分配每题答案解析 ==========
+function renderStage2() {
+    const total = pipelineItems.length;
+    if (total === 0) return;
+    if (currentS2QIndex < 0) currentS2QIndex = 0;
+    if (currentS2QIndex >= total) currentS2QIndex = total - 1;
+
+    renderS2Stepper();
+    renderS2QuestionPreview();
+    renderS2AnswerGrid();
+    updateS2NavButtons();
+    updateStageHeaderStats();
+}
+
+function renderS2Stepper() {
+    const wrap = document.getElementById('wb-s2-stepper-wrap');
+    const answerStat = document.getElementById('wb-s2-answer-stat');
+    if (!wrap) return;
+
+    wrap.innerHTML = pipelineItems.map((item, idx) => {
+        const isActive = idx === currentS2QIndex;
+        const anCount = item.answerPages ? item.answerPages.length : 0;
+        const hasAnswer = anCount > 0;
+        return `
+            <div class="wb-step-pill ${isActive ? 'active' : ''} ${hasAnswer ? '' : 'missing-answer'}"
+                 onclick="wbJumpToS2Question(${idx})" title="切换至变式第 ${idx + 1} 题答案分配">
+                <span>${idx + 1}. 课后第 ${item.parentQuestionNum} 题</span>
+                <span style="font-size:0.7rem; opacity:0.85;">(${hasAnswer ? `✓ ${anCount}页` : '待配'})</span>
+            </div>
+        `;
+    }).join('');
+
+    const activeEl = wrap.querySelector('.wb-step-pill.active');
+    if (activeEl && typeof activeEl.scrollIntoView === 'function') {
+        activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    }
+
+    if (answerStat) {
+        const assignedCount = pipelineItems.filter(it => it.answerPages && it.answerPages.length > 0).length;
+        answerStat.textContent = `已配 ${assignedCount} / ${pipelineItems.length} 题答案`;
+    }
+}
+
+function wbJumpToS2Question(idx) {
+    if (idx >= 0 && idx < pipelineItems.length) {
+        currentS2QIndex = idx;
+        renderStage2();
+    }
+}
+
+function renderS2QuestionPreview() {
+    const item = pipelineItems[currentS2QIndex];
+    if (!item) return;
+
+    const titleEl = document.getElementById('wb-s2-preview-title');
+    const indicatorEl = document.getElementById('wb-s2-hw-indicator');
+    const container = document.getElementById('wb-s2-pages-container');
+    const footerMeta = document.getElementById('wb-s2-preview-footer-meta');
+
+    if (titleEl) {
+        titleEl.textContent = `变式第 ${currentS2QIndex + 1} 题 · 题目预览`;
+    }
+
+    const buckets = getConsolidationBuckets();
+    const b = buckets.find(it => Number(it.parentNum) === Number(item.parentQuestionNum));
+    const subNum = getPipelineSubNum(currentS2QIndex);
+    if (indicatorEl) {
+        indicatorEl.textContent = `关联课后第 ${item.parentQuestionNum} 题 · 变式 ${subNum}${b && b.topic ? ` (${b.topic})` : ''}`;
+    }
+
+    if (footerMeta) {
+        footerMeta.textContent = `题目 PDF 页码：第 ${item.exercisePages.map(p => p + 1).join(', ')} 页 (共 ${item.exercisePages.length} 页)`;
+    }
+
+    if (container) {
+        container.innerHTML = item.exercisePages.map(pIdx => `
+            <div class="wb-s1-page-preview-card">
+                <img src="${batchQuestionThumbs[pIdx] || ''}" alt="变式题目第 ${pIdx + 1} 页" onclick="openPageLightbox('q', ${pIdx})" title="点击全屏高清放大查看">
+                <div class="wb-s1-page-pill">题目第 ${pIdx + 1} 页</div>
+            </div>
         `).join('');
     }
 }
 
-// 右栏：对应答案解析多选区
-function renderWbAnswerGrid() {
-    const item = pipelineItems[pipelineCurrentIndex];
+function renderS2AnswerGrid() {
+    const item = pipelineItems[currentS2QIndex];
     if (!item) return;
 
-    const badgeEl = document.getElementById('wb-an-badge');
-    const gridEl = document.getElementById('wb-answer-grid');
-    const summaryText = document.getElementById('wb-an-summary-text');
+    const badgeEl = document.getElementById('wb-s2-an-badge');
+    const gridEl = document.getElementById('wb-s2-answer-grid');
+    const summaryText = document.getElementById('wb-s2-an-summary-text');
 
     const anCount = item.answerPages ? item.answerPages.length : 0;
     if (badgeEl) {
@@ -1038,10 +1437,10 @@ function renderWbAnswerGrid() {
         gridEl.innerHTML = '';
         for (let aIdx = 0; aIdx < batchAnswerPageCount; aIdx++) {
             const isCurrent = item.answerPages.includes(aIdx);
-            const otherIdx = pipelineItems.findIndex((it, idx) => idx !== pipelineCurrentIndex && it.answerPages && it.answerPages.includes(aIdx));
+            const otherIdx = pipelineItems.findIndex((it, idx) => idx !== currentS2QIndex && it.answerPages && it.answerPages.includes(aIdx));
             const card = document.createElement('div');
             card.className = `wb-an-card ${isCurrent ? 'selected-current' : (otherIdx >= 0 ? 'used-other' : 'unassigned')}`;
-            card.onclick = () => toggleWbAnswerPage(aIdx);
+            card.onclick = () => toggleS2AnswerPage(aIdx);
             card.title = isCurrent 
                 ? `已选为本题答案 (第 ${item.answerPages.indexOf(aIdx) + 1} 页)，点击可取消选择` 
                 : (otherIdx >= 0 
@@ -1058,7 +1457,7 @@ function renderWbAnswerGrid() {
                                 ? `<span class="badge-used">变式 ${otherIdx + 1} 已用</span>` 
                                 : `<span class="badge-empty">待分配</span>`)}
                     </div>
-                    <div class="wb-an-zoom" onclick="event.stopPropagation(); openPipeAnswerLightbox(${aIdx});" title="点击放大查看答案解析">
+                    <div class="wb-an-zoom" onclick="event.stopPropagation(); openPageLightbox('a', ${aIdx});" title="点击放大查看答案解析">
                         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line></svg>
                     </div>
                 </div>
@@ -1072,8 +1471,8 @@ function renderWbAnswerGrid() {
     }
 }
 
-function toggleWbAnswerPage(aIdx) {
-    const item = pipelineItems[pipelineCurrentIndex];
+function toggleS2AnswerPage(aIdx) {
+    const item = pipelineItems[currentS2QIndex];
     if (!item) return;
     if (!item.answerPages) item.answerPages = [];
     const pos = item.answerPages.indexOf(aIdx);
@@ -1081,7 +1480,7 @@ function toggleWbAnswerPage(aIdx) {
         item.answerPages.splice(pos, 1);
     } else {
         pipelineItems.forEach((other, oIdx) => {
-            if (oIdx !== pipelineCurrentIndex && other.answerPages) {
+            if (oIdx !== currentS2QIndex && other.answerPages) {
                 const oPos = other.answerPages.indexOf(aIdx);
                 if (oPos >= 0) {
                     other.answerPages.splice(oPos, 1);
@@ -1091,106 +1490,73 @@ function toggleWbAnswerPage(aIdx) {
         item.answerPages.push(aIdx);
         item.answerPages.sort((a, b) => a - b);
     }
-    renderWbStepper();
-    renderWbAnswerGrid();
+    renderS2Stepper();
+    renderS2AnswerGrid();
+    updateS2NavButtons();
 }
 
-function clearCurrentPipeAnswers() {
-    const item = pipelineItems[pipelineCurrentIndex];
+function clearCurrentS2Answers() {
+    const item = pipelineItems[currentS2QIndex];
     if (!item) return;
     item.answerPages = [];
-    renderWbStepper();
-    renderWbAnswerGrid();
+    renderS2Stepper();
+    renderS2AnswerGrid();
+    updateS2NavButtons();
 }
 
-function updateWbNavButtons() {
-    const isFirst = pipelineCurrentIndex <= 0;
-    const isLast = pipelineCurrentIndex >= pipelineItems.length - 1;
+function wbAutoFillAnswers() {
+    for (let i = 0; i < pipelineItems.length; i++) {
+        pipelineItems[i].answerPages = (i < batchAnswerPageCount) ? [i] : [];
+    }
+    renderS2Stepper();
+    renderS2AnswerGrid();
+    updateS2NavButtons();
+    showToast('已按题目顺序一键顺延分配答案页');
+}
 
-    const exPrev = document.getElementById('wb-ex-prev-btn');
-    const exNext = document.getElementById('wb-ex-next-btn');
-    const confirmNext = document.getElementById('wb-confirm-next-btn');
+function updateS2NavButtons() {
+    const isFirst = currentS2QIndex <= 0;
+    const isLast = currentS2QIndex >= pipelineItems.length - 1;
 
-    if (exPrev) exPrev.disabled = isFirst;
-    if (exNext) exNext.disabled = isLast;
+    const prevBtn = document.getElementById('wb-s2-prev-btn');
+    const confirmNext = document.getElementById('wb-s2-confirm-next-btn');
+
+    if (prevBtn) prevBtn.disabled = isFirst;
 
     if (confirmNext) {
         if (isLast) {
-            confirmNext.innerHTML = `完成并切片导入 ✓`;
+            confirmNext.innerHTML = `全部完成，切片导入 ✓`;
             confirmNext.style.background = '#059669';
             confirmNext.style.borderColor = '#059669';
         } else {
-            confirmNext.innerHTML = `确认，下一题 (Space) ➔`;
+            confirmNext.innerHTML = `确认此题答案，下一题 (Space) ➔`;
             confirmNext.style.background = '';
             confirmNext.style.borderColor = '';
         }
     }
 }
 
-function pipePrevQuestion() {
-    if (pipelineCurrentIndex > 0) {
-        pipelineCurrentIndex--;
-        renderVariationWorkbench();
+function wbS2PrevQuestion() {
+    if (currentS2QIndex > 0) {
+        currentS2QIndex--;
+        renderStage2();
     }
 }
 
-function pipeNextQuestion() {
-    if (pipelineCurrentIndex < pipelineItems.length - 1) {
-        pipelineCurrentIndex++;
-        renderVariationWorkbench();
+function wbS2NextQuestion() {
+    if (currentS2QIndex < pipelineItems.length - 1) {
+        currentS2QIndex++;
+        renderStage2();
     } else {
         doImportFromPipeline();
     }
 }
 
-function wbJumpToQuestion(idx) {
-    if (idx >= 0 && idx < pipelineItems.length) {
-        pipelineCurrentIndex = idx;
-        renderVariationWorkbench();
-    }
-}
-
-function wbAutoMatch1to1() {
-    const buckets = getConsolidationBuckets();
-    for (let i = 0; i < pipelineItems.length; i++) {
-        const item = pipelineItems[i];
-        if (buckets[i]) {
-            item.parentQuestionNum = buckets[i].parentNum;
-        } else if (buckets.length > 0) {
-            item.parentQuestionNum = buckets[buckets.length - 1].parentNum;
-        }
-        item.exercisePages = [i];
-        item.answerPages = (i < batchAnswerPageCount) ? [i] : [];
-    }
-    renderVariationWorkbench();
-    showToast('已按 1 页题目对 1 页答案快速分配完成');
-}
-
-function promptToggleExPage() {
-    const item = pipelineItems[pipelineCurrentIndex];
-    if (!item) return;
-    const currentStr = item.exercisePages.map(p => p + 1).join(',');
-    const input = prompt(`当前变式题目包含的 PDF 页码（英文逗号隔开，范围 1~${batchQuestionPageCount}）：`, currentStr);
-    if (input === null) return;
-    const parts = input.split(',').map(s => parseInt(s.trim(), 10)).filter(n => Number.isInteger(n) && n >= 1 && n <= batchQuestionPageCount);
-    if (parts.length === 0) {
-        showToast('至少需要包含 1 个有效题目页码', 'warn');
-        return;
-    }
-    const newPages = Array.from(new Set(parts)).map(n => n - 1).sort((a, b) => a - b);
-    item.exercisePages = newPages;
-    renderWbExerciseView();
-}
-
-function openPipePageLightbox(kind) {
-    const item = pipelineItems[pipelineCurrentIndex];
+function openS2PageLightbox() {
+    const item = pipelineItems[currentS2QIndex];
     if (!item) return;
     const pIdx = item.exercisePages[0] || 0;
     openPageLightbox('q', pIdx);
-}
-
-function openPipeAnswerLightbox(aIdx) {
-    openPageLightbox('a', aIdx);
 }
 
 // ========== Pipeline Summary Modal ==========
@@ -1215,8 +1581,9 @@ function openPipelineSummaryDialog() {
         const isAnswerEmpty = anPages.length === 0;
         if (isAnswerEmpty) unassignedAnswerCount++;
 
+        const isCurrentRow = (currentWbStage === 1 ? idx === currentS1QIndex : idx === currentS2QIndex);
         return `
-            <tr style="${idx === pipelineCurrentIndex ? 'background:rgba(5,150,105,0.06);' : ''}">
+            <tr style="${isCurrentRow ? 'background:rgba(5,150,105,0.06);' : ''}">
                 <td><strong>第 ${idx + 1} 题</strong></td>
                 <td>
                     <span style="font-weight:600; color:var(--text-primary);">课后第 ${item.parentQuestionNum} 题</span>
@@ -1231,11 +1598,11 @@ function openPipelineSummaryDialog() {
                 </td>
                 <td>
                     ${isAnswerEmpty 
-                        ? `<span style="color:#ef4444;">待完善</span>` 
+                        ? `<span style="color:#ef4444;">待完善答案</span>` 
                         : `<span style="color:#059669;">✓ 正常</span>`}
                 </td>
                 <td style="text-align:center;">
-                    <button type="button" class="btn xs secondary" onclick="closePipelineSummaryDialog(); wbJumpToQuestion(${idx});">跳转修改</button>
+                    <button type="button" class="btn xs secondary" onclick="closePipelineSummaryDialog(); jumpToQuestionFromSummary(${idx});">跳转修改</button>
                 </td>
             </tr>
         `;
@@ -1252,6 +1619,14 @@ function openPipelineSummaryDialog() {
     dialog.classList.add('active');
 }
 
+function jumpToQuestionFromSummary(idx) {
+    if (currentWbStage === 1) {
+        wbJumpToS1Question(idx);
+    } else {
+        wbJumpToS2Question(idx);
+    }
+}
+
 function closePipelineSummaryDialog() {
     const dialog = document.getElementById('pipeline-summary-dialog');
     if (dialog) dialog.classList.remove('active');
@@ -1259,13 +1634,20 @@ function closePipelineSummaryDialog() {
 
 // ========== Do Import from Pipeline ==========
 async function doImportFromPipeline() {
+    const emptyExerciseItems = pipelineItems.filter(it => !it.exercisePages || it.exercisePages.length === 0);
+    if (emptyExerciseItems.length > 0) {
+        switchWbStage(1);
+        showToast(`变式第 ${emptyExerciseItems.map(it => it.id).join('、')} 题未选择题目页面，请先配置`, 'warn');
+        return;
+    }
+
     const emptyAnswerItems = pipelineItems.filter(it => !it.answerPages || it.answerPages.length === 0);
     if (emptyAnswerItems.length > 0) {
         showCustomDialog({
             title: '部分题目未分配答案',
             body: `检测到变式第 ${emptyAnswerItems.map(it => it.id).join('、')} 题尚未选择对应答案页。<br><br>是否继续导入？未选答案的题目将不包含答案解析 PDF。`,
             confirmText: '继续切片导入',
-            cancelText: '返回修改',
+            cancelText: '返回分配答案',
             onConfirm: () => executePipelineImport()
         });
         return;
@@ -1294,8 +1676,8 @@ async function executePipelineImport() {
         };
     });
 
-    const nextBtn = document.getElementById('wb-confirm-next-btn');
-    const topFinishBtn = document.getElementById('wb-top-finish-btn');
+    const nextBtn = document.getElementById('wb-s2-confirm-next-btn');
+    const topFinishBtn = document.getElementById('wb-top-primary-btn');
     if (nextBtn) nextBtn.disabled = true;
     if (topFinishBtn) topFinishBtn.disabled = true;
 
@@ -1331,7 +1713,7 @@ async function executePipelineImport() {
             const item = varItems[idx];
             showToast(`正在切分上传 ${idx + 1}/${varItems.length}...`);
 
-            // 题目切分
+            // 题目切分 (支持跨页多选合并)
             try {
                 const exBlob = await mergePages(exerciseSrc, item.exercisePages);
                 const exFile = new File([exBlob], `课后第${item.parentQuestionNum}题_变式${item.subNum}_题目.pdf`, { type: 'application/pdf' });
@@ -1348,7 +1730,7 @@ async function executePipelineImport() {
                 failCount++;
             }
 
-            // 答案切分 (支持多页合并切片)
+            // 答案切分 (支持跨页多选合并)
             if (item.answerPages.length > 0) {
                 try {
                     const anBlob = await mergePages(answerSrc, item.answerPages);
@@ -1409,18 +1791,32 @@ if (!window._pipeKeyNavBound) {
 
         if (e.key === ' ' || e.key === 'Enter') {
             e.preventDefault();
-            pipeNextQuestion();
-        } else if (e.key === 'ArrowLeft') {
+            if (currentWbStage === 1) {
+                wbS1NextQuestion();
+            } else {
+                wbS2NextQuestion();
+            }
+        } else if (e.key === 'ArrowLeft' || e.key === 'q' || e.key === 'Q') {
             e.preventDefault();
-            pipePrevQuestion();
-        } else if (e.key === 'ArrowRight') {
+            if (currentWbStage === 1) {
+                wbS1PrevQuestion();
+            } else {
+                wbS2PrevQuestion();
+            }
+        } else if (e.key === 'ArrowRight' || e.key === 'e' || e.key === 'E') {
             e.preventDefault();
-            pipeNextQuestion();
+            if (currentWbStage === 1) {
+                wbS1NextQuestion();
+            } else {
+                wbS2NextQuestion();
+            }
         } else if (e.key >= '1' && e.key <= '9') {
-            const num = parseInt(e.key, 10);
-            const buckets = getConsolidationBuckets();
-            if (buckets.some(b => Number(b.parentNum) === num)) {
-                selectWbHomework(num);
+            if (currentWbStage === 1) {
+                const num = parseInt(e.key, 10);
+                const buckets = getConsolidationBuckets();
+                if (buckets.some(b => Number(b.parentNum) === num)) {
+                    selectS1Homework(num);
+                }
             }
         }
     });
@@ -4682,19 +5078,30 @@ window.onLightboxVariationChange = onLightboxVariationChange;
 window.openVariationWorkbench = openVariationWorkbench;
 window.closeVariationWorkbench = closeVariationWorkbench;
 window.initVariationPipeline = initVariationPipeline;
-window.renderVariationWorkbench = renderVariationWorkbench;
-window.selectWbHomework = selectWbHomework;
-window.toggleWbAnswerPage = toggleWbAnswerPage;
-window.clearCurrentPipeAnswers = clearCurrentPipeAnswers;
-window.pipePrevQuestion = pipePrevQuestion;
-window.pipeNextQuestion = pipeNextQuestion;
-window.wbJumpToQuestion = wbJumpToQuestion;
-window.wbAutoMatch1to1 = wbAutoMatch1to1;
-window.openPipePageLightbox = openPipePageLightbox;
-window.openPipeAnswerLightbox = openPipeAnswerLightbox;
+window.switchWbStage = switchWbStage;
+window.wbHeaderPrimaryAction = wbHeaderPrimaryAction;
+window.renderStage1 = renderStage1;
+window.renderStage2 = renderStage2;
+window.wbJumpToS1Question = wbJumpToS1Question;
+window.wbJumpToS2Question = wbJumpToS2Question;
+window.selectS1Homework = selectS1Homework;
+window.toggleS1ExercisePage = toggleS1ExercisePage;
+window.toggleS2AnswerPage = toggleS2AnswerPage;
+window.clearCurrentS2Answers = clearCurrentS2Answers;
+window.wbS1PrevQuestion = wbS1PrevQuestion;
+window.wbS1NextQuestion = wbS1NextQuestion;
+window.wbS2PrevQuestion = wbS2PrevQuestion;
+window.wbS2NextQuestion = wbS2NextQuestion;
+window.wbAddNewQuestion = wbAddNewQuestion;
+window.wbDeleteCurrentQuestion = wbDeleteCurrentQuestion;
+window.wbAutoFillQuestions = wbAutoFillQuestions;
+window.wbAutoFillAnswers = wbAutoFillAnswers;
+window.openS1PageLightbox = openS1PageLightbox;
+window.openS2PageLightbox = openS2PageLightbox;
 window.openPipelineSummaryDialog = openPipelineSummaryDialog;
 window.closePipelineSummaryDialog = closePipelineSummaryDialog;
-window.promptToggleExPage = promptToggleExPage;
+window.jumpToQuestionFromSummary = jumpToQuestionFromSummary;
+window.doImportFromPipeline = doImportFromPipeline;
 
 window.addEventListener('resize', () => {
     document.querySelectorAll('.question-topic-input').forEach(el => {
