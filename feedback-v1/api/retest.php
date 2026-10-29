@@ -190,7 +190,7 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                                 'videoUrl' => $r['video_url'] ?: null,
                                 'exercisePdf' => $exerciseUrl,
                                 'answerPdf' => $r['answer_pdf'] ?: null,
-                                'sourceType' => 'homework'
+                                'sourceType' => $bankType
                             ];
                             $uniquePdfs[$exerciseUrl] = true;
                         }
@@ -274,7 +274,8 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                             'topic' => $q['topic'] ?? '',
                             'videoUrl' => $q['videoUrl'] ?? ($q['video_url'] ?? null),
                             'exercisePdf' => $exerciseUrl,
-                            'answerPdf' => $q['answerPdf']['url'] ?? null
+                            'answerPdf' => $q['answerPdf']['url'] ?? null,
+                            'sourceType' => $bankType
                         ];
                         $uniquePdfs[$exerciseUrl] = true;
                     }

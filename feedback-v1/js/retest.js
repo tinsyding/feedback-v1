@@ -997,7 +997,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 list.forEach(p => {
                     const url = type === 'exercise' ? p.exercisePdf : p.answerPdf;
                     if (url) {
-                        const actualSourceType = p.sourceType || sourceType;
+                        const actualSourceType = (sourceType === 'preview') ? 'preview' : (p.sourceType || sourceType);
                         const isVar = actualSourceType === 'variation' || Boolean(p.isVariation);
                         validItems.push({
                             url: url,
