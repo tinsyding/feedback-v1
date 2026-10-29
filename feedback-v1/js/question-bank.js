@@ -439,11 +439,16 @@ async function apiDelete(params) {
 
 function handleUnauthorized() {
     showCustomDialog({
-        title: '需要管理员权限',
-        body: '执行此操作需要登录管理员账号，是否前往登录？',
-        confirmText: '去登录',
+        title: '登录状态已失效',
+        body: '您的教师登录会话已过期，请重新登录账号以继续操作。<br><span style="font-size:12px;color:var(--text-muted, #94a3b8);">（提示：重新登录后无需刷新页面，当前编辑内容将被保留。若需退出可前往 <a href="index.html" style="color:var(--primary, #2563eb);">登录首页</a>）</span>',
+        confirmText: '立即登录',
+        cancelText: '取消',
         onConfirm: () => {
-            window.location.href = 'admin-login.html?redirect=question-bank.html';
+            if (typeof window.showAuthModal === 'function') {
+                window.showAuthModal();
+            } else {
+                window.location.href = 'index.html';
+            }
         }
     });
 }
@@ -806,6 +811,565 @@ if (!window._hwPreviewEscBound) {
     });
 }
 
+// ========== 举一反三智能流水线工作台 (Smart Pipeline Workbench) ==========
+let pipelineItems = [];
+let pipelineCurrentIndex = 0;
+
+function initVariationPipeline() {
+    const buckets = getConsolidationBuckets();
+    const count = batchQuestionPageCount || 0;
+    pipelineItems = [];
+    let currentAnPagePointer = 0;
+
+    for (let i = 0; i < count; i++) {
+        const pNum = (buckets[i] ? buckets[i].parentNum : (buckets[0] ? buckets[0].parentNum : 1));
+        let anPages = [];
+        if (currentAnPagePointer < batchAnswerPageCount) {
+            anPages = [currentAnPagePointer];
+            currentAnPagePointer++;
+        }
+        pipelineItems.push({
+            id: i + 1,
+            parentQuestionNum: Number(pNum),
+            exercisePages: [i],
+            answerPages: anPages
+        });
+    }
+
+    pipelineCurrentIndex = 0;
+    renderVariationPipeline();
+}
+
+function renderVariationPipeline() {
+    const total = pipelineItems.length;
+    if (total === 0) return;
+    if (pipelineCurrentIndex < 0) pipelineCurrentIndex = 0;
+    if (pipelineCurrentIndex >= total) pipelineCurrentIndex = total - 1;
+
+    const curNumEl = document.getElementById('pipe-current-num');
+    const totNumEl = document.getElementById('pipe-total-num');
+    const sumCountEl = document.getElementById('pipe-summary-count');
+    if (curNumEl) curNumEl.textContent = String(pipelineCurrentIndex + 1);
+    if (totNumEl) totNumEl.textContent = String(total);
+    if (sumCountEl) sumCountEl.textContent = String(total);
+
+    renderPipelineBreadcrumbs();
+    renderPipelineHwCards();
+    renderPipelineStage();
+    updatePipelineNavButtons();
+    updateAnnotationStatus();
+}
+
+function renderPipelineBreadcrumbs() {
+    const strip = document.getElementById('pipe-breadcrumb-strip');
+    if (!strip) return;
+
+    strip.innerHTML = pipelineItems.map((item, idx) => {
+        const isActive = idx === pipelineCurrentIndex;
+        const anCount = item.answerPages ? item.answerPages.length : 0;
+        const hasAnswer = anCount > 0;
+        return `
+            <div class="pipe-crumb-pill ${isActive ? 'active' : ''} ${hasAnswer ? '' : 'no-answer'}"
+                 onclick="pipeJumpToQuestion(${idx})" title="切换至变式第 ${idx + 1} 题 (课后第 ${item.parentQuestionNum} 题)">
+                <span class="pipe-crumb-num">${idx + 1}</span>
+                <span>课后第 ${item.parentQuestionNum} 题</span>
+                <span style="font-size:0.72rem; opacity:0.8;">(${anCount}页答案)</span>
+            </div>
+        `;
+    }).join('');
+
+    const activeEl = strip.querySelector('.pipe-crumb-pill.active');
+    if (activeEl && typeof activeEl.scrollIntoView === 'function') {
+        activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    }
+}
+
+function getPipelineSubNum(targetIdx) {
+    const item = pipelineItems[targetIdx];
+    if (!item) return 1;
+    let sub = 0;
+    for (let i = 0; i <= targetIdx; i++) {
+        if (pipelineItems[i] && pipelineItems[i].parentQuestionNum === item.parentQuestionNum) {
+            sub++;
+        }
+    }
+    return Math.max(1, sub);
+}
+
+function renderPipelineHwCards() {
+    const container = document.getElementById('pipe-hw-cards-grid');
+    if (!container) return;
+    const buckets = getConsolidationBuckets();
+    const currItem = pipelineItems[pipelineCurrentIndex];
+    const currParent = currItem ? currItem.parentQuestionNum : (buckets[0]?.parentNum || 1);
+
+    const counts = {};
+    buckets.forEach(b => { counts[b.parentNum] = 0; });
+    pipelineItems.forEach(it => {
+        if (it && it.parentQuestionNum) {
+            counts[it.parentQuestionNum] = (counts[it.parentQuestionNum] || 0) + 1;
+        }
+    });
+
+    container.innerHTML = buckets.map(b => {
+        const isActive = Number(b.parentNum) === Number(currParent);
+        const count = counts[b.parentNum] || 0;
+        return `
+            <div class="pipe-hw-card ${isActive ? 'active' : ''}" onclick="selectPipelineHomework(${b.parentNum})" title="点击将当前变式题归入课后第 ${b.parentNum} 题">
+                <div class="pipe-hw-card-top">
+                    <span class="pipe-hw-num">课后第 ${b.parentNum} 题</span>
+                    <span class="pipe-hw-count-badge ${count > 0 ? 'has-items' : ''}">${count > 0 ? `已配 ${count} 题` : '未配'}</span>
+                </div>
+                <div class="pipe-hw-topic" title="${escapeHtml(b.topic || '')}">${escapeHtml(b.topic || '（未设考点）')}</div>
+            </div>
+        `;
+    }).join('');
+
+    const descEl = document.getElementById('pipe-active-hw-desc');
+    const matchedBucket = buckets.find(b => Number(b.parentNum) === Number(currParent));
+    const subNum = getPipelineSubNum(pipelineCurrentIndex);
+    if (descEl) {
+        descEl.innerHTML = `当前选定：<b>课后第 ${currParent} 题 · 变式 ${subNum}</b>（考点：${escapeHtml(matchedBucket?.topic || '未设考点')}）`;
+    }
+
+    selectedBucketParentNum = Number(currParent);
+}
+
+function selectPipelineHomework(parentNum) {
+    if (!pipelineItems[pipelineCurrentIndex]) return;
+    pipelineItems[pipelineCurrentIndex].parentQuestionNum = Number(parentNum);
+    renderPipelineHwCards();
+    renderPipelineBreadcrumbs();
+}
+
+function renderPipelineStage() {
+    const item = pipelineItems[pipelineCurrentIndex];
+    if (!item) return;
+
+    // 1. Exercise (Left)
+    const exImg = document.getElementById('pipe-exercise-img');
+    const exInfo = document.getElementById('pipe-ex-page-info');
+    const exPagesSelector = document.getElementById('pipe-ex-pages-selector');
+
+    const firstExPage = item.exercisePages[0] || 0;
+    if (exImg) {
+        exImg.src = batchQuestionThumbs[firstExPage] || '';
+    }
+    if (exInfo) {
+        exInfo.textContent = `PDF 第 ${item.exercisePages.map(p => p + 1).join(', ')} 页`;
+    }
+    if (exPagesSelector) {
+        exPagesSelector.innerHTML = item.exercisePages.map(p => `
+            <span class="pipe-ex-tag">第 ${p + 1} 页</span>
+        `).join('') + `
+            <button type="button" class="btn xs secondary" style="font-size:0.7rem; padding:1px 6px;" onclick="promptToggleExPage()" title="若本道变式题目本身跨越多页，可在此增减题目页">增减题目续页</button>
+        `;
+    }
+
+    // 2. Answer (Right Filmstrip)
+    const anInfo = document.getElementById('pipe-an-page-info');
+    const anSummary = document.getElementById('pipe-an-selection-summary');
+    const filmstrip = document.getElementById('pipe-filmstrip-grid');
+
+    const anCount = item.answerPages ? item.answerPages.length : 0;
+    if (anInfo) {
+        anInfo.textContent = anCount > 0 ? `已选 ${anCount} 页答案` : '未选择答案页';
+        anInfo.style.color = anCount > 0 ? '#059669' : '#ef4444';
+    }
+    if (anSummary) {
+        if (anCount > 0) {
+            anSummary.innerHTML = `<span>✓ 已分配答案：第 ${item.answerPages.map(p => p + 1).join('、')} 页 (共 ${anCount} 页解析)</span>`;
+            anSummary.style.color = '#059669';
+        } else {
+            anSummary.innerHTML = `<span style="color:#ef4444;">⚠️ 尚未为当前题目选择对应答案页</span>`;
+        }
+    }
+
+    if (filmstrip) {
+        filmstrip.innerHTML = '';
+        for (let aIdx = 0; aIdx < batchAnswerPageCount; aIdx++) {
+            const isCurrent = item.answerPages.includes(aIdx);
+            const otherIdx = pipelineItems.findIndex((it, idx) => idx !== pipelineCurrentIndex && it.answerPages && it.answerPages.includes(aIdx));
+            const card = document.createElement('div');
+            card.className = `pipe-an-card ${isCurrent ? 'selected-current' : (otherIdx >= 0 ? 'used-other' : 'unassigned')}`;
+            card.onclick = () => togglePipelineAnswerPage(aIdx);
+            card.title = isCurrent 
+                ? `已选为本题答案 (第 ${item.answerPages.indexOf(aIdx) + 1} 页)，点击可取消选择` 
+                : (otherIdx >= 0 
+                    ? `已被变式第 ${otherIdx + 1} 题使用，点击将转移到本题` 
+                    : `点击选用为本题答案`);
+
+            card.innerHTML = `
+                <div class="pipe-an-thumb-wrap">
+                    <img src="${batchAnswerThumbs[aIdx]}" alt="答案第 ${aIdx + 1} 页" loading="lazy">
+                    <div class="pipe-an-badge">
+                        ${isCurrent 
+                            ? `<span class="badge-sel">✓ 答案第 ${item.answerPages.indexOf(aIdx) + 1} 页</span>` 
+                            : (otherIdx >= 0 
+                                ? `<span class="badge-used">变式 ${otherIdx + 1} 已用</span>` 
+                                : `<span class="badge-empty">待分配</span>`)}
+                    </div>
+                    <div class="pipe-an-zoom" onclick="event.stopPropagation(); openPipeAnswerLightbox(${aIdx});" title="点击放大查看答案解析">
+                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line></svg>
+                    </div>
+                </div>
+                <div class="pipe-an-footer">
+                    <span class="pipe-an-page-no">第 ${aIdx + 1} 页</span>
+                    <span class="pipe-an-check-icon">${isCurrent ? '✓ 已选' : (otherIdx >= 0 ? '已用' : '+ 选用')}</span>
+                </div>
+            `;
+            filmstrip.appendChild(card);
+        }
+    }
+}
+
+function promptToggleExPage() {
+    const item = pipelineItems[pipelineCurrentIndex];
+    if (!item) return;
+    const currentStr = item.exercisePages.map(p => p + 1).join(',');
+    const input = prompt(`当前变式题目包含的 PDF 页码（英文逗号隔开，范围 1~${batchQuestionPageCount}）：`, currentStr);
+    if (input === null) return;
+    const parts = input.split(',').map(s => parseInt(s.trim(), 10)).filter(n => Number.isInteger(n) && n >= 1 && n <= batchQuestionPageCount);
+    if (parts.length === 0) {
+        showToast('至少需要包含 1 个有效题目页码', 'warn');
+        return;
+    }
+    const newPages = Array.from(new Set(parts)).map(n => n - 1).sort((a, b) => a - b);
+    item.exercisePages = newPages;
+    renderPipelineStage();
+}
+
+function togglePipelineAnswerPage(aIdx) {
+    const item = pipelineItems[pipelineCurrentIndex];
+    if (!item) return;
+    if (!item.answerPages) item.answerPages = [];
+    const pos = item.answerPages.indexOf(aIdx);
+    if (pos >= 0) {
+        item.answerPages.splice(pos, 1);
+    } else {
+        pipelineItems.forEach((other, oIdx) => {
+            if (oIdx !== pipelineCurrentIndex && other.answerPages) {
+                const oPos = other.answerPages.indexOf(aIdx);
+                if (oPos >= 0) {
+                    other.answerPages.splice(oPos, 1);
+                }
+            }
+        });
+        item.answerPages.push(aIdx);
+        item.answerPages.sort((a, b) => a - b);
+    }
+    renderPipelineStage();
+    renderPipelineBreadcrumbs();
+}
+
+function clearCurrentPipeAnswers() {
+    const item = pipelineItems[pipelineCurrentIndex];
+    if (!item) return;
+    item.answerPages = [];
+    renderPipelineStage();
+    renderPipelineBreadcrumbs();
+}
+
+function updatePipelineNavButtons() {
+    const prevBtn = document.getElementById('pipe-btn-prev');
+    const nextBtn = document.getElementById('pipe-btn-next');
+    const isFirst = pipelineCurrentIndex <= 0;
+    const isLast = pipelineCurrentIndex >= pipelineItems.length - 1;
+
+    if (prevBtn) {
+        prevBtn.disabled = isFirst;
+    }
+    if (nextBtn) {
+        if (isLast) {
+            nextBtn.innerHTML = `完成分配并切片导入 ✓`;
+            nextBtn.className = 'btn primary';
+            nextBtn.style.background = '#059669';
+            nextBtn.style.borderColor = '#059669';
+        } else {
+            nextBtn.innerHTML = `下一道变式 →`;
+            nextBtn.className = 'btn primary';
+            nextBtn.style.background = '';
+            nextBtn.style.borderColor = '';
+        }
+    }
+}
+
+function pipePrevQuestion() {
+    if (pipelineCurrentIndex > 0) {
+        pipelineCurrentIndex--;
+        renderVariationPipeline();
+    }
+}
+
+function pipeNextQuestion() {
+    if (pipelineCurrentIndex < pipelineItems.length - 1) {
+        pipelineCurrentIndex++;
+        renderVariationPipeline();
+    } else {
+        doImportFromPipeline();
+    }
+}
+
+function pipeJumpToQuestion(idx) {
+    if (idx >= 0 && idx < pipelineItems.length) {
+        pipelineCurrentIndex = idx;
+        renderVariationPipeline();
+    }
+}
+
+function autoMatchPipeline1to1() {
+    const buckets = getConsolidationBuckets();
+    for (let i = 0; i < pipelineItems.length; i++) {
+        const item = pipelineItems[i];
+        if (buckets[i]) {
+            item.parentQuestionNum = buckets[i].parentNum;
+        } else if (buckets.length > 0) {
+            item.parentQuestionNum = buckets[buckets.length - 1].parentNum;
+        }
+        item.exercisePages = [i];
+        item.answerPages = (i < batchAnswerPageCount) ? [i] : [];
+    }
+    renderVariationPipeline();
+    showToast('已按 1 页题目对 1 页答案快速分配完成');
+}
+
+function openPipePageLightbox(kind) {
+    const item = pipelineItems[pipelineCurrentIndex];
+    if (!item) return;
+    const pIdx = item.exercisePages[0] || 0;
+    openPageLightbox('q', pIdx);
+}
+
+function openPipeAnswerLightbox(aIdx) {
+    openPageLightbox('a', aIdx);
+}
+
+// ========== Pipeline Summary Modal ==========
+function openPipelineSummaryDialog() {
+    const dialog = document.getElementById('pipeline-summary-dialog');
+    const countBadge = document.getElementById('pipe-modal-count-badge');
+    const tableBody = document.getElementById('pipe-summary-table-body');
+    const footerInfo = document.getElementById('pipe-summary-footer-info');
+    if (!dialog || !tableBody) return;
+
+    if (countBadge) countBadge.textContent = `共 ${pipelineItems.length} 道变式题`;
+
+    const buckets = getConsolidationBuckets();
+    const bucketMap = {};
+    buckets.forEach(b => { bucketMap[b.parentNum] = b; });
+
+    let unassignedAnswerCount = 0;
+    tableBody.innerHTML = pipelineItems.map((item, idx) => {
+        const b = bucketMap[item.parentQuestionNum];
+        const subNum = getPipelineSubNum(idx);
+        const anPages = item.answerPages || [];
+        const isAnswerEmpty = anPages.length === 0;
+        if (isAnswerEmpty) unassignedAnswerCount++;
+
+        return `
+            <tr style="${idx === pipelineCurrentIndex ? 'background:rgba(5,150,105,0.06);' : ''}">
+                <td><strong>第 ${idx + 1} 题</strong></td>
+                <td>
+                    <span style="font-weight:600; color:var(--text-primary);">课后第 ${item.parentQuestionNum} 题</span>
+                    <div style="font-size:0.75rem; color:var(--text-secondary);">${escapeHtml(b?.topic || '未设考点')}</div>
+                </td>
+                <td><span class="saved-badge badge-variation" style="background:#ecfdf5;color:#059669;border-color:#a7f3d0;">变式 ${subNum}</span></td>
+                <td>第 ${item.exercisePages.map(p => p + 1).join(', ')} 页</td>
+                <td>
+                    ${isAnswerEmpty 
+                        ? `<span style="color:#ef4444; font-weight:600;">⚠️ 未分配答案</span>` 
+                        : `<span style="color:#059669; font-weight:600;">第 ${anPages.map(p => p + 1).join('、')} 页 (共 ${anPages.length} 页)</span>`}
+                </td>
+                <td>
+                    ${isAnswerEmpty 
+                        ? `<span style="color:#ef4444;">待完善</span>` 
+                        : `<span style="color:#059669;">✓ 正常</span>`}
+                </td>
+                <td style="text-align:center;">
+                    <button type="button" class="btn xs secondary" onclick="closePipelineSummaryDialog(); pipeJumpToQuestion(${idx});">跳转修改</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    if (footerInfo) {
+        if (unassignedAnswerCount > 0) {
+            footerInfo.innerHTML = `<span style="color:#ef4444; font-weight:600;">⚠️ 提示：检测到有 ${unassignedAnswerCount} 道变式题尚未分配答案页，请核对。</span>`;
+        } else {
+            footerInfo.innerHTML = `<span style="color:#059669; font-weight:600;">✓ 全部变式题已完整分配课后原题与答案解析。</span>`;
+        }
+    }
+
+    dialog.classList.add('active');
+}
+
+function closePipelineSummaryDialog() {
+    const dialog = document.getElementById('pipeline-summary-dialog');
+    if (dialog) dialog.classList.remove('active');
+}
+
+// ========== Do Import from Pipeline ==========
+async function doImportFromPipeline() {
+    const emptyAnswerItems = pipelineItems.filter(it => !it.answerPages || it.answerPages.length === 0);
+    if (emptyAnswerItems.length > 0) {
+        showCustomDialog({
+            title: '部分题目未分配答案',
+            body: `检测到变式第 ${emptyAnswerItems.map(it => it.id).join('、')} 题尚未选择对应答案页。<br><br>是否继续导入？未选答案的题目将不包含答案解析 PDF。`,
+            confirmText: '继续切片导入',
+            cancelText: '返回修改',
+            onConfirm: () => executePipelineImport()
+        });
+        return;
+    }
+    await executePipelineImport();
+}
+
+async function executePipelineImport() {
+    const buckets = getConsolidationBuckets();
+    const bucketTopicMap = {};
+    buckets.forEach(b => { bucketTopicMap[b.parentNum] = b.topic || ''; });
+
+    const parentSubCounts = {};
+    const varItems = pipelineItems.map((item, idx) => {
+        const pNum = item.parentQuestionNum;
+        parentSubCounts[pNum] = (parentSubCounts[pNum] || 0) + 1;
+        const subNum = parentSubCounts[pNum];
+        return {
+            id: idx + 1,
+            parentQuestionNum: pNum,
+            subNum: subNum,
+            topic: bucketTopicMap[pNum] || '',
+            videoUrl: '',
+            exercisePages: item.exercisePages,
+            answerPages: item.answerPages || []
+        };
+    });
+
+    const nextBtn = document.getElementById('pipe-btn-next');
+    if (nextBtn) nextBtn.disabled = true;
+
+    try {
+        showToast('正在切分并导入举一反三题目...');
+        const [exBuf, anBuf] = await Promise.all([
+            batchExerciseFile.arrayBuffer(),
+            batchAnswerFile.arrayBuffer()
+        ]);
+        const exerciseSrc = await PDFLib.PDFDocument.load(exBuf);
+        const answerSrc = await PDFLib.PDFDocument.load(anBuf);
+
+        currentQuestions = varItems.map(item => {
+            const qThumb = batchQuestionThumbs[item.exercisePages[0]] || null;
+            const aThumb = item.answerPages.length > 0 ? (batchAnswerThumbs[item.answerPages[0]] || null) : null;
+            return {
+                id: item.id,
+                parentQuestionNum: item.parentQuestionNum,
+                subNum: item.subNum,
+                topic: item.topic,
+                videoUrl: '',
+                exercisePdf: { status: 'uploading', name: `课后第${item.parentQuestionNum}题_变式${item.subNum}_题目.pdf`, thumb: qThumb },
+                answerPdf: aThumb ? { status: 'uploading', name: `课后第${item.parentQuestionNum}题_变式${item.subNum}_答案.pdf`, thumb: aThumb } : null
+            };
+        });
+
+        isDirty = true;
+        renderQuestionList();
+        updateStatus();
+
+        let failCount = 0;
+        for (let idx = 0; idx < varItems.length; idx++) {
+            const item = varItems[idx];
+            showToast(`正在切分上传 ${idx + 1}/${varItems.length}...`);
+
+            // 题目切分
+            try {
+                const exBlob = await mergePages(exerciseSrc, item.exercisePages);
+                const exFile = new File([exBlob], `课后第${item.parentQuestionNum}题_变式${item.subNum}_题目.pdf`, { type: 'application/pdf' });
+                const exRes = await uploadPdfBlob(exFile);
+                currentQuestions[idx].exercisePdf = {
+                    url: exRes.url,
+                    name: exRes.originalName,
+                    status: 'uploaded',
+                    thumb: batchQuestionThumbs[item.exercisePages[0]] || null
+                };
+            } catch (e) {
+                console.error('举一反三题目切片上传失败', item, e);
+                currentQuestions[idx].exercisePdf = null;
+                failCount++;
+            }
+
+            // 答案切分 (支持多页合并切片)
+            if (item.answerPages.length > 0) {
+                try {
+                    const anBlob = await mergePages(answerSrc, item.answerPages);
+                    const anFile = new File([anBlob], `课后第${item.parentQuestionNum}题_变式${item.subNum}_答案.pdf`, { type: 'application/pdf' });
+                    const anRes = await uploadPdfBlob(anFile);
+                    currentQuestions[idx].answerPdf = {
+                        url: anRes.url,
+                        name: anRes.originalName,
+                        status: 'uploaded',
+                        thumb: batchAnswerThumbs[item.answerPages[0]] || null
+                    };
+                } catch (e) {
+                    console.error('举一反三答案切片上传失败', item, e);
+                    currentQuestions[idx].answerPdf = null;
+                    failCount++;
+                }
+            }
+        }
+
+        batchImported = currentQuestions.length > 0;
+        renderQuestionList();
+        updateStatus();
+        if (failCount > 0) {
+            showToast(`导入完成，但有 ${failCount} 个切片上传失败`);
+        } else {
+            showToast(`已成功导入 ${currentQuestions.length} 道举一反三变式题`);
+        }
+        if (currentQuestions.length > 0) {
+            goToStep(4);
+        }
+    } catch (e) {
+        console.error('举一反三切片导入失败:', e);
+        showToast('切片导入失败，请检查 PDF 文件');
+    } finally {
+        if (nextBtn) nextBtn.disabled = false;
+    }
+}
+
+if (!window._pipeKeyNavBound) {
+    window._pipeKeyNavBound = true;
+    document.addEventListener('keydown', (e) => {
+        if (getBankType() !== 'variation' || currentStep !== 3) return;
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+        const lightbox = document.getElementById('page-lightbox-dialog');
+        const summaryDialog = document.getElementById('pipeline-summary-dialog');
+        const hwDialog = document.getElementById('homework-preview-dialog');
+        if (lightbox?.classList.contains('active') || summaryDialog?.classList.contains('active') || hwDialog?.classList.contains('active')) {
+            if (e.key === 'Escape') {
+                if (summaryDialog?.classList.contains('active')) closePipelineSummaryDialog();
+            }
+            return;
+        }
+
+        if (e.key === ' ' || e.key === 'Enter') {
+            e.preventDefault();
+            pipeNextQuestion();
+        } else if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            pipePrevQuestion();
+        } else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            pipeNextQuestion();
+        } else if (e.key >= '1' && e.key <= '9') {
+            const num = parseInt(e.key, 10);
+            const buckets = getConsolidationBuckets();
+            if (buckets.some(b => Number(b.parentNum) === num)) {
+                selectPipelineHomework(num);
+            }
+        }
+    });
+}
+
 function initVariationAssignments() {
     variationAssignments.q = new Array(batchQuestionPageCount).fill(null);
     variationAssignments.a = new Array(batchAnswerPageCount).fill(null);
@@ -965,6 +1529,7 @@ async function goNextFromStep2() {
         if (!ok) return;
         batchImported = false;
         if (getBankType() === 'variation') {
+            initVariationPipeline();
             initVariationAssignments();
         } else {
             buildDefaultLabels();
@@ -1220,6 +1785,7 @@ function syncAnswerToQuestionNumbers() {
 }
 
 function renderAnnotationList() {
+    const isVar = getBankType() === 'variation';
     const qCount = document.getElementById('qpdf-page-count');
     const aCount = document.getElementById('apdf-page-count');
     const tabQ = document.getElementById('tab-q-count');
@@ -1228,13 +1794,37 @@ function renderAnnotationList() {
     if (aCount) aCount.textContent = batchAnswerPageCount;
     if (tabQ) tabQ.textContent = batchQuestionPageCount;
     if (tabA) tabA.textContent = batchAnswerPageCount;
-    if (getBankType() === 'variation') {
-        renderVariationBucketCards();
-    }
-    renderPageGrid('qpdf-page-grid', batchQuestionThumbs, batchQuestionLabels, 'q');
-    renderPageGrid('apdf-page-grid', batchAnswerThumbs, batchAnswerLabels, 'a');
-    setThumbSize(currentThumbSize);
-    if (getBankType() !== 'variation') {
+
+    const pipeContainer = document.getElementById('variation-pipeline-container');
+    const mappingContainer = document.getElementById('mapping-sections-container');
+    const stdHint = document.getElementById('step3-standard-hint');
+    const varHint = document.getElementById('step3-variation-hint');
+    const varBucketPanel = document.getElementById('variation-bucket-panel');
+    const mappingNextBtn = document.getElementById('mapping-next-btn');
+    const autoCascadeWrap = document.getElementById('auto-cascade-numbers')?.closest('.label-sync-action');
+    const autoDetectStatus = document.getElementById('auto-detect-status');
+
+    if (isVar) {
+        if (pipeContainer) pipeContainer.style.display = 'flex';
+        if (mappingContainer) mappingContainer.style.display = 'none';
+        if (stdHint) stdHint.style.display = 'none';
+        if (varHint) varHint.style.display = 'none';
+        if (varBucketPanel) varBucketPanel.style.display = 'none';
+        if (mappingNextBtn) mappingNextBtn.style.display = 'none';
+        if (autoCascadeWrap) autoCascadeWrap.style.display = 'none';
+        if (autoDetectStatus) autoDetectStatus.style.display = 'none';
+        renderVariationPipeline();
+    } else {
+        if (pipeContainer) pipeContainer.style.display = 'none';
+        if (mappingContainer) mappingContainer.style.display = 'flex';
+        if (stdHint) stdHint.style.display = 'block';
+        if (varHint) varHint.style.display = 'none';
+        if (varBucketPanel) varBucketPanel.style.display = 'none';
+        if (mappingNextBtn) mappingNextBtn.style.display = 'inline-flex';
+        if (autoCascadeWrap) autoCascadeWrap.style.display = 'inline-flex';
+        renderPageGrid('qpdf-page-grid', batchQuestionThumbs, batchQuestionLabels, 'q');
+        renderPageGrid('apdf-page-grid', batchAnswerThumbs, batchAnswerLabels, 'a');
+        setThumbSize(currentThumbSize);
         updateAutoDetectStatus();
     }
 }
@@ -1753,8 +2343,8 @@ function updateAnnotationStatus() {
     const el = document.getElementById('mapping-status-text');
     if (!el) return;
     if (getBankType() === 'variation') {
-        const assignedQ = (variationAssignments.q || []).filter(Boolean).length;
-        el.textContent = `题目 ${batchQuestionPageCount} 页 (已分配 ${assignedQ} 页) / 答案 ${batchAnswerPageCount} 页`;
+        const assignedAn = (pipelineItems || []).filter(it => it.answerPages && it.answerPages.length > 0).length;
+        el.textContent = `变式 ${pipelineItems.length} 题 (已配答案 ${assignedAn}/${pipelineItems.length})`;
         return;
     }
     const qSet = new Set(batchQuestionLabels.filter(n => Number.isInteger(n) && n > 0));
@@ -1921,7 +2511,7 @@ async function goNextFromVariationMapping() {
 
 async function goNextFromMapping() {
     if (getBankType() === 'variation') {
-        await goNextFromVariationMapping();
+        await doImportFromPipeline();
         return;
     }
 
@@ -4054,6 +4644,21 @@ window.openHomeworkPdfInNewTab = openHomeworkPdfInNewTab;
 window.autoAssignVariationPages1to1 = autoAssignVariationPages1to1;
 window.clearAllVariationAssignments = clearAllVariationAssignments;
 window.onLightboxVariationChange = onLightboxVariationChange;
+
+window.initVariationPipeline = initVariationPipeline;
+window.renderVariationPipeline = renderVariationPipeline;
+window.selectPipelineHomework = selectPipelineHomework;
+window.togglePipelineAnswerPage = togglePipelineAnswerPage;
+window.clearCurrentPipeAnswers = clearCurrentPipeAnswers;
+window.pipePrevQuestion = pipePrevQuestion;
+window.pipeNextQuestion = pipeNextQuestion;
+window.pipeJumpToQuestion = pipeJumpToQuestion;
+window.autoMatchPipeline1to1 = autoMatchPipeline1to1;
+window.openPipePageLightbox = openPipePageLightbox;
+window.openPipeAnswerLightbox = openPipeAnswerLightbox;
+window.openPipelineSummaryDialog = openPipelineSummaryDialog;
+window.closePipelineSummaryDialog = closePipelineSummaryDialog;
+window.promptToggleExPage = promptToggleExPage;
 
 window.addEventListener('resize', () => {
     document.querySelectorAll('.question-topic-input').forEach(el => {

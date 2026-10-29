@@ -12,7 +12,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261029_v4';
+            const v = '20261029_v5';
             document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/question-bank.css?v=${v}">`);
@@ -422,6 +422,113 @@
                                 </div>
                             </div>
 
+                            <!-- 举一反三智能流水线工作台 (Smart Pipeline Workbench) -->
+                            <div class="variation-pipeline-container" id="variation-pipeline-container" style="display:none;">
+                                <div class="pipe-top-bar">
+                                    <div class="pipe-progress-info">
+                                        <span class="pipe-badge-main">变式流水线</span>
+                                        <span class="pipe-step-indicator">第 <b id="pipe-current-num">1</b> / <span id="pipe-total-num">0</span> 道题</span>
+                                        <span class="pipe-sub-tip">题目与答案按题推进；支持答案多页跨页勾选</span>
+                                    </div>
+                                    <div class="pipe-top-actions">
+                                        <button type="button" class="btn sm secondary" onclick="autoMatchPipeline1to1()" title="按 1 题对 1 题快速分配所有页面">1页对1题快速匹配</button>
+                                        <button type="button" class="btn sm secondary" onclick="openPipelineSummaryDialog()" title="查看所有变式题的原题归属与答案页分配清单">核对总览清单 (<span id="pipe-summary-count">0</span>)</button>
+                                    </div>
+                                </div>
+
+                                <!-- 变式题目导航胶囊序列 -->
+                                <div class="pipe-breadcrumb-strip" id="pipe-breadcrumb-strip">
+                                    <!-- 动态渲染每个变式题标签 -->
+                                </div>
+
+                                <!-- 课后原题卡槽栏 (目标原题选择) -->
+                                <div class="pipe-hw-section">
+                                    <div class="pipe-hw-header">
+                                        <div class="pipe-hw-title-wrap">
+                                            <span class="pipe-section-label">归入课后巩固原题</span>
+                                            <span class="pipe-active-hw-desc" id="pipe-active-hw-desc">当前选定：<b>课后第 1 题</b></span>
+                                        </div>
+                                        <button type="button" class="bucket-preview-btn active-bucket-preview-btn" onclick="previewCurrentHomeworkQuestion(event)" title="同屏对比当前选定的课后原题">
+                                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                            同屏对比原题
+                                        </button>
+                                    </div>
+                                    <div class="pipe-hw-cards-grid" id="pipe-hw-cards-grid">
+                                        <!-- 动态渲染课后原题卡片 -->
+                                    </div>
+                                </div>
+
+                                <!-- 主工作台：左侧题目，右侧答案胶卷 -->
+                                <div class="pipe-stage-workbench">
+                                    <!-- 左侧：变式题目区 -->
+                                    <div class="pipe-column pipe-col-exercise">
+                                        <div class="pipe-col-header">
+                                            <div class="pipe-col-title">
+                                                <span class="col-pill ex">变式题目</span>
+                                                <span class="col-meta" id="pipe-ex-page-info">PDF 第 1 页</span>
+                                            </div>
+                                            <div class="pipe-col-tools">
+                                                <button type="button" class="btn xs secondary" onclick="openPipePageLightbox('q')" title="放大查看题目大图">
+                                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line></svg>
+                                                    放大
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="pipe-preview-frame" onclick="openPipePageLightbox('q')" title="点击放大查看高清题目">
+                                            <img id="pipe-exercise-img" class="pipe-preview-img" src="" alt="题目大图">
+                                            <div class="pipe-zoom-tip">点击放大查看</div>
+                                        </div>
+                                        <div class="pipe-col-footer">
+                                            <span class="pipe-footer-label">包含题目页：</span>
+                                            <div class="pipe-ex-pages-selector" id="pipe-ex-pages-selector">
+                                                <!-- 题目页码标签 -->
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- 右侧：对应答案区 (胶卷多选) -->
+                                    <div class="pipe-column pipe-col-answer">
+                                        <div class="pipe-col-header">
+                                            <div class="pipe-col-title">
+                                                <span class="col-pill an">对应答案解析</span>
+                                                <span class="col-meta" id="pipe-an-page-info">已选 1 页答案</span>
+                                            </div>
+                                            <div class="pipe-col-tools">
+                                                <button type="button" class="btn xs secondary" onclick="clearCurrentPipeAnswers()" title="清空本题选中的答案页">清空选中</button>
+                                            </div>
+                                        </div>
+                                        <div class="pipe-answer-scrollbox" id="pipe-answer-scrollbox">
+                                            <div class="pipe-filmstrip-grid" id="pipe-filmstrip-grid">
+                                                <!-- 动态渲染答案页胶卷，点击卡片即可多选/反选 -->
+                                            </div>
+                                        </div>
+                                        <div class="pipe-col-footer answer-footer">
+                                            <div class="pipe-an-selection-summary" id="pipe-an-selection-summary">
+                                                <span>已分配答案：第 1 页</span>
+                                            </div>
+                                            <span class="pipe-multi-hint">提示：直接点击答案缩略图即可多选跨页解析</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 底部流水线控制台 -->
+                                <div class="pipe-bottom-nav">
+                                    <div class="pipe-nav-left">
+                                        <button type="button" class="btn secondary" id="pipe-btn-prev" onclick="pipePrevQuestion()">
+                                            ← 上一道变式
+                                        </button>
+                                    </div>
+                                    <div class="pipe-nav-center">
+                                        <span class="pipe-kbd-tip">快捷键：按 <b>Space</b> 或 <b>Enter</b> 确认并切至下一题；按 <b>← / →</b> 翻题；数字键 <b>1~9</b> 选课后题</span>
+                                    </div>
+                                    <div class="pipe-nav-right">
+                                        <button type="button" class="btn primary" id="pipe-btn-next" onclick="pipeNextQuestion()">
+                                            下一道变式 →
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
                             <div class="mapping-sections-container view-split" id="mapping-sections-container">
                                 <div class="mapping-section" id="section-exercise">
                                     <h4 class="mapping-section-title">
@@ -606,6 +713,43 @@
         </div>
     </div>
 
+    <!-- Pipeline Summary Dialog (举一反三核对总览清单) -->
+    <div class="dialog-overlay" id="pipeline-summary-dialog">
+        <div class="pipeline-summary-box">
+            <div class="pipeline-summary-header">
+                <div class="pipe-summary-title-wrap">
+                    <h3 class="dialog-title">举一反三分配总览清单</h3>
+                    <span class="pipe-summary-badge" id="pipe-modal-count-badge">共 0 道变式题</span>
+                </div>
+                <button type="button" class="pdf-preview-close" onclick="closePipelineSummaryDialog()" title="关闭 (ESC)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="pipeline-summary-body" id="pipe-summary-body">
+                <table class="pipeline-summary-table">
+                    <thead>
+                        <tr>
+                            <th style="width:65px;">序号</th>
+                            <th style="width:160px;">归属课后原题</th>
+                            <th style="width:100px;">变式编号</th>
+                            <th style="width:110px;">题目页码</th>
+                            <th>对应答案页码</th>
+                            <th style="width:90px;">状态</th>
+                            <th style="width:80px; text-align:center;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pipe-summary-table-body">
+                        <!-- 动态渲染每一道变式的汇总数据 -->
+                    </tbody>
+                </table>
+            </div>
+            <div class="pipeline-summary-footer">
+                <div class="pipe-summary-footer-info" id="pipe-summary-footer-info"></div>
+                <button type="button" class="btn primary sm" onclick="closePipelineSummaryDialog()">确定</button>
+            </div>
+        </div>
+    </div>
+
     <!-- High-Definition Page Lightbox Dialog -->
     <div class="dialog-overlay" id="page-lightbox-dialog">
         <div class="page-lightbox-box">
@@ -679,7 +823,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261029_v4';
+            const v = '20261029_v5';
             document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
             document.write(`<script src="js/common.js?v=${v}"><\/script>`);
             document.write(`<script src="js/auth.js?v=${v}"><\/script>`);
