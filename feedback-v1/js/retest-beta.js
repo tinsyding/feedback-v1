@@ -1200,43 +1200,43 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 }
 
                 // 2. 自底向上逐行扫描题目内容底部结束位置
-                // 排除底部 52pt（约占单页 6.2%~7%，通常为原始试卷页脚、内部资料标识或切片页码）
-                const footerIgnorePt = 52;
-                const footerIgnorePx = Math.max(Math.floor(height * 0.065), Math.floor((footerIgnorePt / pageHeightPt) * height));
+                // 排除底部页脚区域（缩减至 26pt，约单页 3%，避免误切紧贴下边缘的长大题或大图）
+                const footerIgnorePt = 26;
+                const footerIgnorePx = Math.max(Math.floor(height * 0.03), Math.floor((footerIgnorePt / pageHeightPt) * height));
                 const scanBottom = height - footerIgnorePx;
                 const scanTop = Math.max(10, Math.floor((topCropPt / pageHeightPt) * height));
 
-                // 题目内容深色墨水阈值：纯正题干墨水深黑 (RGB < 100)，
-                // 设定为 145 并要求每行深色像素 >= 6，可彻底忽略 180~245 的浅灰巨幅斜向水印、底纹与抗锯齿边缘
-                const CONTENT_INK_THRESHOLD = 145;
-
+                // 题目内容墨水检测：
+                // 几何线条、图表顶点、单字母编号（如 B、C、D、点 M 等）或分式下标极其纤细，单行往往仅 1~4 个像素宽！
+                // 针对纯深色墨水 (RGB < 115) 仅需单行出现 >= 2 像素即判定有笔画；抗锯齿过渡墨水 (RGB < 165) 仅需 >= 4 像素
                 let lastContentY = scanTop;
 
                 for (let y = scanBottom; y >= scanTop; y--) {
-                    let inkCount = 0;
+                    let darkCount = 0;
+                    let deepDarkCount = 0;
                     const rowOffset = y * width * 4;
-                    for (let x = 12; x < width - 12; x++) {
+                    for (let x = 10; x < width - 10; x++) {
                         const idx = rowOffset + x * 4;
                         const r = data[idx];
                         const g = data[idx + 1];
                         const b = data[idx + 2];
-                        if (r < CONTENT_INK_THRESHOLD && g < CONTENT_INK_THRESHOLD && b < CONTENT_INK_THRESHOLD) {
-                            inkCount++;
-                            if (inkCount >= 6) {
-                                lastContentY = y;
-                                break;
-                            }
+                        if (r < 115 && g < 115 && b < 115) {
+                            deepDarkCount++;
+                            darkCount++;
+                        } else if (r < 165 && g < 165 && b < 165) {
+                            darkCount++;
                         }
                     }
-                    if (lastContentY === y) {
+                    if (deepDarkCount >= 2 || darkCount >= 4) {
+                        lastContentY = y;
                         break;
                     }
                 }
 
                 // 换算回 PDF Points
                 const rawBottomPt = (lastContentY / height) * pageHeightPt;
-                // 加 18pt 呼吸余量（防止切到最下方下划线或下标）
-                const bottomCutPt = Math.min(pageHeightPt, Math.ceil(rawBottomPt + 18));
+                // 预留充分的呼吸余量（由原先极其容易切图切字的 18pt 提升至 35pt，约 1.2cm），严密保护几何图形底部顶点、字母标签、下划线及分式
+                const bottomCutPt = Math.min(pageHeightPt, Math.ceil(rawBottomPt + 35));
 
                 // 实际有效高度
                 const rawEffectiveH = bottomCutPt - topCropPt;
