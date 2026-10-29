@@ -100,24 +100,36 @@ fi
 
 fail=0
 
+http_code() {
+    local domain="$1"
+    local path="$2"
+    curl -sk --noproxy '*' --resolve "$domain:443:127.0.0.1" \
+        --connect-timeout 5 --max-time 15 \
+        -o /dev/null -w '%{http_code}' "https://$domain$path" || true
+}
+
+check_path() {
+    local domain="$1"
+    local path="$2"
+    local expected="$3"
+    local code=""
+    for _ in 1 2 3 4 5; do
+        code="$(http_code "$domain" "$path")"
+        if [ "$code" = "$expected" ]; then
+            return 0
+        fi
+        sleep 1
+    done
+    echo "FAIL $domain $path => $code（期望 $expected）"
+    return 1
+}
+
+sleep 1
+
 for domain in $SITES; do
-    code=$(curl -sk --resolve "$domain:443:127.0.0.1" -o /dev/null -w '%{http_code}' "https://$domain/data/vision_config.json" || true)
-    if [ "$code" != "404" ]; then
-        echo "FAIL $domain /data/vision_config.json => $code"
-        fail=1
-    fi
-
-    code=$(curl -sk --resolve "$domain:443:127.0.0.1" -o /dev/null -w '%{http_code}' "https://$domain/data/identify_archive/" || true)
-    if [ "$code" != "404" ]; then
-        echo "FAIL $domain /data/identify_archive/ => $code"
-        fail=1
-    fi
-
-    code=$(curl -sk --resolve "$domain:443:127.0.0.1" -o /dev/null -w '%{http_code}' "https://$domain/nginx.conf" || true)
-    if [ "$code" != "404" ]; then
-        echo "FAIL $domain /nginx.conf => $code"
-        fail=1
-    fi
+    check_path "$domain" "/data/vision_config.json" "404" || fail=1
+    check_path "$domain" "/data/identify_archive/" "404" || fail=1
+    check_path "$domain" "/nginx.conf" "404" || fail=1
 
     case "$domain" in
         feedback.wxjifang.cn) site_root="/www/wwwroot/JF/feedback-git/feedback-v1" ;;
@@ -129,11 +141,7 @@ for domain in $SITES; do
     if [ -n "$site_root" ] && [ -d "$site_root/data/pdfs" ]; then
         pdf=$(find "$site_root/data/pdfs" -maxdepth 1 -type f -name '*.pdf' -printf '%f\n' 2>/dev/null | head -n 1 || true)
         if [ -n "$pdf" ]; then
-            code=$(curl -sk --resolve "$domain:443:127.0.0.1" -o /dev/null -w '%{http_code}' "https://$domain/data/pdfs/$pdf" || true)
-            if [ "$code" != "200" ]; then
-                echo "FAIL $domain /data/pdfs/$pdf => $code"
-                fail=1
-            fi
+            check_path "$domain" "/data/pdfs/$pdf" "200" || fail=1
         fi
     fi
 done
