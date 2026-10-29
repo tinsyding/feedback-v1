@@ -12,7 +12,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261029_v5';
+            const v = '20261029_v6';
             document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/question-bank.css?v=${v}">`);
@@ -401,133 +401,6 @@
                         </div>
                         <div class="config-card-body">
                             <p class="qb-step-hint" id="step3-standard-hint">系统会先尝试从每页左上角的印刷文字中自动识别作业题号，并填入下方；<b>没有印刷题号的续页会自动沿用上一页题号</b>，并标注「沿用上页」供核对。<b>自动识别结果仍可直接手动修改</b>，未识别或识别错误的页面请手动填写。跨多页的题目/答案，填成同一个题号即可（已开启 <b>题号智能顺延</b>：当把多页题目的第 2 页改成 5 时，后续原本的 7 会自动换回 6 并整体顺延）。点击任意缩略图可全屏放大查阅。</p>
-                            <p class="qb-step-hint" id="step3-variation-hint" style="display:none;">
-                                <b>举一反三卡槽分配模式：</b>请点击下方卡槽选定目标课后原题，再点击 PDF 页面将其分配给该题（支持一题对应多个同类变式题）；亦可点击<b>「1页对1题快速匹配」</b>按顺序一键对齐。题目考点将在导入后自动从课后原题继承。点击卡片放大镜可全屏查看。
-                            </p>
-
-                            <!-- 举一反三课后原题卡槽栏 -->
-                            <div class="variation-bucket-panel" id="variation-bucket-panel" style="display:none;">
-                                <div class="bucket-header">
-                                    <div class="bucket-title-wrap">
-                                        <span class="bucket-main-title">关联课后原题卡槽</span>
-                                        <span class="bucket-sub-title" id="bucket-active-prompt">当前选定：<b id="active-bucket-name">课后第 1 题</b> <button type="button" class="bucket-preview-btn active-bucket-preview-btn" onclick="previewCurrentHomeworkQuestion(event)" title="查看当前选定课后题原题"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>查看原题</button>（点击下方 PDF 页面即可归入或移出）</span>
-                                    </div>
-                                    <div class="bucket-actions">
-                                        <button type="button" class="btn sm" onclick="autoAssignVariationPages1to1()" title="按页码顺序将每页依次分配给课后第1题、第2题...">1页对1题快速匹配</button>
-                                        <button type="button" class="btn sm secondary" onclick="clearAllVariationAssignments()">清空分配</button>
-                                    </div>
-                                </div>
-                                <div class="variation-bucket-cards" id="variation-bucket-cards">
-                                    <!-- 动态渲染课后原题卡槽 -->
-                                </div>
-                            </div>
-
-                            <!-- 举一反三智能流水线工作台 (Smart Pipeline Workbench) -->
-                            <div class="variation-pipeline-container" id="variation-pipeline-container" style="display:none;">
-                                <div class="pipe-top-bar">
-                                    <div class="pipe-progress-info">
-                                        <span class="pipe-badge-main">变式流水线</span>
-                                        <span class="pipe-step-indicator">第 <b id="pipe-current-num">1</b> / <span id="pipe-total-num">0</span> 道题</span>
-                                        <span class="pipe-sub-tip">题目与答案按题推进；支持答案多页跨页勾选</span>
-                                    </div>
-                                    <div class="pipe-top-actions">
-                                        <button type="button" class="btn sm secondary" onclick="autoMatchPipeline1to1()" title="按 1 题对 1 题快速分配所有页面">1页对1题快速匹配</button>
-                                        <button type="button" class="btn sm secondary" onclick="openPipelineSummaryDialog()" title="查看所有变式题的原题归属与答案页分配清单">核对总览清单 (<span id="pipe-summary-count">0</span>)</button>
-                                    </div>
-                                </div>
-
-                                <!-- 变式题目导航胶囊序列 -->
-                                <div class="pipe-breadcrumb-strip" id="pipe-breadcrumb-strip">
-                                    <!-- 动态渲染每个变式题标签 -->
-                                </div>
-
-                                <!-- 课后原题卡槽栏 (目标原题选择) -->
-                                <div class="pipe-hw-section">
-                                    <div class="pipe-hw-header">
-                                        <div class="pipe-hw-title-wrap">
-                                            <span class="pipe-section-label">归入课后巩固原题</span>
-                                            <span class="pipe-active-hw-desc" id="pipe-active-hw-desc">当前选定：<b>课后第 1 题</b></span>
-                                        </div>
-                                        <button type="button" class="bucket-preview-btn active-bucket-preview-btn" onclick="previewCurrentHomeworkQuestion(event)" title="同屏对比当前选定的课后原题">
-                                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                                            同屏对比原题
-                                        </button>
-                                    </div>
-                                    <div class="pipe-hw-cards-grid" id="pipe-hw-cards-grid">
-                                        <!-- 动态渲染课后原题卡片 -->
-                                    </div>
-                                </div>
-
-                                <!-- 主工作台：左侧题目，右侧答案胶卷 -->
-                                <div class="pipe-stage-workbench">
-                                    <!-- 左侧：变式题目区 -->
-                                    <div class="pipe-column pipe-col-exercise">
-                                        <div class="pipe-col-header">
-                                            <div class="pipe-col-title">
-                                                <span class="col-pill ex">变式题目</span>
-                                                <span class="col-meta" id="pipe-ex-page-info">PDF 第 1 页</span>
-                                            </div>
-                                            <div class="pipe-col-tools">
-                                                <button type="button" class="btn xs secondary" onclick="openPipePageLightbox('q')" title="放大查看题目大图">
-                                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line></svg>
-                                                    放大
-                                                </button>
-                                            </div>
-                                        </div>
-                                        <div class="pipe-preview-frame" onclick="openPipePageLightbox('q')" title="点击放大查看高清题目">
-                                            <img id="pipe-exercise-img" class="pipe-preview-img" src="" alt="题目大图">
-                                            <div class="pipe-zoom-tip">点击放大查看</div>
-                                        </div>
-                                        <div class="pipe-col-footer">
-                                            <span class="pipe-footer-label">包含题目页：</span>
-                                            <div class="pipe-ex-pages-selector" id="pipe-ex-pages-selector">
-                                                <!-- 题目页码标签 -->
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <!-- 右侧：对应答案区 (胶卷多选) -->
-                                    <div class="pipe-column pipe-col-answer">
-                                        <div class="pipe-col-header">
-                                            <div class="pipe-col-title">
-                                                <span class="col-pill an">对应答案解析</span>
-                                                <span class="col-meta" id="pipe-an-page-info">已选 1 页答案</span>
-                                            </div>
-                                            <div class="pipe-col-tools">
-                                                <button type="button" class="btn xs secondary" onclick="clearCurrentPipeAnswers()" title="清空本题选中的答案页">清空选中</button>
-                                            </div>
-                                        </div>
-                                        <div class="pipe-answer-scrollbox" id="pipe-answer-scrollbox">
-                                            <div class="pipe-filmstrip-grid" id="pipe-filmstrip-grid">
-                                                <!-- 动态渲染答案页胶卷，点击卡片即可多选/反选 -->
-                                            </div>
-                                        </div>
-                                        <div class="pipe-col-footer answer-footer">
-                                            <div class="pipe-an-selection-summary" id="pipe-an-selection-summary">
-                                                <span>已分配答案：第 1 页</span>
-                                            </div>
-                                            <span class="pipe-multi-hint">提示：直接点击答案缩略图即可多选跨页解析</span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- 底部流水线控制台 -->
-                                <div class="pipe-bottom-nav">
-                                    <div class="pipe-nav-left">
-                                        <button type="button" class="btn secondary" id="pipe-btn-prev" onclick="pipePrevQuestion()">
-                                            ← 上一道变式
-                                        </button>
-                                    </div>
-                                    <div class="pipe-nav-center">
-                                        <span class="pipe-kbd-tip">快捷键：按 <b>Space</b> 或 <b>Enter</b> 确认并切至下一题；按 <b>← / →</b> 翻题；数字键 <b>1~9</b> 选课后题</span>
-                                    </div>
-                                    <div class="pipe-nav-right">
-                                        <button type="button" class="btn primary" id="pipe-btn-next" onclick="pipeNextQuestion()">
-                                            下一道变式 →
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
 
                             <div class="mapping-sections-container view-split" id="mapping-sections-container">
                                 <div class="mapping-section" id="section-exercise">
@@ -636,6 +509,120 @@
                 </div>
             </section>
         </main>
+    </div>
+
+    <!-- 全屏沉浸式教研工作台 (形态1) -->
+    <div class="variation-workbench" id="variation-workbench" style="display:none;">
+        <!-- Top Nav Bar -->
+        <header class="wb-header">
+            <div class="wb-header-left">
+                <button type="button" class="btn sm secondary wb-back-btn" onclick="closeVariationWorkbench()">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                    返回上传
+                </button>
+                <div class="wb-title-wrap">
+                    <span class="wb-badge">举一反三工作台</span>
+                    <h2 class="wb-title" id="wb-header-title">举一反三装配</h2>
+                    <span class="wb-sub-meta" id="wb-sub-meta">初二数学 · 培优班</span>
+                </div>
+            </div>
+
+            <!-- Question Stepper Dots in Center -->
+            <div class="wb-header-center">
+                <div class="wb-stepper-wrap" id="wb-stepper-wrap">
+                    <!-- Pills / Dots for questions 1..N -->
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="wb-header-right">
+                <button type="button" class="btn sm secondary" onclick="wbAutoMatch1to1()" title="按 1 题对 1 题快速分配所有页面">1页对1题快速匹配</button>
+                <button type="button" class="btn sm secondary" onclick="openPipelineSummaryDialog()" title="查看所有变式题的分配汇总">核对总览清单 (<span id="wb-summary-count">0</span>)</button>
+                <button type="button" class="btn sm primary wb-finish-btn" id="wb-top-finish-btn" onclick="doImportFromPipeline()">完成并切片导入 ✓</button>
+            </div>
+        </header>
+
+        <!-- Main Three-Column Workspace -->
+        <div class="wb-main-layout">
+            <!-- Left Column: Homework Question Navigator -->
+            <aside class="wb-col wb-col-homework">
+                <div class="wb-col-header">
+                    <div class="wb-col-title-wrap">
+                        <span class="wb-col-title">课后原题导航</span>
+                        <span class="wb-col-subtitle">点击选择当前变式归属的原题</span>
+                    </div>
+                    <span class="wb-count-tag" id="wb-hw-count-tag">共 0 题</span>
+                </div>
+                <div class="wb-hw-list" id="wb-hw-list">
+                    <!-- Homework Question Cards rendered dynamically -->
+                </div>
+            </aside>
+
+            <!-- Middle Column: Variation Exercise Big View -->
+            <section class="wb-col wb-col-exercise">
+                <div class="wb-col-header">
+                    <div class="wb-col-title-wrap">
+                        <span class="wb-col-title" id="wb-ex-title">变式题目 · 第 1 / 0 题</span>
+                        <span class="wb-active-hw-indicator" id="wb-active-hw-indicator">已归入：课后第 1 题 · 变式 1</span>
+                    </div>
+                    <div class="wb-header-tools">
+                        <button type="button" class="btn xs secondary" onclick="openPipePageLightbox('q')" title="全屏高清放大">
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line></svg>
+                            全屏放大
+                        </button>
+                    </div>
+                </div>
+                <div class="wb-preview-viewport" onclick="openPipePageLightbox('q')" title="点击全屏放大查看">
+                    <img id="wb-ex-img" class="wb-preview-image" src="" alt="变式题目">
+                    <div class="wb-zoom-hint">点击可全屏放大</div>
+                </div>
+                <div class="wb-ex-footer">
+                    <div class="wb-ex-nav">
+                        <button type="button" class="btn sm secondary" id="wb-ex-prev-btn" onclick="pipePrevQuestion()">
+                            ◀ 上一题 (←)
+                        </button>
+                    </div>
+                    <div class="wb-ex-pages-control">
+                        <span class="wb-control-label">题目 PDF 页码：</span>
+                        <div class="wb-ex-tags" id="wb-ex-tags">
+                            <!-- e.g. [第 1 页] -->
+                        </div>
+                        <button type="button" class="btn xs secondary" onclick="promptToggleExPage()">增减续页</button>
+                    </div>
+                    <div class="wb-ex-nav">
+                        <button type="button" class="btn sm secondary" id="wb-ex-next-btn" onclick="pipeNextQuestion()">
+                            下一题 (→) ▶
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Column: Answer Filmstrip & Multi-Page Selection -->
+            <section class="wb-col wb-col-answer">
+                <div class="wb-col-header">
+                    <div class="wb-col-title-wrap">
+                        <span class="wb-col-title">对应答案解析</span>
+                        <span class="wb-an-status-badge" id="wb-an-badge">已选 1 页答案</span>
+                    </div>
+                    <div class="wb-header-tools">
+                        <button type="button" class="btn xs secondary" onclick="clearCurrentPipeAnswers()" title="清空本题所选答案">清空选中</button>
+                    </div>
+                </div>
+                <div class="wb-answer-scroll-area">
+                    <div class="wb-answer-grid" id="wb-answer-grid">
+                        <!-- Dynamic Answer Cards -->
+                    </div>
+                </div>
+                <div class="wb-an-footer">
+                    <div class="wb-an-summary-text" id="wb-an-summary-text">
+                        当前绑定：答案第 1 页
+                    </div>
+                    <button type="button" class="btn primary wb-step-next-btn" id="wb-confirm-next-btn" onclick="pipeNextQuestion()">
+                        确认，下一题 (Space) ➔
+                    </button>
+                </div>
+            </section>
+        </div>
     </div>
 
     <!-- Generic dialog -->
@@ -823,7 +810,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261029_v5';
+            const v = '20261029_v6';
             document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
             document.write(`<script src="js/common.js?v=${v}"><\/script>`);
             document.write(`<script src="js/auth.js?v=${v}"><\/script>`);

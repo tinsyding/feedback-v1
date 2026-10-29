@@ -565,6 +565,10 @@ function goToStep(n) {
 
 function goBack() {
     if (currentStep <= 1) return;
+    if (currentStep === 4 && getBankType() === 'variation' && batchImported) {
+        openVariationWorkbench();
+        return;
+    }
     // Existing-data path (no upload/mapping): back from edit goes to selector
     if (currentStep === 4 && !batchImported) {
         goToStep(1);
@@ -609,6 +613,12 @@ async function handleStepIndicatorClick(n) {
                 showToast('该专题尚未录入【课后巩固】题库，无法录入举一反三！请先录入课后巩固题目。', 'warn');
                 return;
             }
+            if (!batchQuestionThumbs || batchQuestionThumbs.length === 0) {
+                goNextFromStep2();
+            } else {
+                openVariationWorkbench();
+            }
+            return;
         }
         if (!batchQuestionThumbs || batchQuestionThumbs.length === 0) {
             goNextFromStep2();
@@ -811,9 +821,33 @@ if (!window._hwPreviewEscBound) {
     });
 }
 
-// ========== 举一反三智能流水线工作台 (Smart Pipeline Workbench) ==========
+// ========== 形态 1：全屏沉浸式教研工作台 (Full-Screen Immersive Workbench) ==========
 let pipelineItems = [];
 let pipelineCurrentIndex = 0;
+
+function openVariationWorkbench() {
+    const wb = document.getElementById('variation-workbench');
+    if (!wb) return;
+
+    const subMeta = document.getElementById('wb-sub-meta');
+    if (subMeta && subjectSelect && gradeSelect && tierSelect && weekSelect) {
+        subMeta.textContent = `${subjectSelect.value} · ${gradeSelect.value} · ${tierSelect.value} · ${getTopicLabel(weekSelect.value)}`;
+    }
+
+    if (!pipelineItems || pipelineItems.length === 0) {
+        initVariationPipeline();
+    } else {
+        renderVariationWorkbench();
+    }
+
+    wb.style.display = 'flex';
+}
+
+function closeVariationWorkbench() {
+    const wb = document.getElementById('variation-workbench');
+    if (wb) wb.style.display = 'none';
+    goToStep(2);
+}
 
 function initVariationPipeline() {
     const buckets = getConsolidationBuckets();
@@ -837,48 +871,44 @@ function initVariationPipeline() {
     }
 
     pipelineCurrentIndex = 0;
-    renderVariationPipeline();
+    renderVariationWorkbench();
 }
 
-function renderVariationPipeline() {
+function renderVariationWorkbench() {
     const total = pipelineItems.length;
     if (total === 0) return;
     if (pipelineCurrentIndex < 0) pipelineCurrentIndex = 0;
     if (pipelineCurrentIndex >= total) pipelineCurrentIndex = total - 1;
 
-    const curNumEl = document.getElementById('pipe-current-num');
-    const totNumEl = document.getElementById('pipe-total-num');
-    const sumCountEl = document.getElementById('pipe-summary-count');
-    if (curNumEl) curNumEl.textContent = String(pipelineCurrentIndex + 1);
-    if (totNumEl) totNumEl.textContent = String(total);
-    if (sumCountEl) sumCountEl.textContent = String(total);
+    renderWbStepper();
+    renderWbHomeworkList();
+    renderWbExerciseView();
+    renderWbAnswerGrid();
+    updateWbNavButtons();
 
-    renderPipelineBreadcrumbs();
-    renderPipelineHwCards();
-    renderPipelineStage();
-    updatePipelineNavButtons();
-    updateAnnotationStatus();
+    const sumCount = document.getElementById('wb-summary-count');
+    if (sumCount) sumCount.textContent = String(total);
 }
 
-function renderPipelineBreadcrumbs() {
-    const strip = document.getElementById('pipe-breadcrumb-strip');
-    if (!strip) return;
+// 顶部题号指示器胶囊
+function renderWbStepper() {
+    const wrap = document.getElementById('wb-stepper-wrap');
+    if (!wrap) return;
 
-    strip.innerHTML = pipelineItems.map((item, idx) => {
+    wrap.innerHTML = pipelineItems.map((item, idx) => {
         const isActive = idx === pipelineCurrentIndex;
         const anCount = item.answerPages ? item.answerPages.length : 0;
         const hasAnswer = anCount > 0;
         return `
-            <div class="pipe-crumb-pill ${isActive ? 'active' : ''} ${hasAnswer ? '' : 'no-answer'}"
-                 onclick="pipeJumpToQuestion(${idx})" title="切换至变式第 ${idx + 1} 题 (课后第 ${item.parentQuestionNum} 题)">
-                <span class="pipe-crumb-num">${idx + 1}</span>
-                <span>课后第 ${item.parentQuestionNum} 题</span>
-                <span style="font-size:0.72rem; opacity:0.8;">(${anCount}页答案)</span>
+            <div class="wb-step-pill ${isActive ? 'active' : ''} ${hasAnswer ? '' : 'missing-answer'}"
+                 onclick="wbJumpToQuestion(${idx})" title="切换至变式第 ${idx + 1} 题 (课后第 ${item.parentQuestionNum} 题)">
+                <span>${idx + 1}. 课后第 ${item.parentQuestionNum} 题</span>
+                <span style="font-size:0.7rem; opacity:0.8;">(${anCount}页)</span>
             </div>
         `;
     }).join('');
 
-    const activeEl = strip.querySelector('.pipe-crumb-pill.active');
+    const activeEl = wrap.querySelector('.wb-step-pill.active');
     if (activeEl && typeof activeEl.scrollIntoView === 'function') {
         activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
     }
@@ -896,10 +926,15 @@ function getPipelineSubNum(targetIdx) {
     return Math.max(1, sub);
 }
 
-function renderPipelineHwCards() {
-    const container = document.getElementById('pipe-hw-cards-grid');
+// 左栏：课后原题导航列表 (常驻原题缩略图)
+function renderWbHomeworkList() {
+    const container = document.getElementById('wb-hw-list');
+    const countTag = document.getElementById('wb-hw-count-tag');
     if (!container) return;
+
     const buckets = getConsolidationBuckets();
+    if (countTag) countTag.textContent = `共 ${buckets.length} 题`;
+
     const currItem = pipelineItems[pipelineCurrentIndex];
     const currParent = currItem ? currItem.parentQuestionNum : (buckets[0]?.parentNum || 1);
 
@@ -914,85 +949,99 @@ function renderPipelineHwCards() {
     container.innerHTML = buckets.map(b => {
         const isActive = Number(b.parentNum) === Number(currParent);
         const count = counts[b.parentNum] || 0;
+        const thumbUrl = (b.exercisePdf && b.exercisePdf.thumb) ? b.exercisePdf.thumb : '';
         return `
-            <div class="pipe-hw-card ${isActive ? 'active' : ''}" onclick="selectPipelineHomework(${b.parentNum})" title="点击将当前变式题归入课后第 ${b.parentNum} 题">
-                <div class="pipe-hw-card-top">
-                    <span class="pipe-hw-num">课后第 ${b.parentNum} 题</span>
-                    <span class="pipe-hw-count-badge ${count > 0 ? 'has-items' : ''}">${count > 0 ? `已配 ${count} 题` : '未配'}</span>
+            <div class="wb-hw-card ${isActive ? 'active' : ''}" onclick="selectWbHomework(${b.parentNum})" title="点击将当前变式题指定给课后第 ${b.parentNum} 题">
+                <div class="wb-hw-card-top">
+                    <span class="wb-hw-no">课后第 ${b.parentNum} 题</span>
+                    <span class="wb-hw-assigned-badge ${count > 0 ? 'has-items' : ''}">${count > 0 ? `已配 ${count} 变式` : '未分配'}</span>
                 </div>
-                <div class="pipe-hw-topic" title="${escapeHtml(b.topic || '')}">${escapeHtml(b.topic || '（未设考点）')}</div>
+                <div class="wb-hw-topic" title="${escapeHtml(b.topic || '')}">${escapeHtml(b.topic || '（未设考点）')}</div>
+                <div class="wb-hw-thumb-wrap">
+                    ${thumbUrl 
+                        ? `<img src="${thumbUrl}" alt="原题第 ${b.parentNum} 题" loading="lazy">` 
+                        : `<span style="font-size:0.75rem; color:var(--text-tertiary);">课后原题切片图</span>`}
+                </div>
             </div>
         `;
     }).join('');
 
-    const descEl = document.getElementById('pipe-active-hw-desc');
-    const matchedBucket = buckets.find(b => Number(b.parentNum) === Number(currParent));
-    const subNum = getPipelineSubNum(pipelineCurrentIndex);
-    if (descEl) {
-        descEl.innerHTML = `当前选定：<b>课后第 ${currParent} 题 · 变式 ${subNum}</b>（考点：${escapeHtml(matchedBucket?.topic || '未设考点')}）`;
-    }
-
     selectedBucketParentNum = Number(currParent);
 }
 
-function selectPipelineHomework(parentNum) {
+function selectWbHomework(parentNum) {
     if (!pipelineItems[pipelineCurrentIndex]) return;
     pipelineItems[pipelineCurrentIndex].parentQuestionNum = Number(parentNum);
-    renderPipelineHwCards();
-    renderPipelineBreadcrumbs();
+    renderWbStepper();
+    renderWbHomeworkList();
+    renderWbExerciseView();
 }
 
-function renderPipelineStage() {
+// 中栏：变式题目大图展示区
+function renderWbExerciseView() {
     const item = pipelineItems[pipelineCurrentIndex];
     if (!item) return;
 
-    // 1. Exercise (Left)
-    const exImg = document.getElementById('pipe-exercise-img');
-    const exInfo = document.getElementById('pipe-ex-page-info');
-    const exPagesSelector = document.getElementById('pipe-ex-pages-selector');
+    const titleEl = document.getElementById('wb-ex-title');
+    const indicatorEl = document.getElementById('wb-active-hw-indicator');
+    const imgEl = document.getElementById('wb-ex-img');
+    const tagsEl = document.getElementById('wb-ex-tags');
+
+    if (titleEl) {
+        titleEl.textContent = `变式题目 · 第 ${pipelineCurrentIndex + 1} / ${pipelineItems.length} 题`;
+    }
+
+    const buckets = getConsolidationBuckets();
+    const b = buckets.find(it => Number(it.parentNum) === Number(item.parentQuestionNum));
+    const subNum = getPipelineSubNum(pipelineCurrentIndex);
+    if (indicatorEl) {
+        indicatorEl.textContent = `已归入：课后第 ${item.parentQuestionNum} 题 · 变式 ${subNum}${b && b.topic ? ` (${b.topic})` : ''}`;
+    }
 
     const firstExPage = item.exercisePages[0] || 0;
-    if (exImg) {
-        exImg.src = batchQuestionThumbs[firstExPage] || '';
-    }
-    if (exInfo) {
-        exInfo.textContent = `PDF 第 ${item.exercisePages.map(p => p + 1).join(', ')} 页`;
-    }
-    if (exPagesSelector) {
-        exPagesSelector.innerHTML = item.exercisePages.map(p => `
-            <span class="pipe-ex-tag">第 ${p + 1} 页</span>
-        `).join('') + `
-            <button type="button" class="btn xs secondary" style="font-size:0.7rem; padding:1px 6px;" onclick="promptToggleExPage()" title="若本道变式题目本身跨越多页，可在此增减题目页">增减题目续页</button>
-        `;
+    if (imgEl) {
+        imgEl.src = batchQuestionThumbs[firstExPage] || '';
     }
 
-    // 2. Answer (Right Filmstrip)
-    const anInfo = document.getElementById('pipe-an-page-info');
-    const anSummary = document.getElementById('pipe-an-selection-summary');
-    const filmstrip = document.getElementById('pipe-filmstrip-grid');
+    if (tagsEl) {
+        tagsEl.innerHTML = item.exercisePages.map(p => `
+            <span class="wb-tag-pill">第 ${p + 1} 页</span>
+        `).join('');
+    }
+}
+
+// 右栏：对应答案解析多选区
+function renderWbAnswerGrid() {
+    const item = pipelineItems[pipelineCurrentIndex];
+    if (!item) return;
+
+    const badgeEl = document.getElementById('wb-an-badge');
+    const gridEl = document.getElementById('wb-answer-grid');
+    const summaryText = document.getElementById('wb-an-summary-text');
 
     const anCount = item.answerPages ? item.answerPages.length : 0;
-    if (anInfo) {
-        anInfo.textContent = anCount > 0 ? `已选 ${anCount} 页答案` : '未选择答案页';
-        anInfo.style.color = anCount > 0 ? '#059669' : '#ef4444';
+    if (badgeEl) {
+        badgeEl.textContent = anCount > 0 ? `已选 ${anCount} 页答案` : '未选择答案页';
+        badgeEl.style.color = anCount > 0 ? '#059669' : '#ef4444';
     }
-    if (anSummary) {
+
+    if (summaryText) {
         if (anCount > 0) {
-            anSummary.innerHTML = `<span>✓ 已分配答案：第 ${item.answerPages.map(p => p + 1).join('、')} 页 (共 ${anCount} 页解析)</span>`;
-            anSummary.style.color = '#059669';
+            summaryText.innerHTML = `<span>✓ 当前绑定：答案第 <b>${item.answerPages.map(p => p + 1).join('、')}</b> 页 (共 ${anCount} 页解析)</span>`;
+            summaryText.style.color = '#059669';
         } else {
-            anSummary.innerHTML = `<span style="color:#ef4444;">⚠️ 尚未为当前题目选择对应答案页</span>`;
+            summaryText.innerHTML = `<span style="color:#ef4444; font-weight:700;">⚠️ 尚未为当前题目选择对应答案页（请点击下方答案图勾选）</span>`;
         }
     }
 
-    if (filmstrip) {
-        filmstrip.innerHTML = '';
+    if (gridEl) {
+        gridEl.innerHTML = '';
         for (let aIdx = 0; aIdx < batchAnswerPageCount; aIdx++) {
             const isCurrent = item.answerPages.includes(aIdx);
             const otherIdx = pipelineItems.findIndex((it, idx) => idx !== pipelineCurrentIndex && it.answerPages && it.answerPages.includes(aIdx));
             const card = document.createElement('div');
-            card.className = `pipe-an-card ${isCurrent ? 'selected-current' : (otherIdx >= 0 ? 'used-other' : 'unassigned')}`;
-            card.onclick = () => togglePipelineAnswerPage(aIdx);
+            card.className = `wb-an-card ${isCurrent ? 'selected-current' : (otherIdx >= 0 ? 'used-other' : 'unassigned')}`;
+            card.onclick = () => toggleWbAnswerPage(aIdx);
             card.title = isCurrent 
                 ? `已选为本题答案 (第 ${item.answerPages.indexOf(aIdx) + 1} 页)，点击可取消选择` 
                 : (otherIdx >= 0 
@@ -1000,46 +1049,30 @@ function renderPipelineStage() {
                     : `点击选用为本题答案`);
 
             card.innerHTML = `
-                <div class="pipe-an-thumb-wrap">
+                <div class="wb-an-thumb-wrap">
                     <img src="${batchAnswerThumbs[aIdx]}" alt="答案第 ${aIdx + 1} 页" loading="lazy">
-                    <div class="pipe-an-badge">
+                    <div class="wb-an-badge">
                         ${isCurrent 
                             ? `<span class="badge-sel">✓ 答案第 ${item.answerPages.indexOf(aIdx) + 1} 页</span>` 
                             : (otherIdx >= 0 
                                 ? `<span class="badge-used">变式 ${otherIdx + 1} 已用</span>` 
                                 : `<span class="badge-empty">待分配</span>`)}
                     </div>
-                    <div class="pipe-an-zoom" onclick="event.stopPropagation(); openPipeAnswerLightbox(${aIdx});" title="点击放大查看答案解析">
+                    <div class="wb-an-zoom" onclick="event.stopPropagation(); openPipeAnswerLightbox(${aIdx});" title="点击放大查看答案解析">
                         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line></svg>
                     </div>
                 </div>
-                <div class="pipe-an-footer">
-                    <span class="pipe-an-page-no">第 ${aIdx + 1} 页</span>
-                    <span class="pipe-an-check-icon">${isCurrent ? '✓ 已选' : (otherIdx >= 0 ? '已用' : '+ 选用')}</span>
+                <div class="wb-an-card-footer">
+                    <span>第 ${aIdx + 1} 页</span>
+                    <span>${isCurrent ? '✓ 已选' : (otherIdx >= 0 ? '已用' : '+ 选用')}</span>
                 </div>
             `;
-            filmstrip.appendChild(card);
+            gridEl.appendChild(card);
         }
     }
 }
 
-function promptToggleExPage() {
-    const item = pipelineItems[pipelineCurrentIndex];
-    if (!item) return;
-    const currentStr = item.exercisePages.map(p => p + 1).join(',');
-    const input = prompt(`当前变式题目包含的 PDF 页码（英文逗号隔开，范围 1~${batchQuestionPageCount}）：`, currentStr);
-    if (input === null) return;
-    const parts = input.split(',').map(s => parseInt(s.trim(), 10)).filter(n => Number.isInteger(n) && n >= 1 && n <= batchQuestionPageCount);
-    if (parts.length === 0) {
-        showToast('至少需要包含 1 个有效题目页码', 'warn');
-        return;
-    }
-    const newPages = Array.from(new Set(parts)).map(n => n - 1).sort((a, b) => a - b);
-    item.exercisePages = newPages;
-    renderPipelineStage();
-}
-
-function togglePipelineAnswerPage(aIdx) {
+function toggleWbAnswerPage(aIdx) {
     const item = pipelineItems[pipelineCurrentIndex];
     if (!item) return;
     if (!item.answerPages) item.answerPages = [];
@@ -1058,38 +1091,38 @@ function togglePipelineAnswerPage(aIdx) {
         item.answerPages.push(aIdx);
         item.answerPages.sort((a, b) => a - b);
     }
-    renderPipelineStage();
-    renderPipelineBreadcrumbs();
+    renderWbStepper();
+    renderWbAnswerGrid();
 }
 
 function clearCurrentPipeAnswers() {
     const item = pipelineItems[pipelineCurrentIndex];
     if (!item) return;
     item.answerPages = [];
-    renderPipelineStage();
-    renderPipelineBreadcrumbs();
+    renderWbStepper();
+    renderWbAnswerGrid();
 }
 
-function updatePipelineNavButtons() {
-    const prevBtn = document.getElementById('pipe-btn-prev');
-    const nextBtn = document.getElementById('pipe-btn-next');
+function updateWbNavButtons() {
     const isFirst = pipelineCurrentIndex <= 0;
     const isLast = pipelineCurrentIndex >= pipelineItems.length - 1;
 
-    if (prevBtn) {
-        prevBtn.disabled = isFirst;
-    }
-    if (nextBtn) {
+    const exPrev = document.getElementById('wb-ex-prev-btn');
+    const exNext = document.getElementById('wb-ex-next-btn');
+    const confirmNext = document.getElementById('wb-confirm-next-btn');
+
+    if (exPrev) exPrev.disabled = isFirst;
+    if (exNext) exNext.disabled = isLast;
+
+    if (confirmNext) {
         if (isLast) {
-            nextBtn.innerHTML = `完成分配并切片导入 ✓`;
-            nextBtn.className = 'btn primary';
-            nextBtn.style.background = '#059669';
-            nextBtn.style.borderColor = '#059669';
+            confirmNext.innerHTML = `完成并切片导入 ✓`;
+            confirmNext.style.background = '#059669';
+            confirmNext.style.borderColor = '#059669';
         } else {
-            nextBtn.innerHTML = `下一道变式 →`;
-            nextBtn.className = 'btn primary';
-            nextBtn.style.background = '';
-            nextBtn.style.borderColor = '';
+            confirmNext.innerHTML = `确认，下一题 (Space) ➔`;
+            confirmNext.style.background = '';
+            confirmNext.style.borderColor = '';
         }
     }
 }
@@ -1097,27 +1130,27 @@ function updatePipelineNavButtons() {
 function pipePrevQuestion() {
     if (pipelineCurrentIndex > 0) {
         pipelineCurrentIndex--;
-        renderVariationPipeline();
+        renderVariationWorkbench();
     }
 }
 
 function pipeNextQuestion() {
     if (pipelineCurrentIndex < pipelineItems.length - 1) {
         pipelineCurrentIndex++;
-        renderVariationPipeline();
+        renderVariationWorkbench();
     } else {
         doImportFromPipeline();
     }
 }
 
-function pipeJumpToQuestion(idx) {
+function wbJumpToQuestion(idx) {
     if (idx >= 0 && idx < pipelineItems.length) {
         pipelineCurrentIndex = idx;
-        renderVariationPipeline();
+        renderVariationWorkbench();
     }
 }
 
-function autoMatchPipeline1to1() {
+function wbAutoMatch1to1() {
     const buckets = getConsolidationBuckets();
     for (let i = 0; i < pipelineItems.length; i++) {
         const item = pipelineItems[i];
@@ -1129,8 +1162,24 @@ function autoMatchPipeline1to1() {
         item.exercisePages = [i];
         item.answerPages = (i < batchAnswerPageCount) ? [i] : [];
     }
-    renderVariationPipeline();
+    renderVariationWorkbench();
     showToast('已按 1 页题目对 1 页答案快速分配完成');
+}
+
+function promptToggleExPage() {
+    const item = pipelineItems[pipelineCurrentIndex];
+    if (!item) return;
+    const currentStr = item.exercisePages.map(p => p + 1).join(',');
+    const input = prompt(`当前变式题目包含的 PDF 页码（英文逗号隔开，范围 1~${batchQuestionPageCount}）：`, currentStr);
+    if (input === null) return;
+    const parts = input.split(',').map(s => parseInt(s.trim(), 10)).filter(n => Number.isInteger(n) && n >= 1 && n <= batchQuestionPageCount);
+    if (parts.length === 0) {
+        showToast('至少需要包含 1 个有效题目页码', 'warn');
+        return;
+    }
+    const newPages = Array.from(new Set(parts)).map(n => n - 1).sort((a, b) => a - b);
+    item.exercisePages = newPages;
+    renderWbExerciseView();
 }
 
 function openPipePageLightbox(kind) {
@@ -1186,7 +1235,7 @@ function openPipelineSummaryDialog() {
                         : `<span style="color:#059669;">✓ 正常</span>`}
                 </td>
                 <td style="text-align:center;">
-                    <button type="button" class="btn xs secondary" onclick="closePipelineSummaryDialog(); pipeJumpToQuestion(${idx});">跳转修改</button>
+                    <button type="button" class="btn xs secondary" onclick="closePipelineSummaryDialog(); wbJumpToQuestion(${idx});">跳转修改</button>
                 </td>
             </tr>
         `;
@@ -1245,8 +1294,10 @@ async function executePipelineImport() {
         };
     });
 
-    const nextBtn = document.getElementById('pipe-btn-next');
+    const nextBtn = document.getElementById('wb-confirm-next-btn');
+    const topFinishBtn = document.getElementById('wb-top-finish-btn');
     if (nextBtn) nextBtn.disabled = true;
+    if (topFinishBtn) topFinishBtn.disabled = true;
 
     try {
         showToast('正在切分并导入举一反三题目...');
@@ -1326,6 +1377,8 @@ async function executePipelineImport() {
             showToast(`已成功导入 ${currentQuestions.length} 道举一反三变式题`);
         }
         if (currentQuestions.length > 0) {
+            const wb = document.getElementById('variation-workbench');
+            if (wb) wb.style.display = 'none';
             goToStep(4);
         }
     } catch (e) {
@@ -1333,13 +1386,16 @@ async function executePipelineImport() {
         showToast('切片导入失败，请检查 PDF 文件');
     } finally {
         if (nextBtn) nextBtn.disabled = false;
+        if (topFinishBtn) topFinishBtn.disabled = false;
     }
 }
 
 if (!window._pipeKeyNavBound) {
     window._pipeKeyNavBound = true;
     document.addEventListener('keydown', (e) => {
-        if (getBankType() !== 'variation' || currentStep !== 3) return;
+        const wb = document.getElementById('variation-workbench');
+        const isWbOpen = wb && wb.style.display !== 'none';
+        if (getBankType() !== 'variation' || !isWbOpen) return;
         if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
         const lightbox = document.getElementById('page-lightbox-dialog');
         const summaryDialog = document.getElementById('pipeline-summary-dialog');
@@ -1364,7 +1420,7 @@ if (!window._pipeKeyNavBound) {
             const num = parseInt(e.key, 10);
             const buckets = getConsolidationBuckets();
             if (buckets.some(b => Number(b.parentNum) === num)) {
-                selectPipelineHomework(num);
+                selectWbHomework(num);
             }
         }
     });
@@ -1530,13 +1586,14 @@ async function goNextFromStep2() {
         batchImported = false;
         if (getBankType() === 'variation') {
             initVariationPipeline();
-            initVariationAssignments();
+            openVariationWorkbench();
+            return;
         } else {
             buildDefaultLabels();
+            renderAnnotationList();
+            updateAnnotationStatus();
+            goToStep(3);
         }
-        renderAnnotationList();
-        updateAnnotationStatus();
-        goToStep(3);
     } finally {
         if (nextBtn) nextBtn.disabled = false;
     }
@@ -1795,38 +1852,15 @@ function renderAnnotationList() {
     if (tabQ) tabQ.textContent = batchQuestionPageCount;
     if (tabA) tabA.textContent = batchAnswerPageCount;
 
-    const pipeContainer = document.getElementById('variation-pipeline-container');
-    const mappingContainer = document.getElementById('mapping-sections-container');
-    const stdHint = document.getElementById('step3-standard-hint');
-    const varHint = document.getElementById('step3-variation-hint');
-    const varBucketPanel = document.getElementById('variation-bucket-panel');
-    const mappingNextBtn = document.getElementById('mapping-next-btn');
-    const autoCascadeWrap = document.getElementById('auto-cascade-numbers')?.closest('.label-sync-action');
-    const autoDetectStatus = document.getElementById('auto-detect-status');
-
     if (isVar) {
-        if (pipeContainer) pipeContainer.style.display = 'flex';
-        if (mappingContainer) mappingContainer.style.display = 'none';
-        if (stdHint) stdHint.style.display = 'none';
-        if (varHint) varHint.style.display = 'none';
-        if (varBucketPanel) varBucketPanel.style.display = 'none';
-        if (mappingNextBtn) mappingNextBtn.style.display = 'none';
-        if (autoCascadeWrap) autoCascadeWrap.style.display = 'none';
-        if (autoDetectStatus) autoDetectStatus.style.display = 'none';
-        renderVariationPipeline();
-    } else {
-        if (pipeContainer) pipeContainer.style.display = 'none';
-        if (mappingContainer) mappingContainer.style.display = 'flex';
-        if (stdHint) stdHint.style.display = 'block';
-        if (varHint) varHint.style.display = 'none';
-        if (varBucketPanel) varBucketPanel.style.display = 'none';
-        if (mappingNextBtn) mappingNextBtn.style.display = 'inline-flex';
-        if (autoCascadeWrap) autoCascadeWrap.style.display = 'inline-flex';
-        renderPageGrid('qpdf-page-grid', batchQuestionThumbs, batchQuestionLabels, 'q');
-        renderPageGrid('apdf-page-grid', batchAnswerThumbs, batchAnswerLabels, 'a');
-        setThumbSize(currentThumbSize);
-        updateAutoDetectStatus();
+        openVariationWorkbench();
+        return;
     }
+
+    renderPageGrid('qpdf-page-grid', batchQuestionThumbs, batchQuestionLabels, 'q');
+    renderPageGrid('apdf-page-grid', batchAnswerThumbs, batchAnswerLabels, 'a');
+    setThumbSize(currentThumbSize);
+    updateAutoDetectStatus();
 }
 
 function renderPageGrid(containerId, thumbs, labels, kind) {
@@ -4645,15 +4679,17 @@ window.autoAssignVariationPages1to1 = autoAssignVariationPages1to1;
 window.clearAllVariationAssignments = clearAllVariationAssignments;
 window.onLightboxVariationChange = onLightboxVariationChange;
 
+window.openVariationWorkbench = openVariationWorkbench;
+window.closeVariationWorkbench = closeVariationWorkbench;
 window.initVariationPipeline = initVariationPipeline;
-window.renderVariationPipeline = renderVariationPipeline;
-window.selectPipelineHomework = selectPipelineHomework;
-window.togglePipelineAnswerPage = togglePipelineAnswerPage;
+window.renderVariationWorkbench = renderVariationWorkbench;
+window.selectWbHomework = selectWbHomework;
+window.toggleWbAnswerPage = toggleWbAnswerPage;
 window.clearCurrentPipeAnswers = clearCurrentPipeAnswers;
 window.pipePrevQuestion = pipePrevQuestion;
 window.pipeNextQuestion = pipeNextQuestion;
-window.pipeJumpToQuestion = pipeJumpToQuestion;
-window.autoMatchPipeline1to1 = autoMatchPipeline1to1;
+window.wbJumpToQuestion = wbJumpToQuestion;
+window.wbAutoMatch1to1 = wbAutoMatch1to1;
 window.openPipePageLightbox = openPipePageLightbox;
 window.openPipeAnswerLightbox = openPipeAnswerLightbox;
 window.openPipelineSummaryDialog = openPipelineSummaryDialog;
