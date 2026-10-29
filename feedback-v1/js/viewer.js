@@ -1525,7 +1525,7 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                         || (!studentId ? (plusTokens[fullName] || plusTokens[studentName]) : '');
                     if (token) {
                         const retestBase = getRetestBaseUrl();
-                        const previewSuffix = hasPreviewErrors ? '（预习的错题也在这个里面）' : '';
+                        const previewSuffix = hasPreviewErrors ? '（预习错题请切换到对应专题查看）' : '';
                         plusFeedbackPart += `${retestBase}?token=${token}${previewSuffix}\n`;
                     } else {
                         plusFeedbackPart += `(生成链接失败，请联系老师)\n`;
@@ -1560,7 +1560,7 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                         || (!studentId ? (plusTokens[fullName] || plusTokens[studentName]) : '');
                     if (token) {
                         const retestBase = getRetestBaseUrl();
-                        const previewSuffix = '（预习的错题也在这个里面）';
+                        const previewSuffix = '（预习错题请切换到对应专题查看）';
                         plusFeedbackPart += `${retestBase}?token=${token}${previewSuffix}\n`;
                     } else {
                         plusFeedbackPart += `(生成链接失败，请联系老师)\n`;
@@ -2190,7 +2190,7 @@ async function doGeneratePreviewOnlyFeedback() {
             previewOnlyPlusPart += `【错题本】：点击链接查看本专题的错题\n`;
             if (token) {
                 const retestBase = getRetestBaseUrl();
-                const previewSuffix = '（预习的错题也在这个里面）';
+                const previewSuffix = '（预习错题请切换到对应专题查看）';
                 previewOnlyPlusPart += `${retestBase}?token=${token}${previewSuffix}\n`;
             } else {
                 previewOnlyPlusPart += `(生成链接失败，请联系老师)\n`;

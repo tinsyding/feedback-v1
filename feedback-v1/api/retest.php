@@ -1329,6 +1329,7 @@ if ($action === 'decrypt') {
     $grade = $data['g'] ?? '';
     $tier = $data['t'] ?? '';
     $currWeek = intval($_GET['w'] ?? ($data['w'] ?? 0));
+    $hasExplicitWeek = isset($_GET['w']) && intval($_GET['w']) > 0;
     $studentName = trim($data['n'] ?? '');
     $studentKey = trim($data['k'] ?? $studentName);
     $studentId = trim($data['id'] ?? '');
@@ -1340,10 +1341,9 @@ if ($action === 'decrypt') {
     if (empty($studentKeyCandidates)) {
         $studentKeyCandidates = [(string)$studentKey];
     }
-    $currErrors = $data['q'] ?? [];
-    $currPreviewErrors = is_array($data['pq'] ?? null) ? $data['pq'] : [];
-    $currPreviewWeek = intval($data['pw'] ?? $currWeek);
-    if ($currPreviewWeek <= 0) $currPreviewWeek = $currWeek;
+    // Token 内的 q/pq/pw 只对签发时的周次有效，切换到历史周时不能复用
+    $tokenWeek = intval($data['w'] ?? 0);
+    $currErrors = [];
     $tokenYear = intval($data['year'] ?? 0);
     $tokenSeason = trim($data['season'] ?? '');
 
@@ -1523,12 +1523,7 @@ if ($action === 'decrypt') {
             }
         }
     }
-    // 即使课后巩固没有错题，只要预习有错题，也要让该周出现在错题本中
-    foreach ($previewHistory as $previewWeekKey => $previewEntry) {
-        if (!empty($previewEntry['errors']) && !isset($studentHistory[(string)$previewWeekKey])) {
-            $studentHistory[(string)$previewWeekKey] = [];
-        }
-    }
+    // 预习错题在数据库查询后按“预习周次”统一归档，见下方 $previewByTopic
 
     // 尝试从 MySQL student_records 查询该学生的历史周次数据及成绩评语进行双向融合
     // 匹配只认身份 Key（新/旧格式），不再按姓名 OR 匹配，杜绝同名学生串档；
@@ -1567,7 +1562,12 @@ if ($action === 'decrypt') {
                 $peq = json_decode($r['preview_error_questions'] ?? 'null', true);
                 $dbPreviewData[(string)$wn] = [
                     'errors' => is_array($peq) ? array_values(array_unique(array_filter(array_map('intval', $peq)))) : [],
-                    'previewWeek' => intval($r['preview_week_num'] ?? 0) > 0 ? intval($r['preview_week_num']) : $wn
+                    'previewWeek' => intval($r['preview_week_num'] ?? 0) > 0 ? intval($r['preview_week_num']) : $wn,
+                    'previewScore' => $r['preview_score'],
+                    'previewComment' => $r['preview_comment'] ?? '',
+                    'sourceWeek' => (int)$wn,
+                    // 该行是否真的携带预习数据：空行不能覆盖其它作业关联过来的预习
+                    'hasPreview' => ($r['preview_week_num'] !== null || $r['preview_error_questions'] !== null)
                 ];
                 $dbStudentScores[(string)$wn] = [
                     'homeworkScore' => $r['homework_score'],
@@ -1627,25 +1627,87 @@ if ($action === 'decrypt') {
         }
     }
 
-    // 若历史库已有该周错题，优先采用历史库数据
-    if (isset($studentHistory[(string)$currWeek])) {
-        $currErrors = $studentHistory[(string)$currWeek];
-    } elseif ($currWeek > 0 && !empty($currErrors)) {
-        $studentHistory[(string)$currWeek] = $currErrors;
-    }
-
-    // 当前周预习错题：数据库/预习档案优先，Token 内兜底
-    if (isset($dbPreviewData[(string)$currWeek])) {
-        $currPreviewErrors = $dbPreviewData[(string)$currWeek]['errors'];
-        $currPreviewWeek = $dbPreviewData[(string)$currWeek]['previewWeek'];
-    } elseif (isset($previewHistory[(string)$currWeek])) {
-        $currPreviewErrors = $previewHistory[(string)$currWeek]['errors'];
-        $currPreviewWeek = $previewHistory[(string)$currWeek]['previewWeek'];
-    }
-
     // 如果未指定有效当前周，默认采用历史记录中的最大周次
     if ($currWeek <= 0 && !empty($studentHistory)) {
         $currWeek = max(array_map('intval', array_keys($studentHistory)));
+    }
+
+    // 预习错题按“预习周次”重新归档：教师可以把专题二的预习随专题一作业一起生成，
+    // 错题本中必须落在专题二，不能串到专题一。数据库优先于文件档案。
+    $previewByTopic = [];
+    foreach ($dbPreviewData as $wn => $entry) {
+        if (empty($entry['hasPreview'])) continue;
+        $topic = intval($entry['previewWeek'] ?? 0);
+        if ($topic <= 0) $topic = intval($wn);
+        $entry['topic'] = $topic;
+        $entry['tier'] = trim((string)($dbWeekTiers[(string)$wn] ?? ''));
+        $previewByTopic[$topic] = $entry;
+    }
+    foreach ($previewHistory as $previewWeekKey => $entry) {
+        $topic = intval($entry['previewWeek'] ?? 0);
+        if ($topic <= 0) $topic = intval($previewWeekKey);
+        if (!isset($previewByTopic[$topic])) {
+            $entry['topic'] = $topic;
+            $entry['sourceWeek'] = intval($previewWeekKey);
+            $previewByTopic[$topic] = $entry;
+        }
+    }
+
+    // Token 内的当前周数据只在访问签发周次时生效
+    $useTokenWeek = ($tokenWeek <= 0 || $currWeek === $tokenWeek);
+    $tokenCurrentErrors = ($useTokenWeek && is_array($data['q'] ?? null)) ? $data['q'] : [];
+    $tokenPreviewErrors = ($useTokenWeek && is_array($data['pq'] ?? null)) ? $data['pq'] : [];
+    $tokenPreviewWeek = $useTokenWeek ? intval($data['pw'] ?? 0) : 0;
+    if ($tokenPreviewWeek <= 0) $tokenPreviewWeek = $currWeek;
+
+    // 即使课后巩固没有错题，只要预习有错题，也让该预习专题单独出现在错题本中
+    foreach ($previewByTopic as $topic => $entry) {
+        if (!empty($entry['errors']) && !isset($studentHistory[(string)$topic])) {
+            $studentHistory[(string)$topic] = [];
+        }
+    }
+    // Token 兜底：数据库与预习档案都没有该预习周时，用 Token 内数据补齐
+    if (!empty($tokenPreviewErrors) && !isset($previewByTopic[$tokenPreviewWeek])) {
+        $previewByTopic[$tokenPreviewWeek] = [
+            'errors' => array_values(array_unique(array_filter(array_map('intval', $tokenPreviewErrors)))),
+            'previewWeek' => $tokenPreviewWeek,
+            'tier' => $tier
+        ];
+        if (!isset($studentHistory[(string)$tokenPreviewWeek])) {
+            $studentHistory[(string)$tokenPreviewWeek] = [];
+        }
+    }
+
+    // 默认预览专题：优先找与当前周同一次生成关联的预习；否则用 Token 内的预习周次
+    $defaultPreviewTopic = 0;
+    foreach ($previewByTopic as $topic => $entry) {
+        if (intval($entry['sourceWeek'] ?? 0) === $currWeek && !empty($entry['errors'])) {
+            $defaultPreviewTopic = intval($topic);
+        }
+    }
+    if ($defaultPreviewTopic <= 0 && !empty($previewByTopic[$tokenPreviewWeek]['errors'] ?? [])) {
+        $defaultPreviewTopic = $tokenPreviewWeek;
+    }
+
+    // 默认打开有内容的专题：巩固无错题但本次预习属于其它专题时，直接切到预习专题
+    if (!$hasExplicitWeek && $useTokenWeek
+        && empty($studentHistory[(string)$currWeek])
+        && empty($tokenCurrentErrors)
+        && empty($previewByTopic[$currWeek]['errors'] ?? [])
+        && $defaultPreviewTopic > 0
+        && $defaultPreviewTopic !== $currWeek) {
+        $currWeek = $defaultPreviewTopic;
+        $useTokenWeek = ($currWeek === $tokenWeek);
+    }
+
+    // 若历史库已有该周错题，优先采用历史库数据；否则仅在同周 Token 数据有效时兜底
+    if (isset($studentHistory[(string)$currWeek])) {
+        $currErrors = $studentHistory[(string)$currWeek];
+    } elseif ($currWeek > 0 && $useTokenWeek && !empty($tokenCurrentErrors)) {
+        $currErrors = $tokenCurrentErrors;
+        $studentHistory[(string)$currWeek] = $currErrors;
+    } else {
+        $currErrors = [];
     }
 
     // 按周次升序排列
@@ -1662,22 +1724,14 @@ if ($action === 'decrypt') {
         if ($weekTier === '') $weekTier = $tier;
         $pdfList = getWeekPdfs($qbankDir, $subject, $grade, $weekTier, $wNum, $errors, $tokenYear, $tokenSeason, 'homework');
 
-        $previewEntry = $dbPreviewData[(string)$wNum] ?? ($previewHistory[(string)$wNum] ?? null);
+        $previewEntry = $previewByTopic[$wNum] ?? null;
         $previewErrors = is_array($previewEntry['errors'] ?? null) ? $previewEntry['errors'] : [];
-        $previewWeekNum = intval($previewEntry['previewWeek'] ?? 0);
-        if ($previewWeekNum <= 0) {
-            if ($wNum === $currWeek) {
-                if (empty($previewErrors) && !empty($currPreviewErrors)) {
-                    $previewErrors = $currPreviewErrors;
-                }
-                $previewWeekNum = $currPreviewWeek > 0 ? $currPreviewWeek : $wNum;
-            } else {
-                $previewWeekNum = $wNum;
-            }
-        }
+        $previewWeekNum = $wNum;
+        $previewTier = trim((string)($previewEntry['tier'] ?? ''));
+        if ($previewTier === '') $previewTier = $weekTier;
         $previewErrors = array_values(array_unique(array_filter(array_map('intval', $previewErrors))));
         $previewPdfList = !empty($previewErrors)
-            ? getWeekPdfs($qbankDir, $subject, $grade, $weekTier, $previewWeekNum, $previewErrors, $tokenYear, $tokenSeason, 'preview')
+            ? getWeekPdfs($qbankDir, $subject, $grade, $previewTier, $previewWeekNum, $previewErrors, $tokenYear, $tokenSeason, 'preview')
             : [];
 
         $wEntry = [
@@ -1687,13 +1741,14 @@ if ($action === 'decrypt') {
             'previewErrors' => $previewErrors,
             'previewPdfs' => $previewPdfList,
             'previewWeek' => $previewWeekNum,
+            'previewScore' => $previewEntry['previewScore'] ?? null,
+            'previewComment' => $previewEntry['previewComment'] ?? '',
             'homeworkScore' => null,
             'avgScore' => null
         ];
         if (isset($dbStudentScores[(string)$wNum])) {
             $hw = $dbStudentScores[(string)$wNum]['homeworkScore'];
             $wEntry['homeworkScore'] = ($hw !== null && $hw !== '') ? (float)$hw : null;
-            $wEntry['previewScore'] = $dbStudentScores[(string)$wNum]['previewScore'];
             $wEntry['totalScore'] = $dbStudentScores[(string)$wNum]['totalScore'];
             $wEntry['comment'] = $dbStudentScores[(string)$wNum]['comment'];
         }
@@ -1713,28 +1768,32 @@ if ($action === 'decrypt') {
     // 兜底（如果没有任何周次数据，至少放当前周）
     if (empty($weeksData) && $currWeek > 0) {
         $currWeekTier = (($dbWeekTiers[(string)$currWeek] ?? '') ?: (($historyWeekTiers[(string)$currWeek] ?? '') ?: $tier));
+        $fallbackPreviewEntry = $previewByTopic[$currWeek] ?? null;
+        $fallbackPreviewErrors = is_array($fallbackPreviewEntry['errors'] ?? null) ? $fallbackPreviewEntry['errors'] : [];
+        $fallbackPreviewTier = trim((string)($fallbackPreviewEntry['tier'] ?? ''));
+        if ($fallbackPreviewTier === '') $fallbackPreviewTier = $currWeekTier;
         $wEntry = [
             'week' => $currWeek,
             'errors' => $currErrors,
             'pdfs' => getWeekPdfs($qbankDir, $subject, $grade, $currWeekTier, $currWeek, $currErrors, $tokenYear, $tokenSeason, 'homework'),
-            'previewErrors' => $currPreviewErrors,
-            'previewPdfs' => !empty($currPreviewErrors) ? getWeekPdfs($qbankDir, $subject, $grade, $currWeekTier, $currPreviewWeek, $currPreviewErrors, $tokenYear, $tokenSeason, 'preview') : [],
-            'previewWeek' => $currPreviewWeek,
+            'previewErrors' => $fallbackPreviewErrors,
+            'previewPdfs' => !empty($fallbackPreviewErrors) ? getWeekPdfs($qbankDir, $subject, $grade, $fallbackPreviewTier, $currWeek, $fallbackPreviewErrors, $tokenYear, $tokenSeason, 'preview') : [],
+            'previewWeek' => $currWeek,
+            'previewScore' => $fallbackPreviewEntry['previewScore'] ?? null,
+            'previewComment' => $fallbackPreviewEntry['previewComment'] ?? '',
             'homeworkScore' => null,
             'avgScore' => null
         ];
         if (isset($dbStudentScores[(string)$currWeek])) {
             $hw = $dbStudentScores[(string)$currWeek]['homeworkScore'];
             $wEntry['homeworkScore'] = ($hw !== null && $hw !== '') ? (float)$hw : null;
-            $wEntry['previewScore'] = $dbStudentScores[(string)$currWeek]['previewScore'];
             $wEntry['totalScore'] = $dbStudentScores[(string)$currWeek]['totalScore'];
             $wEntry['comment'] = $dbStudentScores[(string)$currWeek]['comment'];
         }
         $cm = $wEntry['comment'] ?? '';
         $isUnsub = (!empty($cm) && (mb_strpos($cm, '未交') !== false || mb_strpos($cm, '未提交') !== false || mb_strpos($cm, '缺交') !== false))
-            || (empty($currErrors) && ($wEntry['homeworkScore'] === null || $wEntry['homeworkScore'] <= 0));
+            || (empty($currErrors) && empty($fallbackPreviewErrors) && ($wEntry['homeworkScore'] === null || $wEntry['homeworkScore'] <= 0));
         $wEntry['isUnsubmitted'] = $isUnsub;
-        if (!empty($currPreviewErrors)) $wEntry['isUnsubmitted'] = false;
         if (isset($dbWeekAverages[(string)$currWeek])) {
             $wEntry['avgScore'] = $dbWeekAverages[(string)$currWeek];
         }
