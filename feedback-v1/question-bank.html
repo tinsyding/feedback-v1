@@ -12,7 +12,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261029_v3';
+            const v = '20261029_v4';
             document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/question-bank.css?v=${v}">`);
@@ -409,11 +409,11 @@
                             <div class="variation-bucket-panel" id="variation-bucket-panel" style="display:none;">
                                 <div class="bucket-header">
                                     <div class="bucket-title-wrap">
-                                        <span class="bucket-main-title">🎯 关联课后原题卡槽</span>
-                                        <span class="bucket-sub-title" id="bucket-active-prompt">当前选定：<b id="active-bucket-name">课后第 1 题</b>（点击下方 PDF 页面即可归入或移出）</span>
+                                        <span class="bucket-main-title">关联课后原题卡槽</span>
+                                        <span class="bucket-sub-title" id="bucket-active-prompt">当前选定：<b id="active-bucket-name">课后第 1 题</b> <button type="button" class="bucket-preview-btn active-bucket-preview-btn" onclick="previewCurrentHomeworkQuestion(event)" title="查看当前选定课后题原题"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>查看原题</button>（点击下方 PDF 页面即可归入或移出）</span>
                                     </div>
                                     <div class="bucket-actions">
-                                        <button type="button" class="btn sm" onclick="autoAssignVariationPages1to1()" title="按页码顺序将每页依次分配给课后第1题、第2题...">⚡ 1页对1题快速匹配</button>
+                                        <button type="button" class="btn sm" onclick="autoAssignVariationPages1to1()" title="按页码顺序将每页依次分配给课后第1题、第2题...">1页对1题快速匹配</button>
                                         <button type="button" class="btn sm secondary" onclick="clearAllVariationAssignments()">清空分配</button>
                                     </div>
                                 </div>
@@ -467,7 +467,7 @@
                                 </svg>
                             </div>
                             <h3 style="flex:1; margin:0;" id="step4-title">题目列表</h3>
-                            <span class="variation-step4-hint" id="step4-variation-hint" style="display:none;">🎯 举一反三模式：考点已自动从对应课后原题继承，支持微调；错题本中将自动穿插于对应原题后</span>
+                            <span class="variation-step4-hint" id="step4-variation-hint" style="display:none;">举一反三模式：考点已自动从对应课后原题继承，支持微调；错题本中将自动穿插于对应原题后</span>
                             <span class="qb-status unsaved" id="qb-status">
                                 <span class="qb-status-dot"></span>
                                 <span id="qb-status-text">未保存</span>
@@ -572,6 +572,40 @@
         </div>
     </div>
 
+    <!-- Homework Question Preview Dialog (举一反三关联原题查阅) -->
+    <div class="dialog-overlay" id="homework-preview-dialog">
+        <div class="homework-preview-box">
+            <div class="homework-preview-header">
+                <div class="homework-preview-title-wrap">
+                    <h3 class="dialog-title" id="hw-preview-title">课后原题预览</h3>
+                    <span class="hw-preview-topic-badge" id="hw-preview-topic">考点：-</span>
+                </div>
+                <div class="homework-preview-actions">
+                    <button type="button" class="btn sm secondary" id="hw-preview-newtab-btn" onclick="openHomeworkPdfInNewTab()" title="在新窗口打开原题 PDF">新窗口打开</button>
+                    <button type="button" class="pdf-preview-close" onclick="closeHomeworkPreview()" title="关闭 (ESC)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="homework-preview-body" id="hw-preview-body">
+                <div class="hw-preview-img-wrap" id="hw-preview-img-wrap">
+                    <img id="hw-preview-img" src="" alt="原题大图" style="display:none;">
+                    <div id="hw-preview-loading" class="hw-preview-loading" style="display:none;">
+                        <svg viewBox="0 0 24 24" class="spin-icon" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></svg>
+                        <span>正在加载高清原题...</span>
+                    </div>
+                    <div id="hw-preview-empty" class="hw-preview-empty" style="display:none;">
+                        <span>该课后原题暂无图片切片，可点击右上角新窗口打开 PDF 查看</span>
+                    </div>
+                </div>
+            </div>
+            <div class="homework-preview-footer">
+                <span class="homework-preview-hint">快捷键：按 ESC 键或点击右上角关闭</span>
+                <button type="button" class="btn primary sm" onclick="closeHomeworkPreview()">确定</button>
+            </div>
+        </div>
+    </div>
+
     <!-- High-Definition Page Lightbox Dialog -->
     <div class="dialog-overlay" id="page-lightbox-dialog">
         <div class="page-lightbox-box">
@@ -594,6 +628,10 @@
                         <label for="lightbox-variation-select" style="font-size:0.85rem; font-weight:600; color:var(--text-secondary);">归入课后：</label>
                         <select id="lightbox-variation-select" class="qb-select sm" style="height:32px; padding:2px 8px; font-size:0.85rem;" onchange="onLightboxVariationChange(this.value)">
                         </select>
+                        <button type="button" class="bucket-preview-btn" id="lightbox-hw-preview-btn" onclick="previewHomeworkQuestionFromLightbox(event)" title="查看对应课后题原题">
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                            查看原题
+                        </button>
                     </div>
                 </div>
                 <div class="page-lightbox-controls">
@@ -641,7 +679,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261029_v3';
+            const v = '20261029_v4';
             document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
             document.write(`<script src="js/common.js?v=${v}"><\/script>`);
             document.write(`<script src="js/auth.js?v=${v}"><\/script>`);

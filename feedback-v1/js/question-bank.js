@@ -568,7 +568,7 @@ function goBack() {
     goToStep(currentStep - 1);
 }
 
-function handleStepIndicatorClick(n) {
+async function handleStepIndicatorClick(n) {
     if (n === currentStep) return;
     const isAssistant = window.currentUser && window.currentUser.role === 'assistant';
     if (isAssistant && (n === 2 || n === 3)) {
@@ -585,11 +585,25 @@ function handleStepIndicatorClick(n) {
             showToast('请先选择题库类型、学科、年级、班层和专题');
             return;
         }
+        if (getBankType() === 'variation') {
+            await loadHomeworkQuestionsForVariation();
+            if (!homeworkQuestionsForVariation || homeworkQuestionsForVariation.length === 0) {
+                showToast('该专题尚未录入【课后巩固】题库，无法录入举一反三！请先录入课后巩固题目。', 'warn');
+                return;
+            }
+        }
         goToStep(2);
     } else if (n === 3) {
         if (!batchExerciseFile || !batchAnswerFile) {
             showToast('请先在第2步上传题目和答案 PDF');
             return;
+        }
+        if (getBankType() === 'variation') {
+            await loadHomeworkQuestionsForVariation();
+            if (!homeworkQuestionsForVariation || homeworkQuestionsForVariation.length === 0) {
+                showToast('该专题尚未录入【课后巩固】题库，无法录入举一反三！请先录入课后巩固题目。', 'warn');
+                return;
+            }
         }
         if (!batchQuestionThumbs || batchQuestionThumbs.length === 0) {
             goNextFromStep2();
@@ -622,6 +636,23 @@ async function goNextFromStep1() {
             showToast('该专题暂未录入题目，请在下方列表选择已有专题查看', 'warn');
             return;
         }
+        if (getBankType() === 'variation') {
+            await loadHomeworkQuestionsForVariation();
+            if (!homeworkQuestionsForVariation || homeworkQuestionsForVariation.length === 0) {
+                showCustomDialog({
+                    title: '未录入课后巩固题库',
+                    body: `「${subjectSelect.value} · ${gradeSelect.value} · ${tierSelect.value} · ${getTopicLabel(weekSelect.value)}」尚未录入【课后巩固】题库！<br><br>举一反三必须依赖对应课后巩固的原题和考点。请先切换题库类型录入课后巩固题目后再录入举一反三。`,
+                    confirmText: '去录入课后巩固',
+                    cancelText: '知道了',
+                    onConfirm: () => {
+                        if (bankTypeSelect) bankTypeSelect.value = 'homework';
+                        updateBankTypeUi();
+                        loadCurrentData();
+                    }
+                });
+                return;
+            }
+        }
         goToStep(2);
     }
 }
@@ -638,6 +669,11 @@ async function loadHomeworkQuestionsForVariation() {
     const grade = gradeSelect ? gradeSelect.value : '';
     const tier = tierSelect ? tierSelect.value : '';
     const week = weekSelect ? weekSelect.value : '';
+
+    if (!subject || !grade || !tier || !week) {
+        homeworkQuestionsForVariation = [];
+        return;
+    }
 
     try {
         const res = await apiGet('get', {
@@ -658,19 +694,116 @@ function getConsolidationBuckets() {
     if (homeworkQuestionsForVariation && homeworkQuestionsForVariation.length > 0) {
         return homeworkQuestionsForVariation.map((q, idx) => ({
             parentNum: parseInt(q.id || (idx + 1), 10),
-            topic: (q.topic || '').trim()
+            topic: (q.topic || '').trim(),
+            exercisePdf: q.exercisePdf || null
         }));
     }
-    // 若当前周次尚未录入课后题库，默认根据页面数或最少6题创建卡槽
-    const count = Math.max(6, batchQuestionPageCount || 6);
-    const buckets = [];
-    for (let i = 1; i <= count; i++) {
-        buckets.push({
-            parentNum: i,
-            topic: '（未录入课后题库，导入后可手动微调考点）'
-        });
+    return [];
+}
+
+// ========== 课后原题预览查阅 ==========
+let currentHwPreviewPdfUrl = '';
+
+async function previewHomeworkQuestion(parentNum, event) {
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
     }
-    return buckets;
+    const dialog = document.getElementById('homework-preview-dialog');
+    const titleEl = document.getElementById('hw-preview-title');
+    const topicEl = document.getElementById('hw-preview-topic');
+    const imgEl = document.getElementById('hw-preview-img');
+    const loadingEl = document.getElementById('hw-preview-loading');
+    const emptyEl = document.getElementById('hw-preview-empty');
+    const newTabBtn = document.getElementById('hw-preview-newtab-btn');
+
+    if (!dialog) return;
+
+    const hwQ = (homeworkQuestionsForVariation || []).find(q => Number(q.id) === Number(parentNum));
+    const topic = hwQ && hwQ.topic ? hwQ.topic : '未设置考点';
+    const exPdf = hwQ && hwQ.exercisePdf ? hwQ.exercisePdf : null;
+
+    if (titleEl) titleEl.textContent = `课后第 ${parentNum} 题 · 原题查阅`;
+    if (topicEl) topicEl.textContent = `考点：${topic}`;
+
+    currentHwPreviewPdfUrl = exPdf && exPdf.url ? exPdf.url : '';
+    if (newTabBtn) {
+        newTabBtn.style.display = currentHwPreviewPdfUrl ? 'inline-flex' : 'none';
+    }
+
+    if (imgEl) {
+        imgEl.style.display = 'none';
+        imgEl.src = '';
+    }
+    if (emptyEl) emptyEl.style.display = 'none';
+    if (loadingEl) loadingEl.style.display = 'flex';
+
+    dialog.classList.add('active');
+
+    if (!exPdf || (!exPdf.url && !exPdf.thumb)) {
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (emptyEl) emptyEl.style.display = 'flex';
+        return;
+    }
+
+    if (exPdf.thumb) {
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (imgEl) {
+            imgEl.src = exPdf.thumb;
+            imgEl.style.display = 'block';
+        }
+        return;
+    }
+
+    try {
+        const thumb = await ensurePdfThumbnail(exPdf);
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (thumb && imgEl) {
+            imgEl.src = thumb;
+            imgEl.style.display = 'block';
+        } else if (emptyEl) {
+            emptyEl.style.display = 'flex';
+        }
+    } catch (e) {
+        console.warn('加载原题缩略图失败:', e);
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (emptyEl) emptyEl.style.display = 'flex';
+    }
+}
+
+function previewCurrentHomeworkQuestion(event) {
+    previewHomeworkQuestion(selectedBucketParentNum, event);
+}
+
+function previewHomeworkQuestionFromLightbox(event) {
+    const sel = document.getElementById('lightbox-variation-select');
+    const parentVal = (sel && sel.value) ? Number(sel.value) : (variationAssignments[lightboxKind] ? variationAssignments[lightboxKind][lightboxIndex] : null);
+    const targetParent = parentVal || selectedBucketParentNum;
+    if (!targetParent) {
+        showToast('暂无对应课后题可预览');
+        return;
+    }
+    previewHomeworkQuestion(targetParent, event);
+}
+
+function closeHomeworkPreview() {
+    const dialog = document.getElementById('homework-preview-dialog');
+    if (dialog) dialog.classList.remove('active');
+}
+
+function openHomeworkPdfInNewTab() {
+    if (currentHwPreviewPdfUrl) {
+        window.open(currentHwPreviewPdfUrl, '_blank');
+    }
+}
+
+if (!window._hwPreviewEscBound) {
+    window._hwPreviewEscBound = true;
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeHomeworkPreview();
+        }
+    });
 }
 
 function initVariationAssignments() {
@@ -716,6 +849,12 @@ function renderVariationBucketCards() {
                     <span class="bucket-count-badge ${count > 0 ? 'has-items' : ''}">${count > 0 ? `已分 ${count} 题` : '未分配'}</span>
                 </div>
                 <div class="bucket-card-topic" title="${escapeHtml(b.topic || '')}">${escapeHtml(b.topic || '（未设置考点）')}</div>
+                <div class="bucket-card-footer">
+                    <button type="button" class="bucket-preview-btn" onclick="previewHomeworkQuestion(${b.parentNum}, event)" title="查看课后第 ${b.parentNum} 题原题">
+                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                        查看原题
+                    </button>
+                </div>
             </div>
         `;
     }).join('');
@@ -812,6 +951,13 @@ async function goNextFromStep2() {
         showToast('请先上传题目 PDF 和答案 PDF');
         return;
     }
+    if (getBankType() === 'variation') {
+        await loadHomeworkQuestionsForVariation();
+        if (!homeworkQuestionsForVariation || homeworkQuestionsForVariation.length === 0) {
+            showToast('该专题尚未录入【课后巩固】题库，无法录入举一反三！请先录入课后巩固题目。', 'warn');
+            return;
+        }
+    }
     const nextBtn = document.getElementById('step2-next-btn');
     if (nextBtn) nextBtn.disabled = true;
     try {
@@ -819,7 +965,6 @@ async function goNextFromStep2() {
         if (!ok) return;
         batchImported = false;
         if (getBankType() === 'variation') {
-            await loadHomeworkQuestionsForVariation();
             initVariationAssignments();
         } else {
             buildDefaultLabels();
@@ -1124,12 +1269,12 @@ function renderPageGrid(containerId, thumbs, labels, kind) {
                     </div>
                     ${isAssigned ? `
                         <div class="variation-slot-overlay assigned" onclick="event.stopPropagation();">
-                            <span class="v-slot-text">🟢 课后第 ${parentNum} 题 · 变式 ${subNum}</span>
+                            <span class="v-slot-text">课后第 ${parentNum} 题 · 变式 ${subNum}</span>
                             <button type="button" class="v-unassign-btn" onclick="unassignVariationPage('${kind}', ${i}, event)" title="移出卡槽">×</button>
                         </div>
                     ` : `
                         <div class="variation-slot-overlay unassigned">
-                            <span class="v-slot-text">⚪ 待分配（点击归入第 ${selectedBucketParentNum} 题）</span>
+                            <span class="v-slot-text">待分配（点击归入第 ${selectedBucketParentNum} 题）</span>
                         </div>
                     `}
                 </div>
@@ -3899,6 +4044,16 @@ window.setSavedGradeFilter = setSavedGradeFilter;
 window.setSavedWeekFilter = setSavedWeekFilter;
 window.onSavedFilterChange = onSavedFilterChange;
 window.resetSavedFilters = resetSavedFilters;
+
+window.selectVariationBucket = selectVariationBucket;
+window.previewHomeworkQuestion = previewHomeworkQuestion;
+window.previewCurrentHomeworkQuestion = previewCurrentHomeworkQuestion;
+window.previewHomeworkQuestionFromLightbox = previewHomeworkQuestionFromLightbox;
+window.closeHomeworkPreview = closeHomeworkPreview;
+window.openHomeworkPdfInNewTab = openHomeworkPdfInNewTab;
+window.autoAssignVariationPages1to1 = autoAssignVariationPages1to1;
+window.clearAllVariationAssignments = clearAllVariationAssignments;
+window.onLightboxVariationChange = onLightboxVariationChange;
 
 window.addEventListener('resize', () => {
     document.querySelectorAll('.question-topic-input').forEach(el => {
