@@ -1,0 +1,58 @@
+name: Apply nginx hardening
+
+# 手动运行：GitHub → Actions → Apply nginx hardening → Run workflow。
+# 不随普通代码 push 自动执行，避免每次发版都改线上 nginx。
+# 所需 Secrets 与 deploy.yml 相同：
+#   DEPLOY_HOST / DEPLOY_PORT / DEPLOY_USER / DEPLOY_SSH_KEY
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: nginx-hardening
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Preflight check secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          missing=""
+          [ -z "$DEPLOY_HOST" ] && missing="$missing DEPLOY_HOST"
+          [ -z "$DEPLOY_PORT" ] && missing="$missing DEPLOY_PORT"
+          [ -z "$DEPLOY_USER" ] && missing="$missing DEPLOY_USER"
+          [ -z "$DEPLOY_SSH_KEY" ] && missing="$missing DEPLOY_SSH_KEY"
+          if [ -n "$missing" ]; then
+            echo "缺少 Secrets:$missing"
+            exit 1
+          fi
+          if ! echo "$DEPLOY_PORT" | grep -Eq '^[0-9]+$'; then
+            echo "DEPLOY_PORT 必须是纯数字端口"
+            exit 1
+          fi
+          echo "secrets OK"
+
+      - name: Set up SSH key
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      - name: Install and verify nginx hardening
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          SSH="ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 $DEPLOY_USER@$DEPLOY_HOST"
+          $SSH "cd /www/wwwroot/JF/feedback-git && git pull --ff-only"
+          $SSH "bash /www/wwwroot/JF/feedback-git/feedback-v1/scripts/install_nginx_hardening.sh"
