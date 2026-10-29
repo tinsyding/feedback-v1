@@ -680,6 +680,7 @@ function getConsolidationBuckets() {
     }
     return [];
 }
+const getVariationBucketList = getConsolidationBuckets;
 
 function recalcVariationSubNums(questions = currentQuestions) {
     if (getBankType() !== 'variation' || !Array.isArray(questions)) return;
@@ -3489,7 +3490,13 @@ async function importWithLabels(exerciseFile, answerFile) {
         if (!homeworkQuestionsForVariation || homeworkQuestionsForVariation.length === 0) {
             await loadHomeworkQuestionsForVariation();
         }
-        buckets = getVariationBucketList();
+        buckets = getConsolidationBuckets();
+        if (buckets.length === 0) {
+            const maxP = Math.max(8, ...questionNums);
+            for (let k = 1; k <= maxP; k++) {
+                buckets.push({ parentNum: k, topic: '', exercisePdf: null });
+            }
+        }
         buckets.forEach(b => {
             bucketTopicMap[b.parentNum] = b.topic || '';
         });
@@ -3502,7 +3509,7 @@ async function importWithLabels(exerciseFile, answerFile) {
         const parentNum = isVar
             ? (buckets.some(b => b.parentNum === num)
                 ? num
-                : (buckets[idx]?.parentNum || buckets[buckets.length - 1]?.parentNum || (idx + 1)))
+                : (buckets[idx]?.parentNum || buckets[buckets.length - 1]?.parentNum || num || (idx + 1)))
             : null;
         const topic = isVar ? (bucketTopicMap[parentNum] || '') : '';
         return {
@@ -3626,7 +3633,13 @@ async function doBatchImportPdfs(exerciseFile, answerFile) {
         if (!homeworkQuestionsForVariation || homeworkQuestionsForVariation.length === 0) {
             await loadHomeworkQuestionsForVariation();
         }
-        buckets = getVariationBucketList();
+        buckets = getConsolidationBuckets();
+        if (buckets.length === 0) {
+            const maxP = Math.max(8, pageCount);
+            for (let k = 1; k <= maxP; k++) {
+                buckets.push({ parentNum: k, topic: '', exercisePdf: null });
+            }
+        }
         buckets.forEach(b => {
             bucketTopicMap[b.parentNum] = b.topic || '';
         });
