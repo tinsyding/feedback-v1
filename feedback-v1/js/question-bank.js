@@ -1730,13 +1730,18 @@ async function saveQuestions() {
         const hasExercise = q.exercisePdf && (q.exercisePdf.url || q.exercisePdf.status === 'uploading');
 
         if (!topic) {
-            showToast(`第 ${qNum} 题【知识点】为必填项，请填写完整！`, 'warn');
+            const isVar = getBankType() === 'variation';
+            if (isVar) {
+                showToast(`第 ${qNum} 题关联的原题缺少知识点，请在课后巩固中完善！`, 'warn');
+            } else {
+                showToast(`第 ${qNum} 题【知识点】为必填项，请填写完整！`, 'warn');
+            }
             const itemEls = questionItems.querySelectorAll('.question-item');
             if (itemEls[i]) {
                 itemEls[i].scrollIntoView({ behavior: 'smooth', block: 'center' });
-                const topicInput = itemEls[i].querySelector('.question-topic-input');
+                const topicInput = itemEls[i].querySelector('.question-topic-input') || itemEls[i].querySelector('.var-item-left');
                 if (topicInput) {
-                    topicInput.focus();
+                    if (typeof topicInput.focus === 'function') topicInput.focus();
                     topicInput.classList.add('input-error');
                     setTimeout(() => topicInput.classList.remove('input-error'), 2500);
                 }
@@ -2454,44 +2459,70 @@ function renderQuestionList() {
         const item = document.createElement('div');
         item.className = 'question-item' + (isAssistant ? ' readonly-item' : '');
         item.dataset.index = originalIndex;
-        const videoVal = q.videoUrl || q.video_url || '';
         const parentNum = parseInt(q.parentQuestionNum || q.id, 10) || 1;
         const subNum = parseInt(q.subNum, 10) || 1;
 
-        const variationParentRowHtml = isVariationBank ? `
-                <div class="question-field-row">
-                    <label class="question-field-label">关联原题：</label>
-                    <div class="variation-parent-bar">
-                        <div class="variation-parent-pills">
-                            ${variationBuckets.map(b => {
-                                const isActive = Number(b.parentNum) === Number(parentNum);
-                                return `<button type="button" class="var-parent-pill${isActive ? ' active' : ''}"
-                                    onclick="onVariationParentChange(${originalIndex}, ${b.parentNum})"
-                                    onmouseenter="onHoverHomeworkPreview(event, ${b.parentNum})"
-                                    onmouseleave="hideHoverPopover()"
-                                    title="课后第 ${b.parentNum} 题${b.topic ? '：' + escapeHtml(b.topic) : ''}"
-                                    ${isAssistant ? 'disabled' : ''}>第${b.parentNum}题</button>`;
-                            }).join('')}
-                        </div>
-                        <div class="variation-parent-right">
-                            <span class="var-sub-badge">变式 ${subNum}</span>
-                            <button type="button" class="var-hw-preview-btn"
-                                    onclick="previewHomeworkQuestion(${parentNum}, event)"
-                                    onmouseenter="onHoverHomeworkPreview(event, ${parentNum})"
-                                    onmouseleave="hideHoverPopover()"
-                                    title="查阅课后第 ${parentNum} 题原题">
-                                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                                    <circle cx="12" cy="12" r="3"></circle>
-                                </svg>
-                                <span>原题</span>
-                            </button>
-                        </div>
+        if (isVariationBank) {
+            item.classList.add('variation-item');
+            item.innerHTML = `
+                <div class="question-id-tags">
+                    <span class="question-id-var-badge" title="课后第 ${parentNum} 题 · 变式 ${subNum}">${parentNum}-${subNum}</span>
+                </div>
+                <div class="var-item-left">
+                    <div class="var-parent-header">
+                        <span class="var-parent-current" title="当前关联课后巩固第 ${parentNum} 题">课后第 <strong>${parentNum}</strong> 题</span>
+                        <span class="var-sub-badge">变式 ${subNum}</span>
+                        <button type="button" class="var-hw-preview-btn"
+                                onclick="previewHomeworkQuestion(${parentNum}, event)"
+                                onmouseenter="onHoverHomeworkPreview(event, ${parentNum})"
+                                onmouseleave="hideHoverPopover()"
+                                title="查阅课后第 ${parentNum} 题原题 PDF">
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                <circle cx="12" cy="12" r="3"></circle>
+                            </svg>
+                            <span>原题</span>
+                        </button>
+                    </div>
+                    <div class="var-topic-readonly" title="${escapeHtml(q.topic || '跟随原题自动同步')}">
+                        <span class="var-topic-label">知识点：</span>
+                        <span class="var-topic-text">${escapeHtml(q.topic || '跟随原题自动同步')}</span>
+                        <span class="var-topic-lock-icon" title="知识点随关联原题自动带出，不可在此直接更改">
+                            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                        </span>
                     </div>
                 </div>
-        ` : '';
-
-        const videoRowHtml = (isPreviewBank || isVariationBank) ? '' : `
+                <div class="var-item-center">
+                    <span class="var-selector-label">选择原题：</span>
+                    <div class="variation-parent-pills">
+                        ${variationBuckets.map(b => {
+                            const isActive = Number(b.parentNum) === Number(parentNum);
+                            return `<button type="button" class="var-parent-pill${isActive ? ' active' : ''}"
+                                onclick="onVariationParentChange(${originalIndex}, ${b.parentNum})"
+                                onmouseenter="onHoverHomeworkPreview(event, ${b.parentNum})"
+                                onmouseleave="hideHoverPopover()"
+                                title="关联课后第 ${b.parentNum} 题${b.topic ? '：' + escapeHtml(b.topic) : ''}"
+                                ${isAssistant ? 'disabled' : ''}>第${b.parentNum}题</button>`;
+                        }).join('')}
+                    </div>
+                </div>
+                <div class="question-pdf-actions">
+                    ${renderPdfBtn(q, originalIndex, 'exercise')}
+                    ${renderPdfBtn(q, originalIndex, 'answer')}
+                </div>
+                ${isAssistant ? '' : `
+                <div class="question-actions">
+                    <button class="question-action-btn question-remove-btn" onclick="removeQuestion(${originalIndex})" title="删除此题">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>`}
+            `;
+        } else {
+            const videoVal = q.videoUrl || q.video_url || '';
+            const videoRowHtml = isPreviewBank ? '' : `
                 <div class="question-field-row">
                     <label class="question-field-label video-label">微课链接：</label>
                     <div class="question-video-input-wrap">
@@ -2507,43 +2538,41 @@ function renderQuestionList() {
                         ${videoVal ? `<a href="${escapeHtml(videoVal)}" target="_blank" class="video-preview-link" title="新窗口打开微课链接"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>` : ''}
                     </div>
                 </div>
-        `;
-        const idTagHtml = isVariationBank ? `
-            <span class="question-id-var-badge" title="课后第 ${parentNum} 题 · 变式 ${subNum}">${parentNum}-${subNum}</span>
-        ` : `
-            <input type="number" class="question-id-input" min="1" step="1" value="${escapeHtml(q.id)}" onwheel="this.blur()" onchange="onIdChange(${originalIndex}, this.value)" ${idReadonlyAttr}>
-        `;
-        item.innerHTML = `
-            <div class="question-id-tags">
-                ${idTagHtml}
-            </div>
-            <div class="question-main-fields">
-                ${variationParentRowHtml}
-                <div class="question-field-row question-topic-row">
-                    <label class="question-field-label topic-label">知识点：</label>
-                    <textarea class="question-topic-input"
-                           placeholder="输入知识点 (必填)..."
-                           rows="1"
-                           oninput="onTopicChange(${originalIndex}, this.value); autoResizeTopicTextarea(this);"
-                           onfocus="autoResizeTopicTextarea(this)"
-                           onblur="onTopicBlur(${originalIndex}, this)" ${readonlyAttr}>${escapeHtml(q.topic || '')}</textarea>
+            `;
+            const idTagHtml = `
+                <input type="number" class="question-id-input" min="1" step="1" value="${escapeHtml(q.id)}" onwheel="this.blur()" onchange="onIdChange(${originalIndex}, this.value)" ${idReadonlyAttr}>
+            `;
+            item.innerHTML = `
+                <div class="question-id-tags">
+                    ${idTagHtml}
                 </div>
-                ${videoRowHtml}
-            </div>
-            <div class="question-pdf-actions">
-                ${renderPdfBtn(q, originalIndex, 'exercise')}
-                ${renderPdfBtn(q, originalIndex, 'answer')}
-            </div>
-            ${isAssistant ? '' : `
-            <div class="question-actions">
-                <button class="question-action-btn question-remove-btn" onclick="removeQuestion(${originalIndex})" title="删除此题">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                    </svg>
-                </button>
-            </div>`}
-        `;
+                <div class="question-main-fields">
+                    <div class="question-field-row question-topic-row">
+                        <label class="question-field-label topic-label">知识点：</label>
+                        <textarea class="question-topic-input"
+                               placeholder="输入知识点 (必填)..."
+                               rows="1"
+                               oninput="onTopicChange(${originalIndex}, this.value); autoResizeTopicTextarea(this);"
+                               onfocus="autoResizeTopicTextarea(this)"
+                               onblur="onTopicBlur(${originalIndex}, this)" ${readonlyAttr}>${escapeHtml(q.topic || '')}</textarea>
+                    </div>
+                    ${videoRowHtml}
+                </div>
+                <div class="question-pdf-actions">
+                    ${renderPdfBtn(q, originalIndex, 'exercise')}
+                    ${renderPdfBtn(q, originalIndex, 'answer')}
+                </div>
+                ${isAssistant ? '' : `
+                <div class="question-actions">
+                    <button class="question-action-btn question-remove-btn" onclick="removeQuestion(${originalIndex})" title="删除此题">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>`}
+            `;
+        }
         questionItems.appendChild(item);
         const topicTextarea = item.querySelector('.question-topic-input');
         if (topicTextarea) {
