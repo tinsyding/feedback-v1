@@ -373,7 +373,7 @@ function updateBankTypeUi() {
     }
     const step3TabLabel = document.getElementById('step3-tab-label');
     if (step3TabLabel) {
-        step3TabLabel.textContent = type === 'variation' ? '分配卡槽' : '标注题号';
+        step3TabLabel.textContent = '标注题号';
     }
     const searchInput = document.getElementById('qb-search-input');
     if (searchInput) {
@@ -517,40 +517,11 @@ function goToStep(n) {
         applyAssistantReadOnlyModeIfNeed();
     }
 
-    const isVar = getBankType() === 'variation';
-    const varBucketPanel = document.getElementById('variation-bucket-panel');
-    const varHint = document.getElementById('step3-variation-hint');
-    const stdHint = document.getElementById('step3-standard-hint');
-    const cascadeWrap = document.getElementById('cascade-toggle-wrap');
-    const autoDetectStatus = document.getElementById('auto-detect-status');
-    const undoCascadeBtn = document.getElementById('undo-cascade-btn');
-    const step3Title = document.getElementById('step3-title');
-    const step4VarHint = document.getElementById('step4-variation-hint');
-
     if (n === 3) {
-        if (isVar) {
-            if (varBucketPanel) varBucketPanel.style.display = 'block';
-            if (varHint) varHint.style.display = 'block';
-            if (stdHint) stdHint.style.display = 'none';
-            if (cascadeWrap) cascadeWrap.style.display = 'none';
-            if (autoDetectStatus) autoDetectStatus.style.display = 'none';
-            if (undoCascadeBtn) undoCascadeBtn.style.display = 'none';
-            if (step3Title) step3Title.textContent = '举一反三卡槽分配';
-            renderVariationBucketCards();
-        } else {
-            if (varBucketPanel) varBucketPanel.style.display = 'none';
-            if (varHint) varHint.style.display = 'none';
-            if (stdHint) stdHint.style.display = 'block';
-            if (cascadeWrap) cascadeWrap.style.display = 'inline-flex';
-            if (step3Title) step3Title.textContent = '页面标注';
-            updateAutoDetectStatus();
-        }
+        updateAutoDetectStatus();
     }
 
     if (n === 4) {
-        if (step4VarHint) {
-            step4VarHint.style.display = isVar ? 'inline-block' : 'none';
-        }
         requestAnimationFrame(() => {
             if (typeof resizeAllTopicTextareas === 'function') resizeAllTopicTextareas();
         });
@@ -565,10 +536,6 @@ function goToStep(n) {
 
 function goBack() {
     if (currentStep <= 1) return;
-    if (currentStep === 4 && getBankType() === 'variation' && batchImported) {
-        openVariationWorkbench();
-        return;
-    }
     // Existing-data path (no upload/mapping): back from edit goes to selector
     if (currentStep === 4 && !batchImported) {
         goToStep(1);
@@ -613,12 +580,6 @@ async function handleStepIndicatorClick(n) {
                 showToast('该专题尚未录入【课后巩固】题库，无法录入举一反三！请先录入课后巩固题目。', 'warn');
                 return;
             }
-            if (!batchQuestionThumbs || batchQuestionThumbs.length === 0) {
-                goNextFromStep2();
-            } else {
-                openVariationWorkbench();
-            }
-            return;
         }
         if (!batchQuestionThumbs || batchQuestionThumbs.length === 0) {
             goNextFromStep2();
@@ -672,10 +633,8 @@ async function goNextFromStep1() {
     }
 }
 
-// ========== 举一反三 (Variation) 卡槽分配管理 ==========
+// ========== 举一反三 (Variation) 关联原题管理 ==========
 let homeworkQuestionsForVariation = [];
-let selectedBucketParentNum = 1;
-let variationAssignments = { q: [], a: [] };
 
 async function loadHomeworkQuestionsForVariation() {
     const year = yearSelect ? parseInt(yearSelect.value, 10) : 2026;
@@ -696,6 +655,12 @@ async function loadHomeworkQuestionsForVariation() {
         });
         if (res && res.success && res.data && Array.isArray(res.data.questions) && res.data.questions.length > 0) {
             homeworkQuestionsForVariation = res.data.questions;
+            // 后台异步预热课后原题缩略图，供悬停原题即时预览
+            homeworkQuestionsForVariation.forEach(q => {
+                if (q.exercisePdf && q.exercisePdf.url && !q.exercisePdf.thumb) {
+                    ensurePdfThumbnail(q.exercisePdf).catch(() => {});
+                }
+            });
         } else {
             homeworkQuestionsForVariation = [];
         }
@@ -716,1280 +681,88 @@ function getConsolidationBuckets() {
     return [];
 }
 
-// ========== 课后原题预览查阅 ==========
-let currentHwPreviewPdfUrl = '';
+function recalcVariationSubNums(questions = currentQuestions) {
+    if (getBankType() !== 'variation' || !Array.isArray(questions)) return;
+    const counts = {};
+    questions.forEach((q, idx) => {
+        q.id = idx + 1;
+        const pNum = parseInt(q.parentQuestionNum, 10) || 1;
+        q.parentQuestionNum = pNum;
+        counts[pNum] = (counts[pNum] || 0) + 1;
+        q.subNum = counts[pNum];
+    });
+}
 
-async function previewHomeworkQuestion(parentNum, event) {
+function onVariationParentChange(index, parentNum) {
+    if (index < 0 || index >= currentQuestions.length) return;
+    const q = currentQuestions[index];
+    const pNum = parseInt(parentNum, 10);
+    if (!pNum || pNum <= 0) return;
+
+    q.parentQuestionNum = pNum;
+    const hwQ = (homeworkQuestionsForVariation || []).find(item => Number(item.id) === pNum);
+    if (hwQ && hwQ.topic) {
+        q.topic = hwQ.topic.trim();
+    }
+    recalcVariationSubNums(currentQuestions);
+    isDirty = true;
+    renderQuestionList();
+    updateStatus();
+}
+window.onVariationParentChange = onVariationParentChange;
+
+async function onHoverHomeworkPreview(event, parentNum) {
+    const hwQ = (homeworkQuestionsForVariation || []).find(item => Number(item.id) === Number(parentNum));
+    if (!hwQ || !hwQ.exercisePdf) return;
+    const title = `课后第 ${parentNum} 题${hwQ.topic ? ' · ' + hwQ.topic : ''}`;
+    if (hwQ.exercisePdf.thumb) {
+        showHoverPopover(event, hwQ.exercisePdf.thumb, title);
+    } else if (hwQ.exercisePdf.url) {
+        const thumb = await ensurePdfThumbnail(hwQ.exercisePdf);
+        if (thumb) showHoverPopover(event, thumb, title);
+    }
+}
+window.onHoverHomeworkPreview = onHoverHomeworkPreview;
+
+function previewHomeworkQuestion(parentNum, event) {
     if (event) {
         event.stopPropagation();
         event.preventDefault();
     }
-    const dialog = document.getElementById('homework-preview-dialog');
-    const titleEl = document.getElementById('hw-preview-title');
-    const topicEl = document.getElementById('hw-preview-topic');
-    const imgEl = document.getElementById('hw-preview-img');
-    const loadingEl = document.getElementById('hw-preview-loading');
-    const emptyEl = document.getElementById('hw-preview-empty');
-    const newTabBtn = document.getElementById('hw-preview-newtab-btn');
-
-    if (!dialog) return;
-
+    if (typeof hideHoverPopover === "function") hideHoverPopover();
     const hwQ = (homeworkQuestionsForVariation || []).find(q => Number(q.id) === Number(parentNum));
-    const topic = hwQ && hwQ.topic ? hwQ.topic : '未设置考点';
     const exPdf = hwQ && hwQ.exercisePdf ? hwQ.exercisePdf : null;
-
-    if (titleEl) titleEl.textContent = `课后第 ${parentNum} 题 · 原题查阅`;
-    if (topicEl) topicEl.textContent = `考点：${topic}`;
-
-    currentHwPreviewPdfUrl = exPdf && exPdf.url ? exPdf.url : '';
-    if (newTabBtn) {
-        newTabBtn.style.display = currentHwPreviewPdfUrl ? 'inline-flex' : 'none';
-    }
-
-    if (imgEl) {
-        imgEl.style.display = 'none';
-        imgEl.src = '';
-    }
-    if (emptyEl) emptyEl.style.display = 'none';
-    if (loadingEl) loadingEl.style.display = 'flex';
-
-    dialog.classList.add('active');
-
-    if (!exPdf || (!exPdf.url && !exPdf.thumb)) {
-        if (loadingEl) loadingEl.style.display = 'none';
-        if (emptyEl) emptyEl.style.display = 'flex';
+    if (!exPdf || !exPdf.url) {
+        showToast(`课后第 ${parentNum} 题暂无原题 PDF 文件`);
         return;
     }
-
-    if (exPdf.thumb) {
-        if (loadingEl) loadingEl.style.display = 'none';
-        if (imgEl) {
-            imgEl.src = exPdf.thumb;
-            imgEl.style.display = 'block';
-        }
-        return;
-    }
-
-    try {
-        const thumb = await ensurePdfThumbnail(exPdf);
-        if (loadingEl) loadingEl.style.display = 'none';
-        if (thumb && imgEl) {
-            imgEl.src = thumb;
-            imgEl.style.display = 'block';
-        } else if (emptyEl) {
-            emptyEl.style.display = 'flex';
-        }
-    } catch (e) {
-        console.warn('加载原题缩略图失败:', e);
-        if (loadingEl) loadingEl.style.display = 'none';
-        if (emptyEl) emptyEl.style.display = 'flex';
-    }
+    const topic = hwQ && hwQ.topic ? ` (${hwQ.topic})` : "";
+    previewPdf(exPdf.url, `课后第 ${parentNum} 题 · 原题${topic}`);
 }
-
-function previewCurrentHomeworkQuestion(event) {
-    previewHomeworkQuestion(selectedBucketParentNum, event);
-}
-
-function previewHomeworkQuestionFromLightbox(event) {
-    const sel = document.getElementById('lightbox-variation-select');
-    const parentVal = (sel && sel.value) ? Number(sel.value) : (variationAssignments[lightboxKind] ? variationAssignments[lightboxKind][lightboxIndex] : null);
-    const targetParent = parentVal || selectedBucketParentNum;
-    if (!targetParent) {
-        showToast('暂无对应课后题可预览');
-        return;
-    }
-    previewHomeworkQuestion(targetParent, event);
-}
-
-function closeHomeworkPreview() {
-    const dialog = document.getElementById('homework-preview-dialog');
-    if (dialog) dialog.classList.remove('active');
-}
-
-function openHomeworkPdfInNewTab() {
-    if (currentHwPreviewPdfUrl) {
-        window.open(currentHwPreviewPdfUrl, '_blank');
-    }
-}
-
-if (!window._hwPreviewEscBound) {
-    window._hwPreviewEscBound = true;
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            closeHomeworkPreview();
-        }
-    });
-}
-
-// ========== 举一反三：两阶段分步流水线工作台 (Two-Stage Pipeline Workbench) ==========
-let pipelineItems = [];
-let currentWbStage = 1; // 1: 题目切分与关联原题; 2: 分配每题答案解析
-let currentS1QIndex = 0;
-let currentS2QIndex = 0;
-
-function openVariationWorkbench() {
-    const wb = document.getElementById('variation-workbench');
-    if (!wb) return;
-
-    const subMeta = document.getElementById('wb-sub-meta');
-    if (subMeta && subjectSelect && gradeSelect && tierSelect && weekSelect) {
-        subMeta.textContent = `${subjectSelect.value} · ${gradeSelect.value} · ${tierSelect.value} · ${getTopicLabel(weekSelect.value)}`;
-    }
-
-    if (!pipelineItems || pipelineItems.length === 0) {
-        initVariationPipeline();
-    } else {
-        switchWbStage(currentWbStage || 1);
-    }
-
-    wb.style.display = 'flex';
-}
-
-function closeVariationWorkbench() {
-    const wb = document.getElementById('variation-workbench');
-    if (wb) wb.style.display = 'none';
-    goToStep(2);
-}
-
-function initVariationPipeline() {
-    const buckets = getConsolidationBuckets();
-    const count = batchQuestionPageCount || 0;
-    pipelineItems = [];
-
-    for (let i = 0; i < count; i++) {
-        const pNum = (buckets[i] ? buckets[i].parentNum : (buckets[0] ? buckets[0].parentNum : 1));
-        const anPages = (i < batchAnswerPageCount) ? [i] : [];
-        pipelineItems.push({
-            id: i + 1,
-            parentQuestionNum: Number(pNum),
-            exercisePages: [i],
-            answerPages: anPages
-        });
-    }
-
-    if (pipelineItems.length === 0) {
-        pipelineItems.push({
-            id: 1,
-            parentQuestionNum: (buckets[0] ? buckets[0].parentNum : 1),
-            exercisePages: [],
-            answerPages: []
-        });
-    }
-
-    currentWbStage = 1;
-    currentS1QIndex = 0;
-    currentS2QIndex = 0;
-    switchWbStage(1);
-}
-
-function switchWbStage(stage) {
-    if (stage === 2) {
-        // 校验：每道题目必须至少包含 1 页题目 PDF
-        const emptyExIdx = pipelineItems.findIndex(it => !it.exercisePages || it.exercisePages.length === 0);
-        if (emptyExIdx >= 0) {
-            currentS1QIndex = emptyExIdx;
-            renderStage1();
-            showToast(`变式第 ${emptyExIdx + 1} 题尚未配置题目页面，请先为其选择题目页面`, 'warn');
-            return false;
-        }
-    }
-
-    currentWbStage = stage;
-
-    const tab1 = document.getElementById('wb-tab-stage-1');
-    const tab2 = document.getElementById('wb-tab-stage-2');
-    const view1 = document.getElementById('wb-stage-1-view');
-    const view2 = document.getElementById('wb-stage-2-view');
-    const toolAutoQ = document.getElementById('wb-tool-auto-questions');
-    const toolAutoA = document.getElementById('wb-tool-auto-answers');
-    const topPrimaryBtn = document.getElementById('wb-top-primary-btn');
-
-    if (stage === 1) {
-        if (tab1) tab1.className = 'wb-stage-tab-btn active';
-        if (tab2) tab2.className = 'wb-stage-tab-btn';
-        if (view1) view1.style.display = 'flex';
-        if (view2) view2.style.display = 'none';
-        if (toolAutoQ) toolAutoQ.style.display = 'inline-flex';
-        if (toolAutoA) toolAutoA.style.display = 'none';
-        if (topPrimaryBtn) {
-            topPrimaryBtn.textContent = '下一步：配置答案 ➔';
-            topPrimaryBtn.style.background = '';
-        }
-        renderStage1();
-    } else {
-        if (tab1) tab1.className = 'wb-stage-tab-btn completed';
-        if (tab2) tab2.className = 'wb-stage-tab-btn active';
-        if (view1) view1.style.display = 'none';
-        if (view2) view2.style.display = 'flex';
-        if (toolAutoQ) toolAutoQ.style.display = 'none';
-        if (toolAutoA) toolAutoA.style.display = 'inline-flex';
-        if (topPrimaryBtn) {
-            topPrimaryBtn.textContent = '全部完成，切片导入 ✓';
-            topPrimaryBtn.style.background = '#059669';
-        }
-        if (currentS2QIndex >= pipelineItems.length) currentS2QIndex = pipelineItems.length - 1;
-        if (currentS2QIndex < 0) currentS2QIndex = 0;
-        renderStage2();
-    }
-
-    updateStageHeaderStats();
-    return true;
-}
-
-function updateStageHeaderStats() {
-    const s1Pill = document.getElementById('wb-s1-status-pill');
-    const s2Pill = document.getElementById('wb-s2-status-pill');
-    const sumCount = document.getElementById('wb-summary-count');
-
-    if (s1Pill) s1Pill.textContent = `${pipelineItems.length} 题`;
-    const assignedCount = pipelineItems.filter(it => it.answerPages && it.answerPages.length > 0).length;
-    if (s2Pill) {
-        s2Pill.textContent = assignedCount === pipelineItems.length ? '全部已配' : `已配 ${assignedCount}/${pipelineItems.length} 题`;
-    }
-    if (sumCount) sumCount.textContent = String(pipelineItems.length);
-}
-
-function wbHeaderPrimaryAction() {
-    if (currentWbStage === 1) {
-        switchWbStage(2);
-    } else {
-        doImportFromPipeline();
-    }
-}
-
-function getPipelineSubNum(targetIdx) {
-    const item = pipelineItems[targetIdx];
-    if (!item) return 1;
-    let sub = 0;
-    for (let i = 0; i <= targetIdx; i++) {
-        if (pipelineItems[i] && pipelineItems[i].parentQuestionNum === item.parentQuestionNum) {
-            sub++;
-        }
-    }
-    return Math.max(1, sub);
-}
-
-// ========== 第 1 阶段：切分题目与关联原题 ==========
-function renderStage1() {
-    const total = pipelineItems.length;
-    if (total === 0) return;
-    if (currentS1QIndex < 0) currentS1QIndex = 0;
-    if (currentS1QIndex >= total) currentS1QIndex = total - 1;
-
-    renderS1Stepper();
-    renderS1HomeworkList();
-    renderS1ExerciseView();
-    renderS1ExerciseFilmstrip();
-    updateS1NavButtons();
-    updateStageHeaderStats();
-}
-
-function renderS1Stepper() {
-    const wrap = document.getElementById('wb-s1-stepper-wrap');
-    const pageStat = document.getElementById('wb-s1-page-stat');
-    if (!wrap) return;
-
-    wrap.innerHTML = pipelineItems.map((item, idx) => {
-        const isActive = idx === currentS1QIndex;
-        const exCount = item.exercisePages ? item.exercisePages.length : 0;
-        const hasPages = exCount > 0;
-        return `
-            <div class="wb-step-pill ${isActive ? 'active' : ''} ${hasPages ? '' : 'missing-pages'}"
-                 onclick="wbJumpToS1Question(${idx})" title="切换至变式第 ${idx + 1} 题 (课后第 ${item.parentQuestionNum} 题)">
-                <span>${idx + 1}. 课后第 ${item.parentQuestionNum} 题</span>
-                <span style="font-size:0.7rem; opacity:0.85;">(${exCount}页)</span>
-            </div>
-        `;
-    }).join('');
-
-    const activeEl = wrap.querySelector('.wb-step-pill.active');
-    if (activeEl && typeof activeEl.scrollIntoView === 'function') {
-        activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-    }
-
-    if (pageStat) {
-        const usedPages = new Set(pipelineItems.flatMap(it => it.exercisePages || []));
-        pageStat.textContent = `已分配 ${usedPages.size} / ${batchQuestionPageCount} 页题目 (共 ${pipelineItems.length} 题)`;
-    }
-}
-
-function wbJumpToS1Question(idx) {
-    if (idx >= 0 && idx < pipelineItems.length) {
-        currentS1QIndex = idx;
-        renderStage1();
-    }
-}
-
-function renderS1HomeworkList() {
-    const container = document.getElementById('wb-s1-hw-list');
-    const countTag = document.getElementById('wb-s1-hw-count-tag');
-    if (!container) return;
-
-    const buckets = getConsolidationBuckets();
-    if (countTag) countTag.textContent = `共 ${buckets.length} 题`;
-
-    const currItem = pipelineItems[currentS1QIndex];
-    const currParent = currItem ? currItem.parentQuestionNum : (buckets[0]?.parentNum || 1);
-
-    const counts = {};
-    buckets.forEach(b => { counts[b.parentNum] = 0; });
-    pipelineItems.forEach(it => {
-        if (it && it.parentQuestionNum) {
-            counts[it.parentQuestionNum] = (counts[it.parentQuestionNum] || 0) + 1;
-        }
-    });
-
-    container.innerHTML = buckets.map(b => {
-        const isActive = Number(b.parentNum) === Number(currParent);
-        const count = counts[b.parentNum] || 0;
-        const thumbUrl = (b.exercisePdf && b.exercisePdf.thumb) ? b.exercisePdf.thumb : '';
-        return `
-            <div class="wb-hw-card ${isActive ? 'active' : ''}" onclick="selectS1Homework(${b.parentNum})" title="点击将当前变式题关联至课后第 ${b.parentNum} 题">
-                <div class="wb-hw-card-top">
-                    <span class="wb-hw-no">课后第 ${b.parentNum} 题</span>
-                    <span class="wb-hw-assigned-badge ${count > 0 ? 'has-items' : ''}">
-                        ${isActive ? '✓ 当前选定 · ' : ''}${count > 0 ? `已配 ${count} 变式` : '未挂载'}
-                    </span>
-                </div>
-                <div class="wb-hw-topic" title="${escapeHtml(b.topic || '')}">${escapeHtml(b.topic || '（未设考点）')}</div>
-                <div class="wb-hw-thumb-wrap">
-                    ${thumbUrl 
-                        ? `<img src="${thumbUrl}" alt="原题第 ${b.parentNum} 题" loading="lazy">` 
-                        : `<span style="font-size:0.75rem; color:var(--text-tertiary);">课后原题切片图</span>`}
-                    <button type="button" class="wb-hw-preview-btn" onclick="previewHomeworkQuestion(${b.parentNum}, event)" title="查阅原题大图与解析">
-                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line></svg>
-                        查阅原题
-                    </button>
-                </div>
-            </div>
-        `;
-    }).join('');
-}
-
-function selectS1Homework(parentNum) {
-    if (!pipelineItems[currentS1QIndex]) return;
-    pipelineItems[currentS1QIndex].parentQuestionNum = Number(parentNum);
-    renderS1Stepper();
-    renderS1HomeworkList();
-    renderS1ExerciseView();
-    updateS1NavButtons();
-}
-
-function renderS1ExerciseView() {
-    const item = pipelineItems[currentS1QIndex];
-    if (!item) return;
-
-    const titleEl = document.getElementById('wb-s1-ex-title');
-    const indicatorEl = document.getElementById('wb-s1-hw-indicator');
-    const pagesBadge = document.getElementById('wb-s1-ex-pages-badge');
-    const container = document.getElementById('wb-s1-pages-container');
-
-    if (titleEl) {
-        titleEl.textContent = `变式第 ${currentS1QIndex + 1} 题 · 题目预览`;
-    }
-
-    const buckets = getConsolidationBuckets();
-    const b = buckets.find(it => Number(it.parentNum) === Number(item.parentQuestionNum));
-    const subNum = getPipelineSubNum(currentS1QIndex);
-    if (indicatorEl) {
-        indicatorEl.textContent = `已归入：课后第 ${item.parentQuestionNum} 题 · 变式 ${subNum}${b && b.topic ? ` (${b.topic})` : ''}`;
-    }
-
-    const exCount = item.exercisePages ? item.exercisePages.length : 0;
-    if (pagesBadge) {
-        if (exCount > 0) {
-            pagesBadge.textContent = `包含 ${exCount} 页题目 (第 ${item.exercisePages.map(p => p + 1).join('、')} 页)`;
-            pagesBadge.style.color = '#2563eb';
-            pagesBadge.style.background = '#eff6ff';
-            pagesBadge.style.borderColor = '#bfdbfe';
-        } else {
-            pagesBadge.textContent = `⚠️ 尚未为此题配置任何题目页面`;
-            pagesBadge.style.color = '#ef4444';
-            pagesBadge.style.background = '#fef2f2';
-            pagesBadge.style.borderColor = '#fecaca';
-        }
-    }
-
-    if (container) {
-        if (exCount === 0) {
-            container.innerHTML = `
-                <div style="text-align:center; color:var(--text-tertiary); padding:40px 20px;">
-                    <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom:12px; opacity:0.6;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
-                    <div style="font-size:0.95rem; font-weight:700; color:var(--text-secondary); margin-bottom:6px;">尚未为此变式题选择题目页面</div>
-                    <div style="font-size:0.8rem; color:var(--text-tertiary);">请在下方【题目 PDF 全部页面】胶片中直接点击缩略图勾选。<br>支持单题多页：点击多个页面即可合成一道完整题目。</div>
-                </div>
-            `;
-        } else {
-            container.innerHTML = item.exercisePages.map((pIdx, order) => `
-                <div class="wb-s1-page-preview-card">
-                    <img src="${batchQuestionThumbs[pIdx] || ''}" alt="题目第 ${pIdx + 1} 页" onclick="openPageLightbox('q', ${pIdx})" title="点击全屏高清放大查看">
-                    <div class="wb-s1-page-pill">题目第 ${pIdx + 1} 页 (本题第 ${order + 1} 页)</div>
-                </div>
-            `).join('');
-        }
-    }
-}
-
-function renderS1ExerciseFilmstrip() {
-    const item = pipelineItems[currentS1QIndex];
-    if (!item) return;
-
-    const scrollEl = document.getElementById('wb-s1-filmstrip-scroll');
-    const countEl = document.getElementById('wb-s1-filmstrip-count');
-    if (countEl) countEl.textContent = `共 ${batchQuestionPageCount} 页`;
-    if (!scrollEl) return;
-
-    scrollEl.innerHTML = '';
-    for (let exIdx = 0; exIdx < batchQuestionPageCount; exIdx++) {
-        const isCurrent = item.exercisePages.includes(exIdx);
-        const otherIdx = pipelineItems.findIndex((it, idx) => idx !== currentS1QIndex && it.exercisePages && it.exercisePages.includes(exIdx));
-        
-        const card = document.createElement('div');
-        card.className = `wb-ex-page-card ${isCurrent ? 'selected-current' : (otherIdx >= 0 ? 'used-other' : 'unassigned')}`;
-        card.onclick = () => toggleS1ExercisePage(exIdx);
-        card.title = isCurrent 
-            ? `已包含在当前变式题中 (本题第 ${item.exercisePages.indexOf(exIdx) + 1} 页)，点击可取消` 
-            : (otherIdx >= 0 
-                ? `已被变式第 ${otherIdx + 1} 题使用，点击将转移到本题` 
-                : `点击加入当前变式题`);
-
-        card.innerHTML = `
-            <div class="wb-card-thumb-wrap">
-                <img src="${batchQuestionThumbs[exIdx]}" alt="题目第 ${exIdx + 1} 页" loading="lazy">
-                <div class="wb-card-badge">
-                    ${isCurrent 
-                        ? `<span class="badge-sel">✓ 本题第 ${item.exercisePages.indexOf(exIdx) + 1} 页</span>` 
-                        : (otherIdx >= 0 
-                            ? `<span class="badge-used">变式 ${otherIdx + 1} 已用</span>` 
-                            : `<span class="badge-empty">待选</span>`)}
-                </div>
-                <div class="wb-card-zoom" onclick="event.stopPropagation(); openPageLightbox('q', ${exIdx});" title="点击放大查看页面">
-                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line></svg>
-                </div>
-            </div>
-            <div class="wb-card-footer">
-                <span>第 ${exIdx + 1} 页</span>
-                <span>${isCurrent ? '✓ 已选' : (otherIdx >= 0 ? '已用' : '+ 选用')}</span>
-            </div>
-        `;
-        scrollEl.appendChild(card);
-    }
-}
-
-function toggleS1ExercisePage(exIdx) {
-    const item = pipelineItems[currentS1QIndex];
-    if (!item) return;
-    if (!item.exercisePages) item.exercisePages = [];
-
-    const pos = item.exercisePages.indexOf(exIdx);
-    if (pos >= 0) {
-        item.exercisePages.splice(pos, 1);
-    } else {
-        // 如果已被其他变式题占用，则从该题剔除
-        pipelineItems.forEach((other, oIdx) => {
-            if (oIdx !== currentS1QIndex && other.exercisePages) {
-                const oPos = other.exercisePages.indexOf(exIdx);
-                if (oPos >= 0) {
-                    other.exercisePages.splice(oPos, 1);
-                }
-            }
-        });
-        item.exercisePages.push(exIdx);
-        item.exercisePages.sort((a, b) => a - b);
-    }
-
-    renderS1Stepper();
-    renderS1ExerciseView();
-    renderS1ExerciseFilmstrip();
-    updateS1NavButtons();
-}
-
-function updateS1NavButtons() {
-    const isFirst = currentS1QIndex <= 0;
-    const isLast = currentS1QIndex >= pipelineItems.length - 1;
-
-    const prevBtn = document.getElementById('wb-s1-prev-btn');
-    const nextBtn = document.getElementById('wb-s1-next-btn');
-    const summaryEl = document.getElementById('wb-s1-footer-summary');
-
-    if (prevBtn) prevBtn.disabled = isFirst;
-
-    const currItem = pipelineItems[currentS1QIndex];
-    if (summaryEl && currItem) {
-        summaryEl.innerHTML = `<span>当前：变式第 <b>${currentS1QIndex + 1}</b> / ${pipelineItems.length} 题 · 关联课后第 <b>${currItem.parentQuestionNum}</b> 题 · 包含 <b>${currItem.exercisePages.length}</b> 页题目</span>`;
-    }
-
-    if (nextBtn) {
-        if (isLast) {
-            nextBtn.innerHTML = `题目已配完，进入阶段 2：配置答案 ➔`;
-            nextBtn.style.background = '#059669';
-            nextBtn.style.borderColor = '#059669';
-        } else {
-            nextBtn.innerHTML = `确认本题，下一题 (Space) ➔`;
-            nextBtn.style.background = '';
-            nextBtn.style.borderColor = '';
-        }
-    }
-}
-
-function wbS1PrevQuestion() {
-    if (currentS1QIndex > 0) {
-        currentS1QIndex--;
-        renderStage1();
-    }
-}
-
-function wbS1NextQuestion() {
-    if (currentS1QIndex < pipelineItems.length - 1) {
-        currentS1QIndex++;
-        renderStage1();
-    } else {
-        switchWbStage(2);
-    }
-}
-
-function wbAddNewQuestion() {
-    const buckets = getConsolidationBuckets();
-    const defaultParent = buckets.length > 0 ? buckets[0].parentNum : 1;
-
-    // 寻找第一个尚未分配的题目页码
-    const usedPages = new Set(pipelineItems.flatMap(it => it.exercisePages || []));
-    let nextUnusedPage = -1;
-    for (let i = 0; i < batchQuestionPageCount; i++) {
-        if (!usedPages.has(i)) {
-            nextUnusedPage = i;
-            break;
-        }
-    }
-
-    const newQuestion = {
-        id: pipelineItems.length + 1,
-        parentQuestionNum: defaultParent,
-        exercisePages: nextUnusedPage >= 0 ? [nextUnusedPage] : [],
-        answerPages: []
-    };
-
-    pipelineItems.push(newQuestion);
-    currentS1QIndex = pipelineItems.length - 1;
-    renderStage1();
-    showToast(`已新增变式第 ${pipelineItems.length} 题`);
-}
-
-function wbDeleteCurrentQuestion() {
-    if (pipelineItems.length <= 1) {
-        showToast('至少需要保留 1 道变式题', 'warn');
-        return;
-    }
-
-    const delId = currentS1QIndex + 1;
-    pipelineItems.splice(currentS1QIndex, 1);
-    pipelineItems.forEach((it, idx) => {
-        it.id = idx + 1;
-    });
-
-    if (currentS1QIndex >= pipelineItems.length) {
-        currentS1QIndex = pipelineItems.length - 1;
-    }
-
-    renderStage1();
-    showToast(`已删除变式第 ${delId} 题`);
-}
-
-function wbAutoFillQuestions() {
-    const buckets = getConsolidationBuckets();
-    const count = batchQuestionPageCount || 0;
-    if (count === 0) {
-        showToast('当前未检测到题目页面', 'warn');
-        return;
-    }
-
-    pipelineItems = [];
-    for (let i = 0; i < count; i++) {
-        const pNum = (buckets[i] ? buckets[i].parentNum : (buckets[0] ? buckets[0].parentNum : 1));
-        pipelineItems.push({
-            id: i + 1,
-            parentQuestionNum: Number(pNum),
-            exercisePages: [i],
-            answerPages: (i < batchAnswerPageCount) ? [i] : []
-        });
-    }
-
-    currentS1QIndex = 0;
-    renderStage1();
-    showToast('已按 1 页题目对应 1 题自动铺满');
-}
-
-function openS1PageLightbox() {
-    const item = pipelineItems[currentS1QIndex];
-    if (!item) return;
-    const pIdx = item.exercisePages[0] || 0;
-    openPageLightbox('q', pIdx);
-}
-
-// ========== 第 2 阶段：分配每题答案解析 ==========
-function renderStage2() {
-    const total = pipelineItems.length;
-    if (total === 0) return;
-    if (currentS2QIndex < 0) currentS2QIndex = 0;
-    if (currentS2QIndex >= total) currentS2QIndex = total - 1;
-
-    renderS2Stepper();
-    renderS2QuestionPreview();
-    renderS2AnswerGrid();
-    updateS2NavButtons();
-    updateStageHeaderStats();
-}
-
-function renderS2Stepper() {
-    const wrap = document.getElementById('wb-s2-stepper-wrap');
-    const answerStat = document.getElementById('wb-s2-answer-stat');
-    if (!wrap) return;
-
-    wrap.innerHTML = pipelineItems.map((item, idx) => {
-        const isActive = idx === currentS2QIndex;
-        const anCount = item.answerPages ? item.answerPages.length : 0;
-        const hasAnswer = anCount > 0;
-        return `
-            <div class="wb-step-pill ${isActive ? 'active' : ''} ${hasAnswer ? '' : 'missing-answer'}"
-                 onclick="wbJumpToS2Question(${idx})" title="切换至变式第 ${idx + 1} 题答案分配">
-                <span>${idx + 1}. 课后第 ${item.parentQuestionNum} 题</span>
-                <span style="font-size:0.7rem; opacity:0.85;">(${hasAnswer ? `✓ ${anCount}页` : '待配'})</span>
-            </div>
-        `;
-    }).join('');
-
-    const activeEl = wrap.querySelector('.wb-step-pill.active');
-    if (activeEl && typeof activeEl.scrollIntoView === 'function') {
-        activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-    }
-
-    if (answerStat) {
-        const assignedCount = pipelineItems.filter(it => it.answerPages && it.answerPages.length > 0).length;
-        answerStat.textContent = `已配 ${assignedCount} / ${pipelineItems.length} 题答案`;
-    }
-}
-
-function wbJumpToS2Question(idx) {
-    if (idx >= 0 && idx < pipelineItems.length) {
-        currentS2QIndex = idx;
-        renderStage2();
-    }
-}
-
-function renderS2QuestionPreview() {
-    const item = pipelineItems[currentS2QIndex];
-    if (!item) return;
-
-    const titleEl = document.getElementById('wb-s2-preview-title');
-    const indicatorEl = document.getElementById('wb-s2-hw-indicator');
-    const container = document.getElementById('wb-s2-pages-container');
-    const footerMeta = document.getElementById('wb-s2-preview-footer-meta');
-
-    if (titleEl) {
-        titleEl.textContent = `变式第 ${currentS2QIndex + 1} 题 · 题目预览`;
-    }
-
-    const buckets = getConsolidationBuckets();
-    const b = buckets.find(it => Number(it.parentNum) === Number(item.parentQuestionNum));
-    const subNum = getPipelineSubNum(currentS2QIndex);
-    if (indicatorEl) {
-        indicatorEl.textContent = `关联课后第 ${item.parentQuestionNum} 题 · 变式 ${subNum}${b && b.topic ? ` (${b.topic})` : ''}`;
-    }
-
-    if (footerMeta) {
-        footerMeta.textContent = `题目 PDF 页码：第 ${item.exercisePages.map(p => p + 1).join(', ')} 页 (共 ${item.exercisePages.length} 页)`;
-    }
-
-    if (container) {
-        container.innerHTML = item.exercisePages.map(pIdx => `
-            <div class="wb-s1-page-preview-card">
-                <img src="${batchQuestionThumbs[pIdx] || ''}" alt="变式题目第 ${pIdx + 1} 页" onclick="openPageLightbox('q', ${pIdx})" title="点击全屏高清放大查看">
-                <div class="wb-s1-page-pill">题目第 ${pIdx + 1} 页</div>
-            </div>
-        `).join('');
-    }
-}
-
-function renderS2AnswerGrid() {
-    const item = pipelineItems[currentS2QIndex];
-    if (!item) return;
-
-    const badgeEl = document.getElementById('wb-s2-an-badge');
-    const gridEl = document.getElementById('wb-s2-answer-grid');
-    const summaryText = document.getElementById('wb-s2-an-summary-text');
-
-    const anCount = item.answerPages ? item.answerPages.length : 0;
-    if (badgeEl) {
-        badgeEl.textContent = anCount > 0 ? `已选 ${anCount} 页答案` : '未选择答案页';
-        badgeEl.style.color = anCount > 0 ? '#059669' : '#ef4444';
-    }
-
-    if (summaryText) {
-        if (anCount > 0) {
-            summaryText.innerHTML = `<span>✓ 当前绑定：答案第 <b>${item.answerPages.map(p => p + 1).join('、')}</b> 页 (共 ${anCount} 页解析)</span>`;
-            summaryText.style.color = '#059669';
-        } else {
-            summaryText.innerHTML = `<span style="color:#ef4444; font-weight:700;">⚠️ 尚未为当前题目选择对应答案页（请点击下方答案图勾选）</span>`;
-        }
-    }
-
-    if (gridEl) {
-        gridEl.innerHTML = '';
-        for (let aIdx = 0; aIdx < batchAnswerPageCount; aIdx++) {
-            const isCurrent = item.answerPages.includes(aIdx);
-            const otherIdx = pipelineItems.findIndex((it, idx) => idx !== currentS2QIndex && it.answerPages && it.answerPages.includes(aIdx));
-            const card = document.createElement('div');
-            card.className = `wb-an-card ${isCurrent ? 'selected-current' : (otherIdx >= 0 ? 'used-other' : 'unassigned')}`;
-            card.onclick = () => toggleS2AnswerPage(aIdx);
-            card.title = isCurrent 
-                ? `已选为本题答案 (第 ${item.answerPages.indexOf(aIdx) + 1} 页)，点击可取消选择` 
-                : (otherIdx >= 0 
-                    ? `已被变式第 ${otherIdx + 1} 题使用，点击将转移到本题` 
-                    : `点击选用为本题答案`);
-
-            card.innerHTML = `
-                <div class="wb-an-thumb-wrap">
-                    <img src="${batchAnswerThumbs[aIdx]}" alt="答案第 ${aIdx + 1} 页" loading="lazy">
-                    <div class="wb-an-badge">
-                        ${isCurrent 
-                            ? `<span class="badge-sel">✓ 答案第 ${item.answerPages.indexOf(aIdx) + 1} 页</span>` 
-                            : (otherIdx >= 0 
-                                ? `<span class="badge-used">变式 ${otherIdx + 1} 已用</span>` 
-                                : `<span class="badge-empty">待分配</span>`)}
-                    </div>
-                    <div class="wb-an-zoom" onclick="event.stopPropagation(); openPageLightbox('a', ${aIdx});" title="点击放大查看答案解析">
-                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line></svg>
-                    </div>
-                </div>
-                <div class="wb-an-card-footer">
-                    <span>第 ${aIdx + 1} 页</span>
-                    <span>${isCurrent ? '✓ 已选' : (otherIdx >= 0 ? '已用' : '+ 选用')}</span>
-                </div>
-            `;
-            gridEl.appendChild(card);
-        }
-    }
-}
-
-function toggleS2AnswerPage(aIdx) {
-    const item = pipelineItems[currentS2QIndex];
-    if (!item) return;
-    if (!item.answerPages) item.answerPages = [];
-    const pos = item.answerPages.indexOf(aIdx);
-    if (pos >= 0) {
-        item.answerPages.splice(pos, 1);
-    } else {
-        pipelineItems.forEach((other, oIdx) => {
-            if (oIdx !== currentS2QIndex && other.answerPages) {
-                const oPos = other.answerPages.indexOf(aIdx);
-                if (oPos >= 0) {
-                    other.answerPages.splice(oPos, 1);
-                }
-            }
-        });
-        item.answerPages.push(aIdx);
-        item.answerPages.sort((a, b) => a - b);
-    }
-    renderS2Stepper();
-    renderS2AnswerGrid();
-    updateS2NavButtons();
-}
-
-function clearCurrentS2Answers() {
-    const item = pipelineItems[currentS2QIndex];
-    if (!item) return;
-    item.answerPages = [];
-    renderS2Stepper();
-    renderS2AnswerGrid();
-    updateS2NavButtons();
-}
-
-function wbAutoFillAnswers() {
-    for (let i = 0; i < pipelineItems.length; i++) {
-        pipelineItems[i].answerPages = (i < batchAnswerPageCount) ? [i] : [];
-    }
-    renderS2Stepper();
-    renderS2AnswerGrid();
-    updateS2NavButtons();
-    showToast('已按题目顺序一键顺延分配答案页');
-}
-
-function updateS2NavButtons() {
-    const isFirst = currentS2QIndex <= 0;
-    const isLast = currentS2QIndex >= pipelineItems.length - 1;
-
-    const prevBtn = document.getElementById('wb-s2-prev-btn');
-    const confirmNext = document.getElementById('wb-s2-confirm-next-btn');
-
-    if (prevBtn) prevBtn.disabled = isFirst;
-
-    if (confirmNext) {
-        if (isLast) {
-            confirmNext.innerHTML = `全部完成，切片导入 ✓`;
-            confirmNext.style.background = '#059669';
-            confirmNext.style.borderColor = '#059669';
-        } else {
-            confirmNext.innerHTML = `确认此题答案，下一题 (Space) ➔`;
-            confirmNext.style.background = '';
-            confirmNext.style.borderColor = '';
-        }
-    }
-}
-
-function wbS2PrevQuestion() {
-    if (currentS2QIndex > 0) {
-        currentS2QIndex--;
-        renderStage2();
-    }
-}
-
-function wbS2NextQuestion() {
-    if (currentS2QIndex < pipelineItems.length - 1) {
-        currentS2QIndex++;
-        renderStage2();
-    } else {
-        doImportFromPipeline();
-    }
-}
-
-function openS2PageLightbox() {
-    const item = pipelineItems[currentS2QIndex];
-    if (!item) return;
-    const pIdx = item.exercisePages[0] || 0;
-    openPageLightbox('q', pIdx);
-}
-
-// ========== Pipeline Summary Modal ==========
-function openPipelineSummaryDialog() {
-    const dialog = document.getElementById('pipeline-summary-dialog');
-    const countBadge = document.getElementById('pipe-modal-count-badge');
-    const tableBody = document.getElementById('pipe-summary-table-body');
-    const footerInfo = document.getElementById('pipe-summary-footer-info');
-    if (!dialog || !tableBody) return;
-
-    if (countBadge) countBadge.textContent = `共 ${pipelineItems.length} 道变式题`;
-
-    const buckets = getConsolidationBuckets();
-    const bucketMap = {};
-    buckets.forEach(b => { bucketMap[b.parentNum] = b; });
-
-    let unassignedAnswerCount = 0;
-    tableBody.innerHTML = pipelineItems.map((item, idx) => {
-        const b = bucketMap[item.parentQuestionNum];
-        const subNum = getPipelineSubNum(idx);
-        const anPages = item.answerPages || [];
-        const isAnswerEmpty = anPages.length === 0;
-        if (isAnswerEmpty) unassignedAnswerCount++;
-
-        const isCurrentRow = (currentWbStage === 1 ? idx === currentS1QIndex : idx === currentS2QIndex);
-        return `
-            <tr style="${isCurrentRow ? 'background:rgba(5,150,105,0.06);' : ''}">
-                <td><strong>第 ${idx + 1} 题</strong></td>
-                <td>
-                    <span style="font-weight:600; color:var(--text-primary);">课后第 ${item.parentQuestionNum} 题</span>
-                    <div style="font-size:0.75rem; color:var(--text-secondary);">${escapeHtml(b?.topic || '未设考点')}</div>
-                </td>
-                <td><span class="saved-badge badge-variation" style="background:#ecfdf5;color:#059669;border-color:#a7f3d0;">变式 ${subNum}</span></td>
-                <td>第 ${item.exercisePages.map(p => p + 1).join(', ')} 页</td>
-                <td>
-                    ${isAnswerEmpty 
-                        ? `<span style="color:#ef4444; font-weight:600;">⚠️ 未分配答案</span>` 
-                        : `<span style="color:#059669; font-weight:600;">第 ${anPages.map(p => p + 1).join('、')} 页 (共 ${anPages.length} 页)</span>`}
-                </td>
-                <td>
-                    ${isAnswerEmpty 
-                        ? `<span style="color:#ef4444;">待完善答案</span>` 
-                        : `<span style="color:#059669;">✓ 正常</span>`}
-                </td>
-                <td style="text-align:center;">
-                    <button type="button" class="btn xs secondary" onclick="closePipelineSummaryDialog(); jumpToQuestionFromSummary(${idx});">跳转修改</button>
-                </td>
-            </tr>
-        `;
-    }).join('');
-
-    if (footerInfo) {
-        if (unassignedAnswerCount > 0) {
-            footerInfo.innerHTML = `<span style="color:#ef4444; font-weight:600;">⚠️ 提示：检测到有 ${unassignedAnswerCount} 道变式题尚未分配答案页，请核对。</span>`;
-        } else {
-            footerInfo.innerHTML = `<span style="color:#059669; font-weight:600;">✓ 全部变式题已完整分配课后原题与答案解析。</span>`;
-        }
-    }
-
-    dialog.classList.add('active');
-}
-
-function jumpToQuestionFromSummary(idx) {
-    if (currentWbStage === 1) {
-        wbJumpToS1Question(idx);
-    } else {
-        wbJumpToS2Question(idx);
-    }
-}
-
-function closePipelineSummaryDialog() {
-    const dialog = document.getElementById('pipeline-summary-dialog');
-    if (dialog) dialog.classList.remove('active');
-}
-
-// ========== Do Import from Pipeline ==========
-async function doImportFromPipeline() {
-    const emptyExerciseItems = pipelineItems.filter(it => !it.exercisePages || it.exercisePages.length === 0);
-    if (emptyExerciseItems.length > 0) {
-        switchWbStage(1);
-        showToast(`变式第 ${emptyExerciseItems.map(it => it.id).join('、')} 题未选择题目页面，请先配置`, 'warn');
-        return;
-    }
-
-    const emptyAnswerItems = pipelineItems.filter(it => !it.answerPages || it.answerPages.length === 0);
-    if (emptyAnswerItems.length > 0) {
-        showCustomDialog({
-            title: '部分题目未分配答案',
-            body: `检测到变式第 ${emptyAnswerItems.map(it => it.id).join('、')} 题尚未选择对应答案页。<br><br>是否继续导入？未选答案的题目将不包含答案解析 PDF。`,
-            confirmText: '继续切片导入',
-            cancelText: '返回分配答案',
-            onConfirm: () => executePipelineImport()
-        });
-        return;
-    }
-    await executePipelineImport();
-}
-
-async function executePipelineImport() {
-    const buckets = getConsolidationBuckets();
-    const bucketTopicMap = {};
-    buckets.forEach(b => { bucketTopicMap[b.parentNum] = b.topic || ''; });
-
-    const parentSubCounts = {};
-    const varItems = pipelineItems.map((item, idx) => {
-        const pNum = item.parentQuestionNum;
-        parentSubCounts[pNum] = (parentSubCounts[pNum] || 0) + 1;
-        const subNum = parentSubCounts[pNum];
-        return {
-            id: idx + 1,
-            parentQuestionNum: pNum,
-            subNum: subNum,
-            topic: bucketTopicMap[pNum] || '',
-            videoUrl: '',
-            exercisePages: item.exercisePages,
-            answerPages: item.answerPages || []
-        };
-    });
-
-    const nextBtn = document.getElementById('wb-s2-confirm-next-btn');
-    const topFinishBtn = document.getElementById('wb-top-primary-btn');
-    if (nextBtn) nextBtn.disabled = true;
-    if (topFinishBtn) topFinishBtn.disabled = true;
-
-    try {
-        showToast('正在切分并导入举一反三题目...');
-        const [exBuf, anBuf] = await Promise.all([
-            batchExerciseFile.arrayBuffer(),
-            batchAnswerFile.arrayBuffer()
-        ]);
-        const exerciseSrc = await PDFLib.PDFDocument.load(exBuf);
-        const answerSrc = await PDFLib.PDFDocument.load(anBuf);
-
-        currentQuestions = varItems.map(item => {
-            const qThumb = batchQuestionThumbs[item.exercisePages[0]] || null;
-            const aThumb = item.answerPages.length > 0 ? (batchAnswerThumbs[item.answerPages[0]] || null) : null;
-            return {
-                id: item.id,
-                parentQuestionNum: item.parentQuestionNum,
-                subNum: item.subNum,
-                topic: item.topic,
-                videoUrl: '',
-                exercisePdf: { status: 'uploading', name: `课后第${item.parentQuestionNum}题_变式${item.subNum}_题目.pdf`, thumb: qThumb },
-                answerPdf: aThumb ? { status: 'uploading', name: `课后第${item.parentQuestionNum}题_变式${item.subNum}_答案.pdf`, thumb: aThumb } : null
-            };
-        });
-
-        isDirty = true;
-        renderQuestionList();
-        updateStatus();
-
-        let failCount = 0;
-        for (let idx = 0; idx < varItems.length; idx++) {
-            const item = varItems[idx];
-            showToast(`正在切分上传 ${idx + 1}/${varItems.length}...`);
-
-            // 题目切分 (支持跨页多选合并)
-            try {
-                const exBlob = await mergePages(exerciseSrc, item.exercisePages);
-                const exFile = new File([exBlob], `课后第${item.parentQuestionNum}题_变式${item.subNum}_题目.pdf`, { type: 'application/pdf' });
-                const exRes = await uploadPdfBlob(exFile);
-                currentQuestions[idx].exercisePdf = {
-                    url: exRes.url,
-                    name: exRes.originalName,
-                    status: 'uploaded',
-                    thumb: batchQuestionThumbs[item.exercisePages[0]] || null
-                };
-            } catch (e) {
-                console.error('举一反三题目切片上传失败', item, e);
-                currentQuestions[idx].exercisePdf = null;
-                failCount++;
-            }
-
-            // 答案切分 (支持跨页多选合并)
-            if (item.answerPages.length > 0) {
-                try {
-                    const anBlob = await mergePages(answerSrc, item.answerPages);
-                    const anFile = new File([anBlob], `课后第${item.parentQuestionNum}题_变式${item.subNum}_答案.pdf`, { type: 'application/pdf' });
-                    const anRes = await uploadPdfBlob(anFile);
-                    currentQuestions[idx].answerPdf = {
-                        url: anRes.url,
-                        name: anRes.originalName,
-                        status: 'uploaded',
-                        thumb: batchAnswerThumbs[item.answerPages[0]] || null
-                    };
-                } catch (e) {
-                    console.error('举一反三答案切片上传失败', item, e);
-                    currentQuestions[idx].answerPdf = null;
-                    failCount++;
-                }
-            }
-        }
-
-        batchImported = currentQuestions.length > 0;
-        renderQuestionList();
-        updateStatus();
-        if (failCount > 0) {
-            showToast(`导入完成，但有 ${failCount} 个切片上传失败`);
-        } else {
-            showToast(`已成功导入 ${currentQuestions.length} 道举一反三变式题`);
-        }
-        if (currentQuestions.length > 0) {
-            const wb = document.getElementById('variation-workbench');
-            if (wb) wb.style.display = 'none';
-            goToStep(4);
-        }
-    } catch (e) {
-        console.error('举一反三切片导入失败:', e);
-        showToast('切片导入失败，请检查 PDF 文件');
-    } finally {
-        if (nextBtn) nextBtn.disabled = false;
-        if (topFinishBtn) topFinishBtn.disabled = false;
-    }
-}
-
-if (!window._pipeKeyNavBound) {
-    window._pipeKeyNavBound = true;
-    document.addEventListener('keydown', (e) => {
-        const wb = document.getElementById('variation-workbench');
-        const isWbOpen = wb && wb.style.display !== 'none';
-        if (getBankType() !== 'variation' || !isWbOpen) return;
-        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
-        const lightbox = document.getElementById('page-lightbox-dialog');
-        const summaryDialog = document.getElementById('pipeline-summary-dialog');
-        const hwDialog = document.getElementById('homework-preview-dialog');
-        if (lightbox?.classList.contains('active') || summaryDialog?.classList.contains('active') || hwDialog?.classList.contains('active')) {
-            if (e.key === 'Escape') {
-                if (summaryDialog?.classList.contains('active')) closePipelineSummaryDialog();
-            }
-            return;
-        }
-
-        if (e.key === ' ' || e.key === 'Enter') {
-            e.preventDefault();
-            if (currentWbStage === 1) {
-                wbS1NextQuestion();
-            } else {
-                wbS2NextQuestion();
-            }
-        } else if (e.key === 'ArrowLeft' || e.key === 'q' || e.key === 'Q') {
-            e.preventDefault();
-            if (currentWbStage === 1) {
-                wbS1PrevQuestion();
-            } else {
-                wbS2PrevQuestion();
-            }
-        } else if (e.key === 'ArrowRight' || e.key === 'e' || e.key === 'E') {
-            e.preventDefault();
-            if (currentWbStage === 1) {
-                wbS1NextQuestion();
-            } else {
-                wbS2NextQuestion();
-            }
-        } else if (e.key >= '1' && e.key <= '9') {
-            if (currentWbStage === 1) {
-                const num = parseInt(e.key, 10);
-                const buckets = getConsolidationBuckets();
-                if (buckets.some(b => Number(b.parentNum) === num)) {
-                    selectS1Homework(num);
-                }
-            }
-        }
-    });
-}
-
-function initVariationAssignments() {
-    variationAssignments.q = new Array(batchQuestionPageCount).fill(null);
-    variationAssignments.a = new Array(batchAnswerPageCount).fill(null);
-    const buckets = getConsolidationBuckets();
-    if (buckets.length > 0) {
-        selectedBucketParentNum = buckets[0].parentNum;
-    } else {
-        selectedBucketParentNum = 1;
-    }
-}
-
-function selectVariationBucket(parentNum) {
-    selectedBucketParentNum = Number(parentNum);
-    renderVariationBucketCards();
-    renderPageGrid('qpdf-page-grid', batchQuestionThumbs, batchQuestionLabels, 'q');
-    renderPageGrid('apdf-page-grid', batchAnswerThumbs, batchAnswerLabels, 'a');
-}
-
-function renderVariationBucketCards() {
-    const container = document.getElementById('variation-bucket-cards');
-    if (!container) return;
-    const buckets = getConsolidationBuckets();
-    const promptName = document.getElementById('active-bucket-name');
-    if (promptName) {
-        promptName.textContent = `课后第 ${selectedBucketParentNum} 题`;
-    }
-
-    const counts = {};
-    buckets.forEach(b => { counts[b.parentNum] = 0; });
-    (variationAssignments.q || []).forEach(pNum => {
-        if (pNum) counts[pNum] = (counts[pNum] || 0) + 1;
-    });
-
-    container.innerHTML = buckets.map(b => {
-        const isActive = Number(b.parentNum) === Number(selectedBucketParentNum);
-        const count = counts[b.parentNum] || 0;
-        return `
-            <div class="variation-bucket-card ${isActive ? 'active' : ''}" onclick="selectVariationBucket(${b.parentNum})">
-                <div class="bucket-card-top">
-                    <span class="bucket-card-title">课后第 ${b.parentNum} 题</span>
-                    <span class="bucket-count-badge ${count > 0 ? 'has-items' : ''}">${count > 0 ? `已分 ${count} 题` : '未分配'}</span>
-                </div>
-                <div class="bucket-card-topic" title="${escapeHtml(b.topic || '')}">${escapeHtml(b.topic || '（未设置考点）')}</div>
-                <div class="bucket-card-footer">
-                    <button type="button" class="bucket-preview-btn" onclick="previewHomeworkQuestion(${b.parentNum}, event)" title="查看课后第 ${b.parentNum} 题原题">
-                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                        查看原题
-                    </button>
-                </div>
-            </div>
-        `;
-    }).join('');
-}
-
-function getVariationSubNum(kind, pageIndex) {
-    const parentNum = variationAssignments[kind] ? variationAssignments[kind][pageIndex] : null;
-    if (!parentNum) return 0;
-    let sub = 0;
-    for (let i = 0; i <= pageIndex; i++) {
-        if (variationAssignments[kind][i] === parentNum) {
-            sub++;
-        }
-    }
-    return sub;
-}
-
-function toggleVariationAssignment(kind, pageIndex) {
-    const curr = variationAssignments[kind][pageIndex];
-    if (curr === selectedBucketParentNum) {
-        variationAssignments[kind][pageIndex] = null;
-        if (kind === 'q' && variationAssignments.a[pageIndex] === selectedBucketParentNum) {
-            variationAssignments.a[pageIndex] = null;
-        }
-    } else {
-        variationAssignments[kind][pageIndex] = selectedBucketParentNum;
-        if (kind === 'q' && pageIndex < batchAnswerPageCount) {
-            variationAssignments.a[pageIndex] = selectedBucketParentNum;
-        }
-    }
-    renderVariationBucketCards();
-    renderPageGrid('qpdf-page-grid', batchQuestionThumbs, batchQuestionLabels, 'q');
-    renderPageGrid('apdf-page-grid', batchAnswerThumbs, batchAnswerLabels, 'a');
-    updateAnnotationStatus();
-}
-
-function unassignVariationPage(kind, pageIndex, e) {
-    if (e) {
-        e.stopPropagation();
-        e.preventDefault();
-    }
-    const oldParent = variationAssignments[kind][pageIndex];
-    variationAssignments[kind][pageIndex] = null;
-    if (kind === 'q' && variationAssignments.a[pageIndex] === oldParent) {
-        variationAssignments.a[pageIndex] = null;
-    }
-    renderVariationBucketCards();
-    renderPageGrid('qpdf-page-grid', batchQuestionThumbs, batchQuestionLabels, 'q');
-    renderPageGrid('apdf-page-grid', batchAnswerThumbs, batchAnswerLabels, 'a');
-    updateAnnotationStatus();
-}
-
-function autoAssignVariationPages1to1() {
-    const buckets = getConsolidationBuckets();
-    const maxCount = Math.min(batchQuestionPageCount, buckets.length);
-    for (let i = 0; i < maxCount; i++) {
-        const pNum = buckets[i].parentNum;
-        variationAssignments.q[i] = pNum;
-        if (i < batchAnswerPageCount) {
-            variationAssignments.a[i] = pNum;
-        }
-    }
-    renderVariationBucketCards();
-    renderPageGrid('qpdf-page-grid', batchQuestionThumbs, batchQuestionLabels, 'q');
-    renderPageGrid('apdf-page-grid', batchAnswerThumbs, batchAnswerLabels, 'a');
-    updateAnnotationStatus();
-    showToast(`已按 1 页对 1 题快速分配前 ${maxCount} 页`);
-}
-
-function clearAllVariationAssignments() {
-    variationAssignments.q = new Array(batchQuestionPageCount).fill(null);
-    variationAssignments.a = new Array(batchAnswerPageCount).fill(null);
-    renderVariationBucketCards();
-    renderPageGrid('qpdf-page-grid', batchQuestionThumbs, batchQuestionLabels, 'q');
-    renderPageGrid('apdf-page-grid', batchAnswerThumbs, batchAnswerLabels, 'a');
-    updateAnnotationStatus();
-    showToast('已清空全部题目的卡槽分配');
-}
-
-function onLightboxVariationChange(parentVal) {
-    const pNum = parentVal ? Number(parentVal) : null;
-    variationAssignments[lightboxKind][lightboxIndex] = pNum;
-    if (lightboxKind === 'q' && lightboxIndex < batchAnswerPageCount) {
-        variationAssignments.a[lightboxIndex] = pNum;
-    }
-    renderVariationBucketCards();
-    renderPageGrid('qpdf-page-grid', batchQuestionThumbs, batchQuestionLabels, 'q');
-    renderPageGrid('apdf-page-grid', batchAnswerThumbs, batchAnswerLabels, 'a');
-    updateAnnotationStatus();
-}
+window.previewHomeworkQuestion = previewHomeworkQuestion;
 
 async function goNextFromStep2() {
     if (!batchExerciseFile || !batchAnswerFile) {
-        showToast('请先上传题目 PDF 和答案 PDF');
+        showToast("请先上传题目 PDF 和答案 PDF");
         return;
     }
-    if (getBankType() === 'variation') {
+    if (getBankType() === "variation") {
         await loadHomeworkQuestionsForVariation();
         if (!homeworkQuestionsForVariation || homeworkQuestionsForVariation.length === 0) {
-            showToast('该专题尚未录入【课后巩固】题库，无法录入举一反三！请先录入课后巩固题目。', 'warn');
+            showToast("该专题尚未录入【课后巩固】题库，无法录入举一反三！请先录入课后巩固题目。", "warn");
             return;
         }
     }
-    const nextBtn = document.getElementById('step2-next-btn');
+    const nextBtn = document.getElementById("step2-next-btn");
     if (nextBtn) nextBtn.disabled = true;
     try {
         const ok = await loadBatchPreviews();
         if (!ok) return;
         batchImported = false;
-        if (getBankType() === 'variation') {
-            initVariationPipeline();
-            openVariationWorkbench();
-            return;
-        } else {
-            buildDefaultLabels();
-            renderAnnotationList();
-            updateAnnotationStatus();
-            goToStep(3);
-        }
+        buildDefaultLabels();
+        renderAnnotationList();
+        updateAnnotationStatus();
+        goToStep(3);
     } finally {
         if (nextBtn) nextBtn.disabled = false;
     }
@@ -2238,7 +1011,6 @@ function syncAnswerToQuestionNumbers() {
 }
 
 function renderAnnotationList() {
-    const isVar = getBankType() === 'variation';
     const qCount = document.getElementById('qpdf-page-count');
     const aCount = document.getElementById('apdf-page-count');
     const tabQ = document.getElementById('tab-q-count');
@@ -2247,11 +1019,6 @@ function renderAnnotationList() {
     if (aCount) aCount.textContent = batchAnswerPageCount;
     if (tabQ) tabQ.textContent = batchQuestionPageCount;
     if (tabA) tabA.textContent = batchAnswerPageCount;
-
-    if (isVar) {
-        openVariationWorkbench();
-        return;
-    }
 
     renderPageGrid('qpdf-page-grid', batchQuestionThumbs, batchQuestionLabels, 'q');
     renderPageGrid('apdf-page-grid', batchAnswerThumbs, batchAnswerLabels, 'a');
@@ -2263,50 +1030,6 @@ function renderPageGrid(containerId, thumbs, labels, kind) {
     const el = document.getElementById(containerId);
     if (!el) return;
     el.innerHTML = '';
-    const isVar = getBankType() === 'variation';
-
-    if (isVar) {
-        thumbs.forEach((thumb, i) => {
-            const card = document.createElement('div');
-            const parentNum = variationAssignments[kind] ? variationAssignments[kind][i] : null;
-            const isAssigned = parentNum !== null && parentNum !== undefined;
-            const subNum = getVariationSubNum(kind, i);
-
-            card.className = `page-card page-card-${kind}${isAssigned ? ' variation-assigned' : ''}`;
-            card.dataset.pageIndex = String(i);
-            card.onclick = () => toggleVariationAssignment(kind, i);
-            card.innerHTML = `
-                <div class="page-thumb-wrap" title="点击分配/移出卡槽；点击右上角放大镜查看高清原题">
-                    <img class="page-thumb" src="${thumb}" alt="第 ${i + 1} 页" loading="lazy">
-                    <div class="page-zoom-badge" onclick="event.stopPropagation(); openPageLightbox('${kind}', ${i});" title="点击放大查看">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="11" cy="11" r="8"></circle>
-                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                            <line x1="11" y1="8" x2="11" y2="14"></line>
-                            <line x1="8" y1="11" x2="14" y2="11"></line>
-                        </svg>
-                        <span>放大</span>
-                    </div>
-                    ${isAssigned ? `
-                        <div class="variation-slot-overlay assigned" onclick="event.stopPropagation();">
-                            <span class="v-slot-text">课后第 ${parentNum} 题 · 变式 ${subNum}</span>
-                            <button type="button" class="v-unassign-btn" onclick="unassignVariationPage('${kind}', ${i}, event)" title="移出卡槽">×</button>
-                        </div>
-                    ` : `
-                        <div class="variation-slot-overlay unassigned">
-                            <span class="v-slot-text">待分配（点击归入第 ${selectedBucketParentNum} 题）</span>
-                        </div>
-                    `}
-                </div>
-                <div class="page-card-footer">
-                    <span class="page-no-tag">第 ${i + 1} 页</span>
-                    <span class="page-status-badge ${isAssigned ? 'paired' : ''}">${isAssigned ? `课后第 ${parentNum} 题` : '待分配'}</span>
-                </div>
-            `;
-            el.appendChild(card);
-        });
-        return;
-    }
 
     const otherLabels = kind === 'q' ? batchAnswerLabels : batchQuestionLabels;
     const autoFlags = kind === 'q' ? batchQuestionAutoFlags : batchAnswerAutoFlags;
@@ -2400,27 +1123,7 @@ function updateLightboxContent() {
         img.style.transform = `scale(${lightboxZoom})`;
     }
 
-    const isVar = getBankType() === 'variation';
-    const stdEditor = document.getElementById('lightbox-label-editor-standard');
-    const varEditor = document.getElementById('lightbox-label-editor-variation');
-    const varSelect = document.getElementById('lightbox-variation-select');
-
-    if (isVar) {
-        if (stdEditor) stdEditor.style.display = 'none';
-        if (varEditor) varEditor.style.display = 'inline-flex';
-        if (varSelect) {
-            const buckets = getConsolidationBuckets();
-            const currentPNum = variationAssignments[lightboxKind] ? variationAssignments[lightboxKind][lightboxIndex] : null;
-            varSelect.innerHTML = `<option value="">未分配</option>` + buckets.map(b => {
-                const topicSnip = b.topic ? ` (${b.topic.slice(0, 12)}...)` : '';
-                return `<option value="${b.parentNum}" ${Number(currentPNum) === Number(b.parentNum) ? 'selected' : ''}>课后第 ${b.parentNum} 题${topicSnip}</option>`;
-            }).join('');
-        }
-    } else {
-        if (stdEditor) stdEditor.style.display = 'inline-flex';
-        if (varEditor) varEditor.style.display = 'none';
-        if (labelInput) labelInput.value = labels[lightboxIndex] || '';
-    }
+    if (labelInput) labelInput.value = labels[lightboxIndex] || '';
 
     if (navInfo) navInfo.textContent = `第 ${lightboxIndex + 1} / ${total} 页`;
 
@@ -2772,179 +1475,11 @@ function onPageLabelChange(kind, index, value) {
 function updateAnnotationStatus() {
     const el = document.getElementById('mapping-status-text');
     if (!el) return;
-    if (getBankType() === 'variation') {
-        const assignedAn = (pipelineItems || []).filter(it => it.answerPages && it.answerPages.length > 0).length;
-        el.textContent = `变式 ${pipelineItems.length} 题 (已配答案 ${assignedAn}/${pipelineItems.length})`;
-        return;
-    }
     const qSet = new Set(batchQuestionLabels.filter(n => Number.isInteger(n) && n > 0));
     el.textContent = `题目 ${batchQuestionPageCount} 页 → ${qSet.size} 道题 / 答案 ${batchAnswerPageCount} 页`;
 }
 
-async function goNextFromVariationMapping() {
-    const unassignedEx = [];
-    for (let i = 0; i < batchQuestionPageCount; i++) {
-        if (!variationAssignments.q || !variationAssignments.q[i]) {
-            unassignedEx.push(i + 1);
-        }
-    }
-    if (unassignedEx.length > 0) {
-        showToast(`题目第 ${unassignedEx.join('、')} 页尚未分配到课后原题卡槽，请先分配完整！`, 'warn');
-        return;
-    }
-
-    const buckets = getConsolidationBuckets();
-    const bucketTopicMap = {};
-    buckets.forEach(b => { bucketTopicMap[b.parentNum] = b.topic || ''; });
-
-    const parentExPages = {};
-    for (let i = 0; i < batchQuestionPageCount; i++) {
-        const pNum = variationAssignments.q[i];
-        if (!parentExPages[pNum]) parentExPages[pNum] = [];
-        parentExPages[pNum].push(i);
-    }
-
-    const parentAnPages = {};
-    for (let i = 0; i < batchAnswerPageCount; i++) {
-        const pNum = variationAssignments.a ? variationAssignments.a[i] : null;
-        if (pNum) {
-            if (!parentAnPages[pNum]) parentAnPages[pNum] = [];
-            parentAnPages[pNum].push(i);
-        }
-    }
-
-    const sortedParents = Object.keys(parentExPages).map(Number).sort((a, b) => a - b);
-    if (sortedParents.length === 0) {
-        showToast('未分配任何题目', 'warn');
-        return;
-    }
-
-    const varItems = [];
-    let globalQNum = 1;
-
-    sortedParents.forEach(pNum => {
-        const exPages = parentExPages[pNum];
-        const anPages = parentAnPages[pNum] || [];
-        const inheritedTopic = bucketTopicMap[pNum] || '';
-
-        exPages.forEach((exPageIdx, subIdx) => {
-            const subNum = subIdx + 1;
-            let pairedAnPages = [];
-            if (anPages.length > subIdx) {
-                pairedAnPages = [anPages[subIdx]];
-            } else if (exPageIdx < batchAnswerPageCount) {
-                pairedAnPages = [exPageIdx];
-            }
-
-            varItems.push({
-                id: globalQNum++,
-                parentQuestionNum: pNum,
-                subNum: subNum,
-                topic: inheritedTopic,
-                videoUrl: '',
-                exercisePages: [exPageIdx],
-                answerPages: pairedAnPages
-            });
-        });
-    });
-
-    const btn = document.getElementById('mapping-next-btn');
-    if (btn) btn.disabled = true;
-
-    try {
-        showToast('正在切分并导入举一反三题目...');
-        const [exBuf, anBuf] = await Promise.all([
-            batchExerciseFile.arrayBuffer(),
-            batchAnswerFile.arrayBuffer()
-        ]);
-        const exerciseSrc = await PDFLib.PDFDocument.load(exBuf);
-        const answerSrc = await PDFLib.PDFDocument.load(anBuf);
-
-        currentQuestions = varItems.map(item => {
-            const qThumb = batchQuestionThumbs[item.exercisePages[0]] || null;
-            const aThumb = item.answerPages.length > 0 ? (batchAnswerThumbs[item.answerPages[0]] || null) : null;
-            return {
-                id: item.id,
-                parentQuestionNum: item.parentQuestionNum,
-                subNum: item.subNum,
-                topic: item.topic,
-                videoUrl: '',
-                exercisePdf: { status: 'uploading', name: `课后第${item.parentQuestionNum}题_变式${item.subNum}_题目.pdf`, thumb: qThumb },
-                answerPdf: aThumb ? { status: 'uploading', name: `课后第${item.parentQuestionNum}题_变式${item.subNum}_答案.pdf`, thumb: aThumb } : null
-            };
-        });
-
-        isDirty = true;
-        renderQuestionList();
-        updateStatus();
-
-        let failCount = 0;
-        for (let idx = 0; idx < varItems.length; idx++) {
-            const item = varItems[idx];
-            showToast(`正在切分上传 ${idx + 1}/${varItems.length}...`);
-
-            // 题目切分
-            try {
-                const exBlob = await mergePages(exerciseSrc, item.exercisePages);
-                const exFile = new File([exBlob], `课后第${item.parentQuestionNum}题_变式${item.subNum}_题目.pdf`, { type: 'application/pdf' });
-                const exRes = await uploadPdfBlob(exFile);
-                currentQuestions[idx].exercisePdf = {
-                    url: exRes.url,
-                    name: exRes.originalName,
-                    status: 'uploaded',
-                    thumb: batchQuestionThumbs[item.exercisePages[0]] || null
-                };
-            } catch (e) {
-                console.error('举一反三题目切片上传失败', item, e);
-                currentQuestions[idx].exercisePdf = null;
-                failCount++;
-            }
-
-            // 答案切分
-            if (item.answerPages.length > 0) {
-                try {
-                    const anBlob = await mergePages(answerSrc, item.answerPages);
-                    const anFile = new File([anBlob], `课后第${item.parentQuestionNum}题_变式${item.subNum}_答案.pdf`, { type: 'application/pdf' });
-                    const anRes = await uploadPdfBlob(anFile);
-                    currentQuestions[idx].answerPdf = {
-                        url: anRes.url,
-                        name: anRes.originalName,
-                        status: 'uploaded',
-                        thumb: batchAnswerThumbs[item.answerPages[0]] || null
-                    };
-                } catch (e) {
-                    console.error('举一反三答案切片上传失败', item, e);
-                    currentQuestions[idx].answerPdf = null;
-                    failCount++;
-                }
-            }
-        }
-
-        batchImported = currentQuestions.length > 0;
-        renderQuestionList();
-        updateStatus();
-        if (failCount > 0) {
-            showToast(`导入完成，但有 ${failCount} 个切片上传失败`);
-        } else {
-            showToast(`已成功导入 ${currentQuestions.length} 道举一反三变式题`);
-        }
-        if (currentQuestions.length > 0) {
-            goToStep(4);
-        }
-    } catch (e) {
-        console.error('举一反三导入失败:', e);
-        showToast('导入失败，请检查 PDF 文件');
-    } finally {
-        if (btn) btn.disabled = false;
-    }
-}
-
 async function goNextFromMapping() {
-    if (getBankType() === 'variation') {
-        await doImportFromPipeline();
-        return;
-    }
-
     const isValid = n => Number.isInteger(n) && n > 0;
 
     for (let i = 0; i < batchQuestionLabels.length; i++) {
@@ -3065,9 +1600,15 @@ async function loadCurrentData() {
     }
 
     try {
+        if (bankType === 'variation') {
+            await loadHomeworkQuestionsForVariation();
+        }
         const result = await apiGet('get', { year, season, bankType, subject, grade, tier, week });
         if (result.success && result.data) {
             currentQuestions = result.data.questions || [];
+            if (bankType === 'variation') {
+                recalcVariationSubNums(currentQuestions);
+            }
             if (window.Logger) Logger.action('load_question_bank', { year, season, bankType, subject, grade, tier, week, questionCount: currentQuestions.length });
         } else {
             currentQuestions = [];
@@ -3553,15 +2094,18 @@ function addQuestion() {
     const nextId = getMaxId() + 1;
     const isVar = getBankType() === 'variation';
     if (isVar) {
-        const maxParent = currentQuestions.reduce((m, q) => Math.max(m, q.parentQuestionNum || 1), 1);
-        const subCount = currentQuestions.filter(q => (q.parentQuestionNum || 1) === maxParent).length;
+        const buckets = getConsolidationBuckets();
+        const nextBucket = buckets[currentQuestions.length] || buckets[buckets.length - 1] || null;
+        const pNum = nextBucket ? nextBucket.parentNum : (currentQuestions.reduce((m, q) => Math.max(m, q.parentQuestionNum || 1), 1));
+        const inheritedTopic = nextBucket ? (nextBucket.topic || '') : '';
         currentQuestions.push({
             id: nextId,
-            parentQuestionNum: maxParent,
-            subNum: subCount + 1,
-            topic: '',
+            parentQuestionNum: pNum,
+            subNum: 1,
+            topic: inheritedTopic,
             videoUrl: ''
         });
+        recalcVariationSubNums(currentQuestions);
     } else {
         currentQuestions.push({ id: nextId, topic: '', videoUrl: '' });
     }
@@ -3595,9 +2139,24 @@ function addBatchQuestions() {
                 return;
             }
             const startId = getMaxId() + 1;
+            const isVar = getBankType() === 'variation';
+            const buckets = isVar ? getConsolidationBuckets() : [];
             for (let i = 0; i < count; i++) {
-                currentQuestions.push({ id: startId + i, topic: '', videoUrl: '' });
+                if (isVar) {
+                    const idx = currentQuestions.length;
+                    const b = buckets[idx] || buckets[buckets.length - 1] || null;
+                    currentQuestions.push({
+                        id: startId + i,
+                        parentQuestionNum: b ? b.parentNum : (idx + 1),
+                        subNum: 1,
+                        topic: b ? (b.topic || '') : '',
+                        videoUrl: ''
+                    });
+                } else {
+                    currentQuestions.push({ id: startId + i, topic: '', videoUrl: '' });
+                }
             }
+            if (isVar) recalcVariationSubNums(currentQuestions);
             isDirty = true;
             renderQuestionList();
             updateStatus();
@@ -3612,6 +2171,9 @@ function removeQuestion(index) {
         return;
     }
     currentQuestions.splice(index, 1);
+    if (getBankType() === 'variation') {
+        recalcVariationSubNums(currentQuestions);
+    }
     // Do not re-number automatically to preserve merged groups
     isDirty = true;
     renderQuestionList();
@@ -3875,11 +2437,59 @@ function renderQuestionList() {
     const readonlyAttr = isAssistant ? 'readonly' : '';
     const idReadonlyAttr = isAssistant ? 'readonly disabled' : '';
 
+    let variationBuckets = [];
+    if (isVariationBank) {
+        recalcVariationSubNums(currentQuestions);
+        variationBuckets = getConsolidationBuckets();
+        if (variationBuckets.length === 0) {
+            const maxP = Math.max(8, ...currentQuestions.map(q => parseInt(q.parentQuestionNum, 10) || 1));
+            for (let k = 1; k <= maxP; k++) {
+                variationBuckets.push({ parentNum: k, topic: '', exercisePdf: null });
+            }
+        }
+    }
+
     filtered.forEach(({ q, originalIndex }) => {
         const item = document.createElement('div');
         item.className = 'question-item' + (isAssistant ? ' readonly-item' : '');
         item.dataset.index = originalIndex;
         const videoVal = q.videoUrl || q.video_url || '';
+        const parentNum = parseInt(q.parentQuestionNum || q.id, 10) || 1;
+        const subNum = parseInt(q.subNum, 10) || 1;
+
+        const variationParentRowHtml = isVariationBank ? `
+                <div class="question-field-row">
+                    <label class="question-field-label">关联原题：</label>
+                    <div class="variation-parent-bar">
+                        <div class="variation-parent-pills">
+                            ${variationBuckets.map(b => {
+                                const isActive = Number(b.parentNum) === Number(parentNum);
+                                return `<button type="button" class="var-parent-pill${isActive ? ' active' : ''}"
+                                    onclick="onVariationParentChange(${originalIndex}, ${b.parentNum})"
+                                    onmouseenter="onHoverHomeworkPreview(event, ${b.parentNum})"
+                                    onmouseleave="hideHoverPopover()"
+                                    title="课后第 ${b.parentNum} 题${b.topic ? '：' + escapeHtml(b.topic) : ''}"
+                                    ${isAssistant ? 'disabled' : ''}>第${b.parentNum}题</button>`;
+                            }).join('')}
+                        </div>
+                        <div class="variation-parent-right">
+                            <span class="var-sub-badge">变式 ${subNum}</span>
+                            <button type="button" class="var-hw-preview-btn"
+                                    onclick="previewHomeworkQuestion(${parentNum}, event)"
+                                    onmouseenter="onHoverHomeworkPreview(event, ${parentNum})"
+                                    onmouseleave="hideHoverPopover()"
+                                    title="查阅课后第 ${parentNum} 题原题">
+                                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                </svg>
+                                <span>原题</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+        ` : '';
+
         const videoRowHtml = (isPreviewBank || isVariationBank) ? '' : `
                 <div class="question-field-row">
                     <label class="question-field-label video-label">微课链接：</label>
@@ -3897,11 +2507,8 @@ function renderQuestionList() {
                     </div>
                 </div>
         `;
-        const idTagHtml = (isVariationBank || q.parentQuestionNum) ? `
-            <div class="variation-id-capsule">
-                <span class="v-badge-parent">课后第 ${q.parentQuestionNum || q.id} 题</span>
-                <span class="v-badge-sub">变式 ${q.subNum || 1}</span>
-            </div>
+        const idTagHtml = isVariationBank ? `
+            <span class="question-id-var-badge" title="课后第 ${parentNum} 题 · 变式 ${subNum}">${parentNum}-${subNum}</span>
         ` : `
             <input type="number" class="question-id-input" min="1" step="1" value="${escapeHtml(q.id)}" onwheel="this.blur()" onchange="onIdChange(${originalIndex}, this.value)" ${idReadonlyAttr}>
         `;
@@ -3910,6 +2517,7 @@ function renderQuestionList() {
                 ${idTagHtml}
             </div>
             <div class="question-main-fields">
+                ${variationParentRowHtml}
                 <div class="question-field-row question-topic-row">
                     <label class="question-field-label topic-label">知识点：</label>
                     <textarea class="question-topic-input"
@@ -4509,11 +3117,6 @@ window.goNextFromMapping = goNextFromMapping;
 window.onPageLabelChange = onPageLabelChange;
 window.selectBatchPdf = selectBatchPdf;
 window.updateBatchPdfStatus = updateBatchPdfStatus;
-window.selectVariationBucket = selectVariationBucket;
-window.unassignVariationPage = unassignVariationPage;
-window.autoAssignVariationPages1to1 = autoAssignVariationPages1to1;
-window.clearAllVariationAssignments = clearAllVariationAssignments;
-window.onLightboxVariationChange = onLightboxVariationChange;
 
 // ========== PDF Upload Logic ==========
 let currentUploadContext = null;
@@ -4879,18 +3482,40 @@ async function importWithLabels(exerciseFile, answerFile) {
         return;
     }
 
-    currentQuestions = questionNums.map(num => {
+    const isVar = getBankType() === 'variation';
+    let buckets = [];
+    const bucketTopicMap = {};
+    if (isVar) {
+        if (!homeworkQuestionsForVariation || homeworkQuestionsForVariation.length === 0) {
+            await loadHomeworkQuestionsForVariation();
+        }
+        buckets = getVariationBucketList();
+        buckets.forEach(b => {
+            bucketTopicMap[b.parentNum] = b.topic || '';
+        });
+    }
+
+    currentQuestions = questionNums.map((num, idx) => {
         const key = String(num);
         const qThumb = batchQuestionThumbs[groups[key].question[0]] || null;
         const aThumb = groups[key].answer.length > 0 ? (batchAnswerThumbs[groups[key].answer[0]] || null) : null;
+        const parentNum = isVar
+            ? (buckets.some(b => b.parentNum === num)
+                ? num
+                : (buckets[idx]?.parentNum || buckets[buckets.length - 1]?.parentNum || (idx + 1)))
+            : null;
+        const topic = isVar ? (bucketTopicMap[parentNum] || '') : '';
         return {
             id: num,
-            topic: '',
+            parentQuestionNum: parentNum,
+            subNum: 1,
+            topic: topic,
             videoUrl: '',
             exercisePdf: { status: 'uploading', name: `题目_第${num}题.pdf`, thumb: qThumb },
             answerPdf: aThumb ? { status: 'uploading', name: `答案_第${num}题.pdf`, thumb: aThumb } : null
         };
     });
+    if (isVar) recalcVariationSubNums(currentQuestions);
     isDirty = true;
     renderQuestionList();
     updateStatus();
@@ -4899,18 +3524,25 @@ async function importWithLabels(exerciseFile, answerFile) {
     const total = questionNums.length;
     let done = 0;
 
-    for (const num of questionNums) {
+    for (let idx = 0; idx < questionNums.length; idx++) {
+        const num = questionNums[idx];
         const key = String(num);
+        const q = currentQuestions[idx];
         done++;
         showToast(`正在导入 ${done}/${total}...`);
 
-        const idx = currentQuestions.findIndex(q => q.id === num);
         const qThumb = batchQuestionThumbs[groups[key].question[0]] || null;
+        const exFileName = isVar
+            ? `课后第${q.parentQuestionNum}题_变式${q.subNum}_题目.pdf`
+            : `题目_第${num}题.pdf`;
+        const anFileName = isVar
+            ? `课后第${q.parentQuestionNum}题_变式${q.subNum}_答案.pdf`
+            : `答案_第${num}题.pdf`;
 
         // 题目：合并该题号所有题目页
         try {
             const exBlob = await mergePages(exerciseSrc, groups[key].question);
-            const exFile = new File([exBlob], `题目_第${num}题.pdf`, { type: 'application/pdf' });
+            const exFile = new File([exBlob], exFileName, { type: 'application/pdf' });
             const exRes = await uploadPdfBlob(exFile);
             currentQuestions[idx].exercisePdf = { url: exRes.url, name: exRes.originalName, status: 'uploaded', thumb: qThumb };
         } catch (e) {
@@ -4925,7 +3557,7 @@ async function importWithLabels(exerciseFile, answerFile) {
             const aThumb = batchAnswerThumbs[answerPages[0]] || null;
             try {
                 const anBlob = await mergePages(answerSrc, answerPages);
-                const anFile = new File([anBlob], `答案_第${num}题.pdf`, { type: 'application/pdf' });
+                const anFile = new File([anBlob], anFileName, { type: 'application/pdf' });
                 const anRes = await uploadPdfBlob(anFile);
                 currentQuestions[idx].answerPdf = { url: anRes.url, name: anRes.originalName, status: 'uploaded', thumb: aThumb };
             } catch (e) {
@@ -4987,17 +3619,39 @@ async function doBatchImportPdfs(exerciseFile, answerFile) {
         return;
     }
 
+    const isVar = getBankType() === 'variation';
+    let buckets = [];
+    const bucketTopicMap = {};
+    if (isVar) {
+        if (!homeworkQuestionsForVariation || homeworkQuestionsForVariation.length === 0) {
+            await loadHomeworkQuestionsForVariation();
+        }
+        buckets = getVariationBucketList();
+        buckets.forEach(b => {
+            bucketTopicMap[b.parentNum] = b.topic || '';
+        });
+    }
+
     // 清空重建：第 N 页 = 第 N 题
     currentQuestions = [];
     for (let i = 1; i <= pageCount; i++) {
+        const parentNum = isVar
+            ? (buckets.some(b => b.parentNum === i)
+                ? i
+                : (buckets[i - 1]?.parentNum || buckets[buckets.length - 1]?.parentNum || i))
+            : null;
+        const topic = isVar ? (bucketTopicMap[parentNum] || '') : '';
         currentQuestions.push({
             id: i,
-            topic: '',
+            parentQuestionNum: parentNum,
+            subNum: 1,
+            topic: topic,
             videoUrl: '',
             exercisePdf: { status: 'uploading', name: `题目_第${i}题.pdf` },
             answerPdf: { status: 'uploading', name: `答案_第${i}题.pdf` }
         });
     }
+    if (isVar) recalcVariationSubNums(currentQuestions);
     isDirty = true;
     renderQuestionList();
     updateStatus();
@@ -5006,11 +3660,19 @@ async function doBatchImportPdfs(exerciseFile, answerFile) {
 
     for (let i = 0; i < pageCount; i++) {
         const no = i + 1;
+        const q = currentQuestions[i];
         showToast(`正在导入 ${no}/${pageCount}...`);
+
+        const exFileName = isVar
+            ? `课后第${q.parentQuestionNum}题_变式${q.subNum}_题目.pdf`
+            : `题目_第${no}题.pdf`;
+        const anFileName = isVar
+            ? `课后第${q.parentQuestionNum}题_变式${q.subNum}_答案.pdf`
+            : `答案_第${no}题.pdf`;
 
         try {
             const exBlob = await splitSinglePage(exerciseSrc, i);
-            const exFile = new File([exBlob], `题目_第${no}题.pdf`, { type: 'application/pdf' });
+            const exFile = new File([exBlob], exFileName, { type: 'application/pdf' });
             const [exRes, exThumb] = await Promise.all([
                 uploadPdfBlob(exFile),
                 generatePdfThumbnailFromFile(exFile)
@@ -5024,7 +3686,7 @@ async function doBatchImportPdfs(exerciseFile, answerFile) {
 
         try {
             const anBlob = await splitSinglePage(answerSrc, i);
-            const anFile = new File([anBlob], `答案_第${no}题.pdf`, { type: 'application/pdf' });
+            const anFile = new File([anBlob], anFileName, { type: 'application/pdf' });
             const [anRes, anThumb] = await Promise.all([
                 uploadPdfBlob(anFile),
                 generatePdfThumbnailFromFile(anFile)
@@ -5065,43 +3727,9 @@ window.setSavedWeekFilter = setSavedWeekFilter;
 window.onSavedFilterChange = onSavedFilterChange;
 window.resetSavedFilters = resetSavedFilters;
 
-window.selectVariationBucket = selectVariationBucket;
 window.previewHomeworkQuestion = previewHomeworkQuestion;
-window.previewCurrentHomeworkQuestion = previewCurrentHomeworkQuestion;
-window.previewHomeworkQuestionFromLightbox = previewHomeworkQuestionFromLightbox;
-window.closeHomeworkPreview = closeHomeworkPreview;
-window.openHomeworkPdfInNewTab = openHomeworkPdfInNewTab;
-window.autoAssignVariationPages1to1 = autoAssignVariationPages1to1;
-window.clearAllVariationAssignments = clearAllVariationAssignments;
-window.onLightboxVariationChange = onLightboxVariationChange;
-
-window.openVariationWorkbench = openVariationWorkbench;
-window.closeVariationWorkbench = closeVariationWorkbench;
-window.initVariationPipeline = initVariationPipeline;
-window.switchWbStage = switchWbStage;
-window.wbHeaderPrimaryAction = wbHeaderPrimaryAction;
-window.renderStage1 = renderStage1;
-window.renderStage2 = renderStage2;
-window.wbJumpToS1Question = wbJumpToS1Question;
-window.wbJumpToS2Question = wbJumpToS2Question;
-window.selectS1Homework = selectS1Homework;
-window.toggleS1ExercisePage = toggleS1ExercisePage;
-window.toggleS2AnswerPage = toggleS2AnswerPage;
-window.clearCurrentS2Answers = clearCurrentS2Answers;
-window.wbS1PrevQuestion = wbS1PrevQuestion;
-window.wbS1NextQuestion = wbS1NextQuestion;
-window.wbS2PrevQuestion = wbS2PrevQuestion;
-window.wbS2NextQuestion = wbS2NextQuestion;
-window.wbAddNewQuestion = wbAddNewQuestion;
-window.wbDeleteCurrentQuestion = wbDeleteCurrentQuestion;
-window.wbAutoFillQuestions = wbAutoFillQuestions;
-window.wbAutoFillAnswers = wbAutoFillAnswers;
-window.openS1PageLightbox = openS1PageLightbox;
-window.openS2PageLightbox = openS2PageLightbox;
-window.openPipelineSummaryDialog = openPipelineSummaryDialog;
-window.closePipelineSummaryDialog = closePipelineSummaryDialog;
-window.jumpToQuestionFromSummary = jumpToQuestionFromSummary;
-window.doImportFromPipeline = doImportFromPipeline;
+window.onVariationParentChange = onVariationParentChange;
+window.onHoverHomeworkPreview = onHoverHomeworkPreview;
 
 window.addEventListener('resize', () => {
     document.querySelectorAll('.question-topic-input').forEach(el => {
