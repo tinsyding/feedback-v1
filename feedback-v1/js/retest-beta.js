@@ -958,6 +958,14 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         return badge ? badge.dataUrl : null;
     }
 
+    /**
+     * 生成题目与作答区外层圆角矩形 SVG 路径（供 PDFLib.drawSvgPath 绘制圆角虚线框）
+     */
+    function getRetestBoxSvgPath(w, h, r) {
+        const safeR = Math.max(2, Math.min(r || 8, w / 4, h / 4));
+        return `M ${safeR} 0 H ${w - safeR} A ${safeR} ${safeR} 0 0 1 ${w} ${safeR} V ${h - safeR} A ${safeR} ${safeR} 0 0 1 ${w - safeR} ${h} H ${safeR} A ${safeR} ${safeR} 0 0 1 0 ${h - safeR} V ${safeR} A ${safeR} ${safeR} 0 0 1 ${safeR} 0 Z`;
+    }
+
     // Download & Merge PDFs with modal progress feedback
     async function downloadMergedPdf(type, allWeeks) {
         if (!retestData) return;
@@ -1258,12 +1266,20 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         }
 
         try {
-            // A4 规格
+            // A4 规格与外框排版参数
             const PAGE_WIDTH = 595.28;
             const PAGE_HEIGHT = 841.89;
             const TOP_MARGIN = 26;
             const BOTTOM_MARGIN = 28;
             const SEPARATOR_HEIGHT = (window.retestQuestionSpacing && window.retestQuestionSpacing >= 8) ? window.retestQuestionSpacing : 85;
+
+            // 题目圆角虚线框规格
+            const BOX_MARGIN_X = 26;
+            const BOX_WIDTH = PAGE_WIDTH - 2 * BOX_MARGIN_X; // 543.28 pt
+            const BOX_PAD_TOP = 8;
+            const BOX_PAD_BOTTOM = 8;
+            const BOX_GAP = 12; // 同页不同题目之间的纵向间距
+
             // Beta 新增：含答案版每道题首切片上方的“胶囊考点卡”（卡高 25pt + 下间距 6pt）
             const TOPIC_BANNER_H = 25;
             const TOPIC_BANNER_GAP = 6;
@@ -1303,34 +1319,50 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                         const { topCropPt, bottomCutPt, effectiveHeightPt, isFullPage } = bounds;
 
                         // 检查当前页剩余空间是否足够
-                        // 每道题首切片附带“专题X：知识点”横条，预留其高度（支持智能换行）
                         const isFirstInTopicGroup = typeof qItem === 'object' ? (qItem.isFirstInTopicGroup !== false) : true;
                         const showTopicBanner = (pIdx === 0 && isFirstInTopicGroup && !!qTopicLabel);
+                        const isLastPageOfQuestion = (pIdx === pageCount - 1);
+                        const answerH = isLastPageOfQuestion ? SEPARATOR_HEIGHT : 0;
+
                         let topicBannerInfo = null;
                         let currentBannerH = TOPIC_BANNER_H;
-                        let currentBannerBlock = TOPIC_BANNER_BLOCK;
+                        let currentBannerBlock = 0;
+
+                        const bannerW = BOX_WIDTH - 16;
+                        const bannerX = BOX_MARGIN_X + 8;
 
                         if (showTopicBanner) {
-                            const estW = Math.max(120, Math.min(540, origW || 540));
-                            topicBannerInfo = generateTopicBadge(qTopicLabel, estW);
+                            topicBannerInfo = generateTopicBadge(qTopicLabel, bannerW);
                             if (topicBannerInfo) {
                                 currentBannerH = topicBannerInfo.heightPt;
-                                currentBannerBlock = topicBannerInfo.blockPt;
+                                currentBannerBlock = currentBannerH + TOPIC_BANNER_GAP;
                             }
                         }
 
-                        const isPageTop = (!currentPage || currentY >= (PAGE_HEIGHT - TOP_MARGIN - 5));
-                        const neededH = isPageTop ? effectiveHeightPt : (SEPARATOR_HEIGHT + effectiveHeightPt);
-                        const neededHWithBanner = neededH + (showTopicBanner ? currentBannerBlock : 0);
+                        const innerContentW = BOX_WIDTH - 12;
+                        const contentAreaH = PAGE_HEIGHT - TOP_MARGIN - BOTTOM_MARGIN;
+                        const maxAvailContentH = contentAreaH - BOX_PAD_TOP - BOX_PAD_BOTTOM - currentBannerBlock - answerH;
+                        const scale = isFullPage
+                            ? Math.min(innerContentW / origW, Math.max(0.1, (maxAvailContentH - 10) / effectiveHeightPt), 1.0)
+                            : Math.min(innerContentW / origW, 1.0);
+                        const drawW = origW * scale;
+                        const drawH = effectiveHeightPt * scale;
+                        const realDrawX = (BOX_MARGIN_X + 6) + (innerContentW - drawW) / 2;
 
-                        if (!currentPage || (currentY - neededHWithBanner < BOTTOM_MARGIN) || (isFullPage && !isPageTop)) {
+                        // 每一题连同作答区外框总高度
+                        const boxH = BOX_PAD_TOP + currentBannerBlock + drawH + answerH + BOX_PAD_BOTTOM;
+
+                        const isPageTop = (!currentPage || currentY >= (PAGE_HEIGHT - TOP_MARGIN - 5));
+
+                        if (!currentPage || (currentY - boxH < BOTTOM_MARGIN) || (isFullPage && !isPageTop)) {
                             // 空间不足，或当前是整页大题且当前页已被占用 -> 开新 A4 页
                             currentPage = mergedPdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
                             currentY = PAGE_HEIGHT - TOP_MARGIN;
-                        } else if (!isPageTop) {
-                            // 拼接在上一题下方：按作答间距留白
-                            currentY -= SEPARATOR_HEIGHT;
                         }
+
+                        const boxTopY = currentY;
+                        const boxBottomY = boxTopY - boxH;
+                        let boxContentY = boxTopY - BOX_PAD_TOP;
 
                         // 裁剪并嵌入
                         const [embedded] = await mergedPdf.embedPdf(sourceDoc, [pIdx]);
@@ -1351,53 +1383,44 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             }
                         }
 
-                        const contentAreaH = PAGE_HEIGHT - TOP_MARGIN - BOTTOM_MARGIN;
-                        const scale = isFullPage
-                            ? Math.min(PAGE_WIDTH / origW, Math.max(0.1, (contentAreaH - (showTopicBanner ? currentBannerBlock : 0)) / effectiveHeightPt), 1.0)
-                            : Math.min(PAGE_WIDTH / origW, 1.0);
-                        const drawW = origW * scale;
-                        const drawH = effectiveHeightPt * scale;
-                        const drawX = (PAGE_WIDTH - drawW) / 2;
-
-                        // 在每道题首切片上方绘制“专题X：知识点”横条（失败则跳过，不挡正文）
-                        if (showTopicBanner) {
+                        // 1. 在题框内顶部绘制“胶囊考点卡”
+                        if (showTopicBanner && topicBannerInfo && topicBannerInfo.dataUrl) {
                             try {
-                                if (!topicBannerInfo || Math.abs(topicBannerInfo.widthPt - drawW) > 2) {
-                                    topicBannerInfo = generateTopicBadge(qTopicLabel, drawW);
-                                }
-                                if (topicBannerInfo && topicBannerInfo.dataUrl) {
-                                    const badgeImg = await mergedPdf.embedPng(topicBannerInfo.dataUrl);
-                                    currentPage.drawImage(badgeImg, {
-                                        x: drawX,
-                                        y: currentY - topicBannerInfo.heightPt,
-                                        width: drawW,
-                                        height: topicBannerInfo.heightPt
-                                    });
-                                    currentY -= topicBannerInfo.blockPt;
-                                }
+                                const badgeImg = await mergedPdf.embedPng(topicBannerInfo.dataUrl);
+                                currentPage.drawImage(badgeImg, {
+                                    x: bannerX,
+                                    y: boxContentY - topicBannerInfo.heightPt,
+                                    width: bannerW,
+                                    height: topicBannerInfo.heightPt
+                                });
+                                boxContentY -= (topicBannerInfo.heightPt + TOPIC_BANNER_GAP);
                             } catch (badgeErr) {
                                 console.warn('Topic badge embed skipped:', badgeErr);
                             }
                         }
 
+                        // 2. 绘制题目切片
+                        const questionBottomY = boxContentY - drawH;
                         currentPage.drawPage(embedded, {
-                            x: drawX,
-                            y: currentY - drawH,
+                            x: realDrawX,
+                            y: questionBottomY,
                             width: drawW,
                             height: drawH
                         });
-                        currentY -= drawH;
+                        boxContentY = questionBottomY;
 
-                        // 在每道题的右下角添加视频讲解二维码与说明文字：第x题视频讲解（由系统全局开关控制）
-                        if (window.retestQrCodeEnabled !== false && videoUrl && pIdx === pageCount - 1) {
+                        // 3. 在每道题右下角/作答区内添加视频讲解二维码与说明文字
+                        if (window.retestQrCodeEnabled !== false && videoUrl && isLastPageOfQuestion) {
                             try {
                                 const qrDataUrl = await generateQuestionQrBadge(videoUrl, qNum);
                                 if (qrDataUrl) {
                                     const qrImage = await mergedPdf.embedPng(qrDataUrl);
                                     const badgeW = 54;
                                     const badgeH = 68;
-                                    const badgeX = (drawX + drawW) - badgeW - 6;
-                                    const badgeY = currentY + 6;
+                                    const badgeX = (BOX_MARGIN_X + BOX_WIDTH) - badgeW - 10;
+                                    const badgeY = (answerH >= 65)
+                                        ? (boxBottomY + 10)
+                                        : Math.max(boxBottomY + 8, questionBottomY + 4);
 
                                     currentPage.drawImage(qrImage, {
                                         x: badgeX,
@@ -1429,6 +1452,23 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                                 console.warn('Failed to embed question QR badge:', qrErr);
                             }
                         }
+
+                        // 4. 绘制包裹“考点卡 + 题目 + 作答区”的圆角虚线框
+                        try {
+                            const boxSvgPath = getRetestBoxSvgPath(BOX_WIDTH, boxH, 8);
+                            currentPage.drawSvgPath(boxSvgPath, {
+                                x: BOX_MARGIN_X,
+                                y: boxTopY,
+                                borderColor: PDFLib.rgb(0.70, 0.74, 0.80),
+                                borderWidth: 0.9,
+                                borderDashArray: [4, 3]
+                            });
+                        } catch (boxErr) {
+                            console.warn('Draw question box failed:', boxErr);
+                        }
+
+                        // 为下一题预留纵向间距
+                        currentY = boxBottomY - BOX_GAP;
                     }
                 } catch (err) {
                     console.error('Failed to load/pack PDF chunk', err);
