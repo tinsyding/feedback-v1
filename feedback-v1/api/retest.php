@@ -1529,6 +1529,7 @@ if ($action === 'decrypt') {
     // 匹配只认身份 Key（新/旧格式），不再按姓名 OR 匹配，杜绝同名学生串档；
     // 仅无学号旧数据允许受控的姓名兜底。
     $dbStudentScores = [];
+    $dbHomeworkErrors = [];
     $dbPreviewData = [];
     $dbWeekAverages = [];
     $dbWeekAveragesByBatch = [];
@@ -1545,7 +1546,7 @@ if ($action === 'decrypt') {
         }
         $dbWhere .= ")";
         $dbRecords = $db->fetchAll(
-            "SELECT sr.batch_id, sr.week_num, sr.preview_week_num, sr.homework_score, sr.preview_score, sr.total_score, sr.teacher_comment, sr.preview_comment, sr.error_questions, sr.preview_error_questions, cb.tier AS batch_tier
+            "SELECT sr.batch_id, sr.week_num, sr.preview_week_num, sr.homework_score, sr.preview_score, sr.total_score, sr.error_count, sr.teacher_comment, sr.preview_comment, sr.error_questions, sr.preview_error_questions, cb.tier AS batch_tier
              FROM student_records sr
              JOIN class_batches cb ON sr.batch_id = cb.id
              WHERE {$dbWhere}
@@ -1556,28 +1557,46 @@ if ($action === 'decrypt') {
             foreach ($dbRecords as $r) {
                 $wn = (int)$r['week_num'];
                 $eq = json_decode($r['error_questions'], true);
-                if (!isset($studentHistory[(string)$wn])) {
-                    $studentHistory[(string)$wn] = is_array($eq) ? array_values(array_unique(array_filter(array_map('intval', $eq)))) : [];
+                $errors = is_array($eq) ? array_values(array_unique(array_filter(array_map('intval', $eq)))) : [];
+                $comment = trim((string)($r['teacher_comment'] ?? ''));
+                // 同一学生同一周可能有多条记录（换班/重复生成）。以后写入的记录为准，
+                // 但仅用“真正带作业数据”的记录覆盖，避免仅预习的空行冲掉历史作业。
+                $hasHomework = !empty($errors)
+                    || ($r['homework_score'] !== null)
+                    || $comment !== ''
+                    || ((int)($r['error_count'] ?? 0) > 0);
+                if ($hasHomework) {
+                    $dbHomeworkErrors[(string)$wn] = $errors;
+                    $dbStudentScores[(string)$wn] = [
+                        'homeworkScore' => $r['homework_score'],
+                        'previewScore' => $r['preview_score'],
+                        'totalScore' => $r['total_score'],
+                        'comment' => $r['teacher_comment'],
+                        'previewComment' => $r['preview_comment'] ?? ''
+                    ];
+                    $dbWeekTiers[(string)$wn] = trim((string)($r['batch_tier'] ?? ''));
+                    $dbWeekBatchIds[(string)$wn] = (int)$r['batch_id'];
                 }
+
                 $peq = json_decode($r['preview_error_questions'] ?? 'null', true);
-                $dbPreviewData[(string)$wn] = [
-                    'errors' => is_array($peq) ? array_values(array_unique(array_filter(array_map('intval', $peq)))) : [],
-                    'previewWeek' => intval($r['preview_week_num'] ?? 0) > 0 ? intval($r['preview_week_num']) : $wn,
-                    'previewScore' => $r['preview_score'],
-                    'previewComment' => $r['preview_comment'] ?? '',
-                    'sourceWeek' => (int)$wn,
-                    // 该行是否真的携带预习数据：空行不能覆盖其它作业关联过来的预习
-                    'hasPreview' => ($r['preview_week_num'] !== null || $r['preview_error_questions'] !== null)
-                ];
-                $dbStudentScores[(string)$wn] = [
-                    'homeworkScore' => $r['homework_score'],
-                    'previewScore' => $r['preview_score'],
-                    'totalScore' => $r['total_score'],
-                    'comment' => $r['teacher_comment'],
-                    'previewComment' => $r['preview_comment'] ?? ''
-                ];
-                $dbWeekTiers[(string)$wn] = trim((string)($r['batch_tier'] ?? ''));
-                $dbWeekBatchIds[(string)$wn] = (int)$r['batch_id'];
+                $hasPreview = ($r['preview_week_num'] !== null || $r['preview_error_questions'] !== null);
+                if ($hasPreview) {
+                    $dbPreviewData[(string)$wn] = [
+                        'errors' => is_array($peq) ? array_values(array_unique(array_filter(array_map('intval', $peq)))) : [],
+                        'previewWeek' => intval($r['preview_week_num'] ?? 0) > 0 ? intval($r['preview_week_num']) : $wn,
+                        'previewScore' => $r['preview_score'],
+                        'previewComment' => $r['preview_comment'] ?? '',
+                        'sourceWeek' => (int)$wn,
+                        'hasPreview' => true
+                    ];
+                }
+            }
+
+            // 文件历史优先；数据库只补齐文件历史没有的周次，且使用最新一条作业记录
+            foreach ($dbHomeworkErrors as $wn => $errors) {
+                if (!isset($studentHistory[(string)$wn])) {
+                    $studentHistory[(string)$wn] = $errors;
+                }
             }
 
             // 计算该学生所在班级在各周次的平均巩固分
