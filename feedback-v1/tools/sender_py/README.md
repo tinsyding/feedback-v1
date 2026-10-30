@@ -79,7 +79,11 @@ Linux 下仅运行单测时不需要 `pywin32` / `mss`。
 
 ## 4. 发送器令牌说明
 
-程序内置默认访问令牌，常规使用无需额外配置。如需覆盖为自定义令牌，可通过以下任一方式设置：
+正式发布版（由 GitHub Actions 构建的 exe）会在构建时自动注入服务端令牌，**老师端开箱即用，无需手动配置**。
+
+令牌来自 GitHub Actions Secret `SENDER_API_TOKEN`，构建时生成 `sender_token.py` 并打包进 exe；该文件不会提交到仓库。由于令牌在 exe 内，属于共享密钥，请勿公开分发源码或构建产物给无关人员；如怀疑泄露，更新 Secret 后重新构建发布即可。
+
+从源码直接运行（未经过 CI 注入）时，仍可用以下方式覆盖：
 
 方式一：环境变量
 
@@ -101,7 +105,7 @@ setx SENDER_API_TOKEN "你的自定义令牌"
 }
 ```
 
-服务端对应配置位于 `feedback-v1/api/secret_key.local.php`。
+服务端对应配置位于 `feedback-v1/api/secret_key.local.php` 的 `senderApiToken`。
 
 ## 5. 输入格式与运行方式
 
@@ -299,7 +303,7 @@ Windows 真机回归建议覆盖：
 
 **Q：提示“缺少发送器令牌”或“鉴权失败”？**
 
-程序已内置默认令牌。若报错请确认服务端接口已更新至最新版本，或检查本机环境变量 `SENDER_API_TOKEN` / `.sender_py\config.json` 是否配置了错误的旧令牌。
+请先升级到最新发布版 exe。正式发布版会在构建时自动注入服务端令牌，默认无需配置。旧版 exe 仍然使用已被服务端禁用的默认令牌，不会自动变好。如果从源码运行，请设置 `SENDER_API_TOKEN` 或 `~/.sender_py/config.json`。
 
 **Q：频繁触发重新校准？**
 

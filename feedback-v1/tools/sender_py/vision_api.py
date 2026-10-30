@@ -14,14 +14,24 @@ import os
 IDENTIFY_PATH = "/api/identify.php"
 CALIBRATE_ROI_PATH = "/api/calibrate_roi.php"
 
-# 内置默认访问令牌（小范围内部使用，开箱即用免配置）
+# 内置默认访问令牌（仅用于未注入构建期 Token 的开发/旧构建，服务端通常已禁用）
 DEFAULT_SENDER_TOKEN = "jf_feedback_sender_internal_token_2026"
+
+# 构建期注入的 Token：由 CI 从 GitHub Secret 生成 sender_token.py，文件不提交。
+# 发布版 exe 会优先使用它，老师端无需任何配置。
+try:
+    from .sender_token import SENDER_TOKEN as EMBEDDED_SENDER_TOKEN
+except Exception:
+    try:
+        from sender_token import SENDER_TOKEN as EMBEDDED_SENDER_TOKEN
+    except Exception:
+        EMBEDDED_SENDER_TOKEN = ""
 
 _VALID_SENDERS = ("me", "parent", "unknown", None)
 
 
 def load_token(explicit=None) -> str:
-    """发送器访问令牌：显式参数 → 环境变量 SENDER_API_TOKEN → ~/.sender_py/config.json → 内置默认令牌。"""
+    """发送器访问令牌：显式参数 → 环境变量 → 用户配置 → 构建期内置 Token → 旧默认令牌。"""
     if explicit:
         return explicit
     env = (os.environ.get("SENDER_API_TOKEN") or "").strip()
@@ -35,6 +45,9 @@ def load_token(explicit=None) -> str:
                 return token
     except Exception:
         pass
+    embedded = (EMBEDDED_SENDER_TOKEN or "").strip()
+    if embedded:
+        return embedded
     return DEFAULT_SENDER_TOKEN
 
 
