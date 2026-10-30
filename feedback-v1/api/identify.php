@@ -31,7 +31,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     sendResponse(false, null, '仅支持 POST', 405);
 }
 
-// ---- 访问令牌（小范围内部使用：默认放行内置默认 Token，也可通过环境变量或 secret_key.local.php 覆盖自定义）----
+// ---- 访问令牌（配置了自定义 Token 时只接受自定义 Token；未配置时仅接受内置默认 Token）----
 const DEFAULT_SENDER_TOKEN = 'jf_feedback_sender_internal_token_2026';
 
 $serverToken = getenv('SENDER_API_TOKEN') ?: '';
@@ -51,16 +51,15 @@ if ($given === '' && stripos($authHeader, 'bearer ') === 0) {
     $given = trim(substr($authHeader, 7));
 }
 
-// 鉴权放行策略：
-// 1. 若客户端携带内置默认 Token，直接予以放行（开箱即用，所有电脑免配置）
-// 2. 若服务端配置了自定义 Token 且客户端匹配，予以放行
-// 3. 若服务端未配置任何自定义 Token，且客户端也未传，按内部小范围默认放行
+// 鉴权策略：
+// 1. 配置了自定义 Token 时，只接受自定义 Token；内置默认 Token 不再绕过
+// 2. 未配置自定义 Token 时，仅接受内置默认 Token；不再允许空 Token 直接放行
 $authorized = false;
-if ($given !== '' && hash_equals(DEFAULT_SENDER_TOKEN, (string)$given)) {
-    $authorized = true;
-} elseif ($serverToken !== '' && $given !== '' && hash_equals($serverToken, (string)$given)) {
-    $authorized = true;
-} elseif ($serverToken === '' && $given === '') {
+if ($serverToken !== '') {
+    if ($given !== '' && hash_equals($serverToken, (string)$given)) {
+        $authorized = true;
+    }
+} elseif ($given !== '' && hash_equals(DEFAULT_SENDER_TOKEN, (string)$given)) {
     $authorized = true;
 }
 
