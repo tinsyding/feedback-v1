@@ -61,6 +61,8 @@ jobs:
     needs: test
     runs-on: windows-latest
     timeout-minutes: 45
+    permissions:
+      contents: write
     defaults:
       run:
         shell: bash
@@ -197,7 +199,20 @@ jobs:
           python -c "import subprocess, sys; p = subprocess.run(['dist_dir/极方每周反馈程序-绿色文件夹版/极方每周反馈程序.exe', '--smoke-test'], timeout=120); sys.exit(p.returncode)"
           python -c "import subprocess, sys; p = subprocess.run(['dist_dir/极方每周反馈程序-Web版-绿色文件夹版/极方每周反馈程序-Web版.exe', '--smoke-test'], timeout=120); sys.exit(p.returncode)"
 
+      - name: Publish GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/sender-')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: 极方每周反馈程序 ${{ github.ref_name }}
+          files: |
+            dist/极方每周反馈程序-绿色文件夹版.zip
+            dist/极方每周反馈程序-Web版-绿色文件夹版.zip
+          fail_on_unmatched_files: true
+          body: ""
+
       - name: Upload Windows artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/sender-') }}
+        continue-on-error: true
         uses: actions/upload-artifact@v5
         with:
           name: JiFangFeedbackSender-windows-x64
@@ -205,42 +220,3 @@ jobs:
             dist/极方每周反馈程序-绿色文件夹版.zip
             dist/极方每周反馈程序-Web版-绿色文件夹版.zip
           if-no-files-found: error
-
-  release:
-    name: Publish GitHub Release
-    needs: build-windows
-    if: startsWith(github.ref, 'refs/tags/sender-')
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - name: Download Windows artifact
-        uses: actions/download-artifact@v5
-        with:
-          name: JiFangFeedbackSender-windows-x64
-          path: dist
-
-      - name: Resolve release title
-        id: release_meta
-        run: echo "title=极方每周反馈程序 ${GITHUB_REF_NAME#sender-}" >> "$GITHUB_OUTPUT"
-
-      - name: Prepare release assets
-        run: |
-          python - <<'PY'
-          import shutil
-
-          # 文件夹绿色版 zip (保留英文规范命名与中文友好命名)
-          shutil.copyfile("dist/极方每周反馈程序-绿色文件夹版.zip", "dist/JiFangFeedbackSender-onedir-windows-x64.zip")
-          shutil.copyfile("dist/极方每周反馈程序-Web版-绿色文件夹版.zip", "dist/JiFangFeedbackWeb-onedir-windows-x64.zip")
-          PY
-
-      - name: Publish release asset
-        uses: softprops/action-gh-release@v2
-        with:
-          name: ${{ steps.release_meta.outputs.title }}
-          files: |
-            dist/JiFangFeedbackSender-onedir-windows-x64.zip
-            dist/JiFangFeedbackWeb-onedir-windows-x64.zip
-          fail_on_unmatched_files: true
-          body: ""
