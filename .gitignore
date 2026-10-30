@@ -41,6 +41,7 @@ backups_server/
 _enc.txt
 
 # 重写版 sender_py 本地运行产物（真实学生数据/日志/截图/打包输出，绝不入库）
+feedback-v1/tools/sender_py/sender_token.py
 feedback-v1/tools/sender_py/feedback_history.json
 feedback-v1/tools/sender_py/测试*.json
 feedback-v1/tools/sender_py_debug_*
