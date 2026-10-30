@@ -199,14 +199,20 @@ jobs:
           python -c "import subprocess, sys; p = subprocess.run(['dist_dir/极方每周反馈程序-绿色文件夹版/极方每周反馈程序.exe', '--smoke-test'], timeout=120); sys.exit(p.returncode)"
           python -c "import subprocess, sys; p = subprocess.run(['dist_dir/极方每周反馈程序-Web版-绿色文件夹版/极方每周反馈程序-Web版.exe', '--smoke-test'], timeout=120); sys.exit(p.returncode)"
 
+      - name: Prepare ASCII release assets (tags only)
+        if: startsWith(github.ref, 'refs/tags/sender-')
+        run: |
+          cp "dist/极方每周反馈程序-绿色文件夹版.zip" "dist/JiFangFeedbackSender-onedir-windows-x64.zip"
+          cp "dist/极方每周反馈程序-Web版-绿色文件夹版.zip" "dist/JiFangFeedbackWeb-onedir-windows-x64.zip"
+
       - name: Publish GitHub Release (tags only)
         if: startsWith(github.ref, 'refs/tags/sender-')
         uses: softprops/action-gh-release@v2
         with:
           name: 极方每周反馈程序 ${{ github.ref_name }}
           files: |
-            dist/极方每周反馈程序-绿色文件夹版.zip
-            dist/极方每周反馈程序-Web版-绿色文件夹版.zip
+            dist/JiFangFeedbackSender-onedir-windows-x64.zip
+            dist/JiFangFeedbackWeb-onedir-windows-x64.zip
           fail_on_unmatched_files: true
           body: ""
 
