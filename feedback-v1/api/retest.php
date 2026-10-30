@@ -1592,11 +1592,9 @@ if ($action === 'decrypt') {
                 }
             }
 
-            // 文件历史优先；数据库只补齐文件历史没有的周次，且使用最新一条作业记录
+            // 数据库最新作业记录优先；文件历史只补齐数据库没有作业记录的周次
             foreach ($dbHomeworkErrors as $wn => $errors) {
-                if (!isset($studentHistory[(string)$wn])) {
-                    $studentHistory[(string)$wn] = $errors;
-                }
+                $studentHistory[(string)$wn] = $errors;
             }
 
             // 计算该学生所在班级在各周次的平均巩固分
@@ -1636,11 +1634,12 @@ if ($action === 'decrypt') {
         error_log("DB studentHistory query error: " . $e->getMessage());
     }
 
-    // 同一周可能在多个班型都有记录：以数据库中最新的班型为准，
-    // 优先采用该班型历史档案中的错题，避免多个档案 mtime 相同导致取值不确定。
+    // 同一周可能在多个班型都有记录：数据库已有最新作业记录的周次以数据库为准；
+    // 数据库缺该周作业数据时，再回退到最新班型的历史档案。
     foreach ($dbWeekTiers as $dbWeek => $dbTier) {
         $dbWeek = (string)$dbWeek;
         if ($dbTier === '' || isset($tierlessWeeks[$dbWeek])) continue;
+        if (isset($dbHomeworkErrors[$dbWeek])) continue;
         if (isset($historyByTier[$dbTier][$dbWeek])) {
             $studentHistory[$dbWeek] = $historyByTier[$dbTier][$dbWeek];
         }
