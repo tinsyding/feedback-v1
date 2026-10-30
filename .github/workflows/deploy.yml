@@ -62,6 +62,16 @@ jobs:
           # 统一属主与权限（pull 以 root 执行，新文件归 root，需交还 www）
           $SSH "chown -R www:www /www/wwwroot/JF/feedback-git && cd /www/wwwroot/JF/feedback-git && find feedback-v1 -type d -exec chmod 755 {} + && find feedback-v1 -type f -exec chmod 644 {} + && chmod 700 .git && echo PERMS-OK"
 
+      - name: Reload PHP-FPM (clear opcache)
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          SSH="ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 $DEPLOY_USER@$DEPLOY_HOST"
+          # PHP opcache 可能继续提供旧代码，pull 后必须 reload 才会生效
+          $SSH "if [ -x /etc/init.d/php-fpm-82 ]; then /etc/init.d/php-fpm-82 reload; else systemctl reload php-fpm-82; fi"
+
       - name: Smoke test
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
