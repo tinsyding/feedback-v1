@@ -204,14 +204,18 @@ function handleInvalidSession(message) {
 
 function hydrateFromPayload(payload) {
     const restoredFiles = (payload.homeworkFiles || []).map(file => ({
-        name: file.name, text: file.text, data: parseCSV(file.text)
+        name: file.name,
+        text: file.text,
+        data: (Array.isArray(file.data) && file.data.length > 0) ? file.data : parseCSV(file.text)
     }));
     sessionPayload.homeworkFiles = restoredFiles;
 
     // Preview files
     if (payload.previewFiles && payload.previewFiles.length > 0) {
         const restoredPreview = payload.previewFiles.map(file => ({
-            name: file.name, text: file.text, data: parseCSV(file.text)
+            name: file.name,
+            text: file.text,
+            data: (Array.isArray(file.data) && file.data.length > 0) ? file.data : parseCSV(file.text)
         }));
         sessionPayload.previewFiles = restoredPreview;
         // Merge preview data
@@ -225,7 +229,9 @@ function hydrateFromPayload(payload) {
     // Note files (English only)
     if (payload.noteFiles && payload.noteFiles.length > 0) {
         const restoredNote = payload.noteFiles.map(file => ({
-            name: file.name, text: file.text, data: parseCSV(file.text)
+            name: file.name,
+            text: file.text,
+            data: (Array.isArray(file.data) && file.data.length > 0) ? file.data : parseCSV(file.text)
         }));
         sessionPayload.noteFiles = restoredNote;
         // Merge note data
@@ -239,7 +245,9 @@ function hydrateFromPayload(payload) {
     // Class test files (English only)
     if (payload.classTestFiles && payload.classTestFiles.length > 0) {
         const restoredClassTest = payload.classTestFiles.map(file => ({
-            name: file.name, text: file.text, data: parseCSV(file.text)
+            name: file.name,
+            text: file.text,
+            data: (Array.isArray(file.data) && file.data.length > 0) ? file.data : parseCSV(file.text)
         }));
         sessionPayload.classTestFiles = restoredClassTest;
         // Merge class test data
@@ -449,8 +457,8 @@ function buildPreviewMetrics(data, mode, totalQuestions = 0) {
         const nameMatch = fullName.match(/\d+(.+)/);
         const studentName = nameMatch ? nameMatch[1] : fullName;
         const status = r[pvStatusIdx] || '';
-        const isSubmitted = status.includes('已完成') || status.includes('待订正') || status.includes('已订正');
         const score = parseScoreValue(r[pvScoreIdx]);
+        const isSubmitted = status.includes('已完成') || status.includes('待订正') || status.includes('已订正') || (status.includes('批改中') && score !== null);
         const accuracy = parsePercentValue(r[pvAccIdx]);
         const rawErr = parseInt(r[pvErrIdx]);
         const errorCount = isNaN(rawErr) ? null : rawErr;
@@ -983,15 +991,17 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
         const nameMatch = fullName.match(/\d+(.+)/);
         const studentName = nameMatch ? nameMatch[1] : fullName;
         const status = hwStatusIdx >= 0 ? (r[hwStatusIdx] || '') : '';
-        const isSubmitted = status.includes('已完成') || status.includes('待订正') || status.includes('已订正');
+        const rowScore = parseScoreValue(r[scoreIdx]);
+        const isSubmitted = status.includes('已完成') || status.includes('待订正') || status.includes('已订正') || (status.includes('批改中') && rowScore !== null);
         homeworkMap[studentName] = { isSubmitted, status };
     });
 
     const scoresWithIdx = activeHwRows.map((r, i) => {
         const status = hwStatusIdx >= 0 ? (r[hwStatusIdx] || '') : '';
-        const isSubmitted = status ? (status.includes('已完成') || status.includes('待订正') || status.includes('已订正')) : true;
+        const rowScore = parseScoreValue(r[scoreIdx]);
+        const isSubmitted = status ? (status.includes('已完成') || status.includes('待订正') || status.includes('已订正') || (status.includes('批改中') && rowScore !== null)) : true;
         if (!isSubmitted) return { score: null, index: i };
-        return { score: parseScoreValue(r[scoreIdx]), index: i };
+        return { score: rowScore, index: i };
     }).filter(x => x.score !== null);
     const scores = scoresWithIdx.map(x => x.score);
     const totalStudents = scores.length;
@@ -1274,7 +1284,7 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
             const rawScore = parseScoreValue(row[scoreIdx]);
             const homeworkScore = rawScore !== null ? rawScore : 0;
             const pvInfo = cachedPreviewMap ? cachedPreviewMap[studentName] : null;
-            const previewScore = pvInfo ? (pvInfo.score ?? pvInfo.metricValue ?? null) : null;
+            const previewScore = (pvInfo && pvInfo.isSubmitted) ? (pvInfo.score ?? pvInfo.metricValue ?? null) : null;
 
             const originalCommentForPlus = commentIdx >= 0 ? String(row[commentIdx] || '') : '';
             const fileCommentForPlus = getEffectiveComment(row, commentIdx, correctionCommentIdx);
