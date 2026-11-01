@@ -1800,6 +1800,14 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
         // 【课后复习建议】、个人薄弱点、错题本链接等统一放置在最末尾
         if (plusFeedbackPart && plusFeedbackPart.trim()) {
             let fullPlusPart = plusFeedbackPart;
+            // 未提交时学术反馈正文已包含“第X周…未提交。”，完整模式下末尾避免重复展示该行
+            if (!hwSubmitted) {
+                const hwNotSubmittedPrefix = `第${hwLesson}${getLessonUnit()}${getHomeworkLabelFull()}未提交`;
+                const firstPlusLine = fullPlusPart.split('\n', 1)[0];
+                if (academicFeedback.includes(`${hwNotSubmittedPrefix}。`) && firstPlusLine.startsWith(hwNotSubmittedPrefix)) {
+                    fullPlusPart = fullPlusPart.slice(firstPlusLine.length).replace(/^\n+/, '').trim();
+                }
+            }
             // 若学术反馈正文中已单独列出【预习薄弱点】，完整模式下末尾避免重复展示该行
             if (academicFeedback.includes('【预习薄弱点】：') && fullPlusPart.includes('【预习薄弱点】：')) {
                 fullPlusPart = fullPlusPart.replace(/【预习薄弱点】：[^\n]*\n?/, '').trim();
