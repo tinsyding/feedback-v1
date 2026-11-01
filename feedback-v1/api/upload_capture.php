@@ -48,6 +48,16 @@ if (!in_array($ext, $allowedExts)) {
 $targetFile = $targetDir . '/' . $filename;
 
 if (move_uploaded_file($file['tmp_name'], $targetFile)) {
+    @file_put_contents(
+        $uploadDir . '/index.jsonl',
+        json_encode([
+            'ts' => time(),
+            'rel' => $fingerprint . '/' . $filename,
+            'orig' => basename($file['name']),
+            'type' => $type
+        ], JSON_UNESCAPED_UNICODE) . "\n",
+        FILE_APPEND | LOCK_EX
+    );
     echo json_encode(['success' => true]);
 } else {
     echo json_encode(['success' => false, 'error' => 'Failed to move']);

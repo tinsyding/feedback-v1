@@ -68,6 +68,7 @@ try {
         case 'db_update':
         case 'db_delete':
         case 'db_reset_teacher_password':
+        case 'download_source_file':
             require __DIR__ . '/admin/actions_crud.php';
             break;
 

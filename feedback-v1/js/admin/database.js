@@ -2466,18 +2466,16 @@
 
                         <!-- 5. 录入来源文件名 -->
                         <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 14px 16px;">
-                            <div style="font-size: 0.82rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
-                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
-                                <span>录入来源文件名 ${srcList.length > 0 ? `(共 ${srcList.length} 个文件)` : ''}</span>
+                            <div style="font-size: 0.82rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 6px;">
+                                <span style="display: inline-flex; align-items: center; gap: 6px;">
+                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
+                                    <span>录入来源文件名 ${srcList.length > 0 ? `(共 ${srcList.length} 个文件)` : ''}</span>
+                                </span>
+                                ${srcList.length > 0 ? `<span style="font-size: 0.72rem; font-weight: 400; color: var(--text-muted);">点击文件名可直接下载上传原件（保留30天）</span>` : ''}
                             </div>
                             ${srcList.length > 0 ? `
                                 <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-                                    ${srcList.map(fn => `
-                                        <span style="font-size: 0.78rem; background: var(--bg-subtle); border: 1px solid var(--border-color); color: var(--text-secondary); padding: 3px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; word-break: break-all;">
-                                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
-                                            <span>${escapeHtml(fn)}</span>
-                                        </span>
-                                    `).join('')}
+                                    ${srcList.map(fn => renderSourceFileChip(fn, { recordId: record.id, batchCode: record.batch_code || '', variant: 'default' })).join('')}
                                 </div>
                             ` : '<span style="color: var(--text-muted); font-size: 0.78rem;">（暂无记录来源文件名，历史数据或手动录入）</span>'}
                         </div>
@@ -3219,8 +3217,9 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
                                 </div>
                             ` : ''}
                             ${h.source_files_list && h.source_files_list.length > 0 ? `
-                                <div style="font-size: 0.75rem; color: var(--text-secondary);">
-                                    <span style="color: var(--text-muted);">当时上传文件：</span>${escapeHtml(srcStr)}
+                                <div style="font-size: 0.75rem; color: var(--text-secondary); display: flex; align-items: center; flex-wrap: wrap; gap: 6px;">
+                                    <span style="color: var(--text-muted);">当时上传文件：</span>
+                                    ${h.source_files_list.map(fn => renderSourceFileChip(fn, { recordId: h.record_id || recordId || 0, historyId: h.id || 0, batchCode: h.batch_code || '', variant: 'default' })).join('')}
                                 </div>
                             ` : ''}
                         </div>
@@ -3228,6 +3227,69 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
                 }).join('');
             } catch (e) {
                 container.innerHTML = `<div style="font-size: 0.8rem; color: #f87171; padding: 8px;">加载历史版本失败: ${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        function renderSourceFileChip(fileName, options = {}) {
+            const fn = String(fileName || '').trim();
+            if (!fn) return '';
+            const recId = Number(options.recordId || 0) || 0;
+            const histId = Number(options.historyId || 0) || 0;
+            const batchCode = String(options.batchCode || '').trim();
+            const variant = options.variant || 'default';
+
+            let style = 'font-size: 0.78rem; background: var(--bg-subtle); border: 1px solid var(--border-color); color: var(--text-secondary); padding: 3px 8px;';
+            if (variant === 'preview') {
+                style = 'font-size: 0.76rem; background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.3); color: #fbbf24; padding: 2px 7px;';
+            } else if (variant === 'homework') {
+                style = 'font-size: 0.76rem; background: rgba(56,189,248,0.08); border: 1px solid rgba(56,189,248,0.3); color: #38bdf8; padding: 2px 7px;';
+            }
+
+            const safeFnArg = escapeHtml(JSON.stringify(fn));
+            const safeBatchArg = escapeHtml(JSON.stringify(batchCode));
+
+            return `
+                <button type="button"
+                        onclick="downloadAdminSourceFile(${safeFnArg}, ${recId}, ${histId}, ${safeBatchArg})"
+                        title="点击下载上传原件：${escapeHtml(fn)}"
+                        style="${style} border-radius: 4px; display: inline-flex; align-items: center; gap: 5px; word-break: break-all; cursor: pointer; font-family: inherit; transition: opacity 0.15s;"
+                        onmouseover="this.style.opacity='0.82'"
+                        onmouseout="this.style.opacity='1'">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                    <span>${escapeHtml(fn)}</span>
+                </button>
+            `;
+        }
+
+        async function downloadAdminSourceFile(fileName, recordId = 0, historyId = 0, batchCode = '') {
+            if (!fileName) return;
+            const params = new URLSearchParams({
+                action: 'download_source_file',
+                file_name: fileName
+            });
+            if (recordId) params.set('record_id', String(recordId));
+            if (historyId) params.set('history_id', String(historyId));
+            if (batchCode) params.set('batch_code', String(batchCode));
+
+            try {
+                const checkParams = new URLSearchParams(params);
+                checkParams.set('check_only', '1');
+                const res = await fetch(`${API_BASE}?${checkParams.toString()}`);
+                const json = await res.json();
+                if (!json || !json.success) {
+                    showToast((json && json.error) || '未找到对应上传原件（可能已超过30天保留期）', 'warning', 3500);
+                    return;
+                }
+                const dlUrl = `${API_BASE}?${params.toString()}`;
+                const a = document.createElement('a');
+                a.href = dlUrl;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                showToast(`正在下载原件：${fileName}`, 'success', 2500);
+            } catch (e) {
+                showToast('下载请求失败: ' + e.message, 'error', 3500);
             }
         }
 
