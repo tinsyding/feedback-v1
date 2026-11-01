@@ -649,7 +649,31 @@ if ($action === 'encrypt_batch') {
     $batchTokenMapEntries = [];
 
     // 生成当次操作的唯一批次编号（老师每一次生成就生成一次，作为一次完整的批次）
-    $batchCode = 'B' . date('Ymd_His') . '_' . substr(bin2hex(random_bytes(2)), 0, 4);
+    // 幂等与防抖保护：如果 60 秒内已有同一教师针对同班级、同周次且学生人数完全一致的生成记录，
+    // 则复用上一批次编号，避免因前端微调补交话术重绘而产生冗余批次与重复的历史覆盖归档。
+    $isDebouncedBatch = false;
+    $prevGen = null;
+    if ($batchId) {
+        $prevGen = $db->fetchOne(
+            "SELECT id, batch_code, created_by, student_count, created_at FROM `generation_batches` 
+             WHERE `class_id` = ? AND `week_num` = ? ORDER BY id DESC LIMIT 1",
+            [$batchId, $week]
+        );
+        if ($prevGen && !empty($prevGen['created_at'])) {
+            $lastTime = strtotime($prevGen['created_at']);
+            $timeDiff = time() - $lastTime;
+            $reqStudentCount = count($input['students']);
+            $isSameTeacher = empty($currentTeacher) || empty($prevGen['created_by']) || ($prevGen['created_by'] === $currentTeacher);
+            if ($timeDiff >= 0 && $timeDiff <= 60 && $isSameTeacher && (int)$prevGen['student_count'] === $reqStudentCount) {
+                $isDebouncedBatch = true;
+                $batchCode = $prevGen['batch_code'];
+            }
+        }
+    }
+
+    if (!$isDebouncedBatch) {
+        $batchCode = 'B' . date('Ymd_His') . '_' . substr(bin2hex(random_bytes(2)), 0, 4);
+    }
     $validStudentCount = 0;
     $errorStudentCount = 0;
 
@@ -671,7 +695,8 @@ if ($action === 'encrypt_batch') {
     }
 
     // 核心安全防护：在即将被本次生成覆盖之前，自动将已有学情记录归档至 student_record_history 历史版本元组库
-    if ($batchId && !empty($input['students'])) {
+    // 幂等保护：若命中短时防抖（60秒内同一批次操作），跳过归档，避免产生无意义的同版本自身覆盖！
+    if (!$isDebouncedBatch && $batchId && !empty($input['students'])) {
         try {
             $studentKeysToArchive = [];
             $studentNamesToArchive = [];
@@ -710,10 +735,6 @@ if ($action === 'encrypt_batch') {
                     $queryParams
                 );
                 if (!empty($existingRows)) {
-                    $prevGen = $db->fetchOne(
-                        "SELECT batch_code, created_by FROM `generation_batches` WHERE `class_id` = ? AND `week_num` = ? ORDER BY id DESC LIMIT 1",
-                        [$batchId, $week]
-                    );
                     $prevBatchCode = $prevGen['batch_code'] ?? '';
                     $prevCreator = $prevGen['created_by'] ?? '';
 
@@ -926,8 +947,8 @@ if ($action === 'encrypt_batch') {
         }
     }
 
-    // 记录生成批次汇总表 (generation_batches)
-    if ($batchId && $validStudentCount > 0) {
+    // 记录生成批次汇总表 (generation_batches) - 仅在非防抖新批次时写入
+    if (!$isDebouncedBatch && $batchId && $validStudentCount > 0) {
         try {
             $db->execute(
                 "INSERT INTO generation_batches (`batch_code`, `class_id`, `week_num`, `student_count`, `error_student_count`, `source_files`, `created_by`, `created_at`) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
@@ -1016,8 +1037,8 @@ if ($action === 'encrypt_batch') {
         }
     }
 
-    // 记录生成反馈的审计日志
-    if (function_exists('recordServerLog')) {
+    // 记录生成反馈的审计日志 - 仅在非防抖新批次时写入
+    if (!$isDebouncedBatch && function_exists('recordServerLog')) {
         recordServerLog('action', 'retest', 'generate_feedback', [
             'batch_code'    => $batchCode,
             'class_name'    => $className,
