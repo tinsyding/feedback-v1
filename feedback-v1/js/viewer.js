@@ -109,6 +109,9 @@ let cachedPreviewMap = {};
 let cachedPreviewStats = {};
 let cachedPlusData = null;
 let cachedPlusErrorStats = {};
+let cachedPlusTokens = null;
+let encryptBatchPromise = null;
+let hasLoggedFeedbackGenerated = false;
 let globalAppendText = '';
 let previewReminderText = '';
 let homeworkReminderText = '';
@@ -265,6 +268,9 @@ function hydrateFromPayload(payload) {
     }
     const runtime = payload.runtime || {};
     onlineOverrides = runtime.onlineOverrides || {};
+    if (payload.plusTokens && typeof payload.plusTokens === 'object' && Object.keys(payload.plusTokens).length > 0) {
+        cachedPlusTokens = payload.plusTokens;
+    }
 }
 
 function updateRuntimeState(partial) {
@@ -1222,7 +1228,7 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
     });
 
     // Plus feature: Batch encrypt retest tokens
-    let plusTokens = {};
+    let plusTokens = (cachedPlusTokens && Object.keys(cachedPlusTokens).length > 0) ? cachedPlusTokens : {};
     // 错题本身份 Key：学号_姓名_年级_学科（与服务端 build_student_key 保持一致）
     // 注意：这两个 helper 在无错题本（plusData 关闭）时也要可用于生成学生行 Key。
     const plusGradeForKey = sessionPayload.plusData?.grade || '';
@@ -1235,111 +1241,128 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
     const buildLegacyStudentKey = (studentId, studentName) => studentId ? `${studentId}_${studentName}` : studentName;
 
     if (sessionPayload.plusData && sessionPayload.plusData.enabled) {
-        const idIdx = hwHeader.findIndex(h => h.includes('学号') || h.includes('编号') || h.includes('卡号'));
-        const uploadedFileNames = [];
-        if (sessionPayload.homeworkFiles) {
-            sessionPayload.homeworkFiles.forEach(f => { if (f.name && !uploadedFileNames.includes(f.name)) uploadedFileNames.push(f.name); });
-        }
-        if (sessionPayload.previewFiles) {
-            sessionPayload.previewFiles.forEach(f => { if (f.name && !uploadedFileNames.includes(f.name)) uploadedFileNames.push(f.name); });
-        }
-        if (sessionPayload.noteFiles) {
-            sessionPayload.noteFiles.forEach(f => { if (f.name && !uploadedFileNames.includes(f.name)) uploadedFileNames.push(f.name); });
-        }
-        if (sessionPayload.classTestFiles) {
-            sessionPayload.classTestFiles.forEach(f => { if (f.name && !uploadedFileNames.includes(f.name)) uploadedFileNames.push(f.name); });
-        }
-        if (sessionPayload.reportFile?.name && !uploadedFileNames.includes(sessionPayload.reportFile.name)) {
-            uploadedFileNames.push(sessionPayload.reportFile.name);
-        }
-        if (sessionPayload.rosterFileName && !uploadedFileNames.includes(sessionPayload.rosterFileName)) {
-            uploadedFileNames.push(sessionPayload.rosterFileName);
-        }
-        if (Array.isArray(sessionPayload.sourceFileNames)) {
-            sessionPayload.sourceFileNames.forEach(name => {
-                if (name && !uploadedFileNames.includes(name)) uploadedFileNames.push(name);
-            });
-        }
-
-        const batchPayload = {
-            year: window.semesterYear || 2026,
-            season: window.defaultSeason || 'spring',
-            subject: sessionPayload.subject || '数学',
-            grade: sessionPayload.plusData.grade,
-            tier: sessionPayload.plusData.tier,
-            week: sessionPayload.plusData.week,
-            preview_week: sessionPayload.plusData.previewWeek || pvLesson || sessionPayload.plusData.week,
-            has_preview_data: !!previewData,
-            has_homework_data: true,
-            source_files: uploadedFileNames,
-            students: []
-        };
-
-        hwRows.forEach((row, index) => {
-            const fullName = (row[nameIdx] || '').trim();
-            const nameMatch = fullName.match(/\d+(.+)/);
-            const studentName = nameMatch ? nameMatch[1] : fullName;
-            if (allDroppedSet.has(studentName)) return;
-            if (exclusionSet.has(fullName)) return;
-
-            const studentIdMatch = fullName.match(/^(\d+)/);
-            let studentId = '';
-            if (idIdx >= 0 && row[idIdx]) {
-                studentId = String(row[idIdx]).trim();
-            } else if (studentIdMatch) {
-                studentId = studentIdMatch[1];
+        if (cachedPlusTokens && Object.keys(cachedPlusTokens).length > 0) {
+            plusTokens = cachedPlusTokens;
+        } else if (encryptBatchPromise) {
+            plusTokens = await encryptBatchPromise;
+        } else {
+            const idIdx = hwHeader.findIndex(h => h.includes('学号') || h.includes('编号') || h.includes('卡号'));
+            const uploadedFileNames = [];
+            if (sessionPayload.homeworkFiles) {
+                sessionPayload.homeworkFiles.forEach(f => { if (f.name && !uploadedFileNames.includes(f.name)) uploadedFileNames.push(f.name); });
             }
-            const studentKey = buildPlusStudentKey(studentId, studentName, fullName, index);
-            
-            const rawScore = parseScoreValue(row[scoreIdx]);
-            const homeworkScore = rawScore !== null ? rawScore : 0;
-            const pvInfo = cachedPreviewMap ? cachedPreviewMap[studentName] : null;
-            const previewScore = (pvInfo && pvInfo.isSubmitted) ? (pvInfo.score ?? pvInfo.metricValue ?? null) : null;
+            if (sessionPayload.previewFiles) {
+                sessionPayload.previewFiles.forEach(f => { if (f.name && !uploadedFileNames.includes(f.name)) uploadedFileNames.push(f.name); });
+            }
+            if (sessionPayload.noteFiles) {
+                sessionPayload.noteFiles.forEach(f => { if (f.name && !uploadedFileNames.includes(f.name)) uploadedFileNames.push(f.name); });
+            }
+            if (sessionPayload.classTestFiles) {
+                sessionPayload.classTestFiles.forEach(f => { if (f.name && !uploadedFileNames.includes(f.name)) uploadedFileNames.push(f.name); });
+            }
+            if (sessionPayload.reportFile?.name && !uploadedFileNames.includes(sessionPayload.reportFile.name)) {
+                uploadedFileNames.push(sessionPayload.reportFile.name);
+            }
+            if (sessionPayload.rosterFileName && !uploadedFileNames.includes(sessionPayload.rosterFileName)) {
+                uploadedFileNames.push(sessionPayload.rosterFileName);
+            }
+            if (Array.isArray(sessionPayload.sourceFileNames)) {
+                sessionPayload.sourceFileNames.forEach(name => {
+                    if (name && !uploadedFileNames.includes(name)) uploadedFileNames.push(name);
+                });
+            }
 
-            const originalCommentForPlus = commentIdx >= 0 ? String(row[commentIdx] || '') : '';
-            const fileCommentForPlus = getEffectiveComment(row, commentIdx, correctionCommentIdx);
-            const studentTot = (totalScoreIdx >= 0) ? parseScoreValue(row[totalScoreIdx]) : batchTotalScore;
-            const commentForPlus = parseCommentForPlus(originalCommentForPlus, fileCommentForPlus, {
-                homeworkScore: homeworkScore,
-                maxScore: studentTot || batchTotalScore || 100,
-                questions: sessionPayload?.plusData?.questions
-            });
-            const previewCommentForPlus = pvInfo?.comment ? String(pvInfo.comment) : '';
-            const previewParsedForPlus = previewCommentForPlus
-                ? parseErrorQuestionsFromComment(previewCommentForPlus)
-                : null;
-            batchPayload.students.push({
-                id: studentId,
-                name: studentName,
-                fullName: fullName,
-                key: studentKey,
-                errors: commentForPlus.errorNums,
-                previewErrors: previewParsedForPlus?.errorNums || [],
-                previewComment: previewCommentForPlus,
-                previewWeek: sessionPayload.plusData.previewWeek || pvLesson || sessionPayload.plusData.week,
-                homeworkScore: homeworkScore,
-                previewScore: previewScore,
-                totalScore: studentTot || batchTotalScore || 100,
-                comment: fileCommentForPlus
-            });
-        });
-        
-        if (batchPayload.students.length > 0) {
-            batchPayload.teacher_username = window.currentUser?.username || '';
-            batchPayload.teacher_name = window.currentUser?.real_name || '';
-            try {
-                const reqFn = typeof requestWithTimeout === 'function' ? requestWithTimeout : fetch;
-                const resp = await reqFn('api/retest.php?action=encrypt_batch', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(batchPayload)
-                }, 4000);
-                const result = await resp.json();
-                if (result.success && result.tokens) {
-                    plusTokens = result.tokens;
+            const batchPayload = {
+                year: window.semesterYear || 2026,
+                season: window.defaultSeason || 'spring',
+                subject: sessionPayload.subject || '数学',
+                grade: sessionPayload.plusData.grade,
+                tier: sessionPayload.plusData.tier,
+                week: sessionPayload.plusData.week,
+                preview_week: sessionPayload.plusData.previewWeek || pvLesson || sessionPayload.plusData.week,
+                has_preview_data: !!previewData,
+                has_homework_data: true,
+                source_files: uploadedFileNames,
+                students: []
+            };
+
+            hwRows.forEach((row, index) => {
+                const fullName = (row[nameIdx] || '').trim();
+                const nameMatch = fullName.match(/\d+(.+)/);
+                const studentName = nameMatch ? nameMatch[1] : fullName;
+                if (allDroppedSet.has(studentName)) return;
+                if (exclusionSet.has(fullName)) return;
+
+                const studentIdMatch = fullName.match(/^(\d+)/);
+                let studentId = '';
+                if (idIdx >= 0 && row[idIdx]) {
+                    studentId = String(row[idIdx]).trim();
+                } else if (studentIdMatch) {
+                    studentId = studentIdMatch[1];
                 }
-            } catch (e) {
-                console.warn('获取专属错题本Token跳过或超时 (弱网优雅降级):', e);
+                const studentKey = buildPlusStudentKey(studentId, studentName, fullName, index);
+                
+                const rawScore = parseScoreValue(row[scoreIdx]);
+                const homeworkScore = rawScore !== null ? rawScore : 0;
+                const pvInfo = cachedPreviewMap ? cachedPreviewMap[studentName] : null;
+                const previewScore = (pvInfo && pvInfo.isSubmitted) ? (pvInfo.score ?? pvInfo.metricValue ?? null) : null;
+
+                const originalCommentForPlus = commentIdx >= 0 ? String(row[commentIdx] || '') : '';
+                const fileCommentForPlus = getEffectiveComment(row, commentIdx, correctionCommentIdx);
+                const studentTot = (totalScoreIdx >= 0) ? parseScoreValue(row[totalScoreIdx]) : batchTotalScore;
+                const commentForPlus = parseCommentForPlus(originalCommentForPlus, fileCommentForPlus, {
+                    homeworkScore: homeworkScore,
+                    maxScore: studentTot || batchTotalScore || 100,
+                    questions: sessionPayload?.plusData?.questions
+                });
+                const previewCommentForPlus = pvInfo?.comment ? String(pvInfo.comment) : '';
+                const previewParsedForPlus = previewCommentForPlus
+                    ? parseErrorQuestionsFromComment(previewCommentForPlus)
+                    : null;
+                batchPayload.students.push({
+                    id: studentId,
+                    name: studentName,
+                    fullName: fullName,
+                    key: studentKey,
+                    errors: commentForPlus.errorNums,
+                    previewErrors: previewParsedForPlus?.errorNums || [],
+                    previewComment: previewCommentForPlus,
+                    previewWeek: sessionPayload.plusData.previewWeek || pvLesson || sessionPayload.plusData.week,
+                    homeworkScore: homeworkScore,
+                    previewScore: previewScore,
+                    totalScore: studentTot || batchTotalScore || 100,
+                    comment: fileCommentForPlus
+                });
+            });
+            
+            if (batchPayload.students.length > 0) {
+                batchPayload.teacher_username = window.currentUser?.username || '';
+                batchPayload.teacher_name = window.currentUser?.real_name || '';
+                encryptBatchPromise = (async () => {
+                    try {
+                        const reqFn = typeof requestWithTimeout === 'function' ? requestWithTimeout : fetch;
+                        const resp = await reqFn('api/retest.php?action=encrypt_batch', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(batchPayload)
+                        }, 4000);
+                        const result = await resp.json();
+                        if (result.success && result.tokens) {
+                            cachedPlusTokens = result.tokens;
+                            if (sessionPayload) sessionPayload.plusTokens = result.tokens;
+                            if (typeof updateSessionData === 'function' && sessionId) {
+                                updateSessionData(sessionId, { plusTokens: result.tokens });
+                            }
+                            return result.tokens;
+                        }
+                    } catch (e) {
+                        console.warn('获取专属错题本Token跳过或超时 (弱网优雅降级):', e);
+                    } finally {
+                        encryptBatchPromise = null;
+                    }
+                    return {};
+                })();
+                plusTokens = await encryptBatchPromise;
             }
         }
     }
@@ -1896,7 +1919,10 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
         showToast(`已排除 ${allDroppedSet.size} 名退课学生的反馈`);
     }
 
-    Logger.action('feedback_generated', { totalStudents: hwRows.length, hasHomework: !!homeworkData, skipped: allDroppedSet.size });
+    if (!skipUnsubmittedCheck && !hasLoggedFeedbackGenerated) {
+        Logger.action('feedback_generated', { totalStudents: hwRows.length, hasHomework: !!homeworkData, skipped: allDroppedSet.size });
+        hasLoggedFeedbackGenerated = true;
+    }
 }
 
 async function doGeneratePreviewOnlyFeedback() {
@@ -2508,7 +2534,10 @@ async function doGeneratePreviewOnlyFeedback() {
 
     updateReminderBadges();
 
-    Logger.action('feedback_generated', { totalStudents: pvRows.length, hasHomework: false, skipped: droppedPvSet.size });
+    if (!hasLoggedFeedbackGenerated) {
+        Logger.action('feedback_generated', { totalStudents: pvRows.length, hasHomework: false, skipped: droppedPvSet.size });
+        hasLoggedFeedbackGenerated = true;
+    }
 }
 
 // ========== Utility functions (same as viewer.js) ==========
