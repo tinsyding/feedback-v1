@@ -1124,4 +1124,228 @@ switch ($action) {
             sendResponse(true, ['message' => "已成功重置教师 {$user['username']} 的密码"]);
             break;
 
+        case 'download_source_file':
+            requireAdmin();
+            $origFileName = trim((string)($_GET['file_name'] ?? ''));
+            $recordId = (int)($_GET['record_id'] ?? 0);
+            $historyId = (int)($_GET['history_id'] ?? 0);
+            $batchCode = trim((string)($_GET['batch_code'] ?? ''));
+            $checkOnly = !empty($_GET['check_only']);
+
+            if ($origFileName === '') {
+                sendResponse(false, null, '缺少文件名参数', 400);
+            }
+
+            $studentName = '';
+            $refTimestamps = [];
+
+            if ($historyId > 0) {
+                $hRow = DB::fetchOne("SELECT `batch_code`, `student_name`, `record_created_at`, `record_updated_at`, `archived_at` FROM `student_record_history` WHERE `id` = ? LIMIT 1", [$historyId]);
+                if ($hRow) {
+                    if ($batchCode === '' && !empty($hRow['batch_code'])) $batchCode = (string)$hRow['batch_code'];
+                    $studentName = trim((string)($hRow['student_name'] ?? ''));
+                    foreach (['record_updated_at', 'record_created_at', 'archived_at'] as $tk) {
+                        if (!empty($hRow[$tk])) {
+                            $ts = strtotime((string)$hRow[$tk]);
+                            if ($ts) $refTimestamps[] = $ts;
+                        }
+                    }
+                }
+            }
+
+            if ($recordId > 0 && empty($refTimestamps)) {
+                $rRow = DB::fetchOne("SELECT `batch_code`, `student_name`, `created_at`, `updated_at` FROM `student_records` WHERE `id` = ? LIMIT 1", [$recordId]);
+                if ($rRow) {
+                    if ($batchCode === '' && !empty($rRow['batch_code'])) $batchCode = (string)$rRow['batch_code'];
+                    if ($studentName === '') $studentName = trim((string)($rRow['student_name'] ?? ''));
+                    foreach (['updated_at', 'created_at'] as $tk) {
+                        if (!empty($rRow[$tk])) {
+                            $ts = strtotime((string)$rRow[$tk]);
+                            if ($ts) $refTimestamps[] = $ts;
+                        }
+                    }
+                }
+            }
+
+            if ($batchCode !== '' && preg_match('/^B(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/', $batchCode, $bm)) {
+                $bTs = strtotime("{$bm[1]}-{$bm[2]}-{$bm[3]} {$bm[4]}:{$bm[5]}:{$bm[6]}");
+                if ($bTs) array_unshift($refTimestamps, $bTs);
+            }
+            $refTimestamps = array_values(array_unique(array_filter($refTimestamps)));
+
+            $baseOrig = basename(str_replace('\\', '/', $origFileName));
+            $expectedSanitized = strtolower((string)preg_replace('/[^a-zA-Z0-9.\-_]/', '', $baseOrig));
+
+            // 根据原文件名推断文件类型标签
+            $expectedType = '';
+            if (preg_match('/预习|preview/iu', $baseOrig)) {
+                $expectedType = 'preview';
+            } elseif (preg_match('/统计报告|报告|report/iu', $baseOrig)) {
+                $expectedType = 'report';
+            } elseif (preg_match('/笔记|note/iu', $baseOrig)) {
+                $expectedType = 'note';
+            } elseif (preg_match('/测试|测验|class_test/iu', $baseOrig)) {
+                $expectedType = 'class_test';
+            } elseif (preg_match('/名单|花名册|roster/iu', $baseOrig)) {
+                $expectedType = 'roster';
+            } elseif (preg_match('/巩固|课后|作业|homework/iu', $baseOrig)) {
+                $expectedType = 'homework';
+            }
+
+            $uploadDirs = array_values(array_unique(array_filter([
+                realpath(__DIR__ . '/../../data/uploads'),
+                is_dir('/www/wwwroot/JF/feedback-git/feedback-v1/data/uploads') ? realpath('/www/wwwroot/JF/feedback-git/feedback-v1/data/uploads') : null,
+                is_dir('/www/wwwroot/JF/feedback-v1/data/uploads') ? realpath('/www/wwwroot/JF/feedback-v1/data/uploads') : null,
+            ])));
+
+            $candidates = [];
+
+            // 1. 优先检索 index.jsonl 精确原名映射
+            foreach ($uploadDirs as $uDir) {
+                $idxFile = $uDir . '/index.jsonl';
+                if (is_file($idxFile)) {
+                    $lines = @file($idxFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+                    if (is_array($lines)) {
+                        foreach ($lines as $line) {
+                            $item = @json_decode($line, true);
+                            if (!is_array($item) || empty($item['rel'])) continue;
+                            if (($item['orig'] ?? '') === $baseOrig) {
+                                $fullPath = $uDir . '/' . ltrim((string)$item['rel'], '/');
+                                if (is_file($fullPath)) {
+                                    $candidates[$fullPath] = [
+                                        'path' => $fullPath,
+                                        'ts' => (int)($item['ts'] ?? filemtime($fullPath)),
+                                        'type' => (string)($item['type'] ?? ''),
+                                        'exact_index' => true
+                                    ];
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. 扫描 data/uploads/*/* 归档目录
+            foreach ($uploadDirs as $uDir) {
+                $files = glob($uDir . '/*/*');
+                if (!$files) continue;
+                foreach ($files as $fPath) {
+                    if (!is_file($fPath)) continue;
+                    $bName = basename($fPath);
+                    if (!preg_match('/^(\d{8})_(\d{6})_([a-z_]+)_(.*)$/i', $bName, $m)) {
+                        continue;
+                    }
+                    $dStr = $m[1];
+                    $tStr = $m[2];
+                    $fType = strtolower($m[3]);
+                    $fRest = strtolower($m[4]);
+
+                    if ($fRest !== $expectedSanitized && strtolower($bName) !== strtolower($baseOrig)) {
+                        continue;
+                    }
+                    // 若原文件名明确指示了类型（如 preview vs homework），类型不符的同名编号文件直接排除
+                    if ($expectedType !== '' && $fType !== $expectedType) {
+                        continue;
+                    }
+
+                    $fTs = strtotime(
+                        substr($dStr, 0, 4) . '-' . substr($dStr, 4, 2) . '-' . substr($dStr, 6, 2) . ' ' .
+                        substr($tStr, 0, 2) . ':' . substr($tStr, 2, 2) . ':' . substr($tStr, 4, 2)
+                    ) ?: (int)filemtime($fPath);
+
+                    if (!isset($candidates[$fPath])) {
+                        $candidates[$fPath] = [
+                            'path' => $fPath,
+                            'ts' => $fTs,
+                            'type' => $fType,
+                            'exact_index' => false
+                        ];
+                    }
+                }
+            }
+
+            if (empty($candidates)) {
+                sendResponse(false, null, "未找到文件【{$baseOrig}】的上传原件（可能已超过30天自动清理期限）", 404);
+            }
+
+            // 3. 对候选文件按时间接近度与学生姓名包含关系打分排序
+            $scored = [];
+            $needContentCheck = count($candidates) > 1 && $studentName !== '';
+            $studentNameGbk = $needContentCheck ? @mb_convert_encoding($studentName, 'GBK', 'UTF-8') : '';
+
+            foreach ($candidates as $cand) {
+                $score = 0;
+                if (!empty($cand['exact_index'])) $score += 2000000;
+                if ($expectedType !== '' && $cand['type'] === $expectedType) $score += 1000000;
+
+                if (!empty($refTimestamps)) {
+                    $minDiff = PHP_INT_MAX;
+                    $bestSignedDiff = PHP_INT_MAX;
+                    foreach ($refTimestamps as $rTs) {
+                        $signed = $rTs - $cand['ts']; // 正数表示文件在记录入库前上传
+                        $absDiff = abs($signed);
+                        if ($absDiff < $minDiff) {
+                            $minDiff = $absDiff;
+                            $bestSignedDiff = $signed;
+                        }
+                    }
+                    // 正常流程：文件在入库前 0~2 小时内上传（或入库后 5 分钟内）
+                    if ($bestSignedDiff >= -300 && $bestSignedDiff <= 7200) {
+                        $score += 500000 - $minDiff;
+                    } elseif ($minDiff <= 86400) {
+                        $score += 200000 - $minDiff;
+                    } else {
+                        $score -= min($minDiff, 1000000);
+                    }
+                } else {
+                    // 无参照时间时优先取最新上传的文件
+                    $score += (int)($cand['ts'] / 1000);
+                }
+
+                if ($needContentCheck) {
+                    $rawContent = @file_get_contents($cand['path'], false, null, 0, 524288);
+                    if ($rawContent !== false) {
+                        if (strpos($rawContent, $studentName) !== false || ($studentNameGbk && strpos($rawContent, $studentNameGbk) !== false)) {
+                            $score += 300000;
+                        }
+                    }
+                }
+
+                $cand['score'] = $score;
+                $scored[] = $cand;
+            }
+
+            usort($scored, function ($a, $b) {
+                if ($a['score'] !== $b['score']) return $b['score'] <=> $a['score'];
+                return $b['ts'] <=> $a['ts'];
+            });
+
+            $best = $scored[0];
+            $targetPath = $best['path'];
+
+            if ($checkOnly) {
+                sendResponse(true, [
+                    'found' => true,
+                    'file_name' => $baseOrig,
+                    'archived_name' => basename($targetPath),
+                    'size' => filesize($targetPath),
+                    'uploaded_at' => date('Y-m-d H:i:s', $best['ts'])
+                ]);
+            }
+
+            $asciiFallback = preg_replace('/[^a-zA-Z0-9.\-_]/', '_', $baseOrig);
+            if ($asciiFallback === '' || $asciiFallback === '_') $asciiFallback = 'source_file.csv';
+            $encodedName = rawurlencode($baseOrig);
+
+            if (ob_get_level()) {
+                @ob_end_clean();
+            }
+            header('Content-Description: File Transfer');
+            header('Content-Type: application/octet-stream');
+            header("Content-Disposition: attachment; filename=\"{$asciiFallback}\"; filename*=UTF-8''{$encodedName}");
+            header('Content-Length: ' . filesize($targetPath));
+            header('Cache-Control: no-store, no-cache, must-revalidate');
+            readfile($targetPath);
+            exit;
+
 }
