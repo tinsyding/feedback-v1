@@ -1448,12 +1448,15 @@ select option {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 1px 6px;
+    padding: 0 4px;
+    min-width: 16px;
+    height: 18px;
+    line-height: 18px;
     border-radius: var(--radius-xs);
-    font-size: 0.74rem;
+    font-size: 0.7rem;
     font-weight: 600;
     font-family: var(--font-mono);
-    margin-right: 4px;
+    margin-right: 2px;
     margin-bottom: 2px;
     background: var(--error-light);
     color: var(--error);
@@ -1463,10 +1466,12 @@ select option {
 .q-badge-none {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 2px 8px;
+    gap: 3px;
+    padding: 0 5px;
+    height: 18px;
+    line-height: 18px;
     border-radius: var(--radius-full);
-    font-size: 0.74rem;
+    font-size: 0.7rem;
     font-weight: 600;
     background: var(--success-light);
     color: var(--success);
@@ -1476,9 +1481,11 @@ select option {
 .q-badge-unlisted {
     display: inline-flex;
     align-items: center;
-    padding: 2px 7px;
+    padding: 0 5px;
+    height: 18px;
+    line-height: 18px;
     border-radius: var(--radius-full);
-    font-size: 0.72rem;
+    font-size: 0.7rem;
     color: var(--text-muted);
     background: var(--bg-subtle);
     border: 1px dashed var(--border-color);
@@ -2254,37 +2261,45 @@ select option {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 22px;
-    height: 20px;
-    padding: 0 5px;
+    padding: 0 4px;
+    min-width: 16px;
+    height: 18px;
+    line-height: 18px;
+    border-radius: var(--radius-xs);
+    font-size: 0.7rem;
+    font-weight: 600;
+    font-family: var(--font-mono);
+    margin-right: 2px;
+    margin-bottom: 2px;
     background: var(--error-light);
     color: var(--error);
     border: 1px solid var(--error-border);
-    border-radius: var(--radius-xs);
-    font-size: 0.74rem;
-    font-weight: 700;
-    font-family: var(--font-mono);
 }
 .q-badge-none {
     display: inline-flex;
     align-items: center;
-    padding: 1px 7px;
+    gap: 3px;
+    padding: 0 5px;
+    height: 18px;
+    line-height: 18px;
+    border-radius: var(--radius-full);
+    font-size: 0.7rem;
+    font-weight: 600;
     background: var(--success-light);
     color: var(--success);
     border: 1px solid var(--success-border);
-    border-radius: var(--radius-xs);
-    font-size: 0.74rem;
-    font-weight: 600;
 }
 .q-badge-unlisted {
     display: inline-flex;
     align-items: center;
-    padding: 1px 7px;
-    background: var(--bg-subtle);
+    padding: 0 5px;
+    height: 18px;
+    line-height: 18px;
+    border-radius: var(--radius-full);
+    font-size: 0.7rem;
     color: var(--text-muted);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-xs);
-    font-size: 0.74rem;
+    background: var(--bg-subtle);
+    border: 1px dashed var(--border-color);
 }
 
 /* Token Pill in Card */
