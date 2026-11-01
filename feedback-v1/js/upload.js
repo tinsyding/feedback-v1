@@ -2031,7 +2031,7 @@ window.confirmDuplicateChoices = function() {
         });
     });
 
-    // 按引用从源文件数据中剔除未选中的行，再重建合并数据
+    // 按引用从源文件数据中剔除未选中的行，再重建合并数据并同步更新 text
     let touchedHomework = false;
     let touchedPreview = false;
     if (typeof rawHomeworkFiles !== 'undefined') {
@@ -2039,7 +2039,10 @@ window.confirmDuplicateChoices = function() {
             if (!file || !Array.isArray(file.data) || file.data.length <= 1) return;
             const before = file.data.length;
             file.data = [file.data[0], ...file.data.slice(1).filter(r => !dropSet.has(r))];
-            if (file.data.length !== before) touchedHomework = true;
+            if (file.data.length !== before) {
+                if (typeof serializeCSV === 'function') file.text = serializeCSV(file.data);
+                touchedHomework = true;
+            }
         });
     }
     if (typeof rawPreviewFiles !== 'undefined') {
@@ -2047,7 +2050,10 @@ window.confirmDuplicateChoices = function() {
             if (!file || !Array.isArray(file.data) || file.data.length <= 1) return;
             const before = file.data.length;
             file.data = [file.data[0], ...file.data.slice(1).filter(r => !dropSet.has(r))];
-            if (file.data.length !== before) touchedPreview = true;
+            if (file.data.length !== before) {
+                if (typeof serializeCSV === 'function') file.text = serializeCSV(file.data);
+                touchedPreview = true;
+            }
         });
     }
     if (touchedHomework && typeof updateHomeworkData === 'function') updateHomeworkData();
@@ -2093,8 +2099,8 @@ function checkUngradedSubmissions() {
             if (!fullName) continue;
 
             const status = String(row[statusIdx] || '').trim();
-            // “交了但是老师没改”：状态为“已提交”（或包含“已提交”且不含“未提交”及其他“未”）
-            const isUngraded = (status === '已提交' || (status.includes('已提交') && !status.includes('未')));
+            // “交了但是老师没改完”：状态为“已提交”或“批改中”
+            const isUngraded = (status === '已提交' || (status.includes('已提交') && !status.includes('未')) || status.includes('批改中'));
             if (isUngraded) {
                 const nameMatch = fullName.match(/\d+(.+)/);
                 const studentName = nameMatch ? nameMatch[1].trim() : fullName;
@@ -2202,7 +2208,7 @@ function showUngradedSubmissionsModal(ungradedList) {
                 </svg>
             </div>
             <div class="ungraded-banner-text">
-                共检测到 <strong style="color: #ef4444; font-size: 0.96rem;">${ungradedList.length}</strong> 条作业记录处于<strong>【已提交】</strong>状态（尚未批改分数）。生成反馈要求所有已交作业均有评分，请在教学平台批改或直接在线修改后再继续。
+                共检测到 <strong style="color: #ef4444; font-size: 0.96rem;">${ungradedList.length}</strong> 条作业记录处于<strong>【已提交 / 批改中】</strong>状态（尚未完成批改）。生成反馈要求所有已交作业均完成批改，请在教学平台批改或直接在线修改后再继续。
             </div>
         </div>
     `;
@@ -2231,6 +2237,7 @@ function showUngradedSubmissionsModal(ungradedList) {
 
         const idMatch = (item.fullName || '').match(/^(\d+)/);
         const studentId = idMatch ? idMatch[1] : '';
+        const statusLabel = item.status ? `${escapeSafe(item.status)} · 待完成批改` : '已提交 · 待批改';
 
         html += `
             <div class="ungraded-item-card" data-student="${escapeSafe(item.studentName)}" data-type="${escapeSafe(item.type)}">
@@ -2243,7 +2250,7 @@ function showUngradedSubmissionsModal(ungradedList) {
                 <div class="ungraded-item-right">
                     <span class="ungraded-status-pill">
                         <span class="ungraded-status-dot"></span>
-                        已提交 · 待批改
+                        ${statusLabel}
                     </span>
                 </div>
             </div>
@@ -3569,15 +3576,18 @@ async function persistAndNavigate() {
         })),
         previewFiles: rawPreviewFiles.map(file => ({
             name: file.name,
-            text: file.text
+            text: file.text,
+            data: file.data
         })),
         noteFiles: rawNoteFiles.map(file => ({
             name: file.name,
-            text: file.text
+            text: file.text,
+            data: file.data
         })),
         classTestFiles: rawClassTestFiles.map(file => ({
             name: file.name,
-            text: file.text
+            text: file.text,
+            data: file.data
         })),
         reportFile: reportData ? { name: reportFileName, text: reportDropZone.dataset.rawText || '' } : null,
         previewCommentSource,
@@ -4788,44 +4798,52 @@ async function doSavePreviewEdits(shouldSyncLocal) {
         if (type === 'homework') {
             if (index !== 'all' && rawHomeworkFiles[index]) {
                 rawHomeworkFiles[index].data = fullDataset;
+                if (typeof serializeCSV === 'function') rawHomeworkFiles[index].text = serializeCSV(fullDataset);
                 updateHomeworkData();
             } else {
                 homeworkData = fullDataset;
                 if (rawHomeworkFiles.length === 1) {
                     rawHomeworkFiles[0].data = fullDataset;
+                    if (typeof serializeCSV === 'function') rawHomeworkFiles[0].text = serializeCSV(fullDataset);
                 }
                 updateHomeworkData();
             }
         } else if (type === 'preview') {
             if (index !== 'all' && rawPreviewFiles[index]) {
                 rawPreviewFiles[index].data = fullDataset;
+                if (typeof serializeCSV === 'function') rawPreviewFiles[index].text = serializeCSV(fullDataset);
                 updatePreviewData();
             } else {
                 previewData = fullDataset;
                 if (rawPreviewFiles.length === 1) {
                     rawPreviewFiles[0].data = fullDataset;
+                    if (typeof serializeCSV === 'function') rawPreviewFiles[0].text = serializeCSV(fullDataset);
                 }
                 updatePreviewData();
             }
         } else if (type === 'note') {
             if (index !== 'all' && rawNoteFiles[index]) {
                 rawNoteFiles[index].data = fullDataset;
+                if (typeof serializeCSV === 'function') rawNoteFiles[index].text = serializeCSV(fullDataset);
                 updateNoteData();
             } else {
                 noteData = fullDataset;
                 if (rawNoteFiles.length === 1) {
                     rawNoteFiles[0].data = fullDataset;
+                    if (typeof serializeCSV === 'function') rawNoteFiles[0].text = serializeCSV(fullDataset);
                 }
                 updateNoteData();
             }
         } else if (type === 'class_test') {
             if (index !== 'all' && rawClassTestFiles[index]) {
                 rawClassTestFiles[index].data = fullDataset;
+                if (typeof serializeCSV === 'function') rawClassTestFiles[index].text = serializeCSV(fullDataset);
                 updateClassTestData();
             } else {
                 classTestData = fullDataset;
                 if (rawClassTestFiles.length === 1) {
                     rawClassTestFiles[0].data = fullDataset;
+                    if (typeof serializeCSV === 'function') rawClassTestFiles[0].text = serializeCSV(fullDataset);
                 }
                 updateClassTestData();
             }
@@ -4841,6 +4859,9 @@ async function doSavePreviewEdits(shouldSyncLocal) {
                 reportData = [headers, ...updatedDataRows, ...nonBetaRows];
             } else {
                 reportData = fullDataset;
+            }
+            if (reportDropZone && typeof serializeCSV === 'function') {
+                reportDropZone.dataset.rawText = serializeCSV(reportData);
             }
             if (typeof renderReportFileList === 'function') {
                 renderReportFileList();
