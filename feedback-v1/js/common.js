@@ -131,6 +131,50 @@ function parsePercentValue(raw) {
 }
 
 /**
+ * 统一作业状态判定工具（基于线上全量真实 CSV 数据 8 种状态 + 手动录入兼容）
+ *
+ * 1. 已交·已完结 (graded): 已完成、待订正、已订正、已审阅
+ * 2. 已交·未改完 (ungraded): 已提交（且不含“未”）、批改中
+ * 3. 未提交 (unsubmitted): 未查阅、已查阅、未提交、缺交、未交、缺勤
+ */
+const STANDARD_HOMEWORK_STATUSES = ['已完成', '待订正', '已订正', '已审阅', '已提交', '批改中', '未查阅', '已查阅'];
+
+function isStatusGraded(status) {
+    const s = String(status || '').trim();
+    if (!s) return false;
+    return s.includes('已完成') || s.includes('待订正') || s.includes('已订正') || s.includes('已审阅');
+}
+
+function isStatusUngraded(status) {
+    const s = String(status || '').trim();
+    if (!s) return false;
+    return s === '已提交' || (s.includes('已提交') && !s.includes('未')) || s.includes('批改中');
+}
+
+function isStatusUnsubmitted(status) {
+    const s = String(status || '').trim();
+    if (!s) return false;
+    return s.includes('未查阅') || s.includes('已查阅') || s.includes('未提交') || s.includes('缺交') || s.includes('缺勤') || s === '未交';
+}
+
+function isHomeworkSubmitted(status, options = {}) {
+    const s = String(status || '').trim();
+    if (!s) return !!options.emptyAsSubmitted;
+    if (isStatusGraded(s)) return true;
+    // 兜底：若处于“批改中”但已有非空分数（如客观题已出分且跳过拦截时），视为已提交以免丢分
+    if (s.includes('批改中') && options.score !== undefined && options.score !== null) {
+        return true;
+    }
+    return false;
+}
+
+window.STANDARD_HOMEWORK_STATUSES = STANDARD_HOMEWORK_STATUSES;
+window.isStatusGraded = isStatusGraded;
+window.isStatusUngraded = isStatusUngraded;
+window.isStatusUnsubmitted = isStatusUnsubmitted;
+window.isHomeworkSubmitted = isHomeworkSubmitted;
+
+/**
  * 通过分数和正确率（或总分列）推算本批次作业的标准满分（一般为 100 分）
  * @param {Array<Array<string>>} data - 表格数据数组 [header, ...rows]
  * @returns {number} 推算出的标准满分（如 100、120、150、50 等）
