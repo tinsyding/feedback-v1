@@ -2100,7 +2100,9 @@ function checkUngradedSubmissions() {
 
             const status = String(row[statusIdx] || '').trim();
             // “交了但是老师没改完”：状态为“已提交”或“批改中”
-            const isUngraded = (status === '已提交' || (status.includes('已提交') && !status.includes('未')) || status.includes('批改中'));
+            const isUngraded = (typeof isStatusUngraded === 'function')
+                ? isStatusUngraded(status)
+                : (status === '已提交' || (status.includes('已提交') && !status.includes('未')) || status.includes('批改中'));
             if (isUngraded) {
                 const nameMatch = fullName.match(/\d+(.+)/);
                 const studentName = nameMatch ? nameMatch[1].trim() : fullName;
@@ -2798,7 +2800,9 @@ function checkCommentPrefixStandards() {
         if (!fullName) continue;
 
         const status = hwStatusIdx >= 0 ? (row[hwStatusIdx] || '') : '';
-        const isSubmitted = status.includes('已完成') || status.includes('待订正') || status.includes('已订正') || !status;
+        const isSubmitted = (typeof isHomeworkSubmitted === 'function')
+            ? isHomeworkSubmitted(status, { emptyAsSubmitted: true })
+            : (status.includes('已完成') || status.includes('待订正') || status.includes('已订正') || status.includes('已审阅') || !status);
         if (!isSubmitted) continue;
 
         const rawScore = (typeof parseScoreValue === 'function')
@@ -3081,10 +3085,11 @@ function checkMissingErrorQuestions() {
         if (!fullName) continue;
 
         const status = hwStatusIdx >= 0 ? (row[hwStatusIdx] || '').trim() : '';
-        // 未交（未提交/缺交/缺勤/未交）与未查阅/已查阅均视为无有效批改，不提醒补错题号
-        // （与预览编辑器的未交口径一致，见 updatePreviewDraftCell 注释）
-        const isUnsubmitted = status.includes('未提交') || status.includes('缺交') || status.includes('缺勤') || status === '未交'
-            || status.includes('未查阅') || status.includes('已查阅');
+        // 未交（未提交/缺交/缺勤/未交/未查阅/已查阅）与未批改均视为无有效批改，不提醒补错题号
+        const isUnsubmitted = (typeof isStatusUnsubmitted === 'function' && isStatusUnsubmitted(status))
+            || (typeof isStatusUngraded === 'function' && isStatusUngraded(status))
+            || status.includes('未提交') || status.includes('缺交') || status.includes('缺勤') || status === '未交'
+            || status.includes('未查阅') || status.includes('已查阅') || status.includes('批改中');
         if (isUnsubmitted) continue;
 
         const rawScore = parseScoreValue(row[scoreIdx]);
@@ -3325,7 +3330,10 @@ function getIncomingStudentsList() {
 
         if (hwStatusIdx >= 0) {
             const status = row[hwStatusIdx] || '';
-            if (status && !status.includes('已完成') && !status.includes('待订正') && !status.includes('已订正')) {
+            const isGraded = (typeof isStatusGraded === 'function')
+                ? isStatusGraded(status)
+                : (status.includes('已完成') || status.includes('待订正') || status.includes('已订正') || status.includes('已审阅'));
+            if (status && !isGraded) {
                 continue;
             }
         }
@@ -4730,12 +4738,14 @@ window.handlePreviewStatusChange = function(rowId, statusColIndex, newStatus) {
 
     row.cells[statusColIndex] = newStatus;
 
-    // 智能联动分数：未交的（未查阅/已查阅/未提交/缺交）与没改的（已提交）都没有分数（显示为 -）
+    // 智能联动分数：未交的（未查阅/已查阅/未提交/缺交）与没改完的（已提交/批改中）都没有最终分数（显示为 -）
     const scoreCol = currentFilePreviewState.keyCols.find(k => k.role === 'score');
     if (scoreCol) {
-        const isNoScore = (
+        const isNoScore = (typeof isStatusUngraded === 'function' && isStatusUngraded(newStatus)) ||
+            (typeof isStatusUnsubmitted === 'function' && isStatusUnsubmitted(newStatus)) || (
             newStatus === '已提交' ||
             (newStatus.includes('已提交') && !newStatus.includes('未')) ||
+            newStatus.includes('批改中') ||
             newStatus.includes('未查阅') ||
             newStatus.includes('已查阅') ||
             newStatus.includes('未提交') ||
@@ -5037,8 +5047,11 @@ function renderPreviewTableRows() {
             // 判定是否“未交”或“没改”：未交的、没改的都没有分数（而不是为0）
             const isUngradedOrUnsubmitted = (
                 currentFilePreviewState.type === 'report' ? isRowAbsent : (
+                    (typeof isStatusUngraded === 'function' && isStatusUngraded(rowStatus)) ||
+                    (typeof isStatusUnsubmitted === 'function' && isStatusUnsubmitted(rowStatus)) ||
                     rowStatus === '已提交' ||
                     (rowStatus.includes('已提交') && !rowStatus.includes('未')) ||
+                    rowStatus.includes('批改中') ||
                     rowStatus.includes('未查阅') ||
                     rowStatus.includes('已查阅') ||
                     rowStatus.includes('未提交') ||
@@ -5081,7 +5094,9 @@ function renderPreviewTableRows() {
                     // 作业状态：编辑页面只支持去选择，而不是去敲字
                     if (c.role === 'status') {
                         const currentStatus = rawVal || '已完成';
-                        const standardStatuses = ['已完成', '待订正', '已订正', '已提交', '未查阅', '已查阅'];
+                        const standardStatuses = Array.isArray(window.STANDARD_HOMEWORK_STATUSES)
+                            ? [...window.STANDARD_HOMEWORK_STATUSES]
+                            : ['已完成', '待订正', '已订正', '已审阅', '已提交', '批改中', '未查阅', '已查阅'];
                         if (currentStatus && !standardStatuses.includes(currentStatus)) {
                             standardStatuses.push(currentStatus);
                         }
@@ -5099,7 +5114,7 @@ function renderPreviewTableRows() {
                     if (c.role === 'score') {
                         if (isUngradedOrUnsubmitted) {
                             return `<td style="text-align: center;">
-                                <input type="text" class="preview-cell-input preview-score-input preview-score-disabled" value="-" disabled title="未交或未批改状态无分数，切换为【已完成/待订正/已订正】后可填写分数" style="width:65px; text-align:center;" />
+                                <input type="text" class="preview-cell-input preview-score-input preview-score-disabled" value="-" disabled title="未交或未批改状态无分数，切换为【已完成/待订正/已订正/已审阅】后可填写分数" style="width:65px; text-align:center;" />
                             </td>`;
                         }
                         const safeScore = (rawVal === '-' || rawVal === '') ? '' : rawVal;
@@ -5132,9 +5147,9 @@ function renderPreviewTableRows() {
                     return `<td style="text-align: center;">${cellHtml}</td>`;
                 } else if (c.role === 'status') {
                     let badgeCls = 'badge-graded';
-                    if (rawVal === '已提交' || (rawVal.includes('已提交') && !rawVal.includes('未'))) {
+                    if ((typeof isStatusUngraded === 'function' && isStatusUngraded(rawVal)) || rawVal === '已提交' || (rawVal.includes('已提交') && !rawVal.includes('未')) || rawVal.includes('批改中')) {
                         badgeCls = 'badge-ungraded';
-                    } else if (rawVal.includes('未查阅') || rawVal.includes('已查阅') || rawVal.includes('未提交') || rawVal.includes('缺交') || rawVal === '未交') {
+                    } else if ((typeof isStatusUnsubmitted === 'function' && isStatusUnsubmitted(rawVal)) || rawVal.includes('未查阅') || rawVal.includes('已查阅') || rawVal.includes('未提交') || rawVal.includes('缺交') || rawVal === '未交') {
                         badgeCls = 'badge-unsubmitted';
                     }
                     cellHtml = `<span class="preview-status-badge ${badgeCls}">${escapeAttr(rawVal || '-')}</span>`;

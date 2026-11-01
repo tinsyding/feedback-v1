@@ -458,7 +458,9 @@ function buildPreviewMetrics(data, mode, totalQuestions = 0) {
         const studentName = nameMatch ? nameMatch[1] : fullName;
         const status = r[pvStatusIdx] || '';
         const score = parseScoreValue(r[pvScoreIdx]);
-        const isSubmitted = status.includes('已完成') || status.includes('待订正') || status.includes('已订正') || (status.includes('批改中') && score !== null);
+        const isSubmitted = (typeof isHomeworkSubmitted === 'function')
+            ? isHomeworkSubmitted(status, { score })
+            : (status.includes('已完成') || status.includes('待订正') || status.includes('已订正') || status.includes('已审阅') || (status.includes('批改中') && score !== null));
         const accuracy = parsePercentValue(r[pvAccIdx]);
         const rawErr = parseInt(r[pvErrIdx]);
         const errorCount = isNaN(rawErr) ? null : rawErr;
@@ -992,14 +994,18 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
         const studentName = nameMatch ? nameMatch[1] : fullName;
         const status = hwStatusIdx >= 0 ? (r[hwStatusIdx] || '') : '';
         const rowScore = parseScoreValue(r[scoreIdx]);
-        const isSubmitted = status.includes('已完成') || status.includes('待订正') || status.includes('已订正') || (status.includes('批改中') && rowScore !== null);
+        const isSubmitted = (typeof isHomeworkSubmitted === 'function')
+            ? isHomeworkSubmitted(status, { score: rowScore })
+            : (status.includes('已完成') || status.includes('待订正') || status.includes('已订正') || status.includes('已审阅') || (status.includes('批改中') && rowScore !== null));
         homeworkMap[studentName] = { isSubmitted, status };
     });
 
     const scoresWithIdx = activeHwRows.map((r, i) => {
         const status = hwStatusIdx >= 0 ? (r[hwStatusIdx] || '') : '';
         const rowScore = parseScoreValue(r[scoreIdx]);
-        const isSubmitted = status ? (status.includes('已完成') || status.includes('待订正') || status.includes('已订正') || (status.includes('批改中') && rowScore !== null)) : true;
+        const isSubmitted = (typeof isHomeworkSubmitted === 'function')
+            ? isHomeworkSubmitted(status, { score: rowScore, emptyAsSubmitted: true })
+            : (status ? (status.includes('已完成') || status.includes('待订正') || status.includes('已订正') || status.includes('已审阅') || (status.includes('批改中') && rowScore !== null)) : true);
         if (!isSubmitted) return { score: null, index: i };
         return { score: rowScore, index: i };
     }).filter(x => x.score !== null);
@@ -1168,7 +1174,9 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
             const nameMatch = fullName.match(/\d+(.+)/);
             const name = nameMatch ? nameMatch[1] : fullName;
             const status = noteStatusIdx >= 0 ? (r[noteStatusIdx] || '') : '';
-            const isSubmitted = status.includes('已完成') || status.includes('待订正') || status.includes('已订正');
+            const isSubmitted = (typeof isHomeworkSubmitted === 'function')
+                ? isHomeworkSubmitted(status)
+                : (status.includes('已完成') || status.includes('待订正') || status.includes('已订正') || status.includes('已审阅'));
             noteMap[name] = { isSubmitted, status };
         });
     }
@@ -1185,7 +1193,9 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
             const nameMatch = fullName.match(/\d+(.+)/);
             const name = nameMatch ? nameMatch[1] : fullName;
             const status = ctStatusIdx >= 0 ? (r[ctStatusIdx] || '') : '';
-            const isSubmitted = status.includes('已完成') || status.includes('待订正') || status.includes('已订正');
+            const isSubmitted = (typeof isHomeworkSubmitted === 'function')
+                ? isHomeworkSubmitted(status)
+                : (status.includes('已完成') || status.includes('待订正') || status.includes('已订正') || status.includes('已审阅'));
             classTestMap[name] = { isSubmitted, status };
         });
     }
@@ -1604,14 +1614,19 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                 const noteScore = rawNoteScore !== null ? rawNoteScore : 0;
                 const noteComment = getEffectiveComment(noteRow, noteCommentIdx, noteCorrectionCommentIdx);
                 const noteStatus = noteStatusIdx >= 0 ? (noteRow[noteStatusIdx] || '') : '';
-                const noteSubmitted = noteStatus.includes('已完成') || noteStatus.includes('待订正') || noteStatus.includes('已订正');
+                const noteSubmitted = (typeof isHomeworkSubmitted === 'function')
+                    ? isHomeworkSubmitted(noteStatus, { score: rawNoteScore })
+                    : (noteStatus.includes('已完成') || noteStatus.includes('待订正') || noteStatus.includes('已订正') || noteStatus.includes('已审阅'));
                 
                 // Calculate note stats
                 const noteScoresWithIdx = noteRows.map((r, i) => {
                     const st = noteStatusIdx >= 0 ? (r[noteStatusIdx] || '') : '';
-                    const isSub = st ? (st.includes('已完成') || st.includes('待订正') || st.includes('已订正')) : true;
+                    const rowSc = parseScoreValue(r[noteScoreIdx]);
+                    const isSub = (typeof isHomeworkSubmitted === 'function')
+                        ? isHomeworkSubmitted(st, { score: rowSc, emptyAsSubmitted: true })
+                        : (st ? (st.includes('已完成') || st.includes('待订正') || st.includes('已订正') || st.includes('已审阅')) : true);
                     if (!isSub) return { score: null, index: i };
-                    return { score: parseScoreValue(r[noteScoreIdx]), index: i };
+                    return { score: rowSc, index: i };
                 }).filter(x => x.score !== null);
                 const noteScores = noteScoresWithIdx.map(x => x.score);
                 const rawNoteMax = noteScores.length > 0 ? Math.max(...noteScores) : 0;
@@ -1671,14 +1686,19 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                 const ctScore = rawCtScore !== null ? rawCtScore : 0;
                 const ctComment = getEffectiveComment(ctRow, ctCommentIdx, ctCorrectionCommentIdx);
                 const ctStatus = ctStatusIdx >= 0 ? (ctRow[ctStatusIdx] || '') : '';
-                const ctSubmitted = ctStatus.includes('已完成') || ctStatus.includes('待订正') || ctStatus.includes('已订正');
+                const ctSubmitted = (typeof isHomeworkSubmitted === 'function')
+                    ? isHomeworkSubmitted(ctStatus, { score: rawCtScore })
+                    : (ctStatus.includes('已完成') || ctStatus.includes('待订正') || ctStatus.includes('已订正') || ctStatus.includes('已审阅'));
 
                 // Calculate class test stats
                 const ctScoresWithIdx = ctRows.map((r, i) => {
                     const st = ctStatusIdx >= 0 ? (r[ctStatusIdx] || '') : '';
-                    const isSub = st ? (st.includes('已完成') || st.includes('待订正') || st.includes('已订正')) : true;
+                    const rowSc = parseScoreValue(r[ctScoreIdx]);
+                    const isSub = (typeof isHomeworkSubmitted === 'function')
+                        ? isHomeworkSubmitted(st, { score: rowSc, emptyAsSubmitted: true })
+                        : (st ? (st.includes('已完成') || st.includes('待订正') || st.includes('已订正') || st.includes('已审阅')) : true);
                     if (!isSub) return { score: null, index: i };
-                    return { score: parseScoreValue(r[ctScoreIdx]), index: i };
+                    return { score: rowSc, index: i };
                 }).filter(x => x.score !== null);
                 const ctScores = ctScoresWithIdx.map(x => x.score);
                 const rawCtMax = ctScores.length > 0 ? Math.max(...ctScores) : 0;
@@ -2005,7 +2025,9 @@ async function doGeneratePreviewOnlyFeedback() {
             const nameMatch = fullName.match(/\d+(.+)/);
             const name = nameMatch ? nameMatch[1] : fullName;
             const status = noteStatusIdx >= 0 ? (r[noteStatusIdx] || '') : '';
-            const isSubmitted = status.includes('已完成') || status.includes('待订正') || status.includes('已订正');
+            const isSubmitted = (typeof isHomeworkSubmitted === 'function')
+                ? isHomeworkSubmitted(status)
+                : (status.includes('已完成') || status.includes('待订正') || status.includes('已订正') || status.includes('已审阅'));
             noteMap[name] = { isSubmitted, status };
         });
     }
@@ -2022,7 +2044,9 @@ async function doGeneratePreviewOnlyFeedback() {
             const nameMatch = fullName.match(/\d+(.+)/);
             const name = nameMatch ? nameMatch[1] : fullName;
             const status = ctStatusIdx >= 0 ? (r[ctStatusIdx] || '') : '';
-            const isSubmitted = status.includes('已完成') || status.includes('待订正') || status.includes('已订正');
+            const isSubmitted = (typeof isHomeworkSubmitted === 'function')
+                ? isHomeworkSubmitted(status)
+                : (status.includes('已完成') || status.includes('待订正') || status.includes('已订正') || status.includes('已审阅'));
             classTestMap[name] = { isSubmitted, status };
         });
     }
@@ -2230,14 +2254,19 @@ async function doGeneratePreviewOnlyFeedback() {
                 const noteScore = rawNoteScore !== null ? rawNoteScore : 0;
                 const noteComment = getEffectiveComment(noteRow, noteCommentIdx, noteCorrectionCommentIdx);
                 const noteStatus = noteStatusIdx >= 0 ? (noteRow[noteStatusIdx] || '') : '';
-                const noteSubmitted = noteStatus.includes('已完成') || noteStatus.includes('待订正') || noteStatus.includes('已订正');
+                const noteSubmitted = (typeof isHomeworkSubmitted === 'function')
+                    ? isHomeworkSubmitted(noteStatus, { score: rawNoteScore })
+                    : (noteStatus.includes('已完成') || noteStatus.includes('待订正') || noteStatus.includes('已订正') || noteStatus.includes('已审阅'));
                 
                 // Calculate note stats
                 const noteScoresWithIdx = noteRows.map((r, i) => {
                     const st = noteStatusIdx >= 0 ? (r[noteStatusIdx] || '') : '';
-                    const isSub = st ? (st.includes('已完成') || st.includes('待订正') || st.includes('已订正')) : true;
+                    const rowSc = parseScoreValue(r[noteScoreIdx]);
+                    const isSub = (typeof isHomeworkSubmitted === 'function')
+                        ? isHomeworkSubmitted(st, { score: rowSc, emptyAsSubmitted: true })
+                        : (st ? (st.includes('已完成') || st.includes('待订正') || st.includes('已订正') || st.includes('已审阅')) : true);
                     if (!isSub) return { score: null, index: i };
-                    return { score: parseScoreValue(r[noteScoreIdx]), index: i };
+                    return { score: rowSc, index: i };
                 }).filter(x => x.score !== null);
                 const noteScores = noteScoresWithIdx.map(x => x.score);
                 const rawNoteMax = noteScores.length > 0 ? Math.max(...noteScores) : 0;
@@ -2297,14 +2326,19 @@ async function doGeneratePreviewOnlyFeedback() {
                 const ctScore = rawCtScore !== null ? rawCtScore : 0;
                 const ctComment = getEffectiveComment(ctRow, ctCommentIdx, ctCorrectionCommentIdx);
                 const ctStatus = ctStatusIdx >= 0 ? (ctRow[ctStatusIdx] || '') : '';
-                const ctSubmitted = ctStatus.includes('已完成') || ctStatus.includes('待订正') || ctStatus.includes('已订正');
+                const ctSubmitted = (typeof isHomeworkSubmitted === 'function')
+                    ? isHomeworkSubmitted(ctStatus, { score: rawCtScore })
+                    : (ctStatus.includes('已完成') || ctStatus.includes('待订正') || ctStatus.includes('已订正') || ctStatus.includes('已审阅'));
 
                 // Calculate class test stats
                 const ctScoresWithIdx = ctRows.map((r, i) => {
                     const st = ctStatusIdx >= 0 ? (r[ctStatusIdx] || '') : '';
-                    const isSub = st ? (st.includes('已完成') || st.includes('待订正') || st.includes('已订正')) : true;
+                    const rowSc = parseScoreValue(r[ctScoreIdx]);
+                    const isSub = (typeof isHomeworkSubmitted === 'function')
+                        ? isHomeworkSubmitted(st, { score: rowSc, emptyAsSubmitted: true })
+                        : (st ? (st.includes('已完成') || st.includes('待订正') || st.includes('已订正') || st.includes('已审阅')) : true);
                     if (!isSub) return { score: null, index: i };
-                    return { score: parseScoreValue(r[ctScoreIdx]), index: i };
+                    return { score: rowSc, index: i };
                 }).filter(x => x.score !== null);
                 const ctScores = ctScoresWithIdx.map(x => x.score);
                 const rawCtMax = ctScores.length > 0 ? Math.max(...ctScores) : 0;
@@ -3432,9 +3466,11 @@ async function exportRankImage(type) {
             const name = nm ? nm[1] : fullName;
             if (droppedSet.has(name)) return;
             const status = stIdx >= 0 ? (r[stIdx] || '') : '';
-            const isSubmitted = status ? (status.includes('已完成') || status.includes('待订正') || status.includes('已订正')) : true;
-            if (!isSubmitted) return;
             const rawScore = parseScoreValue(r[si]);
+            const isSubmitted = (typeof isHomeworkSubmitted === 'function')
+                ? isHomeworkSubmitted(status, { score: rawScore, emptyAsSubmitted: true })
+                : (status ? (status.includes('已完成') || status.includes('待订正') || status.includes('已订正') || status.includes('已审阅')) : true);
+            if (!isSubmitted) return;
             if (rawScore === null) return;
             students.push({ name: fullName, score: rawScore, status });
         });
