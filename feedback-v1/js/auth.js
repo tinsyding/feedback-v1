@@ -632,9 +632,12 @@
         const name = data.real_name || data.username || '-';
         const uname = data.username || '-';
         const pwd = data.password || data.initial_password || '（已设置独立密码）';
-        const loginUrl = window.location.origin.includes('wxjifang.cn') 
-            ? 'https://feedback.wxjifang.cn/index.html' 
-            : `${window.location.origin}/index.html`;
+        const isPreviewOrTest = /feedback(backup|test)\.wxjifang\.cn$/.test(window.location.hostname);
+        const loginUrl = isPreviewOrTest
+            ? `${window.location.origin}/index.html`
+            : (window.location.origin.includes('wxjifang.cn')
+                ? 'https://feedback.wxjifang.cn/index.html'
+                : `${window.location.origin}/index.html`);
         return `【极方助教账号】\n助教姓名：${name}\n登录账号：${uname}\n初始密码：${pwd}\n登录入口：${loginUrl}\n权限说明：具备学情反馈制作与错题本查阅打印权限（不可修改已配置题目）`;
     }
 
@@ -753,9 +756,12 @@
                     uEl.textContent = username;
                     pEl.textContent = createdPwd;
                     if (urlEl) {
-                        urlEl.textContent = window.location.origin.includes('wxjifang.cn')
-                            ? 'https://feedback.wxjifang.cn/index.html'
-                            : `${window.location.origin}/index.html`;
+                        const isPreviewOrTest = /feedback(backup|test)\.wxjifang\.cn$/.test(window.location.hostname);
+                        urlEl.textContent = isPreviewOrTest
+                            ? `${window.location.origin}/index.html`
+                            : (window.location.origin.includes('wxjifang.cn')
+                                ? 'https://feedback.wxjifang.cn/index.html'
+                                : `${window.location.origin}/index.html`);
                     }
                     successBox.style.display = 'block';
                 }

@@ -182,35 +182,74 @@
                 const sId = item.student_id ? `学号: ${escapeHtml(item.student_id)}` : '';
                 const sKey = item.student_key || sName;
 
-                // 错题 Badges
+                // 错题 Badges (巩固与预习)
                 let errBadgesHtml = '';
-                if (item.error_questions && Array.isArray(item.error_questions) && item.error_questions.length > 0) {
-                    const badges = item.error_questions.map(q => 
-                        `<span style="display:inline-block; padding: 2px 8px; border-radius: 4px; background: rgba(239,68,68,0.12); color: #ef4444; font-weight: 700; font-size: 0.8rem; border: 1px solid rgba(239,68,68,0.25); margin-right: 4px; margin-bottom: 4px;">第${escapeHtml(String(q))}题</span>`
-                    ).join('');
+                const hasHwErrors = item.error_questions && Array.isArray(item.error_questions) && item.error_questions.length > 0;
+                const hasPrevErrors = item.preview_error_questions && Array.isArray(item.preview_error_questions) && item.preview_error_questions.length > 0;
+
+                if (hasHwErrors || hasPrevErrors) {
+                    let badgeRows = [];
+                    if (hasHwErrors) {
+                        const badges = item.error_questions.map(q => 
+                            `<span style="display:inline-block; padding: 2px 8px; border-radius: 4px; background: rgba(239,68,68,0.12); color: #ef4444; font-weight: 700; font-size: 0.8rem; border: 1px solid rgba(239,68,68,0.25); margin-right: 4px; margin-bottom: 4px;">第${escapeHtml(String(q))}题</span>`
+                        ).join('');
+                        badgeRows.push(`
+                            <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+                                <span style="font-size: 0.78rem; font-weight: 600; color: var(--primary); margin-right: 4px;">巩固错题:</span>
+                                ${badges}
+                            </div>
+                        `);
+                    }
+                    if (hasPrevErrors) {
+                        const prevBadges = item.preview_error_questions.map(q => 
+                            `<span style="display:inline-block; padding: 2px 8px; border-radius: 4px; background: rgba(99,102,241,0.12); color: #6366f1; font-weight: 700; font-size: 0.8rem; border: 1px solid rgba(99,102,241,0.25); margin-right: 4px; margin-bottom: 4px;">第${escapeHtml(String(q))}题</span>`
+                        ).join('');
+                        badgeRows.push(`
+                            <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+                                <span style="font-size: 0.78rem; font-weight: 600; color: #6366f1; margin-right: 4px;">预习错题:</span>
+                                ${prevBadges}
+                            </div>
+                        `);
+                    }
                     errBadgesHtml = `
-                        <div style="padding: 10px 18px; background: rgba(239,68,68,0.03); border-top: 1px solid var(--border-color); display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
-                            <span style="font-size: 0.78rem; color: var(--text-muted); margin-right: 4px;">错题题号:</span>
-                            ${badges}
+                        <div style="padding: 10px 18px; background: rgba(255,255,255,0.015); border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 6px;">
+                            ${badgeRows.join('')}
                         </div>
                     `;
                 }
 
-                // 评语 Block
+                // 评语 Block (巩固评语与预习评语)
                 let commentHtml = '';
-                if (item.teacher_comment) {
+                if (item.teacher_comment || item.preview_comment) {
+                    let commentRows = [];
+                    if (item.teacher_comment) {
+                        commentRows.push(`
+                            <div style="display: flex; align-items: flex-start; gap: 6px;">
+                                <span style="display:inline-flex; align-items:center; gap:4px; font-weight: 600; color: var(--primary); flex-shrink: 0;"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>巩固评语:</span>
+                                <span style="color: var(--text-secondary); line-height: 1.5;">${escapeHtml(item.teacher_comment)}</span>
+                            </div>
+                        `);
+                    }
+                    if (item.preview_comment) {
+                        commentRows.push(`
+                            <div style="display: flex; align-items: flex-start; gap: 6px;">
+                                <span style="display:inline-flex; align-items:center; gap:4px; font-weight: 600; color: #6366f1; flex-shrink: 0;"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>预习评语:</span>
+                                <span style="color: var(--text-secondary); line-height: 1.5;">${escapeHtml(item.preview_comment)}</span>
+                            </div>
+                        `);
+                    }
                     commentHtml = `
-                        <div style="padding: 10px 18px; border-top: 1px solid var(--border-color); font-size: 0.82rem; color: var(--text-secondary); line-height: 1.5; background: rgba(255,255,255,0.015);">
-                            <span style="display:inline-flex; align-items:center; gap:4px; font-weight: 600; color: var(--text-primary); margin-right: 6px;"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>教师评语:</span>
-                            <span>${escapeHtml(item.teacher_comment)}</span>
+                        <div style="padding: 10px 18px; border-top: 1px solid var(--border-color); font-size: 0.82rem; display: flex; flex-direction: column; gap: 6px; background: rgba(255,255,255,0.015);">
+                            ${commentRows.join('')}
                         </div>
                     `;
                 }
 
                 // 班级显示
                 const classTitle = item.class_name || `${item.grade || ''} ${item.tier || ''} ${item.subject || ''}`.trim() || '未分班';
-                const weekText = item.week_num ? `第 ${item.week_num} 周` : '综合周次';
+                const weekText = item.week_num ? `第 ${item.week_num} 周${(item.preview_week_num && String(item.preview_week_num) !== String(item.week_num)) ? ` (预习第${item.preview_week_num}周)` : ''}` : '综合周次';
                 const hwScore = item.homework_score !== null ? `${formatScore(item.homework_score)} 分` : '<span style="color:var(--text-muted); font-weight:normal;">未录入</span>';
+                const prevScore = (item.preview_score !== null && item.preview_score !== undefined && item.preview_score !== '') ? `${formatScore(item.preview_score)} 分` : null;
 
                 // 生成错题本链接 (优先使用服务器回传的免密地址)
                 const baseUrl = window.location.href.substring(0, window.location.href.lastIndexOf('/') + 1);
@@ -254,9 +293,13 @@
                                 <span style="font-weight: 700; font-size: 0.95rem; color: #10b981;">${hwScore}</span>
                             </div>
                             <div>
-                                <span style="color: var(--text-muted); display: block; font-size: 0.75rem; margin-bottom: 2px;">错题总数</span>
-                                <span style="font-weight: 700; font-size: 0.92rem; color: ${item.error_count > 0 ? '#ef4444' : '#10b981'};">
-                                    ${item.error_count > 0 ? `共 ${item.error_count} 题` : '0 错题 (全对)'}
+                                <span style="color: var(--text-muted); display: block; font-size: 0.75rem; margin-bottom: 2px;">课前预习成绩</span>
+                                <span style="font-weight: 700; font-size: 0.95rem; color: #6366f1;">${prevScore || '-'}</span>
+                            </div>
+                            <div>
+                                <span style="color: var(--text-muted); display: block; font-size: 0.75rem; margin-bottom: 2px;">错题总数 (巩固/预习)</span>
+                                <span style="font-weight: 700; font-size: 0.92rem; color: ${(item.error_count > 0 || (item.preview_error_questions && item.preview_error_questions.length > 0)) ? '#ef4444' : '#10b981'};">
+                                    巩固 ${item.error_count > 0 ? `${item.error_count}题` : '全对'} / 预习 ${(item.preview_error_questions && item.preview_error_questions.length > 0) ? `${item.preview_error_questions.length}题` : '全对'}
                                 </span>
                             </div>
                         </div>

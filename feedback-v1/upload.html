@@ -12,7 +12,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 Date.now()（会杀死全部缓存）
-            const v = '20261021-4';
+            const v = '20261101-2';
             document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/auth.css?v=${v}">`);
@@ -1000,7 +1000,7 @@
 
 
                                 <div id="plus-server-config">
-                                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 14px; margin-bottom: 14px;">
+                                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 14px; margin-bottom: 14px;">
                                         <div style="display: flex; flex-direction: column; gap: 6px;">
                                             <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-secondary);">学科</label>
                                             <select class="modern-input custom-select" id="plus-subject" onchange="onPlusSelectorChange()">
@@ -1035,10 +1035,16 @@
                                                 <option value="A">A</option>
                                             </select>
                                         </div>
+                                        <div style="display: flex; flex-direction: column; gap: 6px;" id="plus-preview-week-container">
+                                            <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-secondary);">预习专题</label>
+                                            <select class="modern-input custom-select" id="plus-preview-week" onchange="onPlusSelectorChange()">
+                                                <option value="">不关联预习 / 自动匹配</option>
+                                            </select>
+                                        </div>
                                         <div style="display: flex; flex-direction: column; gap: 6px;">
-                                            <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-secondary);">专题</label>
+                                            <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-secondary);">课后巩固专题</label>
                                             <select class="modern-input custom-select" id="plus-week" onchange="onPlusSelectorChange()">
-                                                <option value="" selected disabled>请选择专题</option>
+                                                <option value="">不关联巩固 / 自动匹配</option>
                                             </select>
                                         </div>
                                     </div>
@@ -1048,7 +1054,7 @@
                                             <line x1="12" y1="16" x2="12" y2="12"></line>
                                             <line x1="12" y1="8" x2="12.01" y2="8"></line>
                                         </svg>
-                                        <span id="plus-data-status-text">请选择学科、班层和专题</span>
+                                        <span id="plus-data-status-text">请选择学科、班层及对应专题</span>
                                     </div>
                                     <div style="margin-top: 10px; text-align: right;">
                                         <a href="question-bank.html" target="_blank"
@@ -1533,7 +1539,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 Date.now()（会杀死全部缓存）
-            const v = '20261021-4';
+            const v = '20261101-2';
             document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
             document.write(`<script src="js/common.js?v=${v}"><\/script>`);
             document.write(`<script src="js/auth.js?v=${v}"><\/script>`);

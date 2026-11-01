@@ -8,6 +8,18 @@ function hideViewerLoadingScreen() {
     }, 350);
 }
 
+// 错题本基础链接：生产站默认走 vip.wxjifang.cn，预览/测试站（feedbackbackup / feedbacktest）自适应走当前站点
+function getRetestBaseUrl() {
+    const host = window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') {
+        return `${window.location.origin}${window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/'))}/retest.html`;
+    }
+    if (/feedback(backup|test)\.wxjifang\.cn$/.test(host)) {
+        return `https://${host}/retest.html`;
+    }
+    return 'https://vip.wxjifang.cn/retest.html';
+}
+
 // ========== Spring/Autumn Semester Viewer Logic ==========
 window.defaultSeason = 'autumn';
 fetch('api/public_config.php').then(r=>r.json()).then(c=>{ 
@@ -1267,6 +1279,9 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                 grade: sessionPayload.plusData.grade,
                 tier: sessionPayload.plusData.tier,
                 week: sessionPayload.plusData.week,
+                preview_week: sessionPayload.plusData.previewWeek || pvLesson || sessionPayload.plusData.week,
+                has_preview_data: !!previewData,
+                has_homework_data: true,
                 source_files: uploadedFileNames,
                 students: []
             };
@@ -1300,12 +1315,19 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                     maxScore: studentTot || batchTotalScore || 100,
                     questions: sessionPayload?.plusData?.questions
                 });
+                const previewCommentForPlus = pvInfo?.comment ? String(pvInfo.comment) : '';
+                const previewParsedForPlus = previewCommentForPlus
+                    ? parseErrorQuestionsFromComment(previewCommentForPlus)
+                    : null;
                 batchPayload.students.push({
                     id: studentId,
                     name: studentName,
                     fullName: fullName,
                     key: studentKey,
                     errors: commentForPlus.errorNums,
+                    previewErrors: previewParsedForPlus?.errorNums || [],
+                    previewComment: previewCommentForPlus,
+                    previewWeek: sessionPayload.plusData.previewWeek || pvLesson || sessionPayload.plusData.week,
                     homeworkScore: homeworkScore,
                     previewScore: previewScore,
                     totalScore: studentTot || batchTotalScore || 100,
@@ -1412,12 +1434,37 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
         feedback += `以下是${getStudentDisplayName(studentName)}${feedbackSubject}作业情况反馈：\n`;
 
         // --- Preview homework section ---
+        let previewParsed = null;
+        let previewTopics = [];
         if (previewData && pvLesson) {
             const pvInfo = previewMap[studentName];
+            previewParsed = pvInfo?.comment ? parseErrorQuestionsFromComment(String(pvInfo.comment)) : null;
+            const previewDisplayInfo = (sessionPayload.plusData?.enabled && previewParsed && previewParsed.errorNums.length > 0)
+                ? { ...pvInfo, comment: previewParsed.cleanComment }
+                : pvInfo;
             if (isWenjuanxing) {
-                feedback += buildWenjuanxingFeedbackSection(pvInfo, pvLesson, previewStats, rankFormat);
+                feedback += buildWenjuanxingFeedbackSection(previewDisplayInfo, pvLesson, previewStats, rankFormat);
             } else {
-                feedback += buildPreviewFeedbackSection(pvInfo, pvLesson, previewStats, previewMetricMode, rankFormat);
+                feedback += buildPreviewFeedbackSection(previewDisplayInfo, pvLesson, previewStats, previewMetricMode, rankFormat);
+            }
+
+            // 预习作业个人薄弱点展示
+            if (sessionPayload.plusData?.enabled && previewParsed && previewParsed.errorNums.length > 0) {
+                const previewQuestions = sessionPayload.plusData.previewQuestions || sessionPayload.plusData.questions || [];
+                if (previewQuestions.length > 0) {
+                    const previewQuestionMap = {};
+                    previewQuestions.forEach(q => {
+                        const ids = String(q.id || q.question_num || '').split(/[,、，]/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+                        const cleanT = typeof cleanTopicTrailingPunctuation === 'function' 
+                            ? cleanTopicTrailingPunctuation(q.topic) 
+                            : (q.topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
+                        ids.forEach(id => { previewQuestionMap[id] = cleanT; });
+                    });
+                    previewTopics = [...new Set(previewParsed.errorNums.map(num => previewQuestionMap[num] || `第${num}题`).filter(Boolean))];
+                    if (previewTopics.length > 0) {
+                        feedback += `【预习薄弱点】：${previewTopics.join('、')}\n`;
+                    }
+                }
             }
         }
 
@@ -1474,37 +1521,23 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
             }
 
             // Plus: add targeted consolidation suggestions
-            if (plusData && plusData.enabled && plusData.questions) {
-                const hasErrors = errorQuestionNums.length > 0;
-                
-                if (hasErrors) {
+            if (plusData && plusData.enabled) {
+                const hasHomeworkErrors = errorQuestionNums.length > 0;
+                const hasPreviewErrors = previewTopics.length > 0 || Boolean(previewParsed && previewParsed.errorNums && previewParsed.errorNums.length > 0);
+                const hasAnyErrors = hasHomeworkErrors || hasPreviewErrors;
+
+                let homeworkTopics = [];
+                if (hasHomeworkErrors && plusData.questions) {
                     const questionMap = {};
                     plusData.questions.forEach(q => {
-                        const ids = String(q.id).split(/[,、，]/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+                        const ids = String(q.id || q.question_num || '').split(/[,、，]/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
                         const cleanT = typeof cleanTopicTrailingPunctuation === 'function' 
                             ? cleanTopicTrailingPunctuation(q.topic) 
                             : (q.topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
                         ids.forEach(id => { questionMap[id] = cleanT; });
                     });
                     
-                    const errorTopics = [...new Set(errorQuestionNums.map(num => questionMap[num]).filter(Boolean))];
-                    
-                    if (errorTopics.length > 0) {
-                        plusFeedbackPart += `【个人薄弱点】：${errorTopics.join('、')}\n`;
-                    }
-                    plusFeedbackPart += `【错题本】：点击链接查看本专题的错题\n`;
-                    const token = plusTokens[studentKey]
-                        || plusTokens[legacyStudentKey]
-                        || (!studentId ? (plusTokens[fullName] || plusTokens[studentName]) : '');
-                    if (token) {
-                        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-                        const retestBase = isLocal
-                            ? `${window.location.origin}${window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/'))}/retest.html`
-                            : 'https://vip.wxjifang.cn/retest.html';
-                        plusFeedbackPart += `${retestBase}?token=${token}\n`;
-                    } else {
-                        plusFeedbackPart += `(生成链接失败，请联系老师)\n`;
-                    }
+                    homeworkTopics = [...new Set(errorQuestionNums.map(num => questionMap[num] || `第${num}题`).filter(Boolean))];
                     
                     errorQuestionNums.forEach(num => {
                         const topic = questionMap[num];
@@ -1517,6 +1550,29 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                             cachedPlusErrorStats[num].students.push(studentDisplayName);
                         }
                     });
+                }
+
+                if (homeworkTopics.length > 0) {
+                    const hwLabel = (previewTopics.length > 0 || (previewData && pvLesson)) ? '【巩固薄弱点】' : '【个人薄弱点】';
+                    plusFeedbackPart += `${hwLabel}：${homeworkTopics.join('、')}\n`;
+                }
+
+                if (previewTopics.length > 0) {
+                    plusFeedbackPart += `【预习薄弱点】：${previewTopics.join('、')}\n`;
+                }
+
+                if (hasAnyErrors) {
+                    plusFeedbackPart += `【错题本】：点击链接查看本专题的错题\n`;
+                    const token = plusTokens[studentKey]
+                        || plusTokens[legacyStudentKey]
+                        || (!studentId ? (plusTokens[fullName] || plusTokens[studentName]) : '');
+                    if (token) {
+                        const retestBase = getRetestBaseUrl();
+                        const previewSuffix = hasPreviewErrors ? '（预习错题请切换到对应专题查看）' : '';
+                        plusFeedbackPart += `${retestBase}?token=${token}${previewSuffix}\n`;
+                    } else {
+                        plusFeedbackPart += `(生成链接失败，请联系老师)\n`;
+                    }
                 } else {
                     // 严格校验：结合分数、正确率、推算满分以及评语多维判定是否真正满分
                     const studentAcc = (accIdx >= 0) ? parsePercentValue(row[accIdx]) : null;
@@ -1535,7 +1591,26 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
         } else {
             const plusData = sessionPayload.plusData;
             if (plusData && plusData.enabled) {
-                plusFeedbackPart = `第${hwLesson}${getLessonUnit()}${getHomeworkLabelFull()}未提交，暂无错题加练数据。\n`;
+                const hasPreviewErrors = previewTopics.length > 0 || Boolean(previewParsed && previewParsed.errorNums && previewParsed.errorNums.length > 0);
+                if (hasPreviewErrors) {
+                    plusFeedbackPart = `第${hwLesson}${getLessonUnit()}${getHomeworkLabelFull()}未提交。\n`;
+                    if (previewTopics.length > 0) {
+                        plusFeedbackPart += `【预习薄弱点】：${previewTopics.join('、')}\n`;
+                    }
+                    plusFeedbackPart += `【错题本】：点击链接查看本专题的错题\n`;
+                    const token = plusTokens[studentKey]
+                        || plusTokens[legacyStudentKey]
+                        || (!studentId ? (plusTokens[fullName] || plusTokens[studentName]) : '');
+                    if (token) {
+                        const retestBase = getRetestBaseUrl();
+                        const previewSuffix = '（预习错题请切换到对应专题查看）';
+                        plusFeedbackPart += `${retestBase}?token=${token}${previewSuffix}\n`;
+                    } else {
+                        plusFeedbackPart += `(生成链接失败，请联系老师)\n`;
+                    }
+                } else {
+                    plusFeedbackPart = `第${hwLesson}${getLessonUnit()}${getHomeworkLabelFull()}未提交，暂无错题加练数据。\n`;
+                }
             }
         }
 
@@ -1720,14 +1795,22 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
         }
 
         // Build separated versions for mode switching
-        const academicFeedback = feedback.trim();
+        const academicFeedback = feedback.trim().replace(/\n{2,}/g, '\n');
         let fullFeedback = academicFeedback;
         // 【课后复习建议】、个人薄弱点、错题本链接等统一放置在最末尾
         if (plusFeedbackPart && plusFeedbackPart.trim()) {
-            fullFeedback += `\n\n${plusFeedbackPart.trim()}`;
+            let fullPlusPart = plusFeedbackPart;
+            // 若学术反馈正文中已单独列出【预习薄弱点】，完整模式下末尾避免重复展示该行
+            if (academicFeedback.includes('【预习薄弱点】：') && fullPlusPart.includes('【预习薄弱点】：')) {
+                fullPlusPart = fullPlusPart.replace(/【预习薄弱点】：[^\n]*\n?/, '').trim();
+            }
+            if (fullPlusPart) {
+                fullFeedback += `\n${fullPlusPart}`;
+            }
         }
-        const plusFeedbackWithName = plusFeedbackPart.trim() ? `${studentName}家长您好，\n\n${plusFeedbackPart.trim()}` : fullFeedback;
-        const plusFeedbackPure = plusFeedbackPart.trim() || fullFeedback;
+        fullFeedback = fullFeedback.replace(/\n{2,}/g, '\n');
+        const plusFeedbackWithName = (plusFeedbackPart.trim() ? `${studentName}家长您好，\n${plusFeedbackPart.trim()}` : fullFeedback).replace(/\n{2,}/g, '\n');
+        const plusFeedbackPure = (plusFeedbackPart.trim() || fullFeedback).replace(/\n{2,}/g, '\n');
 
         let currentDisplayFeedback = fullFeedback;
         if (currentFeedbackViewMode === 'plus-with-name') {
@@ -1842,7 +1925,7 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
     }
 }
 
-function doGeneratePreviewOnlyFeedback() {
+async function doGeneratePreviewOnlyFeedback() {
     const isWenjuanxing = getPhysicsPreviewSource() === 'wenjuanxing';
     const previewMetricMode = isWenjuanxing ? 'score_rank' : resolvePreviewMetricMode(sessionPayload);
     const rankFormat = sessionPayload.rankFormat || 'exact';
@@ -2011,6 +2094,80 @@ function doGeneratePreviewOnlyFeedback() {
     cachedPlusData = sessionPayload.plusData;
     cachedPlusErrorStats = {};
 
+    // 仅上传预习作业时也生成错题本 Token；与课后巩固共用同一身份 Key 与 token_map。
+    let previewOnlyPlusTokens = {};
+    const previewOnlyPlusData = sessionPayload.plusData;
+    if (previewOnlyPlusData?.enabled) {
+        const tokenGrade = previewOnlyPlusData.grade || '';
+        const tokenSubject = sessionPayload.subject || '数学';
+        const previewFileNameList = [];
+        if (sessionPayload.previewFiles) {
+            sessionPayload.previewFiles.forEach(f => {
+                if (f.name && !previewFileNameList.includes(f.name)) previewFileNameList.push(f.name);
+            });
+        }
+        const batchPayload = {
+            year: window.semesterYear || 2026,
+            season: window.defaultSeason || 'spring',
+            subject: tokenSubject,
+            grade: tokenGrade,
+            tier: previewOnlyPlusData.tier || '',
+            week: previewOnlyPlusData.week || pvLesson || 1,
+            preview_week: previewOnlyPlusData.previewWeek || pvLesson || previewOnlyPlusData.week || 1,
+            has_preview_data: true,
+            has_homework_data: false,
+            source_files: previewFileNameList,
+            students: []
+        };
+        pvRows.forEach(row => {
+            const fullName = String(row[pvNameIdx] || '').trim();
+            if (!fullName) return;
+            const nameMatch = fullName.match(/\d+(.+)/);
+            const studentName = (nameMatch ? nameMatch[1] : fullName).trim();
+            if (droppedPvSet.has(studentName) || exclusionSet.has(fullName)) return;
+            const idMatch = fullName.match(/^(\d+)/);
+            const studentId = idMatch ? idMatch[1] : '';
+            const studentKey = studentId
+                ? `${studentId}_${studentName}${tokenGrade && tokenSubject ? `_${tokenGrade}_${tokenSubject}` : ''}`
+                : studentName;
+            const pvInfo = previewMap[studentName];
+            const previewComment = pvInfo?.comment ? String(pvInfo.comment) : '';
+            const parsed = previewComment ? parseErrorQuestionsFromComment(previewComment) : null;
+            batchPayload.students.push({
+                id: studentId,
+                name: studentName,
+                fullName,
+                key: studentKey,
+                errors: [],
+                previewErrors: parsed?.errorNums || [],
+                previewComment,
+                previewWeek: previewOnlyPlusData.previewWeek || pvLesson || previewOnlyPlusData.week || 1,
+                homeworkScore: null,
+                previewScore: pvInfo?.score ?? null,
+                totalScore: 100,
+                comment: ''
+            });
+        });
+        if (batchPayload.students.length > 0) {
+            batchPayload.teacher_username = window.currentUser?.username || '';
+            batchPayload.teacher_name = window.currentUser?.real_name || '';
+            try {
+                const reqFn = typeof requestWithTimeout === 'function' ? requestWithTimeout : fetch;
+                const resp = await reqFn('api/retest.php?action=encrypt_batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(batchPayload)
+                }, 4000);
+                const result = await resp.json();
+                if (result.success && result.tokens) {
+                    previewOnlyPlusTokens = result.tokens;
+                }
+            } catch (e) {
+                console.warn('获取预习专属错题本Token跳过或超时 (弱网优雅降级):', e);
+            }
+        }
+    }
+
     resultBody.innerHTML = '';
     const tableContainer = document.createElement('div');
     tableContainer.className = 'table-container';
@@ -2052,10 +2209,52 @@ function doGeneratePreviewOnlyFeedback() {
         let feedback = `${studentName}家长您好，\n`;
         if (summaryPart) feedback += summaryPart;
         feedback += `以下是${getStudentDisplayName(studentName)}${feedbackSubject}作业情况反馈：\n`;
+
+        const previewParsed = pvInfo?.comment ? parseErrorQuestionsFromComment(String(pvInfo.comment)) : null;
+        const previewDisplayInfo = (sessionPayload.plusData?.enabled && previewParsed && previewParsed.errorNums.length > 0)
+            ? { ...pvInfo, comment: previewParsed.cleanComment }
+            : pvInfo;
         if (isWenjuanxing) {
-            feedback += buildWenjuanxingFeedbackSection(pvInfo, pvLesson, previewStats, rankFormat);
+            feedback += buildWenjuanxingFeedbackSection(previewDisplayInfo, pvLesson, previewStats, rankFormat);
         } else {
-            feedback += buildPreviewFeedbackSection(pvInfo, pvLesson, previewStats, previewMetricMode, rankFormat);
+            feedback += buildPreviewFeedbackSection(previewDisplayInfo, pvLesson, previewStats, previewMetricMode, rankFormat);
+        }
+
+        let previewOnlyPlusPart = '';
+        if (sessionPayload.plusData?.enabled && previewParsed && previewParsed.errorNums.length > 0) {
+            const previewQuestions = sessionPayload.plusData.previewQuestions || sessionPayload.plusData.questions || [];
+            if (previewQuestions.length > 0) {
+                const previewQuestionMap = {};
+                previewQuestions.forEach(q => {
+                    const ids = String(q.id || q.question_num || '').split(/[,、，]/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+                    const cleanT = typeof cleanTopicTrailingPunctuation === 'function' 
+                        ? cleanTopicTrailingPunctuation(q.topic) 
+                        : (q.topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
+                    ids.forEach(id => { previewQuestionMap[id] = cleanT; });
+                });
+                const previewTopics = [...new Set(previewParsed.errorNums.map(num => previewQuestionMap[num] || `第${num}题`).filter(Boolean))];
+                if (previewTopics.length > 0) {
+                    feedback += `【预习薄弱点】：${previewTopics.join('、')}\n`;
+                    previewOnlyPlusPart += `【预习薄弱点】：${previewTopics.join('、')}\n`;
+                }
+            }
+            const tokenIdMatch = fullName.match(/^(\d+)/);
+            const tokenStudentId = tokenIdMatch ? tokenIdMatch[1] : '';
+            const tokenGrade = sessionPayload.plusData?.grade || '';
+            const tokenSubject = feedbackSubject;
+            const tokenStudentKey = tokenStudentId
+                ? `${tokenStudentId}_${studentName}${tokenGrade && tokenSubject ? `_${tokenGrade}_${tokenSubject}` : ''}`
+                : studentName;
+            const tokenLegacyKey = tokenStudentId ? `${tokenStudentId}_${studentName}` : studentName;
+            const token = previewOnlyPlusTokens[tokenStudentKey] || previewOnlyPlusTokens[tokenLegacyKey] || '';
+            previewOnlyPlusPart += `【错题本】：点击链接查看本专题的错题\n`;
+            if (token) {
+                const retestBase = getRetestBaseUrl();
+                const previewSuffix = '（预习错题请切换到对应专题查看）';
+                previewOnlyPlusPart += `${retestBase}?token=${token}${previewSuffix}\n`;
+            } else {
+                previewOnlyPlusPart += `(生成链接失败，请联系老师)\n`;
+            }
         }
 
         // --- Note homework section (English only) ---
@@ -2237,6 +2436,29 @@ function doGeneratePreviewOnlyFeedback() {
             }
         }
 
+        const previewAcademicFeedback = feedback.trim().replace(/\n{2,}/g, '\n');
+        let previewFullFeedback = previewAcademicFeedback;
+        if (previewOnlyPlusPart && previewOnlyPlusPart.trim()) {
+            let fullPlus = previewOnlyPlusPart.trim();
+            if (previewAcademicFeedback.includes('【预习薄弱点】：') && fullPlus.includes('【预习薄弱点】：')) {
+                fullPlus = fullPlus.replace(/【预习薄弱点】：[^\n]*\n?/, '').trim();
+            }
+            if (fullPlus) {
+                previewFullFeedback = (previewFullFeedback + '\n' + fullPlus).replace(/\n{2,}/g, '\n');
+            }
+        }
+        const previewPlusWithName = (previewOnlyPlusPart.trim() ? `${studentName}家长您好，\n${previewOnlyPlusPart.trim()}` : previewFullFeedback).replace(/\n{2,}/g, '\n');
+        const previewPlusPure = (previewOnlyPlusPart.trim() || previewFullFeedback).replace(/\n{2,}/g, '\n');
+
+        let currentDisplayFeedback2 = previewFullFeedback;
+        if (currentFeedbackViewMode === 'plus-with-name') {
+            currentDisplayFeedback2 = previewPlusWithName;
+        } else if (currentFeedbackViewMode === 'plus-pure') {
+            currentDisplayFeedback2 = previewPlusPure;
+        } else if (currentFeedbackViewMode === 'academic-only') {
+            currentDisplayFeedback2 = previewAcademicFeedback;
+        }
+
         const tr = document.createElement('tr');
         tr.setAttribute('data-row-index', index.toString());
         tr.setAttribute('data-student-id', studentId.toString());
@@ -2249,14 +2471,17 @@ function doGeneratePreviewOnlyFeedback() {
         tr.setAttribute('data-note-submitted', noteInfo?.isSubmitted ? '1' : '0');
         const ctInfo = classTestMap[studentName];
         tr.setAttribute('data-class-test-submitted', ctInfo?.isSubmitted ? '1' : '0');
-        tr.setAttribute('data-full-feedback', feedback);
+        tr.setAttribute('data-full-feedback', previewFullFeedback);
+        tr.setAttribute('data-plus-name-feedback', previewPlusWithName);
+        tr.setAttribute('data-plus-pure-feedback', previewPlusPure);
+        tr.setAttribute('data-academic-feedback', previewAcademicFeedback);
 
         // 防 XSS：姓名与评语均来自 CSV/教师输入，渲染前必须转义；onclick 字符串参数单独做 JS 转义
         const escFullName2 = escapeHtml(String(fullName ?? ''));
         const escStudentName2 = escapeHtml(String(studentName ?? ''));
         const jsFullName2 = escapeJsString(fullName);
         const jsStudentName2 = escapeJsString(studentName);
-        const escFeedback2 = escapeHtml(String(feedback ?? ''));
+        const escFeedback2 = escapeHtml(String(currentDisplayFeedback2 ?? ''));
 
         const nameTd = document.createElement('td');
         nameTd.className = 'name-td';
@@ -2768,7 +2993,7 @@ function applyFeedbackViewMode(mode, silent = false) {
         if (targetText !== null && targetText !== undefined) {
             let finalTargetText = targetText;
             if (globalAppendText && mode !== 'plus-pure' && !targetText.endsWith(globalAppendText)) {
-                finalTargetText = finalTargetText + '\n\n' + globalAppendText;
+                finalTargetText = (finalTargetText + '\n' + globalAppendText).replace(/\n{2,}/g, '\n');
             }
             const fc = tr.querySelector('.feedback-content');
             if (fc) fc.textContent = finalTargetText;
@@ -2806,7 +3031,7 @@ function applyGlobalAppend(txt) {
     document.querySelectorAll('#result-body tr').forEach(row => {
         const fc = row.querySelector('.feedback-content');
         if (fc && !fc.textContent.endsWith(txt)) { 
-            const nt = fc.textContent + '\n\n' + txt; 
+            const nt = (fc.textContent + '\n' + txt).replace(/\n{2,}/g, '\n'); 
             fc.textContent = nt; 
             const ed = row.querySelector('.feedback-editor'); 
             if(ed) ed.value = nt; 

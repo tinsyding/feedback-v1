@@ -225,7 +225,7 @@ switch ($action) {
 
             // 对 qbank_questions 排除巨型 base64 缩略图以提升翻页性能；对 admin_users 脱敏密码哈希
             if ($table === 'qbank_questions') {
-                $selectFields = "id, qbank_id, `year`, `season`, subject, grade, tier, `week`, question_num, topic, video_url, exercise_pdf, exercise_name, (exercise_thumb IS NOT NULL AND exercise_thumb != '') AS has_exercise_thumb, answer_pdf, answer_name, (answer_thumb IS NOT NULL AND answer_thumb != '') AS has_answer_thumb, created_by, updated_by, created_at, updated_at";
+                $selectFields = "id, qbank_id, bank_type, `year`, `season`, subject, grade, tier, `week`, question_num, topic, video_url, exercise_pdf, exercise_name, (exercise_thumb IS NOT NULL AND exercise_thumb != '') AS has_exercise_thumb, answer_pdf, answer_name, (answer_thumb IS NOT NULL AND answer_thumb != '') AS has_answer_thumb, created_by, updated_by, created_at, updated_at";
                 $rows = DB::fetchAll("SELECT {$selectFields} FROM `{$table}` {$whereSql} ORDER BY `{$sort}` {$order} LIMIT {$offset}, {$pageSize}", $params);
             } elseif ($table === 'admin_users') {
                 $rows = DB::fetchAll("SELECT `id`, `username`, '●●●●●●●●' AS `password_hash`, `real_name`, `role`, `status`, `last_login_at`, `last_login_ip`, `created_at`, `updated_at` FROM `{$table}` {$whereSql} ORDER BY `{$sort}` {$order} LIMIT {$offset}, {$pageSize}", $params);
@@ -316,6 +316,7 @@ switch ($action) {
             // 附带学情记录的个人薄弱点详细考点与来源文件解析 (student_records, student_record_history)
             if (($table === 'student_records' || $table === 'student_record_history') && !empty($rows)) {
                 $qbankQueries = [];
+                $previewQbankQueries = [];
                 foreach ($rows as $r) {
                     $errs = [];
                     if (!empty($r['error_questions'])) {
@@ -334,8 +335,36 @@ switch ($action) {
                             'week'    => $sWk
                         ];
                     }
+
+                    $pErrs = [];
+                    if (!empty($r['preview_error_questions'])) {
+                        $pErrs = is_array($r['preview_error_questions']) ? $r['preview_error_questions'] : json_decode($r['preview_error_questions'], true);
+                    }
+                    $pWk = (int)($r['preview_week_num'] ?? $sWk);
+                    if (!empty($pErrs) && !empty($sSub) && !empty($sGrd) && $pWk > 0) {
+                        $pKey = $sSub . '___' . $sGrd . '___' . $sTier . '___' . $pWk;
+                        $previewQbankQueries[$pKey] = [
+                            'subject' => $sSub,
+                            'grade'   => $sGrd,
+                            'tier'    => $sTier,
+                            'week'    => $pWk
+                        ];
+                    }
                 }
                 $topicMap = [];
+                $previewTopicMap = [];
+                $gradeAliasMap = [
+                    '初一' => ['七年级', '初一年级', '七年级先学'],
+                    '初二' => ['八年级', '初二年级'],
+                    '初三' => ['九年级', '初三年级'],
+                    '七年级' => ['初一', '初一年级', '七年级先学'],
+                    '八年级' => ['初二', '初二年级'],
+                    '九年级' => ['初三', '初三年级'],
+                    '高一' => ['高一年级'],
+                    '高二' => ['高二年级'],
+                    '高三' => ['高三年级'],
+                ];
+
                 foreach ($qbankQueries as $qItem) {
                     $cleanGrade = preg_replace('/(化学|物理|数学|英语|语文)$/u', '', $qItem['grade']);
                     $cleanGrade = preg_replace('/(班|层)$/u', '', $cleanGrade);
@@ -345,17 +374,6 @@ switch ($action) {
                         $cleanGrade,
                         $cleanGrade . '年级',
                         preg_replace('/年级$/u', '', $cleanGrade)
-                    ];
-                    $gradeAliasMap = [
-                        '初一' => ['七年级', '初一年级', '七年级先学'],
-                        '初二' => ['八年级', '初二年级'],
-                        '初三' => ['九年级', '初三年级'],
-                        '七年级' => ['初一', '初一年级', '七年级先学'],
-                        '八年级' => ['初二', '初二年级'],
-                        '九年级' => ['初三', '初三年级'],
-                        '高一' => ['高一年级'],
-                        '高二' => ['高二年级'],
-                        '高三' => ['高三年级'],
                     ];
                     foreach ($gradeCandidates as $gc) {
                         if (isset($gradeAliasMap[$gc])) {
@@ -373,12 +391,47 @@ switch ($action) {
 
                     $tRows = DB::fetchAll(
                         "SELECT `question_num`, `topic` FROM `qbank_questions` 
-                         WHERE `subject` = ? AND `grade` IN ($inGrades) AND `tier` IN ($inTiers) AND `week` = ?",
+                         WHERE `bank_type` = 'homework' AND `subject` = ? AND `grade` IN ($inGrades) AND `tier` IN ($inTiers) AND `week` = ?",
                         $params
                     );
                     $subKey = $qItem['subject'] . '___' . $qItem['grade'] . '___' . $qItem['tier'] . '___' . $qItem['week'];
                     foreach ($tRows as $tr) {
                         $topicMap[$subKey . '___' . (int)$tr['question_num']] = trim($tr['topic']);
+                    }
+                }
+
+                foreach ($previewQbankQueries as $qItem) {
+                    $cleanGrade = preg_replace('/(化学|物理|数学|英语|语文)$/u', '', $qItem['grade']);
+                    $cleanGrade = preg_replace('/(班|层)$/u', '', $cleanGrade);
+
+                    $gradeCandidates = [
+                        $qItem['grade'],
+                        $cleanGrade,
+                        $cleanGrade . '年级',
+                        preg_replace('/年级$/u', '', $cleanGrade)
+                    ];
+                    foreach ($gradeCandidates as $gc) {
+                        if (isset($gradeAliasMap[$gc])) {
+                            $gradeCandidates = array_merge($gradeCandidates, $gradeAliasMap[$gc]);
+                        }
+                    }
+                    $gradeCandidates = array_values(array_unique(array_filter($gradeCandidates)));
+
+                    $tierVal = trim($qItem['tier']);
+                    $tierCandidates = array_values(array_unique(array_filter([$tierVal, str_replace('班', '', $tierVal)])));
+
+                    $inGrades = implode(',', array_fill(0, count($gradeCandidates), '?'));
+                    $inTiers = implode(',', array_fill(0, count($tierCandidates), '?'));
+                    $params = array_merge([$qItem['subject']], $gradeCandidates, $tierCandidates, [$qItem['week']]);
+
+                    $tRows = DB::fetchAll(
+                        "SELECT `question_num`, `topic` FROM `qbank_questions` 
+                         WHERE `bank_type` = 'preview' AND `subject` = ? AND `grade` IN ($inGrades) AND `tier` IN ($inTiers) AND `week` = ?",
+                        $params
+                    );
+                    $subKey = $qItem['subject'] . '___' . $qItem['grade'] . '___' . $qItem['tier'] . '___' . $qItem['week'];
+                    foreach ($tRows as $tr) {
+                        $previewTopicMap[$subKey . '___' . (int)$tr['question_num']] = trim($tr['topic']);
                     }
                 }
 
@@ -395,7 +448,7 @@ switch ($action) {
                     }
                     $r['source_files_list'] = array_values(array_unique(array_filter($srcFiles)));
 
-                    // 解析薄弱点考点
+                    // 解析课后巩固薄弱点考点
                     $errs = [];
                     if (!empty($r['error_questions'])) {
                         $errs = is_array($r['error_questions']) ? $r['error_questions'] : json_decode($r['error_questions'], true);
@@ -424,6 +477,33 @@ switch ($action) {
                     $r['error_details'] = $details;
                     $r['weak_points'] = array_values(array_unique($weakList));
                     $r['weak_points_text'] = implode('、', array_unique($weakList));
+
+                    // 解析课前预习薄弱点考点
+                    $pErrs = [];
+                    if (!empty($r['preview_error_questions'])) {
+                        $pErrs = is_array($r['preview_error_questions']) ? $r['preview_error_questions'] : json_decode($r['preview_error_questions'], true);
+                    }
+                    $pDetails = [];
+                    $pWeakList = [];
+                    $pWk = (int)($r['preview_week_num'] ?? $sWk);
+                    if (!empty($pErrs) && !empty($sSub) && !empty($sGrd) && $pWk > 0) {
+                        $pSubKey = $sSub . '___' . $sGrd . '___' . $sTier . '___' . $pWk;
+                        foreach ($pErrs as $num) {
+                            $qNum = (int)$num;
+                            $tName = $previewTopicMap[$pSubKey . '___' . $qNum] ?? '';
+                            $cleanT = preg_replace('/[\s,，.。;；:：、\-_—]+$/u', '', $tName);
+                            $pDetails[] = [
+                                'num'   => $qNum,
+                                'topic' => $cleanT ?: '未标注考点'
+                            ];
+                            if ($cleanT) {
+                                $pWeakList[] = $cleanT;
+                            }
+                        }
+                    }
+                    $r['preview_error_details'] = $pDetails;
+                    $r['preview_weak_points'] = array_values(array_unique($pWeakList));
+                    $r['preview_weak_points_text'] = implode('、', array_unique($pWeakList));
                 }
                 unset($r);
             }
@@ -568,6 +648,28 @@ switch ($action) {
                         $input['error_count'] = count($eqArr);
                     }
                 }
+                if (isset($input['preview_error_questions'])) {
+                    $peq = $input['preview_error_questions'];
+                    if ($peq === null || $peq === '') {
+                        $input['preview_error_questions'] = null;
+                    } else {
+                        if (is_string($peq)) {
+                            $peqTrim = trim($peq);
+                            if ($peqTrim === '' || $peqTrim === '[]') {
+                                $input['preview_error_questions'] = json_encode([], JSON_UNESCAPED_UNICODE);
+                            } elseif (str_starts_with($peqTrim, '[')) {
+                                $peqArr = json_decode($peqTrim, true) ?: [];
+                                $input['preview_error_questions'] = json_encode($peqArr, JSON_UNESCAPED_UNICODE);
+                            } else {
+                                $peqArr = array_values(array_filter(array_map('intval', preg_split('/[,、，\s]+/', $peqTrim))));
+                                $input['preview_error_questions'] = json_encode($peqArr, JSON_UNESCAPED_UNICODE);
+                            }
+                        } elseif (is_array($peq)) {
+                            $peqArr = array_values(array_filter(array_map('intval', $peq)));
+                            $input['preview_error_questions'] = json_encode($peqArr, JSON_UNESCAPED_UNICODE);
+                        }
+                    }
+                }
                 if (empty($input['retest_token']) || $input['retest_token'] === 'auto') {
                     $chars = 'abcdefghjkmnpqrstuvwxyz23456789ABCDEFGHJKMNPQRSTUVWXYZ';
                     $charLen = strlen($chars);
@@ -582,9 +684,9 @@ switch ($action) {
 
             // 题库题目表新增时若关联了期次，自动补全缺失的年份/学期/学科/年级/班层/周次
             if ($table === 'qbank_questions' && !empty($input['qbank_id'])) {
-                $pWeek = DB::fetchOne("SELECT `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$input['qbank_id']]);
+                $pWeek = DB::fetchOne("SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$input['qbank_id']]);
                 if ($pWeek) {
-                    foreach (['year', 'season', 'subject', 'grade', 'tier', 'week'] as $k) {
+                    foreach (['bank_type', 'year', 'season', 'subject', 'grade', 'tier', 'week'] as $k) {
                         if (!isset($input[$k]) || $input[$k] === '') {
                             $input[$k] = $pWeek[$k];
                         }
@@ -718,19 +820,41 @@ switch ($action) {
                         $input['error_count'] = count($eqArr);
                     }
                 }
+                if (isset($input['preview_error_questions'])) {
+                    $peq = $input['preview_error_questions'];
+                    if ($peq === null || $peq === '') {
+                        $input['preview_error_questions'] = null;
+                    } else {
+                        if (is_string($peq)) {
+                            $peqTrim = trim($peq);
+                            if ($peqTrim === '' || $peqTrim === '[]') {
+                                $input['preview_error_questions'] = json_encode([], JSON_UNESCAPED_UNICODE);
+                            } elseif (str_starts_with($peqTrim, '[')) {
+                                $peqArr = json_decode($peqTrim, true) ?: [];
+                                $input['preview_error_questions'] = json_encode($peqArr, JSON_UNESCAPED_UNICODE);
+                            } else {
+                                $peqArr = array_values(array_filter(array_map('intval', preg_split('/[,、，\s]+/', $peqTrim))));
+                                $input['preview_error_questions'] = json_encode($peqArr, JSON_UNESCAPED_UNICODE);
+                            }
+                        } elseif (is_array($peq)) {
+                            $peqArr = array_values(array_filter(array_map('intval', $peq)));
+                            $input['preview_error_questions'] = json_encode($peqArr, JSON_UNESCAPED_UNICODE);
+                        }
+                    }
+                }
             }
 
             // 若更新的是 qbank_weeks 表，记录修改前的基础信息以便清理/重命名旧的 JSON 灾备文件
             $oldWeekRec = null;
             if ($table === 'qbank_weeks') {
-                $oldWeekRec = DB::fetchOne("SELECT `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$id]);
+                $oldWeekRec = DB::fetchOne("SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$id]);
             }
 
             // 若更新的是 qbank_questions 表且修改了所属专题 qbank_id，自动对齐期次维度字段
             if ($table === 'qbank_questions' && isset($input['qbank_id'])) {
-                $parentWeek = DB::fetchOne("SELECT `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$input['qbank_id']]);
+                $parentWeek = DB::fetchOne("SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$input['qbank_id']]);
                 if ($parentWeek) {
-                    foreach (['year', 'season', 'subject', 'grade', 'tier', 'week'] as $k) {
+                    foreach (['bank_type', 'year', 'season', 'subject', 'grade', 'tier', 'week'] as $k) {
                         $input[$k] = $parentWeek[$k];
                     }
                 }
@@ -768,13 +892,14 @@ switch ($action) {
                         DB::execute("
                             INSERT INTO `student_record_history` (
                                 record_id, batch_id, batch_code, student_id, student_name, student_key,
-                                week_num, homework_score, preview_score, total_score, error_count,
-                                error_questions, teacher_comment, source_files, retest_token,
+                                week_num, preview_week_num, homework_score, preview_score, total_score, error_count,
+                                error_questions, preview_error_questions, teacher_comment, preview_comment, source_files, retest_token,
                                 created_by, operator, operation_type, record_created_at, record_updated_at, archived_at
                             ) VALUES (
                                 ?, ?, ?, ?, ?, ?,
-                                ?, ?, ?, ?, ?,
+                                ?, ?,
                                 ?, ?, ?, ?,
+                                ?, ?, ?, ?, ?, ?,
                                 ?, ?, 'admin_edit', ?, ?, NOW()
                             )
                         ", [
@@ -785,12 +910,15 @@ switch ($action) {
                             $oldRec['student_name'],
                             $oldRec['student_key'] ?? '',
                             $oldRec['week_num'],
+                            $oldRec['preview_week_num'] ?? null,
                             $oldRec['homework_score'],
                             $oldRec['preview_score'],
                             $oldRec['total_score'],
                             $oldRec['error_count'],
                             $oldRec['error_questions'],
+                            $oldRec['preview_error_questions'] ?? null,
                             $oldRec['teacher_comment'],
+                            $oldRec['preview_comment'] ?? null,
                             $oldRec['source_files'] ?? null,
                             $oldRec['retest_token'] ?? null,
                             $bInfo['created_by'] ?? '',
@@ -812,14 +940,15 @@ switch ($action) {
             // 若更新的是 qbank_weeks 表，级联同步更新 qbank_questions 明细表与 JSON 灾备文件
             if ($table === 'qbank_weeks') {
                 try {
-                    $newWeek = DB::fetchOne("SELECT `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$id]);
+                    $newWeek = DB::fetchOne("SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$id]);
                     if ($newWeek) {
                         // 1. 级联同步 qbank_questions 冗余字段
                         DB::execute("
                             UPDATE `qbank_questions`
-                            SET `year` = ?, `season` = ?, `subject` = ?, `grade` = ?, `tier` = ?, `week` = ?, `updated_at` = NOW()
+                            SET `bank_type` = ?, `year` = ?, `season` = ?, `subject` = ?, `grade` = ?, `tier` = ?, `week` = ?, `updated_at` = NOW()
                             WHERE `qbank_id` = ?
                         ", [
+                            $newWeek['bank_type'] ?? 'homework',
                             $newWeek['year'],
                             $newWeek['season'],
                             $newWeek['subject'],
@@ -901,7 +1030,7 @@ switch ($action) {
             if ($table === 'qbank_weeks') {
                 try {
                     foreach ($ids as $delId) {
-                        $wRec = DB::fetchOne("SELECT `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$delId]);
+                        $wRec = DB::fetchOne("SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$delId]);
                         deleteQbankJsonBackup($wRec);
                     }
                     $inPlaceholders = implode(',', array_fill(0, count($ids), '?'));
@@ -1047,6 +1176,7 @@ switch ($action) {
             $baseOrig = basename(str_replace('\\', '/', $origFileName));
             $expectedSanitized = strtolower((string)preg_replace('/[^a-zA-Z0-9.\-_]/', '', $baseOrig));
 
+            // 根据原文件名推断文件类型标签
             $expectedType = '';
             if (preg_match('/预习|preview/iu', $baseOrig)) {
                 $expectedType = 'preview';
@@ -1070,6 +1200,7 @@ switch ($action) {
 
             $candidates = [];
 
+            // 1. 优先检索 index.jsonl 精确原名映射
             foreach ($uploadDirs as $uDir) {
                 $idxFile = $uDir . '/index.jsonl';
                 if (is_file($idxFile)) {
@@ -1094,6 +1225,7 @@ switch ($action) {
                 }
             }
 
+            // 2. 扫描 data/uploads/*/* 归档目录
             foreach ($uploadDirs as $uDir) {
                 $files = glob($uDir . '/*/*');
                 if (!$files) continue;
@@ -1111,6 +1243,7 @@ switch ($action) {
                     if ($fRest !== $expectedSanitized && strtolower($bName) !== strtolower($baseOrig)) {
                         continue;
                     }
+                    // 若原文件名明确指示了类型（如 preview vs homework），类型不符的同名编号文件直接排除
                     if ($expectedType !== '' && $fType !== $expectedType) {
                         continue;
                     }
@@ -1135,6 +1268,7 @@ switch ($action) {
                 sendResponse(false, null, "未找到文件【{$baseOrig}】的上传原件（可能已超过30天自动清理期限）", 404);
             }
 
+            // 3. 对候选文件按时间接近度与学生姓名包含关系打分排序
             $scored = [];
             $needContentCheck = count($candidates) > 1 && $studentName !== '';
             $studentNameGbk = $needContentCheck ? @mb_convert_encoding($studentName, 'GBK', 'UTF-8') : '';
@@ -1148,13 +1282,14 @@ switch ($action) {
                     $minDiff = PHP_INT_MAX;
                     $bestSignedDiff = PHP_INT_MAX;
                     foreach ($refTimestamps as $rTs) {
-                        $signed = $rTs - $cand['ts'];
+                        $signed = $rTs - $cand['ts']; // 正数表示文件在记录入库前上传
                         $absDiff = abs($signed);
                         if ($absDiff < $minDiff) {
                             $minDiff = $absDiff;
                             $bestSignedDiff = $signed;
                         }
                     }
+                    // 正常流程：文件在入库前 0~2 小时内上传（或入库后 5 分钟内）
                     if ($bestSignedDiff >= -300 && $bestSignedDiff <= 7200) {
                         $score += 500000 - $minDiff;
                     } elseif ($minDiff <= 86400) {
@@ -1163,6 +1298,7 @@ switch ($action) {
                         $score -= min($minDiff, 1000000);
                     }
                 } else {
+                    // 无参照时间时优先取最新上传的文件
                     $score += (int)($cand['ts'] / 1000);
                 }
 

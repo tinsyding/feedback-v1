@@ -300,6 +300,9 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             gridListContainer.innerHTML = '';
 
             const weeksData = result.weeksData || {};
+            const hasAnyPreview = availableWeeks.some(w => getWeekErrorCounts(weeksData[String(w)]).preview > 0);
+            const mergeAllLabel = mergeAllSection ? mergeAllSection.querySelector('span') : null;
+            if (mergeAllLabel) mergeAllLabel.textContent = hasAnyPreview ? '合并下载全部专题（含预习） (PDF)' : '合并下载全部专题 (PDF)';
             const totalCount = availableWeeks.length;
             const gridBtnText = document.getElementById('topic-grid-btn-text');
             if (gridBtnText) gridBtnText.textContent = '全部 (' + totalCount + ') ▾';
@@ -308,13 +311,14 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
             const totalErrors = availableWeeks.reduce((sum, w) => {
                 const wd = weeksData[String(w)];
-                return sum + (wd ? (wd.errors || []).length : 0);
+                return sum + getWeekErrorCounts(wd).total;
             }, 0);
 
             availableWeeks.forEach(w => {
                 const isCurrent = (w === currentWeek);
                 const wData = weeksData[String(w)];
-                const errCount = wData ? (wData.errors || []).length : 0;
+                const counts = getWeekErrorCounts(wData);
+                const errCount = counts.total;
                 const label = getTopicLabel(w);
 
                 const cm = (wData && wData.comment) ? String(wData.comment) : '';
@@ -350,8 +354,12 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                     tileInner += '<span class="topic-tile-count unsubmitted">未交作业</span>';
                 } else if (errCount === 0) {
                     tileInner += '<span class="topic-tile-count perfect">全对 0 错题</span>';
+                } else if (counts.homework > 0 && counts.preview > 0) {
+                    tileInner += '<span class="topic-tile-count">巩固' + counts.homework + '道 · 预习' + counts.preview + '道</span>';
+                } else if (counts.preview > 0) {
+                    tileInner += '<span class="topic-tile-count">预习' + counts.preview + '道错题</span>';
                 } else {
-                    tileInner += '<span class="topic-tile-count">' + errCount + '道错题</span>';
+                    tileInner += '<span class="topic-tile-count">巩固' + counts.homework + '道错题</span>';
                 }
                 tile.innerHTML = tileInner;
                 gridListContainer.appendChild(tile);
@@ -381,6 +389,19 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         return '专题' + numToChinese(w);
     }
 
+    function getWeekErrorCounts(wd) {
+        const homework = wd && Array.isArray(wd.errors) ? wd.errors.length : 0;
+        const preview = wd && Array.isArray(wd.previewErrors) ? wd.previewErrors.length : 0;
+        return { homework, preview, total: homework + preview };
+    }
+
+    function getWeekPdfLists(wd) {
+        return {
+            homework: (wd && Array.isArray(wd.pdfs)) ? wd.pdfs : [],
+            preview: (wd && Array.isArray(wd.previewPdfs)) ? wd.previewPdfs : []
+        };
+    }
+
     // Switch between topics (smooth scroll and grid update)
     function switchWeek(week) {
         activeWeek = week;
@@ -405,8 +426,9 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         const weekDisplayEl = document.getElementById('info-week-display');
         if (weekDisplayEl) weekDisplayEl.textContent = label;
 
-        // 待练错题
-        const errorCount = weekData ? (weekData.errors || []).length : 0;
+        // 待练错题（课后巩固 + 预习合并统计）
+        const weekErrorCounts = getWeekErrorCounts(weekData);
+        const errorCount = weekErrorCounts.total;
         const countEl = document.getElementById('info-count');
         if (countEl) countEl.textContent = errorCount;
 
@@ -442,9 +464,11 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
         // Update button label
         const btnTopicLabel = document.getElementById('btn-topic-label');
-        if (btnTopicLabel) btnTopicLabel.textContent = '下载' + label + '错题本 (PDF)';
+        const previewLabelSuffix = weekErrorCounts.preview > 0 ? '（含预习）' : '';
+        if (btnTopicLabel) btnTopicLabel.textContent = '下载' + label + '错题本' + previewLabelSuffix + ' (PDF)';
 
-        const pdfs = weekData ? (weekData.pdfs || []) : [];
+        const weekPdfLists = getWeekPdfLists(weekData);
+        const pdfs = weekPdfLists.homework.concat(weekPdfLists.preview);
         const hasPdfs = pdfs.length > 0;
         const noPdfHint = document.getElementById('no-pdf-hint');
         const btnTopicDownload = document.getElementById('btn-topic-download');
@@ -505,7 +529,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         } else {
             if (noPdfHint) noPdfHint.style.display = 'none';
             if (btnTopicDownload) btnTopicDownload.disabled = false;
-            if (btnTopicLabel) btnTopicLabel.textContent = '下载' + label + '错题本 (PDF)';
+            if (btnTopicLabel) btnTopicLabel.textContent = '下载' + label + '错题本' + previewLabelSuffix + ' (PDF)';
         }
     }
 
@@ -743,21 +767,24 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         return lines.length > 0 ? lines : [text];
     }
 
-    // 错题本每道题前的标题：优先显示“专题五：勾股定理”，没有专题时退回知识点。
-    function formatQuestionTopicLabel(week, topic) {
+    // 错题本每道题前的标题：优先显示“巩固·专题五：勾股定理”或“预习·专题五：勾股定理”或“举一反三·专题五：勾股定理”，没有专题时退回知识点。
+    function formatQuestionTopicLabel(week, topic, sourceType) {
         const weekNum = parseInt(week, 10);
-        const weekLabel = weekNum > 0 ? ('专题' + numToChinese(weekNum)) : '';
+        const isVar = sourceType === 'variation';
+        const typePrefix = isVar ? '举一反三' : (sourceType === 'preview' ? '预习' : '巩固');
+        let weekLabel = weekNum > 0 ? ('专题' + numToChinese(weekNum)) : '';
+        if (weekLabel) weekLabel = typePrefix + '·' + weekLabel;
         const topicText = String(topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
         if (weekLabel && topicText) return weekLabel + '：' + topicText;
         if (weekLabel) return weekLabel;
-        if (topicText) return '知识点：' + topicText;
-        return '';
+        if (topicText) return (isVar ? '举一反三·考点：' : (typePrefix + '知识点：')) + topicText;
+        return isVar ? '举一反三' : '';
     }
 
     /**
-     * Beta 新增：把专题/知识点文字渲染成横条 PNG DataURL（pdf-lib 内置字体无中文，只能走 canvas，
-     * 与题目二维码牌同路线）。支持超长考点智能换行（单行 20pt，多行自适应撑高）。
-     * 返回 { dataUrl, heightPt, blockPt, widthPt, lineCount }。
+     * Beta 新增：把专题/知识点文字渲染成精致“胶囊考点卡” PNG DataURL（pdf-lib 内置字体无中文，走 canvas）。
+     * 左侧为专属分类胶囊药丸（巩固为极方深宝蓝，预习为活力琥珀橙），右侧为核心考点正文。
+     * 支持超长考点智能换行（单行 25pt，多行自适应撑高），返回 { dataUrl, heightPt, blockPt, widthPt, lineCount }。
      */
     function generateTopicBadge(labelText, widthPt) {
         const label = String(labelText || '').trim().slice(0, 300);
@@ -771,37 +798,78 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         try {
             const K = 2; // 2 倍超采样，保证打印清晰
             const wpx = Math.max(240, Math.round(wPt * K));
-            const padL = 10 * K;
-            const padR = 8 * K;
-            const maxW = wpx - padL - padR;
+
+            // 解析标签文本：拆分为左侧胶囊文本（tagText）与右侧核心考点（contentText）
+            const colonIdx = label.indexOf('：') >= 0 ? label.indexOf('：') : label.indexOf(':');
+            let tagText = '';
+            let contentText = '';
+            if (colonIdx > 0) {
+                tagText = label.slice(0, colonIdx).trim();
+                contentText = label.slice(colonIdx + 1).trim();
+            } else {
+                tagText = label.includes('举一反三') ? '举一反三' : (label.includes('预习') ? '预习' : (label.includes('巩固') ? '巩固' : '考点'));
+                contentText = label.trim();
+            }
+
+            // 规范化胶囊文字（避免出现“巩固知识点”或“预习知识点”这样冗长的药丸）
+            if (tagText === '巩固知识点') tagText = '巩固·考点';
+            if (tagText === '预习知识点') tagText = '预习·考点';
+            if (tagText === '举一反三知识点' || tagText === '举一反三·知识点') tagText = '举一反三';
+            if (tagText === '知识点') tagText = '重点考点';
+
+            const isVariation = tagText.includes('举一反三');
+            const isPreview = !isVariation && tagText.includes('预习');
 
             const testCanvas = document.createElement('canvas');
             const testCtx = testCanvas.getContext('2d');
-            const fontSingle = '700 ' + (12 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
-            const fontMulti = '700 ' + (11 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
 
-            testCtx.font = fontSingle;
+            // 胶囊字体（粗体紧凑）
+            const fontPill = '700 ' + Math.round(10.5 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+            // 考点内容字体（清晰典雅）
+            const fontContent = '600 ' + Math.round(11 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+
+            testCtx.font = fontPill;
+            const pillTextW = testCtx.measureText(tagText).width;
+            const pillPadX = 9 * K;
+            const pillWidth = Math.round(pillTextW + pillPadX * 2);
+            const pillHeight = Math.round(17 * K);
+            const pillRadius = Math.round(pillHeight / 2);
+
+            // 考点文字准备
+            let displayContent = contentText;
+            if (displayContent && !displayContent.startsWith('考点') && !displayContent.startsWith('知识点')) {
+                displayContent = '考点：' + displayContent;
+            }
+
+            const cardPadL = 6 * K;
+            const pillToTextGap = 8 * K;
+            const cardPadR = 10 * K;
+            const maxContentW = wpx - cardPadL - pillWidth - pillToTextGap - cardPadR;
+
+            testCtx.font = fontContent;
             let lines = [];
             let isSingleLine = false;
 
-            if (testCtx.measureText(label).width <= maxW) {
-                lines = [label];
+            if (!displayContent) {
+                isSingleLine = true;
+                lines = [];
+            } else if (testCtx.measureText(displayContent).width <= maxContentW) {
+                lines = [displayContent];
                 isSingleLine = true;
             } else {
-                testCtx.font = fontMulti;
-                lines = splitTopicLines(testCtx, label, maxW, 4);
+                lines = splitTopicLines(testCtx, displayContent, maxContentW, 4);
                 if (lines.length <= 1) {
                     isSingleLine = true;
                 }
             }
 
-            let heightPt = 20;
-            let linePitchPt = 14;
-            let padYPt = 4.5;
+            let heightPt = 25;
+            let linePitchPt = 15;
+            let padYPt = 5;
             if (!isSingleLine) {
-                linePitchPt = 14;
-                padYPt = 5;
-                heightPt = padYPt * 2 + lines.length * linePitchPt;
+                linePitchPt = 15;
+                padYPt = 5.5;
+                heightPt = Math.max(25, padYPt * 2 + lines.length * linePitchPt);
             }
             const hpx = Math.round(heightPt * K);
 
@@ -810,34 +878,76 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             badgeCanvas.height = hpx;
             const ctx = badgeCanvas.getContext('2d');
 
-            // 浅蓝底 + 描边
-            const borderRadius = isSingleLine ? (8 * K) : Math.min(8 * K, Math.round(hpx / 3.5));
-            topicBadgeRoundRect(ctx, 1, 1, wpx - 2, hpx - 2, borderRadius);
-            ctx.fillStyle = '#eff6ff';
-            ctx.fill();
-            ctx.lineWidth = 2;
-            ctx.strokeStyle = '#bfdbfe';
-            ctx.stroke();
-
-            // 左侧蓝色色条
-            const barMarginY = isSingleLine ? (4.5 * K) : (4 * K);
-            ctx.fillStyle = '#2563eb';
-            ctx.fillRect(0, barMarginY, 3 * K, hpx - barMarginY * 2);
-
-            // 文字绘制
-            ctx.fillStyle = '#1e40af';
-            if (isSingleLine) {
-                ctx.font = fontSingle;
-                ctx.textBaseline = 'middle';
-                ctx.fillText(lines[0], padL, hpx / 2 + K);
+            // 1. 卡片底色与微边框 (Card Background & Hairline Border)
+            const cardRadius = 6 * K;
+            topicBadgeRoundRect(ctx, 1, 1, wpx - 2, hpx - 2, cardRadius);
+            if (isVariation) {
+                ctx.fillStyle = '#f0fdf4'; // 雅致清新浅绿底色
+                ctx.fill();
+                ctx.lineWidth = 1.5;
+                ctx.strokeStyle = '#a7f3d0'; // 精致浅翡翠边框
+                ctx.stroke();
+            } else if (isPreview) {
+                ctx.fillStyle = '#fffdfa'; // 温暖柔和暖白天色
+                ctx.fill();
+                ctx.lineWidth = 1.5;
+                ctx.strokeStyle = '#fed7aa'; // 浅琥珀色精致微边框
+                ctx.stroke();
             } else {
-                ctx.font = fontMulti;
+                ctx.fillStyle = '#f8fafc'; // 现代浅蓝灰卡片底色
+                ctx.fill();
+                ctx.lineWidth = 1.5;
+                ctx.strokeStyle = '#cbd5e1'; // 优雅微灰边框
+                ctx.stroke();
+            }
+
+            // 2. 左侧胶囊药丸 (Left Capsule Pill)
+            const pillX = cardPadL;
+            const pillY = isSingleLine ? Math.round((hpx - pillHeight) / 2) : Math.round(padYPt * K + 0.5 * K);
+
+            topicBadgeRoundRect(ctx, pillX, pillY, pillWidth, pillHeight, pillRadius);
+            if (isVariation) {
+                const pillGrad = ctx.createLinearGradient(pillX, pillY, pillX + pillWidth, pillY + pillHeight);
+                pillGrad.addColorStop(0, '#059669'); // 翡翠绿
+                pillGrad.addColorStop(1, '#047857'); // 深翡翠绿
+                ctx.fillStyle = pillGrad;
+            } else if (isPreview) {
+                const pillGrad = ctx.createLinearGradient(pillX, pillY, pillX + pillWidth, pillY + pillHeight);
+                pillGrad.addColorStop(0, '#f59e0b');
+                pillGrad.addColorStop(1, '#d97706');
+                ctx.fillStyle = pillGrad;
+            } else {
+                const pillGrad = ctx.createLinearGradient(pillX, pillY, pillX + pillWidth, pillY + pillHeight);
+                pillGrad.addColorStop(0, '#2563eb');
+                pillGrad.addColorStop(1, '#1d4ed8');
+                ctx.fillStyle = pillGrad;
+            }
+            ctx.fill();
+
+            // 胶囊内文字（纯白色、居中对齐）
+            ctx.font = fontPill;
+            ctx.fillStyle = '#ffffff';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(tagText, pillX + pillWidth / 2, pillY + pillHeight / 2 + 0.5 * K);
+
+            // 3. 右侧考点正文 (Right Topic Text)
+            if (lines.length > 0) {
+                ctx.font = fontContent;
+                ctx.fillStyle = isVariation ? '#064e3b' : '#0f172a'; // 考点深色墨感字色
+                ctx.textAlign = 'left';
                 ctx.textBaseline = 'middle';
-                const padYPx = padYPt * K;
-                const linePitchPx = linePitchPt * K;
-                for (let i = 0; i < lines.length; i++) {
-                    const textY = padYPx + (i + 0.5) * linePitchPx;
-                    ctx.fillText(lines[i], padL, textY);
+
+                const textStartX = pillX + pillWidth + pillToTextGap;
+                if (isSingleLine) {
+                    ctx.fillText(lines[0], textStartX, hpx / 2 + 0.5 * K);
+                } else {
+                    const padYPx = padYPt * K;
+                    const linePitchPx = linePitchPt * K;
+                    for (let i = 0; i < lines.length; i++) {
+                        const textY = padYPx + (i + 0.5) * linePitchPx;
+                        ctx.fillText(lines[i], textStartX, textY);
+                    }
                 }
             }
 
@@ -862,6 +972,14 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         return badge ? badge.dataUrl : null;
     }
 
+    /**
+     * 生成题目与作答区外层圆角矩形 SVG 路径（供 PDFLib.drawSvgPath 绘制圆角虚线框）
+     */
+    function getRetestBoxSvgPath(w, h, r) {
+        const safeR = Math.max(2, Math.min(r || 8, w / 4, h / 4));
+        return `M ${safeR} 0 H ${w - safeR} A ${safeR} ${safeR} 0 0 1 ${w} ${safeR} V ${h - safeR} A ${safeR} ${safeR} 0 0 1 ${w - safeR} ${h} H ${safeR} A ${safeR} ${safeR} 0 0 1 0 ${h - safeR} V ${safeR} A ${safeR} ${safeR} 0 0 1 ${safeR} 0 Z`;
+    }
+
     // Download & Merge PDFs with modal progress feedback
     async function downloadMergedPdf(type, allWeeks) {
         if (!retestData) return;
@@ -872,60 +990,77 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         let pdfsToMerge = [];
         let fileLabel = '';
 
-        const groupAndAppendPdfs = (list, headerWeek) => {
-            if (!list || !list.length) return;
-            const validItems = [];
-            list.forEach(p => {
-                const url = type === 'exercise' ? p.exercisePdf : p.answerPdf;
-                if (url) {
-                    validItems.push({
-                        url: url,
-                        errorNum: p.errorNum,
-                        videoUrl: p.videoUrl || p.video_url || '',
-                        topic: p.topic || '',
-                        week: headerWeek
-                    });
-                }
-            });
-            if (validItems.length === 0) return;
+        const appendWeekPdfs = (wd, fallbackWeek) => {
+            if (!wd) return;
+            const appendList = (list, sourceType, headerWeek) => {
+                if (!list || !list.length) return;
+                const validItems = [];
+                list.forEach(p => {
+                    const url = type === 'exercise' ? p.exercisePdf : p.answerPdf;
+                    if (url) {
+                        const actualSourceType = (sourceType === 'preview') ? 'preview' : (p.sourceType || sourceType);
+                        const isVar = actualSourceType === 'variation' || Boolean(p.isVariation);
+                        validItems.push({
+                            url: url,
+                            errorNum: p.errorNum,
+                            subNum: p.subNum || 1,
+                            videoUrl: p.videoUrl || p.video_url || '',
+                            topic: p.topic || '',
+                            week: headerWeek,
+                            sourceType: actualSourceType,
+                            isVariation: isVar
+                        });
+                    }
+                });
+                if (validItems.length === 0) return;
 
-            // 同知识点错题合并归类：
-            // 若一个学生多道错题属于同一知识点，将这些错题聚合在该知识点下，仅首题展示知识点横条
-            const parseQNum = val => {
-                if (typeof val === 'number') return val;
-                const m = String(val || '').match(/\d+/);
-                return m ? parseInt(m[0], 10) : 0;
-            };
+                const parseQNum = val => {
+                    if (typeof val === 'number') return val;
+                    const m = String(val || '').match(/\d+/);
+                    return m ? parseInt(m[0], 10) : 0;
+                };
 
-            const topicGroups = new Map();
-            validItems.forEach((item, idx) => {
-                const cleanT = String(item.topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
-                const groupKey = cleanT ? ('topic:' + cleanT) : ('__no_topic_' + (item.errorNum || idx) + '__');
-                if (!topicGroups.has(groupKey)) {
-                    topicGroups.set(groupKey, []);
-                }
-                topicGroups.get(groupKey).push(item);
-            });
+                // 确保原题在前、变式题紧随其后排版
+                validItems.sort((a, b) => {
+                    const diff = parseQNum(a.errorNum) - parseQNum(b.errorNum);
+                    if (diff !== 0) return diff;
+                    const rankA = a.isVariation ? (10 + (a.subNum || 1)) : 0;
+                    const rankB = b.isVariation ? (10 + (b.subNum || 1)) : 0;
+                    return rankA - rankB;
+                });
 
-            topicGroups.forEach(groupItems => {
-                groupItems.sort((a, b) => parseQNum(a.errorNum) - parseQNum(b.errorNum));
-                groupItems.forEach((item, idx) => {
-                    pdfsToMerge.push({
-                        ...item,
-                        isFirstInTopicGroup: idx === 0,
-                        topicGroupSize: groupItems.length
+                // 同知识点错题合并归类（举一反三每题独立展示胶囊卡）
+                const topicGroups = new Map();
+                validItems.forEach((item, idx) => {
+                    const cleanT = String(item.topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
+                    const groupKey = item.isVariation
+                        ? ('__var_' + item.errorNum + '_' + (item.subNum || idx) + '__')
+                        : (cleanT ? ('topic:' + cleanT) : ('__no_topic_' + (item.errorNum || idx) + '__'));
+                    if (!topicGroups.has(groupKey)) {
+                        topicGroups.set(groupKey, []);
+                    }
+                    topicGroups.get(groupKey).push(item);
+                });
+
+                topicGroups.forEach(groupItems => {
+                    groupItems.forEach((item, idx) => {
+                        pdfsToMerge.push({
+                            ...item,
+                            isFirstInTopicGroup: item.isVariation ? true : (idx === 0),
+                            topicGroupSize: groupItems.length
+                        });
                     });
                 });
-            });
+            };
+            appendList(wd.previewPdfs, 'preview', wd.previewWeek || fallbackWeek);
+            appendList(wd.pdfs, 'homework', fallbackWeek);
         };
 
         if (allWeeks) {
             const sortedWeeks = Object.keys(weeksData).map(Number).sort((a, b) => a - b);
             sortedWeeks.forEach(w => {
                 const wd = weeksData[String(w)];
-                if (wd && wd.pdfs) {
-                    groupAndAppendPdfs(wd.pdfs, w);
-                }
+                appendWeekPdfs(wd, w);
             });
             if (sortedWeeks.length > 3) {
                 fileLabel = getTopicLabel(sortedWeeks[0]) + '至' + getTopicLabel(sortedWeeks[sortedWeeks.length - 1]) + '_全' + sortedWeeks.length + '讲合辑_' + typeLabel;
@@ -934,8 +1069,8 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             }
         } else {
             const weekData = weeksData[String(activeWeek)];
-            if (!weekData || !weekData.pdfs) return;
-            groupAndAppendPdfs(weekData.pdfs, activeWeek);
+            if (!weekData) return;
+            appendWeekPdfs(weekData, activeWeek);
             fileLabel = getTopicLabel(activeWeek) + '_' + typeLabel;
         }
 
@@ -1100,43 +1235,43 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 }
 
                 // 2. 自底向上逐行扫描题目内容底部结束位置
-                // 排除底部 52pt（约占单页 6.2%~7%，通常为原始试卷页脚、内部资料标识或切片页码）
-                const footerIgnorePt = 52;
-                const footerIgnorePx = Math.max(Math.floor(height * 0.065), Math.floor((footerIgnorePt / pageHeightPt) * height));
+                // 排除底部页脚区域（缩减至 26pt，约单页 3%，避免误切紧贴下边缘的长大题或大图）
+                const footerIgnorePt = 26;
+                const footerIgnorePx = Math.max(Math.floor(height * 0.03), Math.floor((footerIgnorePt / pageHeightPt) * height));
                 const scanBottom = height - footerIgnorePx;
                 const scanTop = Math.max(10, Math.floor((topCropPt / pageHeightPt) * height));
 
-                // 题目内容深色墨水阈值：纯正题干墨水深黑 (RGB < 100)，
-                // 设定为 145 并要求每行深色像素 >= 6，可彻底忽略 180~245 的浅灰巨幅斜向水印、底纹与抗锯齿边缘
-                const CONTENT_INK_THRESHOLD = 145;
-
+                // 题目内容墨水检测：
+                // 几何线条、图表顶点、单字母编号（如 B、C、D、点 M 等）或分式下标极其纤细，单行往往仅 1~4 个像素宽！
+                // 针对纯深色墨水 (RGB < 115) 仅需单行出现 >= 2 像素即判定有笔画；抗锯齿过渡墨水 (RGB < 165) 仅需 >= 4 像素
                 let lastContentY = scanTop;
 
                 for (let y = scanBottom; y >= scanTop; y--) {
-                    let inkCount = 0;
+                    let darkCount = 0;
+                    let deepDarkCount = 0;
                     const rowOffset = y * width * 4;
-                    for (let x = 12; x < width - 12; x++) {
+                    for (let x = 10; x < width - 10; x++) {
                         const idx = rowOffset + x * 4;
                         const r = data[idx];
                         const g = data[idx + 1];
                         const b = data[idx + 2];
-                        if (r < CONTENT_INK_THRESHOLD && g < CONTENT_INK_THRESHOLD && b < CONTENT_INK_THRESHOLD) {
-                            inkCount++;
-                            if (inkCount >= 6) {
-                                lastContentY = y;
-                                break;
-                            }
+                        if (r < 115 && g < 115 && b < 115) {
+                            deepDarkCount++;
+                            darkCount++;
+                        } else if (r < 165 && g < 165 && b < 165) {
+                            darkCount++;
                         }
                     }
-                    if (lastContentY === y) {
+                    if (deepDarkCount >= 2 || darkCount >= 4) {
+                        lastContentY = y;
                         break;
                     }
                 }
 
                 // 换算回 PDF Points
                 const rawBottomPt = (lastContentY / height) * pageHeightPt;
-                // 加 18pt 呼吸余量（防止切到最下方下划线或下标）
-                const bottomCutPt = Math.min(pageHeightPt, Math.ceil(rawBottomPt + 18));
+                // 预留充分的呼吸余量（由原先极其容易切图切字的 18pt 提升至 35pt，约 1.2cm），严密保护几何图形底部顶点、字母标签、下划线及分式
+                const bottomCutPt = Math.min(pageHeightPt, Math.ceil(rawBottomPt + 35));
 
                 // 实际有效高度
                 const rawEffectiveH = bottomCutPt - topCropPt;
@@ -1158,14 +1293,22 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         }
 
         try {
-            // A4 规格
+            // A4 规格与外框排版参数
             const PAGE_WIDTH = 595.28;
             const PAGE_HEIGHT = 841.89;
             const TOP_MARGIN = 26;
             const BOTTOM_MARGIN = 28;
             const SEPARATOR_HEIGHT = (window.retestQuestionSpacing && window.retestQuestionSpacing >= 8) ? window.retestQuestionSpacing : 85;
-            // Beta 新增：含答案版每道题首切片上方的知识点横条（条高 20pt + 下间距 6pt）
-            const TOPIC_BANNER_H = 20;
+
+            // 题目圆角虚线框规格
+            const BOX_MARGIN_X = 26;
+            const BOX_WIDTH = PAGE_WIDTH - 2 * BOX_MARGIN_X; // 543.28 pt
+            const BOX_PAD_TOP = 8;
+            const BOX_PAD_BOTTOM = 8;
+            const BOX_GAP = 12; // 同页不同题目之间的纵向间距
+
+            // Beta 新增：含答案版每道题首切片上方的“胶囊考点卡”（卡高 25pt + 下间距 6pt）
+            const TOPIC_BANNER_H = 25;
             const TOPIC_BANNER_GAP = 6;
             const TOPIC_BANNER_BLOCK = TOPIC_BANNER_H + TOPIC_BANNER_GAP;
 
@@ -1180,7 +1323,8 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 const videoUrl = (typeof qItem === 'object' && qItem.videoUrl) ? String(qItem.videoUrl).trim() : '';
                 const qWeek = (typeof qItem === 'object' && qItem.week) ? qItem.week : activeWeek;
                 const qTopic = (typeof qItem === 'object' && qItem.topic) ? String(qItem.topic).trim() : '';
-                const qTopicLabel = formatQuestionTopicLabel(qWeek, qTopic);
+                const qSourceType = (typeof qItem === 'object' && qItem.sourceType) ? qItem.sourceType : 'homework';
+                const qTopicLabel = formatQuestionTopicLabel(qWeek, qTopic, qSourceType);
                 const qNum = typeof qItem === 'object' ? (qItem.errorNum || (i + 1)) : (i + 1);
 
                 try {
@@ -1202,34 +1346,50 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                         const { topCropPt, bottomCutPt, effectiveHeightPt, isFullPage } = bounds;
 
                         // 检查当前页剩余空间是否足够
-                        // 每道题首切片附带“专题X：知识点”横条，预留其高度（支持智能换行）
                         const isFirstInTopicGroup = typeof qItem === 'object' ? (qItem.isFirstInTopicGroup !== false) : true;
                         const showTopicBanner = (pIdx === 0 && isFirstInTopicGroup && !!qTopicLabel);
+                        const isLastPageOfQuestion = (pIdx === pageCount - 1);
+                        const answerH = isLastPageOfQuestion ? SEPARATOR_HEIGHT : 0;
+
                         let topicBannerInfo = null;
                         let currentBannerH = TOPIC_BANNER_H;
-                        let currentBannerBlock = TOPIC_BANNER_BLOCK;
+                        let currentBannerBlock = 0;
+
+                        const bannerW = BOX_WIDTH - 16;
+                        const bannerX = BOX_MARGIN_X + 8;
 
                         if (showTopicBanner) {
-                            const estW = Math.max(120, Math.min(540, origW || 540));
-                            topicBannerInfo = generateTopicBadge(qTopicLabel, estW);
+                            topicBannerInfo = generateTopicBadge(qTopicLabel, bannerW);
                             if (topicBannerInfo) {
                                 currentBannerH = topicBannerInfo.heightPt;
-                                currentBannerBlock = topicBannerInfo.blockPt;
+                                currentBannerBlock = currentBannerH + TOPIC_BANNER_GAP;
                             }
                         }
 
-                        const isPageTop = (!currentPage || currentY >= (PAGE_HEIGHT - TOP_MARGIN - 5));
-                        const neededH = isPageTop ? effectiveHeightPt : (SEPARATOR_HEIGHT + effectiveHeightPt);
-                        const neededHWithBanner = neededH + (showTopicBanner ? currentBannerBlock : 0);
+                        const innerContentW = BOX_WIDTH - 12;
+                        const contentAreaH = PAGE_HEIGHT - TOP_MARGIN - BOTTOM_MARGIN;
+                        const maxAvailContentH = contentAreaH - BOX_PAD_TOP - BOX_PAD_BOTTOM - currentBannerBlock - answerH;
+                        const scale = isFullPage
+                            ? Math.min(innerContentW / origW, Math.max(0.1, (maxAvailContentH - 10) / effectiveHeightPt), 1.0)
+                            : Math.min(innerContentW / origW, 1.0);
+                        const drawW = origW * scale;
+                        const drawH = effectiveHeightPt * scale;
+                        const realDrawX = (BOX_MARGIN_X + 6) + (innerContentW - drawW) / 2;
 
-                        if (!currentPage || (currentY - neededHWithBanner < BOTTOM_MARGIN) || (isFullPage && !isPageTop)) {
+                        // 每一题连同作答区外框总高度
+                        const boxH = BOX_PAD_TOP + currentBannerBlock + drawH + answerH + BOX_PAD_BOTTOM;
+
+                        const isPageTop = (!currentPage || currentY >= (PAGE_HEIGHT - TOP_MARGIN - 5));
+
+                        if (!currentPage || (currentY - boxH < BOTTOM_MARGIN) || (isFullPage && !isPageTop)) {
                             // 空间不足，或当前是整页大题且当前页已被占用 -> 开新 A4 页
                             currentPage = mergedPdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
                             currentY = PAGE_HEIGHT - TOP_MARGIN;
-                        } else if (!isPageTop) {
-                            // 拼接在上一题下方：按作答间距留白
-                            currentY -= SEPARATOR_HEIGHT;
                         }
+
+                        const boxTopY = currentY;
+                        const boxBottomY = boxTopY - boxH;
+                        let boxContentY = boxTopY - BOX_PAD_TOP;
 
                         // 裁剪并嵌入
                         const [embedded] = await mergedPdf.embedPdf(sourceDoc, [pIdx]);
@@ -1250,53 +1410,44 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             }
                         }
 
-                        const contentAreaH = PAGE_HEIGHT - TOP_MARGIN - BOTTOM_MARGIN;
-                        const scale = isFullPage
-                            ? Math.min(PAGE_WIDTH / origW, Math.max(0.1, (contentAreaH - (showTopicBanner ? currentBannerBlock : 0)) / effectiveHeightPt), 1.0)
-                            : Math.min(PAGE_WIDTH / origW, 1.0);
-                        const drawW = origW * scale;
-                        const drawH = effectiveHeightPt * scale;
-                        const drawX = (PAGE_WIDTH - drawW) / 2;
-
-                        // 在每道题首切片上方绘制“专题X：知识点”横条（失败则跳过，不挡正文）
-                        if (showTopicBanner) {
+                        // 1. 在题框内顶部绘制“胶囊考点卡”
+                        if (showTopicBanner && topicBannerInfo && topicBannerInfo.dataUrl) {
                             try {
-                                if (!topicBannerInfo || Math.abs(topicBannerInfo.widthPt - drawW) > 2) {
-                                    topicBannerInfo = generateTopicBadge(qTopicLabel, drawW);
-                                }
-                                if (topicBannerInfo && topicBannerInfo.dataUrl) {
-                                    const badgeImg = await mergedPdf.embedPng(topicBannerInfo.dataUrl);
-                                    currentPage.drawImage(badgeImg, {
-                                        x: drawX,
-                                        y: currentY - topicBannerInfo.heightPt,
-                                        width: drawW,
-                                        height: topicBannerInfo.heightPt
-                                    });
-                                    currentY -= topicBannerInfo.blockPt;
-                                }
+                                const badgeImg = await mergedPdf.embedPng(topicBannerInfo.dataUrl);
+                                currentPage.drawImage(badgeImg, {
+                                    x: bannerX,
+                                    y: boxContentY - topicBannerInfo.heightPt,
+                                    width: bannerW,
+                                    height: topicBannerInfo.heightPt
+                                });
+                                boxContentY -= (topicBannerInfo.heightPt + TOPIC_BANNER_GAP);
                             } catch (badgeErr) {
                                 console.warn('Topic badge embed skipped:', badgeErr);
                             }
                         }
 
+                        // 2. 绘制题目切片
+                        const questionBottomY = boxContentY - drawH;
                         currentPage.drawPage(embedded, {
-                            x: drawX,
-                            y: currentY - drawH,
+                            x: realDrawX,
+                            y: questionBottomY,
                             width: drawW,
                             height: drawH
                         });
-                        currentY -= drawH;
+                        boxContentY = questionBottomY;
 
-                        // 在每道题的右下角添加视频讲解二维码与说明文字：第x题视频讲解（由系统全局开关控制）
-                        if (window.retestQrCodeEnabled !== false && videoUrl && pIdx === pageCount - 1) {
+                        // 3. 在每道题右下角/作答区内添加视频讲解二维码与说明文字
+                        if (window.retestQrCodeEnabled !== false && videoUrl && isLastPageOfQuestion) {
                             try {
                                 const qrDataUrl = await generateQuestionQrBadge(videoUrl, qNum);
                                 if (qrDataUrl) {
                                     const qrImage = await mergedPdf.embedPng(qrDataUrl);
                                     const badgeW = 54;
                                     const badgeH = 68;
-                                    const badgeX = (drawX + drawW) - badgeW - 6;
-                                    const badgeY = currentY + 6;
+                                    const badgeX = (BOX_MARGIN_X + BOX_WIDTH) - badgeW - 10;
+                                    const badgeY = (answerH >= 65)
+                                        ? (boxBottomY + 10)
+                                        : Math.max(boxBottomY + 8, questionBottomY + 4);
 
                                     currentPage.drawImage(qrImage, {
                                         x: badgeX,
@@ -1328,6 +1479,23 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                                 console.warn('Failed to embed question QR badge:', qrErr);
                             }
                         }
+
+                        // 4. 绘制包裹“考点卡 + 题目 + 作答区”的圆角虚线框
+                        try {
+                            const boxSvgPath = getRetestBoxSvgPath(BOX_WIDTH, boxH, 8);
+                            currentPage.drawSvgPath(boxSvgPath, {
+                                x: BOX_MARGIN_X,
+                                y: boxTopY,
+                                borderColor: PDFLib.rgb(0.70, 0.74, 0.80),
+                                borderWidth: 0.9,
+                                borderDashArray: [4, 3]
+                            });
+                        } catch (boxErr) {
+                            console.warn('Draw question box failed:', boxErr);
+                        }
+
+                        // 为下一题预留纵向间距
+                        currentY = boxBottomY - BOX_GAP;
                     }
                 } catch (err) {
                     console.error('Failed to load/pack PDF chunk', err);
