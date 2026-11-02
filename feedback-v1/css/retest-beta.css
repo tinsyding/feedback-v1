@@ -998,6 +998,93 @@
             font-weight: 600;
         }
 
+        /* 题号排版选项控制卡片 (Beta 实验) */
+        .choice-renumber-box {
+            background: #f8fafc;
+            border: 1.5px solid #e2e8f0;
+            border-radius: var(--radius-lg, 12px);
+            padding: 11px 13px;
+            margin-bottom: 12px;
+        }
+
+        .choice-renumber-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .choice-renumber-label {
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: var(--text-main, #1e293b);
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .choice-renumber-tag {
+            font-size: 0.68rem;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 9999px;
+            letter-spacing: 0.3px;
+        }
+
+        .choice-renumber-tag.badge-recommended {
+            background: #dbeafe;
+            color: #1d4ed8;
+        }
+
+        .choice-renumber-tag.badge-orig {
+            background: #f1f5f9;
+            color: #64748b;
+        }
+
+        .choice-renumber-segmented {
+            display: flex;
+            background: #e2e8f0;
+            padding: 3px;
+            border-radius: 10px;
+            gap: 3px;
+        }
+
+        .renumber-seg-btn {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            padding: 7px 8px;
+            border: none;
+            background: transparent;
+            border-radius: 7px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: #64748b;
+            cursor: pointer;
+            transition: all 0.18s ease;
+            white-space: nowrap;
+        }
+
+        .renumber-seg-btn.active {
+            background: #ffffff;
+            color: var(--primary, #2563eb);
+            font-weight: 700;
+            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+        }
+
+        .renumber-seg-btn svg {
+            flex-shrink: 0;
+        }
+
+        .choice-renumber-hint {
+            margin-top: 7px;
+            font-size: 0.72rem;
+            color: #64748b;
+            line-height: 1.35;
+        }
+
         .choice-options {
             display: flex;
             flex-direction: column;
