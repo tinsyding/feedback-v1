@@ -73,6 +73,12 @@ Thumbs.db
 # Node / Frontend / Rust dependencies & build outputs
 node_modules/
 dist/
+dist_dir/
+dist_zip/
+dist_nuitka*/
+*.dist/
+*.build/
+*.onefile-build/
 target/
 .turbo/
 .cache/

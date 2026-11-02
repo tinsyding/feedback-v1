@@ -16,7 +16,13 @@ APP_VERSION = "1.8.22"
 
 
 def asset_path(filename: str) -> str:
-    """返回运行时资源路径：自适应 PyInstaller onefile/onedir、Nuitka standalone 及源码运行。"""
+    """返回运行时资源路径：自适应 PyInstaller onefile/onedir、Nuitka standalone/onefile 及源码运行。"""
+    # 0. Nuitka onefile 临时解压目录
+    nuitka_dir = os.environ.get("NUITKA_ONEFILE_DIRECTORY")
+    if nuitka_dir:
+        for p in (os.path.join(nuitka_dir, filename), os.path.join(nuitka_dir, "sender_py", filename)):
+            if os.path.isfile(p):
+                return p
     # 1. PyInstaller _MEIPASS 优先 (onefile / onedir 临时目录)
     if getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", None):
         p = os.path.join(sys._MEIPASS, filename)

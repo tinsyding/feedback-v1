@@ -63,6 +63,10 @@ def _load_example_photo(tk, max_w=EXAMPLE_MAX_W):
 
     here = os.path.dirname(os.path.abspath(__file__))
     candidates = []
+    nuitka_dir = os.environ.get("NUITKA_ONEFILE_DIRECTORY")
+    if nuitka_dir:
+        candidates.append(os.path.join(nuitka_dir, "example.png"))
+        candidates.append(os.path.join(nuitka_dir, "sender_py", "example.png"))
     base = getattr(sys, "_MEIPASS", None)
     if base:
         candidates.append(os.path.join(base, "example.png"))

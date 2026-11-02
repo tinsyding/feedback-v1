@@ -20,7 +20,16 @@ except ModuleNotFoundError:
 
 
 def get_web_ui_html_path() -> str:
-    """获取单页面 web_ui.html 路径（自适应 PyInstaller onefile/onedir、Nuitka standalone 及源码路径）。"""
+    """获取单页面 web_ui.html 路径（自适应 PyInstaller onefile/onedir、Nuitka standalone/onefile 及源码路径）。"""
+    # 0. Nuitka onefile 临时解压目录
+    nuitka_dir = os.environ.get("NUITKA_ONEFILE_DIRECTORY")
+    if nuitka_dir:
+        p1 = os.path.join(nuitka_dir, "sender_py", "web_ui.html")
+        if os.path.isfile(p1):
+            return p1
+        p2 = os.path.join(nuitka_dir, "web_ui.html")
+        if os.path.isfile(p2):
+            return p2
     # 1. PyInstaller _MEIPASS 优先
     if getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", None):
         p1 = os.path.join(sys._MEIPASS, "sender_py", "web_ui.html")
@@ -99,7 +108,13 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
 
         if path == "/favicon.ico":
             icon_path = ""
-            if getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", None):
+            nuitka_dir = os.environ.get("NUITKA_ONEFILE_DIRECTORY")
+            if nuitka_dir:
+                for c in (os.path.join(nuitka_dir, "favicon.ico"), os.path.join(nuitka_dir, "sender_py", "favicon.ico")):
+                    if os.path.isfile(c):
+                        icon_path = c
+                        break
+            if not icon_path and getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", None):
                 candidate = os.path.join(sys._MEIPASS, "favicon.ico")
                 if os.path.isfile(candidate):
                     icon_path = candidate
