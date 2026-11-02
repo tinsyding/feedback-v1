@@ -1,7 +1,7 @@
 /**
  * ============================================================================
  * 极方管理后台 (Admin Console) 前端运行脚本 - 生产环境合并包
- * 自动生成时间: 2026-11-01 23:48:19
+ * 自动生成时间: 2026-11-02 20:51:37
  * 源码模块目录: js/admin/
  * 请勿直接手动修改此文件，开发时请修改 js/admin/ 中的子模块并执行本打包脚本。
  * ============================================================================
@@ -1912,7 +1912,7 @@
 
             let hwContent = '';
             if (hwErrList.length > 0) {
-                hwContent = `${hwErrList.map(q => `<span class="q-badge">${escapeHtml(String(q))}</span>`).join('')}<span style="font-size:0.7rem; color:var(--text-muted); margin-left:2px;">(${hwErrList.length}题)</span>`;
+                hwContent = `${hwErrList.map(q => `<span class="q-badge">${escapeHtml(String(q))}</span>`).join('')}<span style="font-size:0.75rem; color:var(--text-muted);">(${hwErrList.length}题)</span>`;
             } else if (isHwFullScore) {
                 hwContent = `<span class="q-badge-none"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:3px;vertical-align:-1px;"><polyline points="20 6 9 17 4 12"></polyline></svg>全对</span>`;
             } else if (hw !== null) {
@@ -1923,15 +1923,15 @@
 
             let pvContent = '';
             if (pvErrList.length > 0) {
-                pvContent = `${pvErrList.map(q => `<span class="q-badge" style="border-color:rgba(245,158,11,0.4); color:#fbbf24;">${escapeHtml(String(q))}</span>`).join('')}<span style="font-size:0.7rem; color:var(--text-muted); margin-left:2px;">(${pvErrList.length}题)</span>`;
+                pvContent = `${pvErrList.map(q => `<span class="q-badge" style="border-color:rgba(245,158,11,0.4); color:#fbbf24;">${escapeHtml(String(q))}</span>`).join('')}<span style="font-size:0.75rem; color:var(--text-muted);">(${pvErrList.length}题)</span>`;
             } else if (isPvFullScore || (hasPreview && pvErrList.length === 0 && pvScoreVal !== null)) {
                 pvContent = `<span class="q-badge-none" style="color:#fbbf24; border-color:rgba(245,158,11,0.3); background:rgba(245,158,11,0.1);"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:3px;vertical-align:-1px;"><polyline points="20 6 9 17 4 12"></polyline></svg>全对</span>`;
             } else {
                 pvContent = `<span style="color:var(--text-muted); font-size:0.78rem;">-</span>`;
             }
 
-            const hwTag = `<span style="display:inline-block; font-size:0.65rem; font-weight:700; padding:0 3px; border-radius:3px; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); flex-shrink:0; line-height:1.3;" title="课后巩固">巩</span>`;
-            const pvTag = `<span style="display:inline-block; font-size:0.65rem; font-weight:700; padding:0 3px; border-radius:3px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); flex-shrink:0; line-height:1.3;" title="课前预习">预</span>`;
+            const hwTag = `<span style="display:inline-block; font-size:0.68rem; font-weight:600; padding:1px 5px; border-radius:4px; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); flex-shrink:0; line-height:1.3;">巩固</span>`;
+            const pvTag = `<span style="display:inline-block; font-size:0.68rem; font-weight:600; padding:1px 5px; border-radius:4px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); flex-shrink:0; line-height:1.3;">预习</span>`;
 
             return `
                 <div style="display:flex; flex-direction:column; gap:4px; justify-content:center;">
@@ -1952,8 +1952,8 @@
             const hwComment = (r.teacher_comment || '').trim();
             const pvComment = (r.preview_comment || '').trim();
 
-            const hwTag = `<span style="display:inline-block; font-size:0.65rem; font-weight:700; padding:0 3px; border-radius:3px; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); flex-shrink:0; line-height:1.3;" title="课后巩固">巩</span>`;
-            const pvTag = `<span style="display:inline-block; font-size:0.65rem; font-weight:700; padding:0 3px; border-radius:3px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); flex-shrink:0; line-height:1.3;" title="课前预习">预</span>`;
+            const hwTag = `<span style="display:inline-block; font-size:0.68rem; font-weight:600; padding:1px 5px; border-radius:4px; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); flex-shrink:0; line-height:1.3;">巩固</span>`;
+            const pvTag = `<span style="display:inline-block; font-size:0.68rem; font-weight:600; padding:1px 5px; border-radius:4px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); flex-shrink:0; line-height:1.3;">预习</span>`;
 
             const hwText = hwComment ? escapeHtml(hwComment) : '<span style="color:var(--text-muted);">-</span>';
             const pvText = pvComment ? escapeHtml(pvComment) : '<span style="color:var(--text-muted);">-</span>';
@@ -1991,7 +1991,7 @@
                     <th style="width: 165px;">年级 / 班层 / 学科</th>
                     <th class="th-sortable ${recSortField === 'week_num' ? 'active' : ''}" style="width: 110px;" onclick="setRecordsSort('week_num')">周次 (巩固/预习) ${sortIcon('week_num')}</th>
                     <th class="th-sortable ${recSortField === 'homework_score' ? 'active' : ''}" style="width: 120px;" onclick="setRecordsSort('homework_score')">成绩 (巩固/预习) ${sortIcon('homework_score')}</th>
-                    <th class="th-sortable ${recSortField === 'error_count' ? 'active' : ''}" style="width: 155px;" onclick="setRecordsSort('error_count')">错题 (巩/预) ${sortIcon('error_count')}</th>
+                    <th class="th-sortable ${recSortField === 'error_count' ? 'active' : ''}" style="width: 185px;" onclick="setRecordsSort('error_count')">错题题号 (巩固/预习) ${sortIcon('error_count')}</th>
                     <th style="width: 180px; max-width: 190px;">评语 (巩固/预习)</th>
                     <th class="th-sortable ${recSortField === 'created_by' ? 'active' : ''}" style="width: 115px;" onclick="setRecordsSort('created_by')">责任教师 ${sortIcon('created_by')}</th>
                     <th class="th-sortable cell-mono ${recSortField === 'updated_at' ? 'active' : ''}" style="width: 100px;" onclick="setRecordsSort('updated_at')">更改时间 ${sortIcon('updated_at')}</th>
@@ -2037,8 +2037,8 @@
                 const hwScoreDisplay = (r.homework_score !== null && r.homework_score !== undefined && r.homework_score !== '') ? formatScore(r.homework_score) : '-';
                 const pvScoreDisplay = (r.preview_score !== null && r.preview_score !== undefined && r.preview_score !== '') ? formatScore(r.preview_score) : null;
 
-                const hwTag = `<span style="display:inline-block; font-size:0.65rem; font-weight:700; padding:0 3px; border-radius:3px; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); flex-shrink:0; line-height:1.3;" title="课后巩固">巩</span>`;
-                const pvTag = `<span style="display:inline-block; font-size:0.65rem; font-weight:700; padding:0 3px; border-radius:3px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); flex-shrink:0; line-height:1.3;" title="课前预习">预</span>`;
+                const hwTag = `<span style="display:inline-block; font-size:0.68rem; font-weight:600; padding:1px 5px; border-radius:4px; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); flex-shrink:0; line-height:1.3;">巩固</span>`;
+                const pvTag = `<span style="display:inline-block; font-size:0.68rem; font-weight:600; padding:1px 5px; border-radius:4px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); flex-shrink:0; line-height:1.3;">预习</span>`;
 
                 return `
                     <tr>
@@ -2165,10 +2165,10 @@
                             <div class="db-card-meta-cell">
                                 <span class="db-card-meta-label">成绩 (巩固 / 预习)</span>
                                 <div style="display:flex; align-items:center; gap:6px;">
-                                    <span style="font-size:0.68rem; font-weight:600; padding:1px 4px; border-radius:3px; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3);" title="课后巩固">巩</span>
+                                    <span style="font-size:0.68rem; font-weight:600; padding:1px 4px; border-radius:3px; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3);">巩固</span>
                                     <b style="color:#38bdf8; font-family:var(--font-mono); font-size:1.02rem;">${hwScoreDisplay}${hwScoreDisplay !== '-' ? '分' : ''}</b>
                                     <span style="color:var(--text-muted); font-size:0.78rem; margin:0 2px;">/</span>
-                                    <span style="font-size:0.68rem; font-weight:600; padding:1px 4px; border-radius:3px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3);" title="课前预习">预</span>
+                                    <span style="font-size:0.68rem; font-weight:600; padding:1px 4px; border-radius:3px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3);">预习</span>
                                     <b style="color:#f59e0b; font-family:var(--font-mono); font-size:0.95rem;">${pvScoreDisplay !== null ? `${pvScoreDisplay}分` : '-'}</b>
                                 </div>
                             </div>
@@ -2189,13 +2189,13 @@
                         ${r.teacher_comment ? `
                         <div class="db-card-comment" onclick="openRecordDetailModal(${idx})" title="点击查看完整巩固评语">
                             <span class="db-card-comment-icon"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span>
-                            <span class="db-card-comment-body"><b style="color:#38bdf8; font-weight:600;">[巩]</b> ${escapeHtml(r.teacher_comment)}</span>
+                            <span class="db-card-comment-body"><b style="color:#38bdf8; font-weight:600;">[巩固评语]</b> ${escapeHtml(r.teacher_comment)}</span>
                         </div>` : ''}
 
                         ${r.preview_comment ? `
                         <div class="db-card-comment" onclick="openRecordDetailModal(${idx})" title="点击查看完整预习评语" style="border-left: 3px solid #f59e0b; margin-top: 4px;">
                             <span class="db-card-comment-icon" style="color:#f59e0b;"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg></span>
-                            <span class="db-card-comment-body"><b style="color:#f59e0b; font-weight:600;">[预]</b> ${escapeHtml(r.preview_comment)}</span>
+                            <span class="db-card-comment-body"><b style="color:#f59e0b; font-weight:600;">[预习评语]</b> ${escapeHtml(r.preview_comment)}</span>
                         </div>` : ''}
 
                         <div class="db-card-footer">
@@ -3229,7 +3229,7 @@
                         <th style="width: 65px;">班型</th>
                         <th class="th-sortable ${dbSortField === 'week_num' ? 'active' : ''}" onclick="setDbSort('week_num')" style="width: 105px;">周次 (巩固/预习) ${sortIcon('week_num')}</th>
                         <th class="th-sortable ${dbSortField === 'homework_score' ? 'active' : ''}" onclick="setDbSort('homework_score')" style="width: 115px;">成绩 (巩固/预习) ${sortIcon('homework_score')}</th>
-                        <th class="th-sortable ${dbSortField === 'error_count' ? 'active' : ''}" onclick="setDbSort('error_count')" style="width: 155px;">错题 (巩/预) ${sortIcon('error_count')}</th>
+                        <th class="th-sortable ${dbSortField === 'error_count' ? 'active' : ''}" onclick="setDbSort('error_count')" style="width: 185px;">错题题号 (巩固/预习) ${sortIcon('error_count')}</th>
                         <th style="width: 175px; max-width: 185px;">评语 (巩固/预习)</th>
                         <th class="th-sortable ${dbSortField === 'created_by' ? 'active' : ''}" onclick="setDbSort('created_by')" style="width: 105px;">生成教师 ${sortIcon('created_by')}</th>
                         <th class="th-sortable ${dbSortField === 'created_at' ? 'active' : ''}" onclick="setDbSort('created_at')" style="width: 120px;">录入时间 ${sortIcon('created_at')}</th>
@@ -3846,10 +3846,10 @@
                                 <div class="db-card-meta-cell">
                                     <span class="db-card-meta-label">成绩 (巩固 / 预习)</span>
                                     <div style="display:flex; align-items:center; gap:6px;">
-                                        <span style="font-size:0.68rem; font-weight:600; padding:1px 4px; border-radius:3px; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3);" title="课后巩固">巩</span>
+                                        <span style="font-size:0.68rem; font-weight:600; padding:1px 4px; border-radius:3px; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3);">巩固</span>
                                         <b style="color:#38bdf8; font-family:var(--font-mono); font-size:1.02rem;">${hwScoreDisplay}${hwScoreDisplay !== '-' ? '分' : ''}</b>
                                         <span style="color:var(--text-muted); font-size:0.78rem; margin:0 2px;">/</span>
-                                        <span style="font-size:0.68rem; font-weight:600; padding:1px 4px; border-radius:3px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3);" title="课前预习">预</span>
+                                        <span style="font-size:0.68rem; font-weight:600; padding:1px 4px; border-radius:3px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3);">预习</span>
                                         <b style="color:#f59e0b; font-family:var(--font-mono); font-size:0.95rem;">${pvScoreDisplay !== null ? `${pvScoreDisplay}分` : '-'}</b>
                                     </div>
                                 </div>
@@ -3866,13 +3866,13 @@
                             ${r.teacher_comment ? `
                             <div class="db-card-comment" onclick="openDbDetailModal(${idx})" title="点击查看完整巩固评语">
                                 <span class="db-card-comment-icon"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span>
-                                <span class="db-card-comment-body"><b style="color:#38bdf8; font-weight:600;">[巩]</b> ${escapeHtml(r.teacher_comment)}</span>
+                                <span class="db-card-comment-body"><b style="color:#38bdf8; font-weight:600;">[巩固评语]</b> ${escapeHtml(r.teacher_comment)}</span>
                             </div>` : ''}
 
                             ${r.preview_comment ? `
                             <div class="db-card-comment" onclick="openDbDetailModal(${idx})" title="点击查看完整预习评语" style="border-left: 3px solid #f59e0b; margin-top: 4px;">
                                 <span class="db-card-comment-icon" style="color:#f59e0b;"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg></span>
-                                <span class="db-card-comment-body"><b style="color:#f59e0b; font-weight:600;">[预]</b> ${escapeHtml(r.preview_comment)}</span>
+                                <span class="db-card-comment-body"><b style="color:#f59e0b; font-weight:600;">[预习评语]</b> ${escapeHtml(r.preview_comment)}</span>
                             </div>` : ''}
 
                             <div class="db-card-footer">
@@ -5064,14 +5064,9 @@
                 const pvScoreVal = (record.preview_score !== null && record.preview_score !== undefined && record.preview_score !== '') ? parseFloat(record.preview_score) : null;
                 const isPvFullScore = (pvScoreVal !== null && pvScoreVal >= 100) || /全对|满分|零失误|无错题/i.test(previewCommentText);
 
-                // 来源文件分类：预习来源文件 vs 巩固来源文件（排除统计报告与学员花名册）
-                const isReportFile = (f) => /报告|report|出勤|attendance/i.test(f);
-                const isRosterFile = (f) => /all_students|学员|名单|roster|花名册|信息表/i.test(f);
-                const isPreviewFile = (f) => /预习|preview/i.test(f);
-                const isHomeworkFile = (f) => /巩固|课后|homework/i.test(f);
-
-                const previewSrcFiles = srcList.filter(f => isPreviewFile(f));
-                const hwSrcFiles = srcList.filter(f => !isReportFile(f) && !isRosterFile(f) && (isHomeworkFile(f) || !isPreviewFile(f)));
+                // 来源文件分类：预习来源文件 vs 巩固来源文件
+                const previewSrcFiles = srcList.filter(f => /预习|preview/i.test(f));
+                const hwSrcFiles = srcList.filter(f => /巩固|课后|homework/i.test(f) || (!/预习|preview/i.test(f) && previewSrcFiles.length > 0));
 
                 body.innerHTML = `
                     <div style="display: flex; flex-direction: column; gap: 14px;">
@@ -5121,9 +5116,9 @@
                                             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
                                             <span>错题本</span>
                                         </button>
-                                        <button type="button" class="btn secondary" style="padding: 6px 12px; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 5px;" onclick="openRetestDirect('${escapeHtml(record.retest_token)}')" title="管理员免密直达错题本">
-                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polygon points="12 8 8 12 12 16 12 8"></polygon></svg>
-                                            <span>管理员错题本</span>
+                                        <button type="button" class="btn secondary" style="padding: 6px 12px; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 5px;" onclick="openRetestBeta('${escapeHtml(record.retest_token)}')" title="打开错题本 Beta 版（支持题号顺序重排）">
+                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+                                            <span>错题本beta</span>
                                         </button>
                                     ` : ''}
                                     <button type="button" class="btn secondary" style="padding: 6px 11px; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 4px;" onclick="copyParentFullFeedback(currentDetailModalRecord, 'student_records')" title="复制家校完整学情反馈语">
@@ -5219,7 +5214,9 @@
                                             </button>
                                         ` : ''}
                                     </div>
-                                    <div id="modal-preview-comment-text" style="font-size: 0.84rem; color: var(--text-primary); line-height: 1.5; white-space: pre-wrap; background: var(--bg-subtle); border-radius: var(--radius-sm); padding: 8px 12px; border: 1px solid var(--border-color); flex: 1; min-height: 50px;">${escapeHtml((previewCommentText || '').trim() || '（暂无课前预习评语）')}</div>
+                                    <div id="modal-preview-comment-text" style="font-size: 0.84rem; color: var(--text-primary); line-height: 1.5; white-space: pre-wrap; background: var(--bg-subtle); border-radius: var(--radius-sm); padding: 8px 12px; border: 1px solid var(--border-color); flex: 1; min-height: 50px;">
+                                        ${escapeHtml(previewCommentText || '（暂无课前预习评语）')}
+                                    </div>
                                 </div>
 
                                 <!-- 预习文件来源 -->
@@ -5314,7 +5311,9 @@
                                             </button>
                                         ` : ''}
                                     </div>
-                                    <div id="modal-comment-text" style="font-size: 0.84rem; color: var(--text-primary); line-height: 1.5; white-space: pre-wrap; background: var(--bg-subtle); border-radius: var(--radius-sm); padding: 8px 12px; border: 1px solid var(--border-color); flex: 1; min-height: 50px;">${escapeHtml((commentText || '').trim() || '（暂无课后巩固评语）')}</div>
+                                    <div id="modal-comment-text" style="font-size: 0.84rem; color: var(--text-primary); line-height: 1.5; white-space: pre-wrap; background: var(--bg-subtle); border-radius: var(--radius-sm); padding: 8px 12px; border: 1px solid var(--border-color); flex: 1; min-height: 50px;">
+                                        ${escapeHtml(commentText || '（暂无课后巩固评语）')}
+                                    </div>
                                 </div>
 
                                 <!-- 巩固文件来源 -->
@@ -5869,9 +5868,32 @@
             }
         }
 
-        async function openRetestBetaDirect(token) {
-            return openRetestDirect(token);
+        async function openRetestBeta(token) {
+            if (!token) {
+                showToast('该学生暂无重测Token', 'error');
+                return;
+            }
+            try {
+                const res = await fetch(`${API_BASE}?action=get_retest_admin_url&token=${encodeURIComponent(token)}`);
+                const json = await res.json();
+                if (json.success && json.data && json.data.admin_sig && json.data.admin_ts) {
+                    const url = `retest-beta.html?token=${encodeURIComponent(token)}&admin_sig=${encodeURIComponent(json.data.admin_sig)}&admin_ts=${json.data.admin_ts}`;
+                    window.open(url, '_blank');
+                } else {
+                    window.open(`retest-beta.html?token=${encodeURIComponent(token)}`, '_blank');
+                }
+            } catch (e) {
+                window.open(`retest-beta.html?token=${encodeURIComponent(token)}`, '_blank');
+            }
         }
+        window.openRetestBeta = openRetestBeta;
+
+        async function openRetestBetaDirect(token) {
+            return openRetestBeta(token);
+        }
+        window.openRetestBetaDirect = openRetestBetaDirect;
+        window.openRetestStudent = openRetestStudent;
+        window.openRetestDirect = openRetestDirect;
 
         function copyWeakPointsOnly(recordIdx, currentTable) {
             let r = window.currentDetailModalRecord;
@@ -5951,109 +5973,65 @@
             let errs = [];
             try { errs = Array.isArray(r.error_questions) ? r.error_questions : JSON.parse(r.error_questions || '[]'); } catch(e){}
 
+            const validDetails = Array.isArray(r.error_details) ? r.error_details.filter(d => d && d.topic && d.topic !== '未标注考点') : [];
+
+            let weakPointsDesc = '';
+            if (validDetails.length > 0) {
+                weakPointsDesc = validDetails.map(d => `• 第${d.num}题：${d.topic}`).join('\n');
+                if (r.weak_points_text && String(r.weak_points_text).trim()) {
+                    weakPointsDesc += `\n• 薄弱考点归纳：${String(r.weak_points_text).trim()}`;
+                }
+            } else if (r.weak_points_text && String(r.weak_points_text).trim()) {
+                weakPointsDesc = `• 薄弱考点：${String(r.weak_points_text).trim()}`;
+            } else if (errs.length > 0) {
+                weakPointsDesc = `• 错题题号：第 ${errs.join('、')} 题 (专属错题本内可查验题目)`;
+            } else {
+                weakPointsDesc = '• 本周巩固作业全部正确，继续保持！';
+            }
+
             let prevErrs = [];
             try { prevErrs = Array.isArray(r.preview_error_questions) ? r.preview_error_questions : JSON.parse(r.preview_error_questions || '[]'); } catch(e){}
-
-            // 错题考点列表
-            const validDetails = Array.isArray(r.error_details) ? r.error_details.filter(d => d && d.topic && d.topic !== '未标注考点') : [];
-            let hwTopics = [];
-            if (validDetails.length > 0) {
-                hwTopics = validDetails.map(d => d.topic);
-            }
-            if (r.weak_points && Array.isArray(r.weak_points) && r.weak_points.length > 0) {
-                hwTopics = r.weak_points;
-            } else if (r.weak_points_text && String(r.weak_points_text).trim()) {
-                hwTopics = [String(r.weak_points_text).trim()];
-            }
-
             const prevDetails = Array.isArray(r.preview_error_details) ? r.preview_error_details.filter(d => d && d.topic && d.topic !== '未标注考点') : [];
-            let pvTopics = [];
+            let prevWeakPointsDesc = '';
             if (prevDetails.length > 0) {
-                pvTopics = prevDetails.map(d => d.topic);
-            }
-            if (r.preview_weak_points && Array.isArray(r.preview_weak_points) && r.preview_weak_points.length > 0) {
-                pvTopics = r.preview_weak_points;
+                prevWeakPointsDesc = prevDetails.map(d => `• 第${d.num}题：${d.topic}`).join('\n');
+                if (r.preview_weak_points_text && String(r.preview_weak_points_text).trim()) {
+                    prevWeakPointsDesc += `\n• 预习薄弱考点归纳：${String(r.preview_weak_points_text).trim()}`;
+                }
             } else if (r.preview_weak_points_text && String(r.preview_weak_points_text).trim()) {
-                pvTopics = [String(r.preview_weak_points_text).trim()];
+                prevWeakPointsDesc = `• 预习薄弱考点：${String(r.preview_weak_points_text).trim()}`;
+            } else if (prevErrs.length > 0) {
+                prevWeakPointsDesc = `• 预习错题题号：第 ${prevErrs.join('、')} 题`;
             }
+
+            const hasPrevErrors = prevErrs.length > 0;
+            const previewSuffix = hasPrevErrors ? '（预习的错题也在这个里面）' : '';
 
             const sName = r.student_name || '同学';
-            const hwScore = (r.homework_score !== null && r.homework_score !== undefined && r.homework_score !== '') ? formatScore(r.homework_score) : null;
-            const prevScore = (r.preview_score !== null && r.preview_score !== undefined && r.preview_score !== '') ? formatScore(r.preview_score) : null;
-            const hwLesson = r.week_num || '';
-            const pvLesson = r.preview_week_num || r.week_num || '';
+            const hwScore = (r.homework_score !== null && r.homework_score !== undefined && r.homework_score !== '') ? `${r.homework_score}分` : '已按时提交';
+            const totalScore = (r.total_score !== null && r.total_score !== undefined && r.total_score !== '') ? ` (满分${r.total_score}分)` : '';
+            const prevScore = (r.preview_score !== null && r.preview_score !== undefined && r.preview_score !== '') ? `${r.preview_score}分` : '';
+            const wDesc = r.week_num ? `第${r.week_num}周` : '本周';
 
-            const hwComment = (r.teacher_comment || '').trim();
-            const pvComment = (r.preview_comment || '').trim();
-
-            const isHwFullScore = (hwScore !== null && parseFloat(hwScore) >= 100) || /全对|全部正确|满分|零失误|无错题/i.test(hwComment);
-
-            let feedbackParts = [];
-
-            // 1. 预习部分（按系统生成原版话术格式）
-            if (prevScore !== null || pvComment) {
-                let pvLines = [];
-                const pvPrefix = pvLesson ? `第${pvLesson}讲` : '课前';
-                if (prevScore !== null) {
-                    pvLines.push(`${pvPrefix}课前预习得分为${prevScore}，`);
-                }
-                if (pvComment) {
-                    pvLines.push(pvComment);
-                }
-                if (pvLines.length > 0) {
-                    feedbackParts.push(pvLines.join('\n'));
-                }
+            let previewFeedbackBlock = '';
+            if (prevScore || prevWeakPointsDesc || (r.preview_comment && String(r.preview_comment).trim())) {
+                previewFeedbackBlock = `\n【课前预习情况】：` +
+                    (prevScore ? `\n预习得分：${prevScore}` : '') +
+                    (prevWeakPointsDesc ? `\n预习错题与薄弱点：\n${prevWeakPointsDesc}` : '') +
+                    ((r.preview_comment && String(r.preview_comment).trim()) ? `\n预习评语：${String(r.preview_comment).trim()}` : '');
             }
 
-            // 2. 巩固部分（按系统生成原版话术格式）
-            if (hwScore !== null || hwComment) {
-                let hwLines = [];
-                const hwPrefix = hwLesson ? `第${hwLesson}周` : '课后';
-                if (hwScore !== null) {
-                    hwLines.push(`${hwPrefix}课后巩固得分为${hwScore}，`);
-                }
-                if (hwComment) {
-                    hwLines.push(hwComment);
-                }
-                if (hwLines.length > 0) {
-                    feedbackParts.push(hwLines.join('\n'));
-                }
-            }
+            const text = 
+`【极方学员本周学情反馈】
+家长您好！以下是 ${sName} 同学${wDesc}的学习情况反馈：
+【课后巩固情况】：
+作业巩固成绩：${hwScore}${totalScore}
+错题考点与薄弱知识点：
+${weakPointsDesc}
+教师巩固评语：
+${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_comment).trim() : '学习态度认真，继续加油！'}${previewFeedbackBlock}${link ? `\n专属个性化错题本与微课巩固：\n${link}${previewSuffix}` : ''}`.replace(/\n{2,}/g, '\n');
 
-            // 3. 薄弱点部分（按系统生成原版话术格式）
-            let topicLines = [];
-            if (hwTopics.length > 0) {
-                const label = (pvTopics.length > 0 || prevScore !== null) ? '【巩固薄弱点】' : '【个人薄弱点】';
-                topicLines.push(`${label}：${[...new Set(hwTopics)].join('、')}`);
-            }
-            if (pvTopics.length > 0) {
-                topicLines.push(`【预习薄弱点】：${[...new Set(pvTopics)].join('、')}`);
-            }
-            if (topicLines.length > 0) {
-                feedbackParts.push(topicLines.join('\n'));
-            }
-
-            // 4. 错题本 / 复习建议部分（按系统生成原版话术格式）
-            const hasErrors = errs.length > 0 || prevErrs.length > 0;
-            if (hasErrors) {
-                let errLines = ['【错题本】：点击链接查看本专题的错题'];
-                if (link) {
-                    const previewSuffix = (prevErrs.length > 0) ? '（预习错题请切换到对应专题查看）' : '';
-                    errLines.push(`${link}${previewSuffix}`);
-                }
-                feedbackParts.push(errLines.join('\n'));
-            } else if (isHwFullScore) {
-                feedbackParts.push('【错题本】：本次作业满分，暂无错题需要重练，表现优异，继续加油！');
-            } else if (hwScore !== null) {
-                feedbackParts.push(`【课后复习建议】：本次作业得分为${hwScore}分，请${sName}同学针对课堂疑难点与错题认真完成错题整理与订正，及时查漏补缺！`);
-            }
-
-            let text = feedbackParts.join('\n-------------------------\n').trim().replace(/\n{3,}/g, '\n\n');
-            if (!text) {
-                text = `${sName}同学学习态度认真，继续加油！`;
-            }
-
-            copyTextToClipboard(text, '学情反馈话术已复制到剪贴板！');
+            copyTextToClipboard(text, '家校学情完整反馈语已复制到剪贴板！');
         }
 
         function copyTextToClipboard(text, successMsg) {

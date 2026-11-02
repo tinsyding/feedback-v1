@@ -2409,9 +2409,9 @@
                                             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
                                             <span>错题本</span>
                                         </button>
-                                        <button type="button" class="btn secondary" style="padding: 6px 12px; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 5px;" onclick="openRetestDirect('${escapeHtml(record.retest_token)}')" title="管理员免密直达错题本">
-                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polygon points="12 8 8 12 12 16 12 8"></polygon></svg>
-                                            <span>管理员错题本</span>
+                                        <button type="button" class="btn secondary" style="padding: 6px 12px; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 5px;" onclick="openRetestBeta('${escapeHtml(record.retest_token)}')" title="打开错题本 Beta 版（支持题号顺序重排）">
+                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+                                            <span>错题本beta</span>
                                         </button>
                                     ` : ''}
                                     <button type="button" class="btn secondary" style="padding: 6px 11px; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 4px;" onclick="copyParentFullFeedback(currentDetailModalRecord, 'student_records')" title="复制家校完整学情反馈语">
@@ -3161,9 +3161,32 @@
             }
         }
 
-        async function openRetestBetaDirect(token) {
-            return openRetestDirect(token);
+        async function openRetestBeta(token) {
+            if (!token) {
+                showToast('该学生暂无重测Token', 'error');
+                return;
+            }
+            try {
+                const res = await fetch(`${API_BASE}?action=get_retest_admin_url&token=${encodeURIComponent(token)}`);
+                const json = await res.json();
+                if (json.success && json.data && json.data.admin_sig && json.data.admin_ts) {
+                    const url = `retest-beta.html?token=${encodeURIComponent(token)}&admin_sig=${encodeURIComponent(json.data.admin_sig)}&admin_ts=${json.data.admin_ts}`;
+                    window.open(url, '_blank');
+                } else {
+                    window.open(`retest-beta.html?token=${encodeURIComponent(token)}`, '_blank');
+                }
+            } catch (e) {
+                window.open(`retest-beta.html?token=${encodeURIComponent(token)}`, '_blank');
+            }
         }
+        window.openRetestBeta = openRetestBeta;
+
+        async function openRetestBetaDirect(token) {
+            return openRetestBeta(token);
+        }
+        window.openRetestBetaDirect = openRetestBetaDirect;
+        window.openRetestStudent = openRetestStudent;
+        window.openRetestDirect = openRetestDirect;
 
         function copyWeakPointsOnly(recordIdx, currentTable) {
             let r = window.currentDetailModalRecord;
