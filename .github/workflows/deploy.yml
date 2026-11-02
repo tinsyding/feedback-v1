@@ -56,11 +56,17 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          TARGET_SHA: ${{ github.sha }}
         run: |
           SSH="ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 $DEPLOY_USER@$DEPLOY_HOST"
-          $SSH "cd /www/wwwroot/JF/feedback-git && git pull --ff-only && git rev-parse HEAD"
-          # 统一属主与权限（pull 以 root 执行，新文件归 root，需交还 www）
+          # 1. 临时解除 .user.ini 宝塔防跨目录不可变保护 (+i)，避免阻止 git 检出与 chown/chmod
+          $SSH "find /www/wwwroot/JF/feedback-git -name '.user.ini' -exec chattr -i {} + 2>/dev/null || true"
+          # 2. 拉取最新代码并严格对齐当前目标提交（彻底避免多分支 fast-forward 失败与服务端临时改动冲突）
+          $SSH "cd /www/wwwroot/JF/feedback-git && git fetch origin main && git reset --hard $TARGET_SHA && git rev-parse HEAD"
+          # 3. 统一属主与权限（pull/reset 以 root 执行，新文件交还 www 属主并规范读写位）
           $SSH "chown -R www:www /www/wwwroot/JF/feedback-git && cd /www/wwwroot/JF/feedback-git && find feedback-v1 -type d -exec chmod 755 {} + && find feedback-v1 -type f -exec chmod 644 {} + && chmod 700 .git && echo PERMS-OK"
+          # 4. 重新加锁 .user.ini 恢复宝塔目录安全防御
+          $SSH "find /www/wwwroot/JF/feedback-git -name '.user.ini' -exec chattr +i {} + 2>/dev/null || true"
 
       - name: Reload PHP-FPM (clear opcache)
         env:
