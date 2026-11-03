@@ -27,7 +27,7 @@
             try { new VConsole(); } catch(e) {}
         }
     </script>
-    <link rel="stylesheet" href="css/retest.css?v=20260930a">
+    <link rel="stylesheet" href="css/retest.css?v=20261103a">
     <link rel="stylesheet" href="css/tokens.css?v=20260927">
 </head>
 <body>
@@ -232,6 +232,26 @@
             <div class="choice-title">选择下载版本</div>
             <div class="choice-subtitle" id="choice-modal-subtitle" style="display:none;"></div>
         </div>
+
+        <!-- 题头考点提示开关：家长可按需隐藏知识点，避免提前提示解题思路 -->
+        <div class="choice-topic-hint-box">
+            <div class="choice-topic-hint-row">
+                <span class="choice-topic-hint-label">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+                        <line x1="7" y1="7" x2="7.01" y2="7"></line>
+                    </svg>
+                    题头考点提示
+                </span>
+                <span class="choice-topic-hint-state" id="topic-hint-state-text">显示</span>
+            </div>
+            <div class="choice-topic-hint-segmented">
+                <button type="button" class="topic-hint-seg-btn active" id="btn-topic-hint-on" onclick="setTopicHintEnabled(true)">显示考点</button>
+                <button type="button" class="topic-hint-seg-btn" id="btn-topic-hint-off" onclick="setTopicHintEnabled(false)">隐藏考点</button>
+            </div>
+            <div class="choice-topic-hint-desc" id="topic-hint-desc">题头会显示具体考点，方便家长对照复习。</div>
+        </div>
+
         <div class="choice-options">
             <!-- Option 1: 仅错题题目 -->
             <button class="choice-opt-btn" onclick="selectDownloadVersion('exercise')">
@@ -342,6 +362,6 @@
     <span id="toast-text">已复制到剪贴板</span>
 </div>
 
-<script src="js/retest.js?v=20261102-1"></script>
+<script src="js/retest.js?v=20261103-2"></script>
 </body>
 </html>

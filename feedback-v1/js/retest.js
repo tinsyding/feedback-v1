@@ -29,10 +29,15 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
     // Load configuration & Spacing Management
     window.retestQuestionSpacing = 85;
     window.retestQrCodeEnabled = true;
+    // 题头考点提示：默认显示，家长可自行隐藏，避免提前给孩子解题提示
+    window.retestTopicHintEnabled = true;
     try {
         const savedSpacing = (localStorage.getItem('retest_question_spacing') || localStorage.getItem('retest_beta_spacing'));
         if (savedSpacing) {
             window.retestQuestionSpacing = parseInt(savedSpacing) || 85;
+        }
+        if (localStorage.getItem('retest_topic_hint_enabled') === '0') {
+            window.retestTopicHintEnabled = false;
         }
     } catch(e) {}
 
@@ -73,6 +78,36 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         } catch(e) {}
         const cmText = ptToCentimetersText(window.retestQuestionSpacing);
         showToast(`作答留白已设为 ${cmText}，下载打印时将按此留白排版`);
+    }
+
+    // 题头考点提示开关（按家长设备记忆，互不影响）
+    function updateTopicHintUI() {
+        const enabled = window.retestTopicHintEnabled !== false;
+        const btnOn = document.getElementById('btn-topic-hint-on');
+        const btnOff = document.getElementById('btn-topic-hint-off');
+        const stateText = document.getElementById('topic-hint-state-text');
+        const desc = document.getElementById('topic-hint-desc');
+
+        if (btnOn) btnOn.classList.toggle('active', enabled);
+        if (btnOff) btnOff.classList.toggle('active', !enabled);
+        if (stateText) {
+            stateText.textContent = enabled ? '显示' : '隐藏';
+            stateText.classList.toggle('hidden', !enabled);
+        }
+        if (desc) {
+            desc.textContent = enabled
+                ? '题头会显示具体考点，方便家长对照复习。选择会保存在本机，下次下载自动沿用。'
+                : '重练版题头只保留题号与专题，详解版仍保留考点。选择会保存在本机，下次下载自动沿用。';
+        }
+    }
+
+    function setTopicHintEnabled(enabled) {
+        window.retestTopicHintEnabled = Boolean(enabled);
+        try {
+            localStorage.setItem('retest_topic_hint_enabled', enabled ? '1' : '0');
+        } catch(e) {}
+        updateTopicHintUI();
+        showToast(enabled ? '已开启考点提示' : '已隐藏考点提示，重练版 PDF 不再显示知识点');
     }
 
     // 优先通过无缓存机制载入系统全局配置（经脱敏公开接口）
@@ -557,6 +592,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         } else {
             subtitle.textContent = '当前选择：' + getTopicLabel(activeWeek);
         }
+        updateTopicHintUI();
         modal.style.display = 'flex';
     }
 
@@ -1455,9 +1491,13 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 const targetUrl = typeof qItem === 'string' ? qItem : qItem.url;
                 const videoUrl = (typeof qItem === 'object' && qItem.videoUrl) ? String(qItem.videoUrl).trim() : '';
                 const qWeek = (typeof qItem === 'object' && qItem.week) ? qItem.week : activeWeek;
-                const qTopic = (typeof qItem === 'object' && (qItem.clusterTopic || qItem.topic))
+                const qTopicRaw = (typeof qItem === 'object' && (qItem.clusterTopic || qItem.topic))
                     ? String(qItem.clusterTopic || qItem.topic).trim()
                     : '';
+                // 学生版（重练版）隐藏考点时，仅移除题头中的具体知识点，题号/专题/原题变式关系保持不变；
+                // 详解版含答案解析，主要供家长批改复习，仍保留考点，避免误伤复习信息。
+                const hideTopicInBadge = (window.retestTopicHintEnabled === false) && type === 'exercise';
+                const qTopic = hideTopicInBadge ? '' : qTopicRaw;
                 const qSourceType = (typeof qItem === 'object' && qItem.sourceType) ? qItem.sourceType : 'homework';
                 const qParentNum = typeof qItem === 'object'
                     ? (parseInt(qItem.parentNum || qItem.errorNum, 10) || (i + 1))

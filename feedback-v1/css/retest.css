@@ -975,6 +975,8 @@
             padding: 24px 20px;
             width: 100%;
             max-width: 360px;
+            max-height: calc(100vh - 40px);
+            overflow-y: auto;
             box-shadow: 0 24px 48px -12px rgba(15, 23, 42, 0.22);
             animation: zoomIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
             text-align: left;
@@ -996,6 +998,82 @@
             font-size: 0.8rem;
             color: var(--primary);
             font-weight: 600;
+        }
+
+        /* 题头考点提示开关 */
+        .choice-topic-hint-box {
+            background: #f8fafc;
+            border: 1.5px solid #e2e8f0;
+            border-radius: var(--radius-lg, 12px);
+            padding: 11px 13px;
+            margin-bottom: 12px;
+        }
+
+        .choice-topic-hint-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .choice-topic-hint-label {
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: var(--text-main, #1e293b);
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .choice-topic-hint-state {
+            font-size: 0.68rem;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 9999px;
+            background: #dbeafe;
+            color: #1d4ed8;
+            letter-spacing: 0.3px;
+        }
+
+        .choice-topic-hint-state.hidden {
+            background: #f1f5f9;
+            color: #64748b;
+        }
+
+        .choice-topic-hint-segmented {
+            display: flex;
+            background: #e2e8f0;
+            padding: 3px;
+            border-radius: 10px;
+            gap: 3px;
+        }
+
+        .topic-hint-seg-btn {
+            flex: 1;
+            padding: 7px 8px;
+            border: none;
+            background: transparent;
+            border-radius: 7px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: #64748b;
+            cursor: pointer;
+            transition: all 0.18s ease;
+            white-space: nowrap;
+        }
+
+        .topic-hint-seg-btn.active {
+            background: #ffffff;
+            color: var(--primary, #2563eb);
+            font-weight: 700;
+            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+        }
+
+        .choice-topic-hint-desc {
+            margin-top: 7px;
+            font-size: 0.72rem;
+            color: #64748b;
+            line-height: 1.35;
         }
 
         .choice-options {
