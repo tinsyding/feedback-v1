@@ -86,18 +86,12 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         const btnOn = document.getElementById('btn-topic-hint-on');
         const btnOff = document.getElementById('btn-topic-hint-off');
         const stateText = document.getElementById('topic-hint-state-text');
-        const desc = document.getElementById('topic-hint-desc');
 
         if (btnOn) btnOn.classList.toggle('active', enabled);
         if (btnOff) btnOff.classList.toggle('active', !enabled);
         if (stateText) {
             stateText.textContent = enabled ? '显示' : '隐藏';
             stateText.classList.toggle('hidden', !enabled);
-        }
-        if (desc) {
-            desc.textContent = enabled
-                ? '题头会显示具体考点，方便家长对照复习。选择会保存在本机，下次下载自动沿用。'
-                : '重练版题头只保留题号与专题，详解版仍保留考点。选择会保存在本机，下次下载自动沿用。';
         }
     }
 
@@ -837,9 +831,9 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             };
         }
 
+        // 课后巩固原题
         const contentParts = [];
         if (subjectPart) contentParts.push(subjectPart);
-        // 这里用实际收录数量，而不是最大学号，避免缺失变式 PDF 时虚报题量
         if (variationCount > 0) contentParts.push('含 ' + variationCount + ' 道同类变式');
         return {
             tagText: parentNum ? ('第' + parentNum + '题·原题') : '原题',
