@@ -81,75 +81,18 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         showToast(`作答留白已设为 ${cmText}，下载打印时将按此留白排版`);
     }
 
-    // 题号编排模式管理 (Beta 实验特性: sequential / original)
-    window.retestRenumberMode = 'sequential';
-    try {
-        const savedRenumber = (localStorage.getItem('retest_renumber_mode') || localStorage.getItem('retest_beta_renumber_mode'));
-        if (savedRenumber === 'original' || savedRenumber === 'sequential') {
-            window.retestRenumberMode = savedRenumber;
-        }
-    } catch(e) {}
-
-    function updateRenumberUI(mode) {
-        window.retestRenumberMode = (mode === 'original') ? 'original' : 'sequential';
-        const btnSeq = document.getElementById('btn-renumber-seq');
-        const btnOrig = document.getElementById('btn-renumber-orig');
-        const hint = document.getElementById('choice-renumber-hint');
-        const tag = document.getElementById('choice-renumber-tag');
-
-        if (btnSeq && btnOrig) {
-            const svgSeq = btnSeq.querySelector('svg');
-            const svgOrig = btnOrig.querySelector('svg');
-            if (window.retestRenumberMode === 'sequential') {
-                btnSeq.classList.add('active');
-                btnOrig.classList.remove('active');
-                if (svgSeq) svgSeq.style.display = 'inline-block';
-                if (svgOrig) svgOrig.style.display = 'none';
-                if (hint) hint.textContent = '整卷从第 1 题起连续递增排版，小字标注对应原作业题号';
-                if (tag) {
-                    tag.textContent = '重练推荐';
-                    tag.className = 'choice-renumber-tag badge-recommended';
-                }
-            } else {
-                btnOrig.classList.add('active');
-                btnSeq.classList.remove('active');
-                if (svgOrig) svgOrig.style.display = 'inline-block';
-                if (svgSeq) svgSeq.style.display = 'none';
-                if (hint) hint.textContent = '保留原作业分散题号（如第 3 题、第 7 题），方便逐题对照';
-                if (tag) {
-                    tag.textContent = '原题对照';
-                    tag.className = 'choice-renumber-tag badge-orig';
-                }
-            }
-        }
-    }
-
-    function setRenumberMode(mode) {
-        updateRenumberUI(mode);
-        try {
-            localStorage.setItem('retest_renumber_mode', window.retestRenumberMode);
-            localStorage.setItem('retest_beta_renumber_mode', window.retestRenumberMode);
-        } catch(e) {}
-    }
-
     // 题头考点提示开关（按家长设备记忆，互不影响）
     function updateTopicHintUI() {
         const enabled = window.retestTopicHintEnabled !== false;
         const btnOn = document.getElementById('btn-topic-hint-on');
         const btnOff = document.getElementById('btn-topic-hint-off');
         const stateText = document.getElementById('topic-hint-state-text');
-        const desc = document.getElementById('topic-hint-desc');
 
         if (btnOn) btnOn.classList.toggle('active', enabled);
         if (btnOff) btnOff.classList.toggle('active', !enabled);
         if (stateText) {
             stateText.textContent = enabled ? '显示' : '隐藏';
             stateText.classList.toggle('hidden', !enabled);
-        }
-        if (desc) {
-            desc.textContent = enabled
-                ? '题头会显示具体考点，方便家长对照复习。选择会保存在本机，下次下载自动沿用。'
-                : '重练版题头只保留题号与专题，详解版仍保留考点。选择会保存在本机，下次下载自动沿用。';
         }
     }
 
@@ -232,12 +175,8 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
     }
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => {
-            updateRenumberUI(window.retestRenumberMode);
-            initRetestPage();
-        });
+        document.addEventListener('DOMContentLoaded', initRetestPage);
     } else {
-        updateRenumberUI(window.retestRenumberMode);
         initRetestPage();
     }
 
@@ -648,7 +587,6 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         } else {
             subtitle.textContent = '当前选择：' + getTopicLabel(activeWeek);
         }
-        updateRenumberUI(window.retestRenumberMode);
         updateTopicHintUI();
         modal.style.display = 'flex';
     }
@@ -667,7 +605,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
     // Select version from Choice Modal
     function selectDownloadVersion(version) {
         closeDownloadModal();
-        downloadMergedPdf(version, pendingDownloadAllWeeks, window.retestRenumberMode);
+        downloadMergedPdf(version, pendingDownloadAllWeeks);
     }
 
     // 题目视频讲解二维码卡片内存缓存
@@ -861,11 +799,9 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
     // 题组化排版：把“第几题 / 原题还是变式 / 对应哪道原题 / 考点”一次性写进题头。
     // 题号是主身份，“举一反三/同类题”只是修饰语，避免变式看起来像一道独立新题。
-    // 支持按整卷顺序编号 (sequential) 与 保持原作业题号 (original)。
-    function buildQuestionBadgeSpec(qItem, week, topic, renumberMode = (window.retestRenumberMode || 'sequential')) {
+    function buildQuestionBadgeSpec(qItem, week, topic) {
         const item = (qItem && typeof qItem === 'object') ? qItem : {};
         const parentNum = parseInt(item.parentNum || item.errorNum, 10) || 0;
-        const displayNum = parseInt(item.displayNum, 10) || 0;
         const subNum = parseInt(item.subNum, 10) || 1;
         const variationTotal = parseInt(item.variationTotal, 10) || 0;
         const rawVariationCount = parseInt(item.variationCount, 10);
@@ -873,56 +809,35 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         const isVariation = Boolean(item.isVariation) || item.sourceType === 'variation';
         const isPreview = !isVariation && item.sourceType === 'preview';
 
-        const isSeq = (renumberMode === 'sequential') && (displayNum > 0);
-        const activeNum = isSeq ? displayNum : parentNum;
-
         const weekNum = parseInt(week, 10);
         const weekPart = weekNum > 0 ? ('专题' + numToChinese(weekNum)) : '';
         const topicText = String(topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
         const subjectPart = [weekPart, topicText].filter(Boolean).join(' · ');
 
         if (isVariation) {
-            const tagText = activeNum
-                ? ('第' + activeNum + '题·变式' + subNum + (variationTotal > 0 ? ('/' + variationTotal) : ''))
+            const tagText = parentNum
+                ? ('第' + parentNum + '题·变式' + subNum + (variationTotal > 0 ? ('/' + variationTotal) : ''))
                 : ('变式' + subNum);
             const contentParts = ['举一反三 · 同类题'];
-            if (isSeq) {
-                if (parentNum && parentNum !== displayNum) {
-                    contentParts.push('对应第' + displayNum + '题(原作业第' + parentNum + '题)');
-                } else if (displayNum) {
-                    contentParts.push('对应第' + displayNum + '题');
-                }
-            } else if (parentNum) {
-                contentParts.push('对应第' + parentNum + '题');
-            }
+            if (parentNum) contentParts.push('对应第' + parentNum + '题');
             if (subjectPart) contentParts.push(subjectPart);
             return { tagText, contentText: contentParts.join(' · '), theme: 'variation' };
         }
 
         if (isPreview) {
-            const tagText = activeNum ? ('第' + activeNum + '题·预习') : '预习';
-            const contentParts = [];
-            if (isSeq && parentNum && parentNum !== displayNum) {
-                contentParts.push('原预习第' + parentNum + '题');
-            }
-            if (subjectPart) contentParts.push(subjectPart);
             return {
-                tagText: tagText,
-                contentText: contentParts.join(' · ') || '预习',
+                tagText: parentNum ? ('第' + parentNum + '题·预习') : '预习',
+                contentText: subjectPart || '预习',
                 theme: 'preview'
             };
         }
 
         // 课后巩固原题
-        const tagText = activeNum ? ('第' + activeNum + '题·原题') : '原题';
         const contentParts = [];
-        if (isSeq && parentNum && parentNum !== displayNum) {
-            contentParts.push('原作业第' + parentNum + '题');
-        }
         if (subjectPart) contentParts.push(subjectPart);
         if (variationCount > 0) contentParts.push('含 ' + variationCount + ' 道同类变式');
         return {
-            tagText: tagText,
+            tagText: parentNum ? ('第' + parentNum + '题·原题') : '原题',
             contentText: contentParts.join(' · ') || '原题',
             theme: 'original'
         };
@@ -1192,7 +1107,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
     }
 
     // Download & Merge PDFs with modal progress feedback
-    async function downloadMergedPdf(type, allWeeks, renumberMode = (window.retestRenumberMode || 'sequential')) {
+    async function downloadMergedPdf(type, allWeeks) {
         if (!retestData) return;
 
         const weeksData = retestData.weeksData || {};
@@ -1200,7 +1115,6 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         const typeLabel = type === 'exercise' ? '仅错题题目' : '错题题目+答案';
         let pdfsToMerge = [];
         let fileLabel = '';
-        let clusterDisplayCounter = 0;
 
         const appendWeekPdfs = (wd, fallbackWeek) => {
             if (!wd) return;
@@ -1287,13 +1201,10 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                         return Math.max(max, parseInt(x.subNum, 10) || 1);
                     }, 0);
                     const variationCount = cluster.items.filter(x => x.isVariation).length;
-                    clusterDisplayCounter++;
-                    const assignedDisplayNum = clusterDisplayCounter;
                     cluster.items.forEach((item, idx) => {
                         pdfsToMerge.push({
                             ...item,
                             parentNum: cluster.parentNum,
-                            displayNum: assignedDisplayNum,
                             clusterTopic: cluster.topic,
                             variationTotal: variationTotal,
                             variationCount: variationCount,
@@ -1586,16 +1497,12 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 const qParentNum = typeof qItem === 'object'
                     ? (parseInt(qItem.parentNum || qItem.errorNum, 10) || (i + 1))
                     : (i + 1);
-                const qDisplayNum = (typeof qItem === 'object' && qItem.displayNum)
-                    ? parseInt(qItem.displayNum, 10)
-                    : (i + 1);
-                const qActiveNum = (renumberMode === 'sequential' && qDisplayNum > 0) ? qDisplayNum : qParentNum;
                 const qSubNum = typeof qItem === 'object' ? (parseInt(qItem.subNum, 10) || 1) : 1;
                 const qVariationTotal = typeof qItem === 'object' ? (parseInt(qItem.variationTotal, 10) || 0) : 0;
                 const qIsVariation = typeof qItem === 'object'
                     ? (Boolean(qItem.isVariation) || qSourceType === 'variation')
                     : false;
-                const qBadgeSpec = buildQuestionBadgeSpec(qItem, qWeek, qTopic, renumberMode);
+                const qBadgeSpec = buildQuestionBadgeSpec(qItem, qWeek, qTopic);
 
                 try {
                     const pdfBytes = await fetch(targetUrl).then(res => {
@@ -1634,10 +1541,10 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             headerGap = QUESTION_TOPIC_BANNER_GAP;
                         } else {
                             const runningLabel = qIsVariation
-                                ? ('第' + qActiveNum + '题 · 变式' + qSubNum + (qVariationTotal > 0 ? ('/' + qVariationTotal) : '') + '（续）')
+                                ? ('第' + qParentNum + '题 · 变式' + qSubNum + (qVariationTotal > 0 ? ('/' + qVariationTotal) : '') + '（续）')
                                 : (qSourceType === 'preview'
-                                    ? ('第' + qActiveNum + '题 · 预习（续）')
-                                    : ('第' + qActiveNum + '题 · 原题（续）'));
+                                    ? ('第' + qParentNum + '题 · 预习（续）')
+                                    : ('第' + qParentNum + '题 · 原题（续）'));
                             headerInfo = generateQuestionRunningHeader(runningLabel, bannerW, qBadgeSpec.theme);
                             headerGap = RUNNING_HEADER_GAP;
                         }
@@ -1735,7 +1642,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                         // 3. 在每道题右下角/作答区内添加视频讲解二维码与说明文字
                         if (window.retestQrCodeEnabled !== false && videoUrl && isLastPageOfQuestion) {
                             try {
-                                const qrQuestionNum = qIsVariation ? (qActiveNum + '-' + qSubNum) : qActiveNum;
+                                const qrQuestionNum = qIsVariation ? (qParentNum + '-' + qSubNum) : qParentNum;
                                 const qrDataUrl = await generateQuestionQrBadge(videoUrl, qrQuestionNum);
                                 if (qrDataUrl) {
                                     const qrImage = await mergedPdf.embedPng(qrDataUrl);

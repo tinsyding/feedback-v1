@@ -28,7 +28,7 @@
         }
     </script>
     <!-- Beta 实验页：与 retest.html 同功能独立副本（2026-09-28 同步），样式/脚本独立，接口共用 api/retest.php -->
-    <link rel="stylesheet" href="css/retest-beta.css?v=20261103-1">
+    <link rel="stylesheet" href="css/retest-beta.css?v=20261103-3">
     <link rel="stylesheet" href="css/tokens.css?v=20260927">
 </head>
 <body>
@@ -234,37 +234,6 @@
             <div class="choice-subtitle" id="choice-modal-subtitle" style="display:none;"></div>
         </div>
 
-        <!-- 题号编排方式 (Beta 实验特性) -->
-        <div class="choice-renumber-box">
-            <div class="choice-renumber-row">
-                <span class="choice-renumber-label">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                        <line x1="10" y1="6" x2="21" y2="6"></line>
-                        <line x1="10" y1="12" x2="21" y2="12"></line>
-                        <line x1="10" y1="18" x2="21" y2="18"></line>
-                        <path d="M4 6h1v4"></path>
-                        <path d="M4 10h2"></path>
-                        <path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"></path>
-                    </svg>
-                    题号编排
-                </span>
-                <span class="choice-renumber-tag badge-recommended" id="choice-renumber-tag">重练推荐</span>
-            </div>
-            <div class="choice-renumber-segmented">
-                <button type="button" class="renumber-seg-btn active" id="btn-renumber-seq" onclick="setRenumberMode('sequential')">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                    <span>重新顺序编号 (1, 2, 3...)</span>
-                </button>
-                <button type="button" class="renumber-seg-btn" id="btn-renumber-orig" onclick="setRenumberMode('original')">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" style="display:none;"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                    <span>保持原作业题号</span>
-                </button>
-            </div>
-            <div class="choice-renumber-hint" id="choice-renumber-hint">
-                整卷从第 1 题起连续递增排版，小字标注对应原作业题号
-            </div>
-        </div>
-
         <!-- 题头考点提示开关：家长可按需隐藏知识点，避免提前提示解题思路 -->
         <div class="choice-topic-hint-box">
             <div class="choice-topic-hint-row">
@@ -281,7 +250,6 @@
                 <button type="button" class="topic-hint-seg-btn active" id="btn-topic-hint-on" onclick="setTopicHintEnabled(true)">显示考点</button>
                 <button type="button" class="topic-hint-seg-btn" id="btn-topic-hint-off" onclick="setTopicHintEnabled(false)">隐藏考点</button>
             </div>
-            <div class="choice-topic-hint-desc" id="topic-hint-desc">题头会显示具体考点，方便家长对照复习。</div>
         </div>
 
         <div class="choice-options">
@@ -394,6 +362,6 @@
     <span id="toast-text">已复制到剪贴板</span>
 </div>
 
-<script src="js/retest-beta.js?v=20261103-2"></script>
+<script src="js/retest-beta.js?v=20261103-3"></script>
 </body>
 </html>
