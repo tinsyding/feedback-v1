@@ -225,4 +225,5 @@ jobs:
           path: |
             dist/极方每周反馈程序-绿色文件夹版.zip
             dist/极方每周反馈程序-Web版-绿色文件夹版.zip
+          retention-days: 7
           if-no-files-found: error
