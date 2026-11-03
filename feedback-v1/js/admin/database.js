@@ -2507,9 +2507,7 @@
                                             </button>
                                         ` : ''}
                                     </div>
-                                    <div id="modal-preview-comment-text" style="font-size: 0.84rem; color: var(--text-primary); line-height: 1.5; white-space: pre-wrap; background: var(--bg-subtle); border-radius: var(--radius-sm); padding: 8px 12px; border: 1px solid var(--border-color); flex: 1; min-height: 50px;">
-                                        ${escapeHtml(previewCommentText || '（暂无课前预习评语）')}
-                                    </div>
+                                    <div id="modal-preview-comment-text" style="font-size: 0.84rem; color: var(--text-primary); line-height: 1.5; white-space: pre-wrap; background: var(--bg-subtle); border-radius: var(--radius-sm); padding: 8px 12px; border: 1px solid var(--border-color); flex: 1; min-height: 50px;">${escapeHtml((previewCommentText || '').trim() || '（暂无课前预习评语）')}</div>
                                 </div>
 
                                 <!-- 预习文件来源 -->
@@ -2604,9 +2602,7 @@
                                             </button>
                                         ` : ''}
                                     </div>
-                                    <div id="modal-comment-text" style="font-size: 0.84rem; color: var(--text-primary); line-height: 1.5; white-space: pre-wrap; background: var(--bg-subtle); border-radius: var(--radius-sm); padding: 8px 12px; border: 1px solid var(--border-color); flex: 1; min-height: 50px;">
-                                        ${escapeHtml(commentText || '（暂无课后巩固评语）')}
-                                    </div>
+                                    <div id="modal-comment-text" style="font-size: 0.84rem; color: var(--text-primary); line-height: 1.5; white-space: pre-wrap; background: var(--bg-subtle); border-radius: var(--radius-sm); padding: 8px 12px; border: 1px solid var(--border-color); flex: 1; min-height: 50px;">${escapeHtml((commentText || '').trim() || '（暂无课后巩固评语）')}</div>
                                 </div>
 
                                 <!-- 巩固文件来源 -->
