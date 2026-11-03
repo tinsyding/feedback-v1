@@ -10,6 +10,15 @@ name: Deploy to production
 on:
   push:
     branches: [main]
+    # 纯文档 / CI 配置 / 仓库杂项改动不触发生产部署，节省 Actions 分钟数。
+    # 注意：只要一次 push 里包含任意业务文件（feedback-v1/**），仍会正常部署。
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.github/**'
+      - '.gitignore'
+      - '.gitattributes'
+      - '_scan.py'
 
 concurrency:
   group: production-deploy
