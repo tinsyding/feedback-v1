@@ -218,6 +218,49 @@ class TestBenchmark(unittest.TestCase):
             self.assertIn("202401张三", csv_text)
             self.assertIn("202402李四", csv_text)
 
+    def test_web_controller_benchmark_fallback_to_all_when_unselected(self):
+        """测试当所有学生均未被勾选（例如发送完毕后自动取消勾选），自动兜底为全员评测。"""
+        from sender_py.web_controller import WebController
+        controller = WebController()
+        controller.items = [
+            {"_id": "1", "studentName": "202401张三", "sid": "202401", "sname": "张三", "_selected": False},
+            {"_id": "2", "studentName": "202402李四", "sid": "202402", "sname": "李四", "_selected": False},
+        ]
+        with mock.patch("sender_py.benchmark.benchmark_single_student", return_value={"success": True, "record": None}):
+            res = controller.start_benchmark()
+            self.assertTrue(res["success"])
+            self.assertEqual(res["total"], 2)
+            if controller._benchmark_worker_thread:
+                controller._benchmark_stop_requested = True
+                controller._benchmark_worker_thread.join(timeout=2.0)
+
+    def test_web_ui_html_defines_escape_html(self):
+        """测试 web_ui.html 必须定义 escapeHtml 函数，防止评测结果渲染时抛出未定义异常。"""
+        cur_dir = os.path.dirname(os.path.abspath(__file__))
+        web_ui_path = os.path.join(os.path.dirname(cur_dir), "web_ui.html")
+        with open(web_ui_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("function escapeHtml(", content)
+        self.assertIn(".replace(/&/g, \"&amp;\")", content)
+
+    def test_sender_app_token_attribute_exists(self):
+        """测试 SenderApp 必须具备 token 属性，防止基准评测抛出 AttributeError。"""
+        from sender_py import sender
+        dummy_root = mock.MagicMock()
+        dummy_root.winfo_screenwidth.return_value = 1920
+        dummy_root.winfo_screenheight.return_value = 1080
+        mock_tk = mock.MagicMock()
+        mock_ttk = mock.MagicMock()
+        def fake_build_ui(inst):
+            inst.search_var = mock.MagicMock()
+        with mock.patch.dict(sys.modules, {"tkinter": mock_tk, "tkinter.ttk": mock_ttk}), \
+             mock.patch.object(sender.SenderApp, "_build_ui", side_effect=fake_build_ui, autospec=True), \
+             mock.patch.object(sender.SenderApp, "_setup_appearance", return_value=None), \
+             mock.patch.object(sender.SenderApp, "update_file_pool_ui", return_value=None), \
+             mock.patch.object(sender.SenderApp, "rebuild_student_list", return_value=None):
+            app = sender.SenderApp(dummy_root, [], "https://mock.server", "archive")
+            self.assertTrue(hasattr(app, "token"))
+
 
 if __name__ == "__main__":
     unittest.main()

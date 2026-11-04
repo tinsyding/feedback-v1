@@ -75,6 +75,7 @@ def evaluate_title_image_all_engines(
     
     返回: (engine_results, has_discrepancy, fastest_engine_name)
     """
+    server = (server or "https://feedback.wxjifang.cn").strip()
     if _BENCHMARK_HOOK is not None:
         return _BENCHMARK_HOOK(title_img, sid, sname, server, token)
 
@@ -213,11 +214,21 @@ def benchmark_single_student(
     sid = item.get("sid", "")
     sname = item.get("sname", "")
     if not sname and name:
-        from sender_py.utils import parse_student_identifier
+        try:
+            from sender_py.utils import parse_student_identifier
+        except ModuleNotFoundError:
+            from utils import parse_student_identifier
         _, sname = parse_student_identifier(name)
 
     if should_stop is not None and should_stop():
         return {"success": False, "reason": "用户停止", "record": None}
+
+    # 激活并置顶企业微信窗口，避免后台或最小化导致找窗/坐标失效
+    if not wu.find_and_activate_wecom():
+        if should_stop is not None and should_stop():
+            return {"success": False, "reason": "用户停止", "record": None}
+        return {"success": False, "reason": "企微唤起失败（最小化或无响应），请手动点开后重试", "record": None}
+    time.sleep(0.3)
 
     ok_vis, vis = wu.ensure_fully_visible(log=log)
     rect = vis if (ok_vis and vis) else wu.get_wecom_rect()
@@ -228,6 +239,14 @@ def benchmark_single_student(
     roi = ensure_roi(None, rect, scale, config_path, server=server, token=token, log=log, sample_name=name)
     if not roi:
         return {"success": False, "reason": "ROI 校准未完成", "record": None}
+
+    # 校准过程或居中操作可能改变企微位置，刷新最新物理坐标
+    try:
+        fresh_rect = wu.get_wecom_rect()
+        if fresh_rect and fresh_rect[2] >= 200 and fresh_rect[3] >= 150:
+            rect = fresh_rect
+    except Exception:
+        pass
 
     log(f"  🔍 正在企业微信中搜索联系人: {name} (候选 1)...")
     entered = search_and_enter(name, 1)
@@ -248,6 +267,14 @@ def benchmark_single_student(
     if check_and_handle_search_tab(log=log, name=name):
         return {"success": False, "reason": "未找到该联系人（弹出全局搜索）", "record": None}
 
+    # 截图核验前再次确认最新坐标
+    try:
+        fresh_rect = wu.get_wecom_rect()
+        if fresh_rect and fresh_rect[2] >= 200 and fresh_rect[3] >= 150:
+            rect = fresh_rect
+    except Exception:
+        pass
+
     # 截取整窗并裁剪标题栏
     img = capture_wecom_window(rect)
     if img is None:
@@ -256,7 +283,7 @@ def benchmark_single_student(
 
     title_img = crop_by_rel(img, roi["title"])
 
-    log(f"  ⚡ 正在并发/串行评测全部 5 种识别方案并计时...")
+    log(f"  ⚡ 正在并发/串行评测全部 3 种识别方案并计时...")
     engine_results, has_discrepancy, fastest = evaluate_title_image_all_engines(
         title_img, sid, sname, server, token
     )

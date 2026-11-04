@@ -769,8 +769,11 @@ class WebController:
             else:
                 items_to_run = [it for it in self.items if it.get("_selected", True)]
 
+            if not items_to_run and self.items:
+                items_to_run = list(self.items)
+
             if not items_to_run:
-                return {"success": False, "message": "未勾选任何需要评测的学生"}
+                return {"success": False, "message": "当前暂无学生数据，请先加载反馈文件"}
 
             self.benchmark_state["running"] = True
             self.benchmark_state["progress"] = {
@@ -834,6 +837,16 @@ class WebController:
         total = len(items_to_run)
         self.emit(f"▶ [多引擎评测] 开始基准评测（共 {total} 人，全程只识别不发送，按 ESC 随时停止）")
         self._start_esc_watcher()
+
+        # 评测开始前统一将企微窗口向下还原并居中，保证坐标稳定
+        try:
+            try:
+                from sender_py import window_utils as wu
+            except ModuleNotFoundError:
+                import window_utils as wu
+            wu.restore_and_center_wecom(log=self.emit)
+        except Exception:
+            pass
 
         try:
             try:

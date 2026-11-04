@@ -1021,6 +1021,14 @@ class SenderApp:
         self._reply_event_queue = queue.Queue()
         self._pending_reply_tasks = 0
         self._reply_analyzer = None
+        try:
+            try:
+                from sender_py.vision_api import load_token
+            except ModuleNotFoundError:
+                from vision_api import load_token
+            self.token = load_token() or None
+        except Exception:
+            self.token = None
 
         self._setup_appearance(root)
         root.title(APP_NAME)
@@ -2769,8 +2777,10 @@ class SenderApp:
             return
 
         selected_items = [it for it in self.items if it.get("_selected", True)]
+        if not selected_items and self.items:
+            selected_items = list(self.items)
         if not selected_items:
-            messagebox.showinfo("提示", "当前未勾选任何需要评测的学生，请先在主列表勾选学生！", parent=self.root)
+            messagebox.showinfo("提示", "当前暂无学生数据，请先加载反馈文件！", parent=self.root)
             return
 
         ok = messagebox.askyesno(
@@ -2841,38 +2851,48 @@ class SenderApp:
         export_btn.config(command=do_export)
 
         def worker():
-            config_path = default_config_path()
-            for idx, item in enumerate(selected_items, 1):
-                if stopped[0]:
-                    break
-                sname = item.get("studentName", "")
-                def _update_ui(i=idx, sn=sname):
-                    status_lbl.config(text=f"正在评测 ({i}/{len(selected_items)}): {sn}")
-                    prog.config(value=i)
-                win.after(0, _update_ui)
+            try:
+                config_path = default_config_path()
+                for idx, item in enumerate(selected_items, 1):
+                    if stopped[0]:
+                        break
+                    sname = item.get("studentName", "")
+                    def _update_ui(i=idx, sn=sname):
+                        status_lbl.config(text=f"正在评测 ({i}/{len(selected_items)}): {sn}")
+                        prog.config(value=i)
+                    win.after(0, _update_ui)
 
-                def log_fn(m):
-                    def _log(msg=m):
-                        txt.insert("end", f"{msg}\n")
-                        txt.see("end")
-                    win.after(0, _log)
+                    def log_fn(m):
+                        def _log(msg=m):
+                            txt.insert("end", f"{msg}\n")
+                            txt.see("end")
+                        win.after(0, _log)
 
-                res = benchmark_single_student(
-                    item, self.server, self.token,
-                    config_path=config_path,
-                    log=log_fn,
-                    should_stop=lambda: stopped[0]
-                )
-                if res.get("record"):
-                    records.append(res["record"])
-                time.sleep(0.3)
+                    res = benchmark_single_student(
+                        item, self.server, getattr(self, "token", None),
+                        config_path=config_path,
+                        log=log_fn,
+                        should_stop=lambda: stopped[0]
+                    )
+                    if res.get("record"):
+                        records.append(res["record"])
+                    time.sleep(0.3)
 
-            def _finish():
-                summary = compute_benchmark_summary(records)
-                status_lbl.config(text=f"评测完成！共测试 {len(records)} 人，发现分歧 {summary.get('discrepancy_count', 0)} 例。")
-                stop_btn.config(state="disabled")
-                export_btn.config(state="normal")
-            win.after(0, _finish)
+                def _finish():
+                    summary = compute_benchmark_summary(records)
+                    status_lbl.config(text=f"评测完成！共测试 {len(records)} 人，发现分歧 {summary.get('discrepancy_count', 0)} 例。")
+                    stop_btn.config(state="disabled")
+                    export_btn.config(state="normal")
+                win.after(0, _finish)
+            except Exception as exc:
+                def _err(e=exc):
+                    status_lbl.config(text=f"评测异常终止: {e}")
+                    txt.insert("end", f"❌ 评测发生异常: {e}\n")
+                    txt.see("end")
+                    stop_btn.config(state="disabled")
+                    if records:
+                        export_btn.config(state="normal")
+                win.after(0, _err)
 
         threading.Thread(target=worker, daemon=True).start()
 

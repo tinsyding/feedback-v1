@@ -1231,9 +1231,12 @@
     }
 
     async function triggerStartBenchmark() {
-      const selected = appState.students.filter(s => s.selected);
+      let selected = appState.students ? appState.students.filter(s => s.selected) : [];
+      if (!selected.length && appState.students && appState.students.length > 0) {
+        selected = appState.students;
+      }
       if (!selected.length) {
-        showToast("请先在主界面勾选要评测的学生");
+        showToast("当前暂无学生数据，请先导入待发送文件");
         return;
       }
       try {
@@ -2520,6 +2523,16 @@
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+    }
+
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return "";
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
     }
 
     function escapeJs(str) {
