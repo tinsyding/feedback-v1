@@ -1462,7 +1462,11 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                     });
                     previewTopics = [...new Set(previewParsed.errorNums.map(num => previewQuestionMap[num] || `第${num}题`).filter(Boolean))];
                 }
-                feedback += `预习题的错题已加入错题本，预习题同类题详见讲义。\n`;
+                const isEnglishSubject = (feedbackSubject === '英语') || String(sessionPayload.subject || '').includes('英语') || String(sessionPayload.title || '').includes('英语');
+                const previewNotice = isEnglishSubject 
+                    ? `预习题错题已加入错题本。\n` 
+                    : `预习题错题已加入错题本，建议结合讲义中的同类题进行巩固。\n`;
+                feedback += previewNotice;
             }
         }
 
@@ -1553,7 +1557,10 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                 // 个人薄弱点仅展示课后巩固的薄弱点
                 if (homeworkTopics.length > 0) {
                     plusFeedbackPart += `【个人薄弱点】：${homeworkTopics.join('、')}\n`;
-                    plusFeedbackPart += `课后巩固的举一反三题目已加入错题本\n`;
+                    const sTrimmed = (studentName || '').trim();
+                    const nameSuffix = sTrimmed ? (sTrimmed.length >= 2 ? sTrimmed.slice(-2) : sTrimmed) : '';
+                    const studentDesc = nameSuffix ? `${nameSuffix}同学` : '同学';
+                    plusFeedbackPart += `课后巩固的“举一反三”题目也已加入错题本，方便${studentDesc}后续复习。\n`;
                 }
 
                 if (hasAnyErrors) {
@@ -1797,8 +1804,8 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                 }
             }
             // 完整模式下末尾避免重复展示该行
-            if (academicFeedback.includes('预习题的错题已加入错题本') && fullPlusPart.includes('预习题的错题已加入错题本')) {
-                fullPlusPart = fullPlusPart.replace(/预习题的错题已加入错题本[^\n]*\n?/, '').trim();
+            if (/(?:预习题错题|预习题的错题)已加入错题本/.test(academicFeedback) && /(?:预习题错题|预习题的错题)已加入错题本/.test(fullPlusPart)) {
+                fullPlusPart = fullPlusPart.replace(/(?:预习题错题|预习题的错题)已加入错题本[^\n]*\n?/, '').trim();
             }
             if (academicFeedback.includes('【预习薄弱点】：') && fullPlusPart.includes('【预习薄弱点】：')) {
                 fullPlusPart = fullPlusPart.replace(/【预习薄弱点】：[^\n]*\n?/, '').trim();
@@ -2233,8 +2240,12 @@ async function doGeneratePreviewOnlyFeedback() {
                 });
                 const previewTopics = [...new Set(previewParsed.errorNums.map(num => previewQuestionMap[num] || `第${num}题`).filter(Boolean))];
             }
-            feedback += `预习题的错题已加入错题本，预习题同类题详见讲义。\n`;
-            previewOnlyPlusPart += `预习题的错题已加入错题本，预习题同类题详见讲义。\n`;
+            const isEnglishSubject = (feedbackSubject === '英语') || String(sessionPayload.subject || '').includes('英语') || String(sessionPayload.title || '').includes('英语');
+            const previewNotice = isEnglishSubject 
+                ? `预习题错题已加入错题本。\n` 
+                : `预习题错题已加入错题本，建议结合讲义中的同类题进行巩固。\n`;
+            feedback += previewNotice;
+            previewOnlyPlusPart += previewNotice;
 
             const tokenIdMatch = fullName.match(/^(\d+)/);
             const tokenStudentId = tokenIdMatch ? tokenIdMatch[1] : '';
@@ -2436,8 +2447,8 @@ async function doGeneratePreviewOnlyFeedback() {
         let previewFullFeedback = previewAcademicFeedback;
         if (previewOnlyPlusPart && previewOnlyPlusPart.trim()) {
             let fullPlus = previewOnlyPlusPart.trim();
-            if (previewAcademicFeedback.includes('预习题的错题已加入错题本') && fullPlus.includes('预习题的错题已加入错题本')) {
-                fullPlus = fullPlus.replace(/预习题的错题已加入错题本[^\n]*\n?/, '').trim();
+            if (/(?:预习题错题|预习题的错题)已加入错题本/.test(previewAcademicFeedback) && /(?:预习题错题|预习题的错题)已加入错题本/.test(fullPlus)) {
+                fullPlus = fullPlus.replace(/(?:预习题错题|预习题的错题)已加入错题本[^\n]*\n?/, '').trim();
             }
             if (previewAcademicFeedback.includes('【预习薄弱点】：') && fullPlus.includes('【预习薄弱点】：')) {
                 fullPlus = fullPlus.replace(/【预习薄弱点】：[^\n]*\n?/, '').trim();
