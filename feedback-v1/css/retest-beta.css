@@ -1040,6 +1040,16 @@
             color: #64748b;
         }
 
+        .choice-topic-hint-state.scope-preview {
+            background: #fef3c7;
+            color: #b45309;
+        }
+
+        .choice-topic-hint-state.scope-homework {
+            background: #ede9fe;
+            color: #6d28d9;
+        }
+
         .choice-topic-hint-segmented {
             display: flex;
             background: #e2e8f0;

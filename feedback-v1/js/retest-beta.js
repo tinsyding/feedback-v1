@@ -32,6 +32,8 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
     window.retestQrCodeEnabled = true;
     // 题头考点提示：默认显示，家长可自行隐藏，避免提前给孩子解题提示
     window.retestTopicHintEnabled = true;
+    // 错题题目范围选择：'all' (预习+巩固) | 'preview' (仅预习) | 'homework' (仅巩固)
+    window.retestDownloadScope = 'all';
     try {
         const savedSpacing = (localStorage.getItem('retest_question_spacing') || localStorage.getItem('retest_beta_spacing'));
         if (savedSpacing) {
@@ -39,6 +41,10 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         }
         if (localStorage.getItem('retest_topic_hint_enabled') === '0') {
             window.retestTopicHintEnabled = false;
+        }
+        const savedScope = localStorage.getItem('retest_download_scope');
+        if (savedScope === 'preview' || savedScope === 'homework' || savedScope === 'all') {
+            window.retestDownloadScope = savedScope;
         }
     } catch(e) {}
 
@@ -104,6 +110,48 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         updateTopicHintUI();
         showToast(enabled ? '已开启考点提示' : '已隐藏考点提示，重练版 PDF 不再显示知识点');
     }
+
+    // 错题题目范围选择（仅预习 / 仅巩固 / 预习+巩固）
+    function updateDownloadScopeUI() {
+        const scope = window.retestDownloadScope || 'all';
+        const btnPreview = document.getElementById('btn-scope-preview');
+        const btnHomework = document.getElementById('btn-scope-homework');
+        const btnAll = document.getElementById('btn-scope-all');
+        const stateText = document.getElementById('scope-state-text');
+
+        if (btnPreview) btnPreview.classList.toggle('active', scope === 'preview');
+        if (btnHomework) btnHomework.classList.toggle('active', scope === 'homework');
+        if (btnAll) btnAll.classList.toggle('active', scope === 'all');
+
+        if (stateText) {
+            stateText.classList.remove('scope-preview', 'scope-homework');
+            if (scope === 'preview') {
+                stateText.textContent = '仅预习';
+                stateText.classList.add('scope-preview');
+            } else if (scope === 'homework') {
+                stateText.textContent = '仅巩固';
+                stateText.classList.add('scope-homework');
+            } else {
+                stateText.textContent = '预习+巩固';
+            }
+        }
+    }
+
+    function setDownloadScope(scope) {
+        window.retestDownloadScope = scope || 'all';
+        try {
+            localStorage.setItem('retest_download_scope', window.retestDownloadScope);
+        } catch(e) {}
+        updateDownloadScopeUI();
+        const msgMap = {
+            preview: '已切换为：仅下载预习错题',
+            homework: '已切换为：仅下载课后巩固错题',
+            all: '已切换为：下载预习+巩固全部错题'
+        };
+        showToast(msgMap[scope] || '已更新下载题目范围');
+    }
+    window.setTopicHintEnabled = setTopicHintEnabled;
+    window.setDownloadScope = setDownloadScope;
 
     // 优先通过无缓存机制载入系统全局配置（经脱敏公开接口）
     fetch('api/public_config.php?v=' + Date.now(), { cache: 'no-store' })
@@ -588,6 +636,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             subtitle.textContent = '当前选择：' + getTopicLabel(activeWeek);
         }
         updateTopicHintUI();
+        updateDownloadScopeUI();
         modal.style.display = 'flex';
     }
 
@@ -1112,6 +1161,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
         const weeksData = retestData.weeksData || {};
         const data = retestData.data;
+        const currentScope = window.retestDownloadScope || 'all';
         const typeLabel = type === 'exercise' ? '仅错题题目' : '错题题目+答案';
         let pdfsToMerge = [];
         let fileLabel = '';
@@ -1214,9 +1264,20 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                     });
                 });
             };
-            appendList(wd.previewPdfs, 'preview', wd.previewWeek || fallbackWeek);
-            appendList(wd.pdfs, 'homework', fallbackWeek);
+            if (currentScope === 'all' || currentScope === 'preview') {
+                appendList(wd.previewPdfs, 'preview', wd.previewWeek || fallbackWeek);
+            }
+            if (currentScope === 'all' || currentScope === 'homework') {
+                appendList(wd.pdfs, 'homework', fallbackWeek);
+            }
         };
+
+        let scopeTag = '';
+        if (currentScope === 'preview') {
+            scopeTag = '_仅预习';
+        } else if (currentScope === 'homework') {
+            scopeTag = '_仅巩固';
+        }
 
         if (allWeeks) {
             const sortedWeeks = Object.keys(weeksData).map(Number).sort((a, b) => a - b);
@@ -1225,19 +1286,25 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 appendWeekPdfs(wd, w);
             });
             if (sortedWeeks.length > 3) {
-                fileLabel = getTopicLabel(sortedWeeks[0]) + '至' + getTopicLabel(sortedWeeks[sortedWeeks.length - 1]) + '_全' + sortedWeeks.length + '讲合辑_' + typeLabel;
+                fileLabel = getTopicLabel(sortedWeeks[0]) + '至' + getTopicLabel(sortedWeeks[sortedWeeks.length - 1]) + '_全' + sortedWeeks.length + '讲合辑_' + typeLabel + scopeTag;
             } else {
-                fileLabel = sortedWeeks.map(w => getTopicLabel(w)).join('+') + '_' + typeLabel;
+                fileLabel = sortedWeeks.map(w => getTopicLabel(w)).join('+') + '_' + typeLabel + scopeTag;
             }
         } else {
             const weekData = weeksData[String(activeWeek)];
             if (!weekData) return;
             appendWeekPdfs(weekData, activeWeek);
-            fileLabel = getTopicLabel(activeWeek) + '_' + typeLabel;
+            fileLabel = getTopicLabel(activeWeek) + '_' + typeLabel + scopeTag;
         }
 
         if (pdfsToMerge.length === 0) {
-            showToast(allWeeks ? '暂无任何错题需要生成合辑' : '该专题暂无错题需要生成');
+            let emptyMsg = allWeeks ? '暂无任何错题需要生成合辑' : '该专题暂无错题需要生成';
+            if (currentScope === 'preview') {
+                emptyMsg = allWeeks ? '暂无任何预习错题需要生成合辑' : '该专题暂无预习错题';
+            } else if (currentScope === 'homework') {
+                emptyMsg = allWeeks ? '暂无任何课后巩固错题需要生成合辑' : '该专题暂无课后巩固错题';
+            }
+            showToast(emptyMsg);
             return;
         }
 

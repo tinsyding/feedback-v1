@@ -27,7 +27,7 @@
             try { new VConsole(); } catch(e) {}
         }
     </script>
-    <link rel="stylesheet" href="css/retest.css?v=20261103b">
+    <link rel="stylesheet" href="css/retest.css?v=20261104">
     <link rel="stylesheet" href="css/tokens.css?v=20260927">
 </head>
 <body>
@@ -251,6 +251,26 @@
             </div>
         </div>
 
+        <!-- 错题题目范围选择：仅预习 / 仅巩固 / 预习+巩固 -->
+        <div class="choice-topic-hint-box" style="margin-bottom: 14px;">
+            <div class="choice-topic-hint-row">
+                <span class="choice-topic-hint-label">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                        <polyline points="2 17 12 22 22 17"></polyline>
+                        <polyline points="2 12 12 17 22 12"></polyline>
+                    </svg>
+                    错题题目范围
+                </span>
+                <span class="choice-topic-hint-state" id="scope-state-text">预习+巩固</span>
+            </div>
+            <div class="choice-topic-hint-segmented">
+                <button type="button" class="topic-hint-seg-btn" id="btn-scope-preview" onclick="setDownloadScope('preview')">仅预习</button>
+                <button type="button" class="topic-hint-seg-btn" id="btn-scope-homework" onclick="setDownloadScope('homework')">仅巩固</button>
+                <button type="button" class="topic-hint-seg-btn active" id="btn-scope-all" onclick="setDownloadScope('all')">预习+巩固</button>
+            </div>
+        </div>
+
         <div class="choice-options">
             <!-- Option 1: 仅错题题目 -->
             <button class="choice-opt-btn" onclick="selectDownloadVersion('exercise')">
@@ -361,6 +381,6 @@
     <span id="toast-text">已复制到剪贴板</span>
 </div>
 
-<script src="js/retest.js?v=20261103-3"></script>
+<script src="js/retest.js?v=20261104"></script>
 </body>
 </html>
