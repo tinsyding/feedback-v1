@@ -10,7 +10,7 @@ feedback/
 
 ## 文档导航
 
-- [多环境架构与运维说明（主站 / 测试站 / 备份站）](./docs/environments.md)
+- [生产环境与运维说明](./docs/environments.md)
 - [GitHub 配置与 CI/CD 工具链说明](./docs/github.md)
 - [后端 API 接口文档](./docs/api.md)
 - [桌面端企业微信反馈发送器说明](./feedback-v1/tools/sender_py/README.md)
@@ -34,15 +34,15 @@ feedback/
 
 ## 站点环境
 
-生产环境配置如下：
+线上生产环境配置如下：
 
 | 环境 | 域名 | 分支 | 部署目录 | 数据库 | 说明 |
 | :--- | :--- | :---: | :--- | :--- | :--- |
 | **主站（生产）** | `feedback.wxjifang.cn`<br>`vip.wxjifang.cn` | `main` | `/www/wwwroot/JF/feedback-git` | `feedback` | 正式生产环境，push `main` 自动触发部署与冒烟检查 |
 
-> **注**：原独立的测试站（`feedbacktest`）与热备镜像站（`feedbackbackup`）已于 2026-11-04 完成本地留底归档并下线清理，详见 [环境与运维说明](./docs/environments.md)。每日 03:00 由定时任务自动生成生产数据库物理快照至 `/www/backup/feedback_backup_snapshots/`。
+每天凌晨 03:00 由定时任务自动生成生产数据库物理快照至 `/www/backup/feedback_backup_snapshots/`。
 
-域名解析、数据库隔离与定时同步机制见 [多环境架构与运维说明](./docs/environments.md)。
+详细的架构与运维约定见 [生产环境与运维说明](./docs/environments.md)。
 
 ## GitHub 与自动化流水线
 

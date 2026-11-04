@@ -9,9 +9,8 @@
   - Gitee：`git@gitee.com:tinsysakura/feedback-v1.git`
   - 双推送配置：本地 `origin` 配置了双 `pushurl`，执行 `git push` 时会同时推送到 GitHub 与 Gitee。
 - 分支说明：
-  - `main`：生产分支，合并或推送后触发生产环境自动部署。
-  - `staging`：特性集成与预发分支，用于多模块协同开发与特性暂存验证（如讲义切题引擎 Beta 等）。
-  - `feat/*`：功能开发分支，完成后合入 `staging` 或 `main`。
+  - `main`：主生产分支，合并或推送后触发生产环境自动部署。
+  - `feat/*`：功能开发分支，验证完成后合并入 `main`。
 
 ## 二、GitHub Actions 工作流
 
