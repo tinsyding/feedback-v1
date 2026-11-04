@@ -34,13 +34,13 @@ feedback/
 
 ## 站点环境
 
-生产服务器运行三套隔离环境：
+生产环境配置如下：
 
-| 环境 | 域名 | 分支 | 部署目录 | 说明 |
-| :--- | :--- | :---: | :--- | :--- |
-| 主站（生产） | `feedback.wxjifang.cn`<br>`vip.wxjifang.cn` | `main` | `/www/wwwroot/JF/feedback-git` | 正式环境，push `main` 自动触发部署与冒烟检查 |
-| 测试站 | `feedbacktest.wxjifang.cn` | `staging` | `/www/wwwroot/JF/feedback-test` | 独立数据库（`feedback_test`），用于新功能上线前验证 |
-| 备份站 | `feedbackbackup.wxjifang.cn` | `main` | `/www/wwwroot/JF/feedback-backup` | 每天 03:00 自动热备数据库并增量同步文件，用于容灾回退 |
+| 环境 | 域名 | 分支 | 部署目录 | 数据库 | 说明 |
+| :--- | :--- | :---: | :--- | :--- | :--- |
+| **主站（生产）** | `feedback.wxjifang.cn`<br>`vip.wxjifang.cn` | `main` | `/www/wwwroot/JF/feedback-git` | `feedback` | 正式生产环境，push `main` 自动触发部署与冒烟检查 |
+
+> **注**：原独立的测试站（`feedbacktest`）与热备镜像站（`feedbackbackup`）已于 2026-11-04 完成本地留底归档并下线清理，详见 [环境与运维说明](./docs/environments.md)。每日 03:00 由定时任务自动生成生产数据库物理快照至 `/www/backup/feedback_backup_snapshots/`。
 
 域名解析、数据库隔离与定时同步机制见 [多环境架构与运维说明](./docs/environments.md)。
 

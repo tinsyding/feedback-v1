@@ -2,7 +2,7 @@
 
 ## 为什么需要
 
-主站、测试站、备份站的 nginx 由宝塔面板管理，线上配置不在代码仓库里。之前出现过 `/data/vision_config.json` 和 `/data/identify_archive/` 被公网直接下载的问题，因此把安全规则做成可版本化的片段，避免重装/迁移时丢失。
+线上主站的 nginx 由宝塔面板管理，线上配置不在代码仓库里。之前出现过 `/data/vision_config.json` 和 `/data/identify_archive/` 被公网直接下载的问题，因此把安全规则做成可版本化的片段，避免重装/迁移时丢失。
 
 ## 版本化文件
 
