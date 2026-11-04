@@ -1448,7 +1448,7 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                 feedback += buildPreviewFeedbackSection(previewDisplayInfo, pvLesson, previewStats, previewMetricMode, rankFormat);
             }
 
-            // 预习作业个人薄弱点展示
+            // 预习作业错题提示（预习薄弱点不展示给家长；有预习错题时展示讲义提示）
             if (sessionPayload.plusData?.enabled && previewParsed && previewParsed.errorNums.length > 0) {
                 const previewQuestions = sessionPayload.plusData.previewQuestions || sessionPayload.plusData.questions || [];
                 if (previewQuestions.length > 0) {
@@ -1461,10 +1461,8 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                         ids.forEach(id => { previewQuestionMap[id] = cleanT; });
                     });
                     previewTopics = [...new Set(previewParsed.errorNums.map(num => previewQuestionMap[num] || `第${num}题`).filter(Boolean))];
-                    if (previewTopics.length > 0) {
-                        feedback += `【预习薄弱点】：${previewTopics.join('、')}\n`;
-                    }
                 }
+                feedback += `预习题的错题已加入错题本，预习题同类题详见讲义。\n`;
             }
         }
 
@@ -1552,26 +1550,21 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                     });
                 }
 
+                // 个人薄弱点仅展示课后巩固的薄弱点
                 if (homeworkTopics.length > 0) {
-                    const hwLabel = (previewTopics.length > 0 || (previewData && pvLesson)) ? '【巩固薄弱点】' : '【个人薄弱点】';
-                    plusFeedbackPart += `${hwLabel}：${homeworkTopics.join('、')}\n`;
-                }
-
-                if (previewTopics.length > 0) {
-                    plusFeedbackPart += `【预习薄弱点】：${previewTopics.join('、')}\n`;
+                    plusFeedbackPart += `【个人薄弱点】：${homeworkTopics.join('、')}\n`;
+                    plusFeedbackPart += `课后巩固的举一反三题目已加入错题本\n`;
                 }
 
                 if (hasAnyErrors) {
-                    plusFeedbackPart += `【错题本】：点击链接查看本专题的错题\n`;
                     const token = plusTokens[studentKey]
                         || plusTokens[legacyStudentKey]
                         || (!studentId ? (plusTokens[fullName] || plusTokens[studentName]) : '');
                     if (token) {
                         const retestBase = getRetestBaseUrl();
-                        const previewSuffix = hasPreviewErrors ? '（预习错题请切换到对应专题查看）' : '';
-                        plusFeedbackPart += `${retestBase}?token=${token}${previewSuffix}\n`;
+                        plusFeedbackPart += `【错题本】：${retestBase}?token=${token}\n`;
                     } else {
-                        plusFeedbackPart += `(生成链接失败，请联系老师)\n`;
+                        plusFeedbackPart += `【错题本】：(生成链接失败，请联系老师)\n`;
                     }
                 } else {
                     // 严格校验：结合分数、正确率、推算满分以及评语多维判定是否真正满分
@@ -1594,19 +1587,14 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                 const hasPreviewErrors = previewTopics.length > 0 || Boolean(previewParsed && previewParsed.errorNums && previewParsed.errorNums.length > 0);
                 if (hasPreviewErrors) {
                     plusFeedbackPart = `第${hwLesson}${getLessonUnit()}${getHomeworkLabelFull()}未提交。\n`;
-                    if (previewTopics.length > 0) {
-                        plusFeedbackPart += `【预习薄弱点】：${previewTopics.join('、')}\n`;
-                    }
-                    plusFeedbackPart += `【错题本】：点击链接查看本专题的错题\n`;
                     const token = plusTokens[studentKey]
                         || plusTokens[legacyStudentKey]
                         || (!studentId ? (plusTokens[fullName] || plusTokens[studentName]) : '');
                     if (token) {
                         const retestBase = getRetestBaseUrl();
-                        const previewSuffix = '（预习错题请切换到对应专题查看）';
-                        plusFeedbackPart += `${retestBase}?token=${token}${previewSuffix}\n`;
+                        plusFeedbackPart += `【错题本】：${retestBase}?token=${token}\n`;
                     } else {
-                        plusFeedbackPart += `(生成链接失败，请联系老师)\n`;
+                        plusFeedbackPart += `【错题本】：(生成链接失败，请联系老师)\n`;
                     }
                 } else {
                     plusFeedbackPart = `第${hwLesson}${getLessonUnit()}${getHomeworkLabelFull()}未提交，暂无错题加练数据。\n`;
@@ -1808,7 +1796,10 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                     fullPlusPart = fullPlusPart.slice(firstPlusLine.length).replace(/^\n+/, '').trim();
                 }
             }
-            // 若学术反馈正文中已单独列出【预习薄弱点】，完整模式下末尾避免重复展示该行
+            // 完整模式下末尾避免重复展示该行
+            if (academicFeedback.includes('预习题的错题已加入错题本') && fullPlusPart.includes('预习题的错题已加入错题本')) {
+                fullPlusPart = fullPlusPart.replace(/预习题的错题已加入错题本[^\n]*\n?/, '').trim();
+            }
             if (academicFeedback.includes('【预习薄弱点】：') && fullPlusPart.includes('【预习薄弱点】：')) {
                 fullPlusPart = fullPlusPart.replace(/【预习薄弱点】：[^\n]*\n?/, '').trim();
             }
@@ -2241,11 +2232,10 @@ async function doGeneratePreviewOnlyFeedback() {
                     ids.forEach(id => { previewQuestionMap[id] = cleanT; });
                 });
                 const previewTopics = [...new Set(previewParsed.errorNums.map(num => previewQuestionMap[num] || `第${num}题`).filter(Boolean))];
-                if (previewTopics.length > 0) {
-                    feedback += `【预习薄弱点】：${previewTopics.join('、')}\n`;
-                    previewOnlyPlusPart += `【预习薄弱点】：${previewTopics.join('、')}\n`;
-                }
             }
+            feedback += `预习题的错题已加入错题本，预习题同类题详见讲义。\n`;
+            previewOnlyPlusPart += `预习题的错题已加入错题本，预习题同类题详见讲义。\n`;
+
             const tokenIdMatch = fullName.match(/^(\d+)/);
             const tokenStudentId = tokenIdMatch ? tokenIdMatch[1] : '';
             const tokenGrade = sessionPayload.plusData?.grade || '';
@@ -2255,13 +2245,11 @@ async function doGeneratePreviewOnlyFeedback() {
                 : studentName;
             const tokenLegacyKey = tokenStudentId ? `${tokenStudentId}_${studentName}` : studentName;
             const token = previewOnlyPlusTokens[tokenStudentKey] || previewOnlyPlusTokens[tokenLegacyKey] || '';
-            previewOnlyPlusPart += `【错题本】：点击链接查看本专题的错题\n`;
             if (token) {
                 const retestBase = getRetestBaseUrl();
-                const previewSuffix = '（预习错题请切换到对应专题查看）';
-                previewOnlyPlusPart += `${retestBase}?token=${token}${previewSuffix}\n`;
+                previewOnlyPlusPart += `【错题本】：${retestBase}?token=${token}\n`;
             } else {
-                previewOnlyPlusPart += `(生成链接失败，请联系老师)\n`;
+                previewOnlyPlusPart += `【错题本】：(生成链接失败，请联系老师)\n`;
             }
         }
 
@@ -2448,6 +2436,9 @@ async function doGeneratePreviewOnlyFeedback() {
         let previewFullFeedback = previewAcademicFeedback;
         if (previewOnlyPlusPart && previewOnlyPlusPart.trim()) {
             let fullPlus = previewOnlyPlusPart.trim();
+            if (previewAcademicFeedback.includes('预习题的错题已加入错题本') && fullPlus.includes('预习题的错题已加入错题本')) {
+                fullPlus = fullPlus.replace(/预习题的错题已加入错题本[^\n]*\n?/, '').trim();
+            }
             if (previewAcademicFeedback.includes('【预习薄弱点】：') && fullPlus.includes('【预习薄弱点】：')) {
                 fullPlus = fullPlus.replace(/【预习薄弱点】：[^\n]*\n?/, '').trim();
             }

@@ -3294,7 +3294,7 @@
             }
 
             const hasPrevErrors = prevErrs.length > 0;
-            const previewSuffix = hasPrevErrors ? '（预习的错题也在这个里面）' : '';
+            const previewSuffix = '';
 
             const sName = r.student_name || '同学';
             const hwScore = (r.homework_score !== null && r.homework_score !== undefined && r.homework_score !== '') ? `${r.homework_score}分` : '已按时提交';
@@ -3303,10 +3303,10 @@
             const wDesc = r.week_num ? `第${r.week_num}周` : '本周';
 
             let previewFeedbackBlock = '';
-            if (prevScore || prevWeakPointsDesc || (r.preview_comment && String(r.preview_comment).trim())) {
+            if (prevScore || hasPrevErrors || (r.preview_comment && String(r.preview_comment).trim())) {
                 previewFeedbackBlock = `\n【课前预习情况】：` +
                     (prevScore ? `\n预习得分：${prevScore}` : '') +
-                    (prevWeakPointsDesc ? `\n预习错题与薄弱点：\n${prevWeakPointsDesc}` : '') +
+                    (hasPrevErrors ? `\n预习题的错题已加入错题本，预习题同类题详见讲义。` : '') +
                     ((r.preview_comment && String(r.preview_comment).trim()) ? `\n预习评语：${String(r.preview_comment).trim()}` : '');
             }
 
@@ -3317,8 +3317,8 @@
 作业巩固成绩：${hwScore}${totalScore}
 错题考点与薄弱知识点：
 ${weakPointsDesc}
-教师巩固评语：
-${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_comment).trim() : '学习态度认真，继续加油！'}${previewFeedbackBlock}${link ? `\n专属个性化错题本与微课巩固：\n${link}${previewSuffix}` : ''}`.replace(/\n{2,}/g, '\n');
+${(validDetails.length > 0 || errs.length > 0) ? '课后巩固的举一反三题目已加入错题本\n' : ''}教师巩固评语：
+${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_comment).trim() : '学习态度认真，继续加油！'}${previewFeedbackBlock}${link ? `\n专属个性化错题本与微课巩固：\n${link}` : ''}`.replace(/\n{2,}/g, '\n');
 
             copyTextToClipboard(text, '家校学情完整反馈语已复制到剪贴板！');
         }
