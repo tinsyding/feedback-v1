@@ -28,8 +28,8 @@
         }
     </script>
     <!-- Beta 实验页：与 retest.html 同功能独立副本（2026-09-28 同步），样式/脚本独立，接口共用 api/retest.php -->
-    <link rel="stylesheet" href="css/retest-beta.css?v=20261104">
-    <link rel="stylesheet" href="css/tokens.css?v=20260927">
+    <link rel="stylesheet" href="css/retest-beta.css?v=20261105-2">
+    <link rel="stylesheet" href="css/tokens.css?v=20261105-2">
 </head>
 <body>
 
@@ -218,7 +218,7 @@
                 <div class="topic-grid-title">全部专题速查</div>
                 <div class="topic-grid-subtitle" id="topic-grid-subtitle">点击直接切换专题</div>
             </div>
-            <button class="topic-grid-close" onclick="closeTopicGridModal()">✕</button>
+            <button class="topic-grid-close" onclick="closeTopicGridModal()">&times;</button>
         </div>
         <div class="topic-grid-list" id="topic-grid-list">
             <!-- Dynamic 4-Column Topic Tiles Rendered Here -->
@@ -363,7 +363,7 @@
         </svg>
     </div>
     <div class="wechat-guide-card">
-        <div style="font-size: 1.05rem; font-weight: 800; margin-bottom: 6px;">请在手机浏览器中打开</div>
+        <div style="font-size: 1.05rem; font-weight: 600; margin-bottom: 6px;">请在手机浏览器中打开</div>
         <div style="font-size: 0.85rem; opacity: 0.95; line-height: 1.5;">
             点击右上角 <strong style="color: #fbbf24; font-size: 1.1rem;">···</strong><br>
             选择 <strong style="color: #60a5fa; font-size: 1.05rem;">「在浏览器打开」</strong><br>
@@ -382,6 +382,6 @@
     <span id="toast-text">已复制到剪贴板</span>
 </div>
 
-<script src="js/retest-beta.js?v=20261104"></script>
+<script src="js/retest-beta.js?v=20261105"></script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 /**
  * ============================================================================
  * 极方管理后台 (Admin Console) 前端运行脚本 - 生产环境合并包
- * 自动生成时间: 2026-11-03 14:42:27
+ * 自动生成时间: 2026-11-04 23:53:24
  * 源码模块目录: js/admin/
  * 请勿直接手动修改此文件，开发时请修改 js/admin/ 中的子模块并执行本打包脚本。
  * ============================================================================
@@ -817,13 +817,13 @@
                 const result = await resp.json();
                 if (result.success) {
                     const data = result.data || {};
-                    showToast(`✓ API 连通成功！延迟: ${data.duration_ms}ms`, 'success');
+                    showToast(`API 连通成功，延迟: ${data.duration_ms}ms`, 'success');
                     if (resultBox) {
                         resultBox.innerHTML = `
-                            <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 0.84rem;">
+                            <div style="background: rgba(76, 195, 138, 0.1); border: 1px solid rgba(76, 195, 138, 0.25); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 0.84rem;">
                                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-                                    <span style="font-weight: 600; color: #10b981;">✓ 连通成功 (HTTP ${data.http_code || 200})</span>
-                                    <span style="color: #10b981; font-weight: 600;">耗时: ${data.duration_ms} ms</span>
+                                    <span style="font-weight: 500; color: var(--positive, #16a34a);">连通成功 (HTTP ${data.http_code || 200})</span>
+                                    <span style="color: var(--positive, #16a34a); font-family: var(--font-mono, monospace);">耗时: ${data.duration_ms} ms</span>
                                 </div>
                                 <div style="color: var(--text-secondary); font-size: 0.8rem;">
                                     <strong>测试模型:</strong> <code>${escapeHtml(data.model || model || 'qwen3.8-max')}</code>
@@ -838,9 +838,9 @@
                     showToast('连通失败: ' + errDetail, 'error');
                     if (resultBox) {
                         resultBox.innerHTML = `
-                            <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 0.84rem;">
-                                <div style="font-weight: 600; color: #ef4444; margin-bottom: 4px;">✗ 连通失败${duration}</div>
-                                <div style="color: #ef4444; font-size: 0.8rem; word-break: break-all;">${escapeHtml(errDetail)}</div>
+                            <div style="background: rgba(229, 72, 77, 0.1); border: 1px solid rgba(229, 72, 77, 0.25); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 0.84rem;">
+                                <div style="font-weight: 500; color: var(--negative, #dc2626); margin-bottom: 4px;">连通失败${duration}</div>
+                                <div style="color: var(--negative, #dc2626); font-size: 0.8rem; word-break: break-all;">${escapeHtml(errDetail)}</div>
                             </div>
                         `;
                     }
@@ -849,9 +849,9 @@
                 showToast('请求异常: ' + err.message, 'error');
                 if (resultBox) {
                     resultBox.innerHTML = `
-                        <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 0.84rem;">
-                            <div style="font-weight: 600; color: #ef4444; margin-bottom: 4px;">✗ 网络异常</div>
-                            <div style="color: #ef4444; font-size: 0.8rem;">${escapeHtml(err.message)}</div>
+                        <div style="background: rgba(229, 72, 77, 0.1); border: 1px solid rgba(229, 72, 77, 0.25); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 0.84rem;">
+                            <div style="font-weight: 500; color: var(--negative, #dc2626); margin-bottom: 4px;">网络异常</div>
+                            <div style="color: var(--negative, #dc2626); font-size: 0.8rem;">${escapeHtml(err.message)}</div>
                         </div>
                     `;
                 }
@@ -6104,7 +6104,7 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
                     <div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px;max-width:520px;width:100%;box-shadow:0 10px 25px rgba(0,0,0,0.5);display:flex;flex-direction:column;gap:12px;">
                         <div style="display:flex;align-items:center;justify-content:space-between;">
                             <h4 style="margin:0;color:#f8fafc;font-size:1rem;font-weight:700;">请手动复制文本</h4>
-                            <button type="button" style="background:none;border:none;color:#94a3b8;font-size:1.2rem;cursor:pointer;" onclick="document.getElementById('copy-fallback-modal').style.display='none'">✕</button>
+                            <button type="button" style="background:none;border:none;color:#94a3b8;font-size:1.2rem;cursor:pointer;" onclick="document.getElementById('copy-fallback-modal').style.display='none'">&times;</button>
                         </div>
                         <p style="margin:0;color:#94a3b8;font-size:0.85rem;" id="copy-fallback-hint">浏览器已自动全选文本，请按下 Ctrl+C 复制：</p>
                         <textarea id="copy-fallback-textarea" rows="8" style="width:100%;background:#0f172a;border:1px solid #334155;color:#e2e8f0;border-radius:6px;padding:10px;font-size:0.85rem;font-family:monospace;resize:vertical;outline:none;" readonly></textarea>

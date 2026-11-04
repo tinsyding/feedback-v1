@@ -2,88 +2,17 @@
    Upload Page — Premium Redesign
    ======================================== */
 
-/* --- Pulse animation for optional badge --- */
-@keyframes pulse-optional {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.6; }
-}
-
 /* --- Page base --- */
 body.upload-page {
     overflow-y: auto;
     position: relative;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
 }
 
-/* --- Animated background orbs --- */
+/* --- Animated background orbs disabled --- */
 .bg-orbs {
-    position: fixed;
-    inset: 0;
-    overflow: hidden;
-    pointer-events: none;
-    z-index: 0;
-}
-
-.orb {
-    position: absolute;
-    border-radius: 50%;
-    filter: blur(100px);
-    opacity: 0.25;
-    animation: orbit 20s ease-in-out infinite;
-}
-
-.orb-1 {
-    width: 600px;
-    height: 600px;
-    background: radial-gradient(circle, rgba(var(--accent-rgb), 0.5), transparent 70%);
-    top: -120px;
-    right: -100px;
-    animation-duration: 22s;
-}
-
-.orb-2 {
-    width: 500px;
-    height: 500px;
-    background: radial-gradient(circle, rgba(191, 90, 242, 0.35), transparent 70%);
-    bottom: -80px;
-    left: -100px;
-    animation-duration: 26s;
-    animation-delay: -8s;
-}
-
-.orb-3 {
-    width: 350px;
-    height: 350px;
-    background: radial-gradient(circle, rgba(48, 209, 88, 0.3), transparent 70%);
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    animation-duration: 30s;
-    animation-delay: -14s;
-}
-
-@keyframes orbit {
-
-    0%,
-    100% {
-        transform: translate(0, 0) scale(1);
-    }
-
-    25% {
-        transform: translate(40px, -30px) scale(1.05);
-    }
-
-    50% {
-        transform: translate(-20px, 40px) scale(0.95);
-    }
-
-    75% {
-        transform: translate(-40px, -20px) scale(1.02);
-    }
-}
-
-[data-theme="light"] .orb {
-    opacity: 0.12;
+    display: none !important;
 }
 
 /* --- Shell layout --- */
@@ -142,19 +71,19 @@ body.upload-page {
 }
 
 .brand-icon {
-    width: 42px;
-    height: 42px;
+    width: 32px;
+    height: 32px;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 14px;
-    background: var(--accent-gradient);
-    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.3);
+    border-radius: var(--radius-sm, 6px);
+    background: var(--brand-500, #2563eb);
+    box-shadow: none;
 }
 
 .brand-icon svg {
-    width: 22px;
-    height: 22px;
+    width: 18px;
+    height: 18px;
     color: #fff;
 }
 
@@ -165,9 +94,9 @@ body.upload-page {
 }
 
 .brand-text h1 {
-    font-size: 1.2rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
+    font-size: 1.05rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
 }
 
 .brand-badge {
@@ -499,28 +428,21 @@ body.upload-page {
 }
 
 .card-icon {
-    width: 44px;
-    height: 44px;
+    width: 36px;
+    height: 36px;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 14px;
+    border-radius: var(--radius-sm, 6px);
+    background: var(--n-3, rgba(255, 255, 255, 0.05));
+    border: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+    color: var(--text-2, #a1a1a6) !important;
     flex-shrink: 0;
 }
 
 .card-icon svg {
-    width: 22px;
-    height: 22px;
-}
-
-.homework-icon {
-    background: rgba(var(--accent-rgb), 0.12);
-    color: var(--accent-primary);
-}
-
-.report-icon {
-    background: rgba(191, 90, 242, 0.12);
-    color: var(--system-purple);
+    width: 18px;
+    height: 18px;
 }
 
 .card-title-group {
@@ -535,21 +457,20 @@ body.upload-page {
 }
 
 .card-badge {
-    font-size: 0.62rem;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 999px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    font-size: 0.72rem;
+    font-weight: 500;
+    padding: 1px 6px;
+    border-radius: var(--radius-xs, 4px);
+    letter-spacing: 0.01em;
 }
 
 .card-badge.required {
-    background: rgba(var(--accent-rgb), 0.12);
-    color: var(--accent-primary);
+    background: var(--brand-light, rgba(37, 99, 235, 0.1));
+    color: var(--brand-500, #2563eb);
 }
 
 .card-badge.optional {
-    background: rgba(142, 142, 147, 0.12);
+    background: var(--ui-fill-base, rgba(255, 255, 255, 0.06));
     color: var(--text-tertiary);
 }
 

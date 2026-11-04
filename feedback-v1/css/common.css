@@ -185,15 +185,11 @@
 [data-theme="light"] .config-panel,
 [data-theme="light"] .result-section {
     background: rgba(255, 255, 255, 0.7);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
     box-shadow: var(--shadow-sm);
 }
 
 [data-theme="light"] .stat-card {
     background: rgba(255, 255, 255, 0.7);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
     box-shadow: var(--shadow-sm);
 }
 
@@ -221,8 +217,6 @@
 
 [data-theme="light"] .comment-card {
     background: rgba(255, 255, 255, 0.7);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
     box-shadow: var(--shadow-sm);
 }
 
@@ -416,8 +410,6 @@ select option:disabled,
 .sidebar {
     width: var(--sidebar-width);
     background: var(--ui-glass-nav);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
     border-right: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
@@ -546,11 +538,10 @@ select option:disabled,
 }
 
 .nav-title {
-    font-size: 0.7rem;
-    font-weight: 600;
+    font-size: 0.72rem;
+    font-weight: 500;
     color: var(--text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
+    letter-spacing: 0.01em;
     margin-bottom: var(--spacing-sm);
     padding-left: 2px;
 }
@@ -569,9 +560,7 @@ select option:disabled,
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
     cursor: pointer;
-    transition: all var(--transition-normal);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
+    transition: var(--transition);
 }
 
 .file-upload-label:hover {
@@ -606,7 +595,7 @@ select option:disabled,
     background: rgba(255, 255, 255, 0.1);
     border-radius: var(--radius-md);
     flex-shrink: 0;
-    transition: all var(--transition-fast);
+    transition: var(--transition);
 }
 
 .file-upload-label:hover .file-upload-icon {
@@ -672,7 +661,7 @@ select option:disabled,
     border: none;
     border-radius: 50%;
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: var(--transition);
     z-index: 2;
     box-shadow: 0 2px 8px var(--accent-glow);
 }
@@ -698,8 +687,6 @@ select option:disabled,
     border-radius: var(--radius-full);
     padding: 4px;
     border: 1px solid var(--border-color);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
 }
 
 .toggle-btn {
@@ -712,7 +699,7 @@ select option:disabled,
     border: none;
     border-radius: calc(var(--radius-full) - 4px);
     cursor: pointer;
-    transition: all var(--transition-normal);
+    transition: var(--transition);
     position: relative;
 }
 
@@ -793,7 +780,7 @@ select option:disabled,
     background: var(--border-color);
     border-radius: 14px;
     position: relative;
-    transition: all var(--transition-normal);
+    transition: var(--transition);
     flex-shrink: 0;
     cursor: pointer;
 }
@@ -807,7 +794,7 @@ select option:disabled,
     border-radius: 50%;
     top: 2px;
     left: 2px;
-    transition: all var(--transition-normal);
+    transition: var(--transition);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
@@ -834,9 +821,7 @@ select option:disabled,
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     outline: none;
-    transition: all var(--transition-fast);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
+    transition: var(--transition);
 }
 
 .text-input:focus {
@@ -882,7 +867,7 @@ select option:disabled,
     border: none;
     border-radius: var(--radius-full);
     cursor: pointer;
-    transition: all var(--transition-normal);
+    transition: var(--transition);
     position: relative;
     overflow: hidden;
     letter-spacing: 0.02em;
@@ -938,7 +923,7 @@ kbd {
     font-size: 0.75rem;
     color: var(--text-tertiary);
     text-decoration: none;
-    transition: all var(--transition-fast);
+    transition: var(--transition);
     opacity: 0.8;
 }
 
@@ -968,9 +953,7 @@ kbd {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-xl);
     padding: var(--spacing-xl);
-    transition: all var(--transition-normal);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
+    transition: var(--transition);
 }
 
 .config-panel:hover {
@@ -1004,9 +987,7 @@ kbd {
     border-radius: var(--radius-lg);
     padding: var(--spacing-lg);
     border-left: 3px solid;
-    transition: all var(--transition-normal);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
+    transition: var(--transition);
 }
 
 .comment-card:hover {
@@ -1071,10 +1052,8 @@ kbd {
     border-radius: var(--radius-md);
     resize: vertical;
     outline: none;
-    transition: all var(--transition-fast);
+    transition: var(--transition);
     line-height: 1.5;
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
 }
 
 .comment-card textarea:focus {
@@ -1129,11 +1108,9 @@ kbd {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-xl);
     text-align: center;
-    transition: all var(--transition-normal);
+    transition: var(--transition);
     position: relative;
     overflow: hidden;
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
 }
 
 .stat-card::before {
@@ -1168,8 +1145,7 @@ kbd {
 .stat-label {
     font-size: 0.78rem;
     color: var(--text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.01em;
 }
 
 .result-section {
@@ -1209,7 +1185,7 @@ kbd {
     border: none;
     border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: var(--transition);
     white-space: nowrap;
 }
 
@@ -1232,8 +1208,6 @@ kbd {
     background: var(--ui-fill-base);
     color: var(--text-secondary);
     border: 1px solid var(--border-color);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
 }
 
 .action-btn.secondary:hover {
@@ -1266,8 +1240,6 @@ kbd {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-xl);
     overflow: hidden;
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
 }
 
 .result-table {
@@ -1286,11 +1258,10 @@ kbd {
     padding: var(--spacing-lg) var(--spacing-lg);
     text-align: left;
     font-size: 0.78rem;
-    font-weight: 600;
+    font-weight: 500;
     color: var(--text-secondary);
     border-bottom: 1px solid var(--border-color);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.01em;
 }
 
 .result-table tbody tr {
@@ -1333,10 +1304,8 @@ kbd {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: var(--transition);
     position: relative;
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
 }
 
 .name-main:hover {
@@ -1368,7 +1337,7 @@ kbd {
     color: var(--accent-primary);
     opacity: 0;
     transform: translateX(-4px);
-    transition: all var(--transition-fast);
+    transition: var(--transition);
     flex-shrink: 0;
 }
 
@@ -1385,15 +1354,13 @@ kbd {
     cursor: pointer;
     font-weight: 500;
     letter-spacing: 0.03em;
-    transition: all var(--transition-fast);
+    transition: var(--transition);
     user-select: none;
     white-space: nowrap;
     line-height: 1.4;
     color: var(--text-secondary);
     background: var(--ui-fill-base);
     border: 1px solid var(--border-color);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
 }
 
 .student-tag.online {
@@ -1435,11 +1402,9 @@ kbd {
     background: var(--ui-fill-weak);
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     cursor: pointer;
-    transition: all var(--transition-normal);
+    transition: var(--transition);
     border: 1px solid var(--border-color);
     border-bottom: none;
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
 }
 
 .feedback-content:hover {
@@ -1461,8 +1426,6 @@ kbd {
     overflow: hidden;
     border: 1px solid var(--border-color);
     border-top: none;
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
 }
 
 .toolbar-btn {
@@ -1479,7 +1442,7 @@ kbd {
     background: transparent;
     border: none;
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: var(--transition);
     white-space: nowrap;
 }
 
@@ -1539,8 +1502,6 @@ kbd {
     right: 0;
     bottom: 0;
     background: var(--ui-overlay-strong);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1551,7 +1512,7 @@ kbd {
     cursor: pointer;
     z-index: 10;
     letter-spacing: 0.05em;
-    transition: all var(--transition-fast);
+    transition: var(--transition);
 }
 
 .copied-row:hover::after {
@@ -1599,33 +1560,19 @@ tr.masked-row.copied-row {
 .focused-row {
     position: relative;
     z-index: 5;
-    animation: focusRowPulse 0.4s ease-out;
 }
 
 .focused-row .feedback-content {
-    border-color: var(--accent-primary) !important;
-    box-shadow: 0 0 20px rgba(var(--accent-rgb), 0.15), inset 0 0 0 1px rgba(var(--accent-rgb), 0.1);
+    border-color: var(--brand-500) !important;
 }
 
 .focused-row .feedback-toolbar {
-    border-color: var(--accent-primary) !important;
+    border-color: var(--brand-500) !important;
 }
 
 .focused-row .name-main {
-    border-color: var(--accent-primary);
-    background: rgba(var(--accent-rgb), 0.08);
-}
-
-@keyframes focusRowPulse {
-    0% {
-        transform: scale(1.01);
-        opacity: 0.7;
-    }
-
-    100% {
-        transform: scale(1);
-        opacity: 1;
-    }
+    border-color: var(--brand-500);
+    background: var(--brand-light, rgba(37, 99, 235, 0.08));
 }
 
 /* Focus indicator — floating bar at top */
@@ -1648,10 +1595,8 @@ tr.masked-row.copied-row {
     gap: 10px;
     padding: 10px 20px;
     background: var(--ui-float-bg);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
     border: 1px solid var(--ui-float-border);
-    border-radius: 50px;
+    border-radius: var(--radius-md, 8px);
     box-shadow: var(--ui-float-shadow);
     white-space: nowrap;
 }
@@ -1660,23 +1605,8 @@ tr.masked-row.copied-row {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--accent-primary);
+    background: var(--brand-500, #2563eb);
     flex-shrink: 0;
-    animation: focusDotPulse 1.5s ease-in-out infinite;
-}
-
-@keyframes focusDotPulse {
-
-    0%,
-    100% {
-        opacity: 1;
-        transform: scale(1);
-    }
-
-    50% {
-        opacity: 0.5;
-        transform: scale(0.8);
-    }
 }
 
 .focus-indicator-name {
@@ -1707,7 +1637,7 @@ tr.masked-row.copied-row {
     border-radius: 50%;
     color: var(--text-secondary);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: var(--transition);
 }
 
 .focus-exit-btn:hover {
@@ -1758,8 +1688,6 @@ tr.masked-row.copied-row {
     resize: vertical;
     font-family: inherit;
     transition: box-shadow var(--transition-fast);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
 }
 
 .feedback-editor:focus {
@@ -1826,23 +1754,10 @@ tr.masked-row.copied-row {
 }
 
 .empty-icon {
-    width: 88px;
-    height: 88px;
-    margin-bottom: var(--spacing-xl);
-    opacity: 0.3;
-    animation: emptyFloat 3s ease-in-out infinite;
-}
-
-@keyframes emptyFloat {
-
-    0%,
-    100% {
-        transform: translateY(0);
-    }
-
-    50% {
-        transform: translateY(-8px);
-    }
+    width: 64px;
+    height: 64px;
+    margin-bottom: var(--spacing-lg);
+    opacity: 0.35;
 }
 
 .empty-icon svg {
@@ -1876,10 +1791,8 @@ tr.masked-row.copied-row {
     font-weight: 500;
     box-shadow: var(--shadow-lg);
     opacity: 0;
-    transition: all var(--transition-smooth);
+    transition: var(--transition);
     z-index: 99999 !important;
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
     white-space: nowrap;
 }
 
@@ -1989,7 +1902,7 @@ tr.masked-row.copied-row {
     color: var(--text-secondary);
     cursor: pointer;
     white-space: nowrap;
-    transition: all var(--transition-fast);
+    transition: var(--transition);
 }
 
 .ui-pill:hover {
@@ -2012,10 +1925,11 @@ tr.masked-row.copied-row {
 
 .ui-pill .pill-count {
     font-size: 0.72rem;
-    font-weight: 700;
-    padding: 1px 8px;
-    border-radius: 999px;
-    background: rgba(127, 127, 127, 0.15);
+    font-weight: 500;
+    font-family: var(--font-mono, monospace);
+    padding: 1px 6px;
+    border-radius: var(--radius-xs, 4px);
+    background: rgba(127, 127, 127, 0.12);
     color: inherit;
     white-space: nowrap;
 }
@@ -2050,7 +1964,7 @@ tr.masked-row.copied-row {
     cursor: pointer;
     white-space: nowrap;
     text-decoration: none;
-    transition: all var(--transition-fast);
+    transition: var(--transition);
 }
 
 .btn svg {
@@ -2219,9 +2133,7 @@ tr.masked-row.copied-row {
     background: var(--ui-fill-base);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
-    transition: all var(--transition-fast);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
+    transition: var(--transition);
 }
 
 .file-item:hover {
@@ -2260,7 +2172,7 @@ tr.masked-row.copied-row {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all var(--transition-fast);
+    transition: var(--transition);
     flex-shrink: 0;
 }
 
@@ -2288,7 +2200,7 @@ tr.masked-row.copied-row {
     padding: var(--spacing-sm) var(--spacing-md);
     width: 100%;
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: var(--transition);
     display: none;
     align-items: center;
     justify-content: center;
@@ -2343,10 +2255,8 @@ tr.masked-row.copied-row {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     outline: none;
-    transition: all var(--transition-fast);
+    transition: var(--transition);
     text-align: center;
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
 }
 
 .lesson-input:focus {
@@ -2394,8 +2304,6 @@ tr.masked-row.copied-row {
     right: 0;
     bottom: 0;
     background: rgba(0, 0, 0, 0.4);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2422,8 +2330,6 @@ tr.masked-row.copied-row {
     max-width: 420px;
     box-shadow: var(--shadow-xl);
     animation: modalSlideUp 0.3s cubic-bezier(0.25, 0.1, 0.25, 1.0);
-    -webkit-backdrop-filter: blur(20px);
-    backdrop-filter: blur(20px);
 }
 
 @keyframes modalSlideUp {
@@ -2468,8 +2374,6 @@ tr.masked-row.copied-row {
     border-radius: var(--radius-lg);
     border: 1px solid var(--border-color);
     transition: border-color var(--transition-fast);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
 }
 
 .confirm-item:focus-within {
@@ -2478,10 +2382,9 @@ tr.masked-row.copied-row {
 
 .confirm-item label {
     font-size: 0.75rem;
-    font-weight: 600;
+    font-weight: 500;
     color: var(--text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.01em;
 }
 
 .confirm-value {
@@ -2503,9 +2406,7 @@ tr.masked-row.copied-row {
     border-radius: var(--radius-md);
     text-align: center;
     outline: none;
-    transition: all var(--transition-fast);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
+    transition: var(--transition);
 }
 
 .confirm-input:focus {
@@ -2552,7 +2453,7 @@ tr.masked-row.copied-row {
     border: none;
     border-radius: var(--radius-full);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: var(--transition);
 }
 
 .modal-btn.secondary {
@@ -2600,8 +2501,6 @@ tr.masked-row.copied-row {
     right: 0;
     bottom: 0;
     background: rgba(0, 0, 0, 0.4);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
     display: none;
     align-items: center;
     justify-content: center;
@@ -2663,8 +2562,6 @@ tr.masked-row.copied-row {
 
 [data-theme="light"] .dialog-overlay {
     background: rgba(15, 23, 42, 0.45);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
 }
 
 @keyframes dialogSlideIn {
@@ -2702,7 +2599,7 @@ tr.masked-row.copied-row {
     background: transparent;
     color: var(--text-tertiary);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: var(--transition);
 }
 
 .dialog-close-btn:hover {
@@ -2746,7 +2643,7 @@ tr.masked-row.copied-row {
     outline: none;
     resize: vertical;
     line-height: 1.6;
-    transition: all var(--transition-fast);
+    transition: var(--transition);
 }
 
 .dialog-input:focus {
@@ -2886,8 +2783,6 @@ body.page-ready {
     opacity: 0;
     transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s ease;
     box-shadow: 0 4px 18px rgba(0, 0, 0, 0.22);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
     pointer-events: none;
 }
 

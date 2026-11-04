@@ -131,14 +131,9 @@
             align-items: center;
             justify-content: center;
             padding: 24px 16px;
-            background-image: 
-                radial-gradient(circle at 50% 25%, var(--bg-gradient-1), transparent 55%),
-                radial-gradient(circle at 80% 80%, var(--bg-gradient-2), transparent 50%);
-            background-repeat: no-repeat;
-            background-attachment: fixed;
             overflow-x: hidden;
             -webkit-font-smoothing: antialiased;
-            transition: background-color 0.25s ease, color 0.25s ease;
+            transition: background-color 0.2s ease, color 0.2s ease;
         }
 
         .login-wrapper {
@@ -150,13 +145,11 @@
 
         .login-card {
             background: var(--bg-card);
-            backdrop-filter: blur(28px);
-            -webkit-backdrop-filter: blur(28px);
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-lg);
             padding: 34px 30px 32px;
             box-shadow: var(--card-shadow);
-            transition: transform 0.2s ease, box-shadow 0.25s ease, background-color 0.25s ease, border-color 0.25s ease;
+            transition: box-shadow 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
         }
 
         @media (max-width: 440px) {
@@ -371,33 +364,31 @@
         /* 登录按钮 */
         .submit-btn {
             width: 100%;
-            height: 46px;
-            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            height: 44px;
+            background: var(--primary, #2563eb);
+            border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: var(--radius-md);
             color: #ffffff;
-            font-size: 0.98rem;
-            font-weight: 600;
+            font-size: 0.95rem;
+            font-weight: 500;
             font-family: inherit;
-            letter-spacing: 0.15em;
+            letter-spacing: 0.02em;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 8px;
-            transition: all 0.2s ease;
-            box-shadow: 0 4px 14px -2px rgba(37, 99, 235, 0.45);
+            transition: background-color 0.15s ease, opacity 0.15s ease;
+            box-shadow: none;
             margin-top: 6px;
         }
 
         .submit-btn:hover:not(:disabled) {
-            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-            transform: translateY(-1px);
-            box-shadow: 0 6px 18px -2px rgba(37, 99, 235, 0.55);
+            background: var(--primary-hover, #1d4ed8);
         }
 
         .submit-btn:active:not(:disabled) {
-            transform: translateY(0);
+            transform: scale(0.99);
         }
 
         .submit-btn:disabled {
@@ -525,7 +516,7 @@
 
                 <!-- 登录提交按钮 -->
                 <button type="submit" id="submit-btn" class="submit-btn">
-                    <span>登 录</span>
+                    <span>登录</span>
                 </button>
             </form>
         </div>

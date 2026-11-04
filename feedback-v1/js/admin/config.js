@@ -300,13 +300,13 @@
                 const result = await resp.json();
                 if (result.success) {
                     const data = result.data || {};
-                    showToast(`✓ API 连通成功！延迟: ${data.duration_ms}ms`, 'success');
+                    showToast(`API 连通成功，延迟: ${data.duration_ms}ms`, 'success');
                     if (resultBox) {
                         resultBox.innerHTML = `
-                            <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 0.84rem;">
+                            <div style="background: rgba(76, 195, 138, 0.1); border: 1px solid rgba(76, 195, 138, 0.25); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 0.84rem;">
                                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-                                    <span style="font-weight: 600; color: #10b981;">✓ 连通成功 (HTTP ${data.http_code || 200})</span>
-                                    <span style="color: #10b981; font-weight: 600;">耗时: ${data.duration_ms} ms</span>
+                                    <span style="font-weight: 500; color: var(--positive, #16a34a);">连通成功 (HTTP ${data.http_code || 200})</span>
+                                    <span style="color: var(--positive, #16a34a); font-family: var(--font-mono, monospace);">耗时: ${data.duration_ms} ms</span>
                                 </div>
                                 <div style="color: var(--text-secondary); font-size: 0.8rem;">
                                     <strong>测试模型:</strong> <code>${escapeHtml(data.model || model || 'qwen3.8-max')}</code>
@@ -321,9 +321,9 @@
                     showToast('连通失败: ' + errDetail, 'error');
                     if (resultBox) {
                         resultBox.innerHTML = `
-                            <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 0.84rem;">
-                                <div style="font-weight: 600; color: #ef4444; margin-bottom: 4px;">✗ 连通失败${duration}</div>
-                                <div style="color: #ef4444; font-size: 0.8rem; word-break: break-all;">${escapeHtml(errDetail)}</div>
+                            <div style="background: rgba(229, 72, 77, 0.1); border: 1px solid rgba(229, 72, 77, 0.25); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 0.84rem;">
+                                <div style="font-weight: 500; color: var(--negative, #dc2626); margin-bottom: 4px;">连通失败${duration}</div>
+                                <div style="color: var(--negative, #dc2626); font-size: 0.8rem; word-break: break-all;">${escapeHtml(errDetail)}</div>
                             </div>
                         `;
                     }
@@ -332,9 +332,9 @@
                 showToast('请求异常: ' + err.message, 'error');
                 if (resultBox) {
                     resultBox.innerHTML = `
-                        <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 0.84rem;">
-                            <div style="font-weight: 600; color: #ef4444; margin-bottom: 4px;">✗ 网络异常</div>
-                            <div style="color: #ef4444; font-size: 0.8rem;">${escapeHtml(err.message)}</div>
+                        <div style="background: rgba(229, 72, 77, 0.1); border: 1px solid rgba(229, 72, 77, 0.25); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 0.84rem;">
+                            <div style="font-weight: 500; color: var(--negative, #dc2626); margin-bottom: 4px;">网络异常</div>
+                            <div style="color: var(--negative, #dc2626); font-size: 0.8rem;">${escapeHtml(err.message)}</div>
                         </div>
                     `;
                 }

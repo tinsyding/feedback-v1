@@ -1891,7 +1891,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         const url = window.location.href;
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(url).then(() => {
-                showToast('已复制页面链接！可粘贴至外部浏览器打开');
+                showToast('已复制页面链接，可粘贴至外部浏览器打开');
             }).catch(() => {
                 fallbackCopy(url);
             });
@@ -1910,7 +1910,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         input.select();
         try {
             document.execCommand('copy');
-            showToast('已复制页面链接！可粘贴至外部浏览器打开');
+            showToast('已复制页面链接，可粘贴至外部浏览器打开');
         } catch (e) {
             showToast('请手动长按复制地址栏链接');
         }
@@ -1931,7 +1931,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         const url = currentTempFullUrl || currentTempDownloadUrl || window.location.href;
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(url).then(() => {
-                showToast('已复制文件下载直链！可在浏览器粘贴下载');
+                showToast('已复制文件下载直链，可在浏览器粘贴下载');
             }).catch(() => {
                 fallbackCopy(url);
             });

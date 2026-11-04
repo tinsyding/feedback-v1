@@ -233,7 +233,7 @@ function setupOptionCards() {
         card.addEventListener('click', () => {
             // Check if this card is disabled
             if (card.getAttribute('data-disabled') === 'true') {
-                showToast('预习作业不是评分制！');
+                showToast('预习作业不是评分制');
                 return;
             }
             
@@ -1754,7 +1754,7 @@ function refreshScopedDropped() {
 
     const totalDropped = new Set([...detectedDroppedStudents.homework, ...detectedDroppedStudents.preview]).size;
     if (totalDropped === 0) {
-        updateRosterStatus(`已选班级：${getScopeLabel()}（${scopeSet.size}人）\n所有作业学生均在名单中 ✓`, 'success');
+        updateRosterStatus(`已选班级：${getScopeLabel()}（${scopeSet.size}人）\n所有作业学生均在名单中`, 'success');
     } else {
         updateRosterStatus(
             `已选班级：${getScopeLabel()}（${scopeSet.size}人）\n检测到 ${totalDropped} 名不在所选班级名单的学生`,
@@ -2523,7 +2523,7 @@ function checkWenjuanxingNameMatches() {
     unmatched.forEach((name, idx) => {
         html += `
         <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px; padding:8px 12px; background:var(--ui-fill-weak); border:1px solid var(--border-light); border-radius:var(--radius-sm);">
-            <span style="flex:0 0 auto; font-size:0.82rem; color:var(--text-secondary); min-width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${name}">❌ ${name}</span>
+            <span style="flex:0 0 auto; font-size:0.82rem; color:var(--text-secondary); min-width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${name}">${name}</span>
             <svg style="flex:0 0 16px; width:16px; height:16px; color:var(--text-tertiary);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
             <input type="text" class="modern-input wjx-name-fix" 
                 data-original="${name}" 
@@ -3428,7 +3428,7 @@ function showBatchOverwriteModal(options) {
             </div>
 
             <div style="font-weight:600; color:var(--text-primary,#fff); margin-bottom:8px;">
-                <span>🔍 检测到以下 ${modifiedStudents.length} 位具体学生数据变动：</span>
+                <span>检测到以下 ${modifiedStudents.length} 位学生数据变动：</span>
             </div>
 
             <div style="max-height:220px; overflow-y:auto; padding-right:4px; margin-bottom:10px;" class="custom-scrollbar">
@@ -3436,7 +3436,7 @@ function showBatchOverwriteModal(options) {
             </div>
 
             <div style="padding:8px 10px; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.2); border-radius:6px; font-size:0.78rem; color:#fcd34d;">
-                💡 若因周次自动识别有误导致冲突，请点击「取消并修改」返回修改周次；若确认需要覆盖更新本周报告，请点击「确认覆盖生成」。
+                若因周次自动识别有误导致冲突，请点击「取消并修改」返回修改周次；若确认需要覆盖更新本周报告，请点击「确认覆盖生成」。
             </div>
         </div>
     `;
@@ -4624,7 +4624,7 @@ window.exportCurrentPreviewCsv = async function() {
     if (res && res.cancelled) {
         showToast('已取消导出 CSV');
     } else if (res && res.success) {
-        showToast('CSV 文件导出成功！');
+        showToast('CSV 文件已导出');
     } else {
         showToast('CSV 导出失败，请重试');
     }
@@ -4967,7 +4967,7 @@ async function doSavePreviewEdits(shouldSyncLocal) {
             if (saveRes && saveRes.cancelled) {
                 showToast('内存数据已保存 (已取消本地文件覆盖)');
             } else if (saveRes && saveRes.success) {
-                showToast('修改已成功保存并同步到本地文件！');
+                showToast('修改已保存并同步到本地文件');
             } else {
                 showToast('修改已保存，但本地文件写入异常');
             }

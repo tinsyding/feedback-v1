@@ -51,18 +51,18 @@
     .logo-badge {
       width: 32px;
       height: 32px;
-      border-radius: 8px;
-      background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+      border-radius: 6px;
+      background: var(--primary);
       color: white;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-weight: bold;
-      font-size: 16px;
+      font-weight: 600;
+      font-size: 15px;
     }
     .brand-title {
-      font-size: 17px;
-      font-weight: 700;
+      font-size: 16px;
+      font-weight: 600;
       color: #1e293b;
     }
     .brand-badge {
@@ -335,7 +335,7 @@
     }
     .progress-bar-fill {
       height: 100%;
-      background: linear-gradient(90deg, #3b82f6, #2563eb);
+      background: var(--primary);
       width: 0%;
       transition: width 0.3s ease;
     }
@@ -510,7 +510,7 @@
     .calib-fill {
       height: 100%;
       width: 25%;
-      background: linear-gradient(90deg, #3b82f6, #2563eb, #1d4ed8);
+      background: var(--primary);
       border-radius: 999px;
       transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s ease;
       position: relative;
@@ -844,7 +844,7 @@
         <!-- 安全提示横幅 -->
         <div style="background:#fef3c7; border:1px solid #fde68a; border-radius:8px; padding:10px 14px; margin-bottom:8px; display:flex; align-items:center; gap:10px; color:#92400e; font-size:13px; font-weight:600;">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-          <span>【物理安全保护已生效】本模式仅在企业微信中搜索联系人并对标题截图进行多引擎横向测算，严格不调用任何发送操作，绝不向家长发送消息！</span>
+          <span>【物理安全保护已生效】本模式仅在企业微信中搜索联系人并对标题截图进行多引擎横向测算，严格不调用任何发送操作，绝不向家长发送消息</span>
         </div>
         <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:8px 12px; margin-bottom:14px; font-size:12px; color:#1e40af; display:flex; align-items:center; gap:8px;">
           <span><strong>操作须知</strong>：评测过程中请保持企业微信窗口在屏幕内完全可见，不要将窗口半截拖出屏幕外，任务开始后亦请勿随意改动企微大小。</span>
@@ -1092,7 +1092,7 @@
       brandClickTimer = setTimeout(() => { brandClickCount = 0; }, 2500);
       if (brandClickCount >= 5) {
         brandClickCount = 0;
-        showToast("已激活隐藏功能：多引擎识别基准评测！");
+        showToast("已激活功能：多引擎识别基准评测");
         openBenchmarkModal();
       }
     }
@@ -1233,7 +1233,7 @@
     async function triggerStartBenchmark() {
       const selected = appState.students.filter(s => s.selected);
       if (!selected.length) {
-        showToast("请先在主界面勾选要评测的学生！");
+        showToast("请先在主界面勾选要评测的学生");
         return;
       }
       try {
@@ -1267,7 +1267,7 @@
 
     function downloadBenchmarkCsv() {
       if (!benchmarkRecords.length) {
-        showToast("当前暂无评测数据，请先开始评测！");
+        showToast("当前暂无评测数据，请先开始评测");
         return;
       }
       window.open("/api/benchmark/export", "_blank");
@@ -1855,7 +1855,7 @@
         return;
       }
       const text = failed.map(st => `${st.sid} ${st.sname} (${st.status}: ${st.last_reason || '未知'})`).join("\n");
-      copyText(text, `✓ 已复制 ${failed.length} 位失败学员名单！`);
+      copyText(text, `已复制 ${failed.length} 位失败学员名单！`);
     }
 
     // 发送与停止控制
@@ -1868,7 +1868,7 @@
       const total = sum.total || students.length;
 
       if (selectedStudents.length === 0) {
-        alert("请先勾选需要发送的学员！");
+        alert("请先勾选需要发送的学员");
         return;
       }
 
@@ -1947,7 +1947,7 @@
       }
       if (fill) {
         fill.style.width = "22%";
-        fill.style.background = "linear-gradient(90deg, #3b82f6, #2563eb, #1d4ed8)";
+        fill.style.background = "#2563eb";
       }
       if (ring) {
         ring.style.display = "block";
@@ -2000,14 +2000,14 @@
             ring.style.borderTopColor = "#16a34a";
             ring.style.borderRightColor = "#86efac";
           }
-          if (title) title.innerText = "✓ 视窗智能校准成功！";
+          if (title) title.innerText = "视窗智能校准成功";
           if (statusText) {
             statusText.innerText = data.message || "企业微信视野配置已自动保存并生效";
             statusText.style.color = "#16a34a";
           }
           setTimeout(() => {
             closeModal("calibratingModal");
-            showToast("✓ 视野智能校准成功，已自动保存！");
+            showToast("视野智能校准成功，已自动保存");
           }, 900);
         } else {
           // 失败 / 提醒状态过渡
@@ -2042,7 +2042,7 @@
         const res = await fetch("/api/wecom/center", { method: "POST" });
         const data = await res.json();
         if (data && data.success) {
-          showToast(data.message || "✓ 企微窗口已恢复为标准最小尺寸并居中！");
+          showToast(data.message || "企微窗口已恢复为标准尺寸并居中");
         } else {
           showToast(data.message || "未能居中企微窗口，请确认企微已打开");
         }
@@ -2068,16 +2068,16 @@
     function copyAllStudentInfo() {
       if (!appState.students || appState.students.length === 0) return;
       const text = appState.students.map(st => `${st.sid} ${st.sname}`).join("\n");
-      copyText(text, "✓ 已复制全部学员学号姓名！");
+      copyText(text, "已复制全部学员学号姓名！");
     }
 
     function copyAllMessages() {
       if (!appState.students || appState.students.length === 0) return;
       const text = appState.students.map(st => `【${st.studentName}】\n${st.message}\n`).join("\n");
-      copyText(text, "✓ 已复制全部学员反馈话术！");
+      copyText(text, "已复制全部学员反馈话术！");
     }
 
-    function copyText(text, successMsg = "✓ 已复制到剪贴板！") {
+    function copyText(text, successMsg = "已复制到剪贴板！") {
       if (!text) return;
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(() => showToast(successMsg)).catch(() => fallbackCopy(text, successMsg));
@@ -2117,7 +2117,7 @@
       openModal("msgPreviewModal");
     }
     function copyCurrentModalMessage() {
-      copyText(currentModalMessage, "✓ 话术已复制到剪贴板！");
+      copyText(currentModalMessage, "话术已复制到剪贴板");
     }
 
     // 跟踪已点击复制的待回学员 Key
@@ -2144,7 +2144,7 @@
             const btnStyle = isCopied 
               ? 'style="background:#dcfce7; color:#15803d; border-color:#86efac; font-weight:600;"' 
               : '';
-            const btnText = isCopied ? '✓ 已复制' : '复制';
+            const btnText = isCopied ? '已复制' : '复制';
 
             return `
             <tr id="replyRow_${idx}" ${rowStyle}>
@@ -2167,7 +2167,7 @@
 
     function copySingleReplyNote(text, itemKey, idx) {
       if (!text) return;
-      copyText(text, `✓ 已复制：${text}`);
+      copyText(text, `已复制：${text}`);
       copiedReplyNotes.add(itemKey);
       const row = document.getElementById(`replyRow_${idx}`);
       if (row) {
@@ -2175,7 +2175,7 @@
       }
       const btn = document.getElementById(`copyBtn_${idx}`);
       if (btn) {
-        btn.innerText = "✓ 已复制";
+        btn.innerText = "已复制";
         btn.style.background = "#dcfce7";
         btn.style.color = "#15803d";
         btn.style.borderColor = "#86efac";
@@ -2198,7 +2198,7 @@
           r.style.backgroundColor = "#f0fdf4";
           const btn = r.querySelector("button");
           if (btn) {
-            btn.innerText = "✓ 已复制";
+            btn.innerText = "已复制";
             btn.style.background = "#dcfce7";
             btn.style.color = "#15803d";
             btn.style.borderColor = "#86efac";
@@ -2248,7 +2248,7 @@
         const res = await fetch("/api/sent_files/open_folder", { method: "POST" });
         const data = await res.json();
         if (data.success) {
-          showToast("✓ 已在本地系统打开记录目录");
+          showToast("已在本地系统打开记录目录");
         } else {
           showToast("本地记录保存在用户目录 ~/.sender_py/sent_records");
         }
@@ -2308,9 +2308,9 @@
             opt.value = item.prefix;
             let statusTag = "现场留存";
             if (item.matched === true) {
-              statusTag = "✓ 成功";
+              statusTag = "成功";
             } else if (item.matched === false) {
-              statusTag = "✗ 未通过";
+              statusTag = "未通过";
             }
             const timeStr = item.formatted_time || item.timestamp || "";
             const targetStr = `${item.target_name || "未知"} (${item.target_id || "-"})`;
@@ -2401,9 +2401,9 @@
       const verdictEl = document.getElementById("debugVerdict");
       if (verdictEl) {
         if (matched === true) {
-          verdictEl.innerHTML = `<span style="color:#16a34a; font-weight:700;">✓ 核验匹配成功</span>`;
+          verdictEl.innerHTML = `<span style="color:#16a34a; font-weight:700;">核验匹配成功</span>`;
         } else if (matched === false) {
-          verdictEl.innerHTML = `<span style="color:#dc2626; font-weight:700;">✗ 核验未通过 (${judgment.reason || diag.reason || "不匹配"})</span>`;
+          verdictEl.innerHTML = `<span style="color:#dc2626; font-weight:700;">核验未通过 (${judgment.reason || diag.reason || "不匹配"})</span>`;
         } else {
           verdictEl.innerHTML = `<span style="color:#64748b;">${judgment.reason || diag.reason || "已记录现场"}</span>`;
         }
@@ -2474,7 +2474,7 @@
         const res = await fetch("/api/debug/open_folder", { method: "POST" });
         const data = await res.json();
         if (data.success) {
-          showToast("✓ 已在系统文件管理器中打开截图目录");
+          showToast("已在系统文件管理器中打开截图目录");
         } else {
           showToast("无法打开目录: " + (data.error || "未知原因"));
         }

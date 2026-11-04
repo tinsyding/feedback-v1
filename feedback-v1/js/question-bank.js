@@ -322,7 +322,7 @@ function applyAssistantReadOnlyModeIfNeed(user) {
         roBadge = document.createElement('span');
         roBadge.id = 'qb-assistant-save-badge';
         roBadge.className = 'badge-assistant-readonly';
-        roBadge.textContent = '🎓 助教只读浏览中（不可保存）';
+        roBadge.textContent = '助教只读浏览，不可保存';
         const saveBar = document.querySelector('.qb-save-bar');
         if (saveBar) saveBar.appendChild(roBadge);
     }
@@ -1872,7 +1872,7 @@ function compareQuestions(oldQuestions, newQuestions) {
 
     // 1. 题数变动
     if (oldList.length !== newList.length) {
-        diffs.push(`题数变动：历史共 <strong>${oldList.length}</strong> 道题 ➔ 本次拟保存 <strong>${newList.length}</strong> 道题`);
+        diffs.push(`题数变动：历史共 <strong>${oldList.length}</strong> 道题 → 本次拟保存 <strong>${newList.length}</strong> 道题`);
     }
 
     const maxLen = Math.max(oldList.length, newList.length);
@@ -1946,7 +1946,7 @@ function showQbankOverwriteModal(options) {
             </div>
 
             <div style="font-weight:600; color:var(--text-primary,#fff); margin-bottom:8px; display:flex; align-items:center; justify-content:space-between;">
-                <span>🔍 检测到以下 ${diffs.length} 处具体变动：</span>
+                <span>检测到以下 ${diffs.length} 处变动：</span>
             </div>
 
             <div style="max-height:240px; overflow-y:auto; padding-right:4px; margin-bottom:6px;" class="custom-scrollbar">
@@ -2226,7 +2226,7 @@ function openTierSyncModal(sourceData = null, isAutoPrompt = false) {
                 ${gridHtml}
             </div>
             <div class="tier-sync-tips">
-                💡 同步将完整覆盖目标班层的题目及解析配置。
+                同步将完整覆盖目标班层的题目及解析配置。
             </div>
         </div>
     `;
@@ -3902,7 +3902,7 @@ async function startBackgroundSlicing(exerciseSrc, answerSrc, groups, questionNu
     if (progressText) {
         progressText.innerHTML = failCount > 0
             ? `切片处理完成（有 ${failCount} 个附件上传失败）`
-            : `✓ 全部 ${total} 道题目切片已就绪！`;
+            : `全部 ${total} 道题目切片已就绪`;
     }
     if (progressFill) progressFill.style.width = '100%';
 

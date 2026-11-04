@@ -59,11 +59,6 @@
         body {
             font-family: 'Plus Jakarta Sans', 'Noto Sans SC', system-ui, -apple-system, sans-serif;
             background-color: var(--bg-page);
-            background-image: 
-                radial-gradient(1000px 500px at 50% 0%, rgba(37, 99, 235, 0.07) 0%, transparent 80%),
-                radial-gradient(600px 400px at 0% 25%, rgba(124, 58, 237, 0.04) 0%, transparent 100%),
-                radial-gradient(600px 400px at 100% 70%, rgba(16, 185, 129, 0.04) 0%, transparent 100%);
-            background-attachment: fixed;
             color: var(--text-main);
             min-height: 100vh;
             display: flex;
@@ -77,8 +72,8 @@
         .wechat-bar {
             width: 100%;
             max-width: 520px;
-            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-            border: 1px solid #fcd34d;
+            background: rgba(224, 164, 58, 0.1);
+            border: 1px solid rgba(224, 164, 58, 0.25);
             border-radius: var(--radius-md);
             padding: 10px 14px;
             margin-bottom: 14px;
@@ -223,22 +218,22 @@
         }
 
         .verify-badge-icon {
-            width: 58px;
-            height: 58px;
-            background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+            width: 48px;
+            height: 48px;
+            background: #eff6ff;
             border: 1px solid #bfdbfe;
             color: var(--primary);
-            border-radius: 18px;
+            border-radius: var(--radius-md);
             display: flex;
             align-items: center;
             justify-content: center;
             margin: 0 auto 14px;
-            box-shadow: 0 8px 16px rgba(37, 99, 235, 0.12);
+            box-shadow: none;
         }
 
         .verify-header-title {
             font-size: 1.3rem;
-            font-weight: 800;
+            font-weight: 600;
             text-align: center;
             color: var(--text-main);
             margin-bottom: 22px;
@@ -382,25 +377,26 @@
         .btn-submit-verify {
             width: 100%;
             height: 50px;
-            background: var(--primary-gradient);
+            background: var(--brand-500, #2563eb);
             color: #ffffff;
             border: none;
             border-radius: var(--radius-md);
             font-size: 1rem;
-            font-weight: 700;
+            font-weight: 600;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 8px;
-            box-shadow: var(--shadow-elevated);
-            transition: all 0.2s;
+            box-shadow: none;
+            transition: background-color 0.15s ease;
             margin-top: 8px;
         }
 
         .btn-submit-verify:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 22px 42px -12px rgba(37, 99, 235, 0.35);
+            background: var(--brand-600, #1d4ed8);
+            transform: none;
+            box-shadow: none;
         }
 
         .btn-submit-verify:active {
@@ -453,7 +449,7 @@
 
         .student-name-text {
             font-size: 1.22rem;
-            font-weight: 800;
+            font-weight: 600;
             color: var(--text-main);
             overflow: hidden;
             text-overflow: ellipsis;
@@ -577,7 +573,7 @@
 
         .stat-val {
             font-size: 1.35rem;
-            font-weight: 800;
+            font-weight: 600;
             line-height: 1.15;
             color: var(--text-main);
             font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
@@ -658,27 +654,27 @@
         }
 
         #week-tabs .ui-pill.active {
-            background: var(--primary-gradient);
-            border-color: var(--primary);
+            background: var(--brand-500, #2563eb);
+            border-color: var(--brand-500, #2563eb);
             color: #ffffff;
-            box-shadow: 0 4px 10px rgba(37, 99, 235, 0.25);
+            box-shadow: none;
         }
 
         .ui-pill.has-badge::after {
             content: '最新';
             position: absolute;
-            top: -7px;
-            right: -5px;
-            background: linear-gradient(135deg, #ff7a00 0%, #ea580c 100%);
+            top: -6px;
+            right: -4px;
+            background: var(--warning, #e0a43a);
             color: #ffffff;
             font-size: 10px;
-            font-weight: 700;
+            font-weight: 500;
             line-height: 1;
-            padding: 2.5px 6px;
-            border-radius: 9999px;
-            border: 1.5px solid #ffffff;
-            box-shadow: 0 2px 5px rgba(234, 88, 12, 0.35);
-            letter-spacing: 0.3px;
+            padding: 2px 5px;
+            border-radius: var(--radius-xs, 4px);
+            border: 1px solid #ffffff;
+            box-shadow: none;
+            letter-spacing: 0.01em;
             white-space: nowrap;
             z-index: 5;
             pointer-events: none;
@@ -728,7 +724,7 @@
 
         .topic-grid-title {
             font-size: 1.08rem;
-            font-weight: 800;
+            font-weight: 600;
             color: var(--text-main);
         }
 
@@ -831,17 +827,17 @@
         .topic-tile-badge {
             position: absolute;
             top: -6px;
-            right: -5px;
-            background: linear-gradient(135deg, #ff7a00 0%, #ea580c 100%);
+            right: -4px;
+            background: var(--warning, #e0a43a);
             color: #ffffff;
             font-size: 10px;
-            font-weight: 700;
+            font-weight: 500;
             line-height: 1;
-            padding: 2.5px 6px;
-            border-radius: 9999px;
-            border: 1.5px solid #ffffff;
-            box-shadow: 0 2px 5px rgba(234, 88, 12, 0.35);
-            letter-spacing: 0.3px;
+            padding: 2px 5px;
+            border-radius: var(--radius-xs, 4px);
+            border: 1px solid #ffffff;
+            box-shadow: none;
+            letter-spacing: 0.01em;
             white-space: nowrap;
             z-index: 5;
             pointer-events: none;
@@ -898,24 +894,25 @@
         .btn-download-main {
             width: 100%;
             height: 48px;
-            background: var(--primary-gradient);
+            background: var(--brand-500, #2563eb);
             color: #ffffff;
             border: none;
             border-radius: var(--radius-md);
             font-size: 0.95rem;
-            font-weight: 700;
+            font-weight: 600;
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 8px;
             cursor: pointer;
-            box-shadow: 0 4px 14px rgba(37, 99, 235, 0.22);
-            transition: all 0.2s ease;
+            box-shadow: none;
+            transition: background-color 0.15s ease;
         }
 
         .btn-download-main:hover {
-            box-shadow: 0 6px 18px rgba(37, 99, 235, 0.3);
-            transform: translateY(-1px);
+            background: var(--brand-600, #1d4ed8);
+            transform: none;
+            box-shadow: none;
         }
 
         .btn-download-main:active {
@@ -989,7 +986,7 @@
 
         .choice-title {
             font-size: 1.12rem;
-            font-weight: 800;
+            font-weight: 600;
             color: var(--text-main);
             margin-bottom: 4px;
         }
@@ -1264,12 +1261,6 @@
 
         .wechat-guide-arrow {
             margin-right: 8px;
-            animation: bounceGuide 1.5s infinite;
-        }
-
-        @keyframes bounceGuide {
-            0%, 100% { transform: translateY(0) translateX(0); }
-            50% { transform: translateY(-8px) translateX(6px); }
         }
 
         .wechat-guide-card {
@@ -1357,16 +1348,17 @@
         }
 
         .btn-card-action.btn-blue {
-            background: #2563eb;
-            background: var(--primary-gradient, linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%));
+            background: var(--brand-500, #2563eb);
             color: #ffffff;
             border: none;
-            box-shadow: 0 4px 14px rgba(37, 99, 235, 0.22);
+            box-shadow: none;
+            transition: background-color 0.15s ease;
         }
 
         .btn-card-action.btn-blue:hover {
-            box-shadow: 0 6px 18px rgba(37, 99, 235, 0.3);
-            transform: translateY(-1px);
+            background: var(--brand-600, #1d4ed8);
+            transform: none;
+            box-shadow: none;
         }
 
         .btn-card-action.btn-blue:active {

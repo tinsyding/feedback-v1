@@ -68,7 +68,7 @@
                                 </svg>
                                 <input type="text" id="front-reset-username" class="front-auth-input" placeholder="请输入教师账号（如 JF001）" autocomplete="username" oninput="window.onResetUsernameChange(this.value)" required>
                             </div>
-                            <div id="front-reset-warn-tip" class="front-auth-warn-tip">⚠️ 测试账号为公共体验账号，不支持重置密码</div>
+                            <div id="front-reset-warn-tip" class="front-auth-warn-tip">测试账号为公共体验账号，不支持重置密码</div>
                         </div>
 
                         <div class="front-auth-field">
@@ -255,7 +255,7 @@
         // 权限徽章
         let roleBadgeHtml = '';
         if (isAssistant) {
-            roleBadgeHtml = `<span class="badge-role-assistant" title="助教账号">🎓 助教</span>`;
+            roleBadgeHtml = `<span class="badge-role-assistant" title="助教账号">助教</span>`;
         } else if (!isTestAccount) {
             roleBadgeHtml = `<span class="badge-role-teacher">教师</span>`;
         }
@@ -349,7 +349,7 @@
 
                 <!-- 新增助教表单 -->
                 <div id="assistant-add-box" class="assistant-sub-form-box" style="display:none;">
-                    <div class="assistant-sub-title">➕ 添加新助教</div>
+                    <div class="assistant-sub-title">添加新助教</div>
                     <form id="assistant-add-form" onsubmit="window.handleAssistantCreate(event)">
                         <div class="assistant-form-grid">
                             <div class="assistant-form-field">
@@ -359,7 +359,7 @@
                                     <input type="text" id="ta-add-username" placeholder="如 01 或 ta1" autocomplete="off" required>
                                 </div>
                                 <div style="font-size: 0.73rem; color: var(--text-muted, #888); margin-top: 4px;">
-                                    登录账号：<span id="ta-add-preview" style="font-family: var(--font-mono, monospace); font-weight: 700; color: var(--accent, #0a84ff);">-</span>
+                                    登录账号：<span id="ta-add-preview" style="font-family: var(--font-mono, monospace); font-weight: 500; color: var(--accent, #2563eb);">-</span>
                                 </div>
                             </div>
                             <div class="assistant-form-field">
@@ -382,14 +382,14 @@
                 <!-- 创建助教成功凭证卡片 (含一键复制) -->
                 <div id="assistant-created-box" class="assistant-sub-form-box" style="display:none; background:rgba(34, 197, 94, 0.08); border-color:rgba(34, 197, 94, 0.35);">
                     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
-                        <div style="font-size:0.92rem; font-weight:700; color:#22c55e; display:flex; align-items:center; gap:6px;">
-                            <span>🎉 助教账号创建成功！</span>
+                        <div style="font-size:0.92rem; font-weight:600; color:var(--positive, #16a34a); display:flex; align-items:center; gap:6px;">
+                            <span>助教账号创建成功</span>
                         </div>
                         <button type="button" class="front-auth-close-btn" onclick="document.getElementById('assistant-created-box').style.display='none'" style="font-size:1.1rem; line-height:1;" title="关闭">&times;</button>
                     </div>
                     <div class="assistant-credentials-panel" style="background:rgba(0,0,0,0.25); border-radius:8px; padding:12px 14px; font-size:0.85rem; line-height:1.75; color:var(--text-primary,#fff); font-family:var(--font-mono, monospace);">
                         <div>助教姓名：<strong id="created-ta-name" style="color:var(--text-primary,#fff);">-</strong></div>
-                        <div>登录账号：<strong id="created-ta-username" style="color:var(--accent,#0a84ff);">-</strong></div>
+                        <div>登录账号：<strong id="created-ta-username" style="color:var(--accent,#2563eb);">-</strong></div>
                         <div>初始密码：<strong id="created-ta-password" style="color:#f59e0b;">-</strong></div>
                         <div style="font-size:0.78rem; color:var(--text-secondary,#ababae); margin-top:3px;">登录入口：<span id="created-ta-url">https://vip.wxjifang.cn</span></div>
                     </div>
@@ -397,14 +397,14 @@
                         <button type="button" class="btn-sub-cancel" onclick="document.getElementById('assistant-created-box').style.display='none'">关闭</button>
                         <button type="button" class="btn-sub-confirm" id="btn-copy-created-ta" onclick="window.copyCreatedAssistantInfo()" style="background:#16a34a; border-color:#16a34a; display:inline-flex; align-items:center; gap:6px;">
                             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                            <span>一键复制账号密码</span>
+                            <span>复制账号密码</span>
                         </button>
                     </div>
                 </div>
 
                 <!-- 编辑助教表单 -->
                 <div id="assistant-edit-box" class="assistant-sub-form-box" style="display:none;">
-                    <div class="assistant-sub-title">✏️ 编辑助教: <span id="ta-edit-uname-disp" style="color:var(--accent,#0a84ff);font-family:monospace;font-weight:700;"></span></div>
+                    <div class="assistant-sub-title">编辑助教: <span id="ta-edit-uname-disp" style="color:var(--accent,#2563eb);font-family:monospace;font-weight:600;"></span></div>
                     <form id="assistant-edit-form" onsubmit="window.handleAssistantUpdate(event)">
                         <input type="hidden" id="ta-edit-id">
                         <div class="assistant-form-grid">
@@ -667,14 +667,14 @@
         try {
             await copyTextToClipboard(text);
             if (typeof showToast === 'function') {
-                showToast('助教账号密码信息已复制到剪贴板！');
+                showToast('助教账号密码已复制到剪贴板');
             } else if (typeof window.showToast === 'function') {
-                window.showToast('助教账号密码信息已复制到剪贴板！');
+                window.showToast('助教账号密码已复制到剪贴板');
             }
             const btn = document.getElementById('btn-copy-created-ta');
             if (btn) {
                 const oldHtml = btn.innerHTML;
-                btn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg> <span>已复制到剪贴板</span>`;
+                btn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg> <span>已复制</span>`;
                 setTimeout(() => { btn.innerHTML = oldHtml; }, 2500);
             }
         } catch (e) {
@@ -688,9 +688,9 @@
         try {
             await copyTextToClipboard(text);
             if (typeof showToast === 'function') {
-                showToast(`已复制助教「${item.real_name || item.username}」的账号密码！`);
+                showToast(`已复制助教「${item.real_name || item.username}」账号密码`);
             } else if (typeof window.showToast === 'function') {
-                window.showToast(`已复制助教「${item.real_name || item.username}」的账号密码！`);
+                window.showToast(`已复制助教「${item.real_name || item.username}」账号密码`);
             }
         } catch (err) {
             prompt('请手动复制助教账号密码：', text);
@@ -770,7 +770,7 @@
                 try {
                     await copyTextToClipboard(formatAssistantShareText(lastCreatedAssistantData));
                     if (typeof showToast === 'function') {
-                        showToast('助教账号创建成功，账号密码已自动复制！', 'success');
+                        showToast('助教账号创建成功，账号密码已复制', 'success');
                     }
                 } catch (_) {
                     if (typeof showToast === 'function') {
@@ -938,7 +938,7 @@
                 hideAuthModal();
                 renderNavUser(currentUser);
                 if (typeof showToast === 'function') {
-                    showToast(`欢迎登录，${currentUser.real_name || currentUser.username}！`, 'success');
+                    showToast(`已登录，${currentUser.real_name || currentUser.username}`, 'success');
                 }
             } else {
                 if (errorEl) {
@@ -1035,7 +1035,7 @@
                 if (newPasswordInput) newPasswordInput.value = '';
                 if (confirmPasswordInput) confirmPasswordInput.value = '';
 
-                const tipMsg = json.data?.message || '密码修改成功！';
+                const tipMsg = json.data?.message || '密码修改成功';
                 if (typeof showToast === 'function') {
                     showToast(tipMsg, 'success');
                 } else if (typeof window.showToast === 'function') {

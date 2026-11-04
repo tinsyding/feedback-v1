@@ -1129,7 +1129,7 @@ function initNetworkMonitor() {
         }
         banner.className = 'global-network-banner offline active';
         banner.innerHTML = `
-            <span>⚠️ 您的网络连接已断开，请检查 Wi-Fi 或本地网络设置</span>
+            <span>网络连接已断开，请检查网络设置</span>
             <button type="button" class="global-network-retry-btn" onclick="checkNetworkReachability()">重新检测</button>
         `;
     }
@@ -1137,7 +1137,7 @@ function initNetworkMonitor() {
     function showOnlineBanner() {
         if (banner.classList.contains('active') && banner.classList.contains('offline')) {
             banner.className = 'global-network-banner online active';
-            banner.innerHTML = '<span>✅ 网络连接已恢复正常</span>';
+            banner.innerHTML = '<span>网络连接已恢复正常</span>';
             if (globalNetworkBannerTimer) clearTimeout(globalNetworkBannerTimer);
             globalNetworkBannerTimer = setTimeout(() => {
                 banner.classList.remove('active');
@@ -1156,7 +1156,7 @@ function initNetworkMonitor() {
 async function checkNetworkReachability() {
     const banner = document.getElementById('global-network-banner');
     if (banner) {
-        banner.innerHTML = '<span>🔄 正在检测网络连通性...</span>';
+        banner.innerHTML = '<span>正在检测网络连通性...</span>';
     }
     try {
         const controller = new AbortController();
@@ -1170,7 +1170,7 @@ async function checkNetworkReachability() {
         if (resp.ok || resp.status < 500) {
             if (banner) {
                 banner.className = 'global-network-banner online active';
-                banner.innerHTML = '<span>✅ 网络连接正常</span>';
+                banner.innerHTML = '<span>网络连接正常</span>';
                 setTimeout(() => banner.classList.remove('active'), 2500);
             }
             if (typeof showToast === 'function') showToast('网络连接正常');
@@ -1183,7 +1183,7 @@ async function checkNetworkReachability() {
     if (banner) {
         banner.className = 'global-network-banner offline active';
         banner.innerHTML = `
-            <span>⚠️ 网络仍未接通，请确认您的路由器或网络连线正常</span>
+            <span>网络仍未接通，请确认路由器或网络连线正常</span>
             <button type="button" class="global-network-retry-btn" onclick="checkNetworkReachability()">再试一次</button>
         `;
     }
@@ -1234,7 +1234,7 @@ async function requestWithTimeout(url, options = {}, timeoutMs = 8000) {
 async function withButtonLoading(buttonEl, loadingText, asyncCallback) {
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
         if (typeof showToast === 'function') {
-            showToast('❌ 当前处于离线状态，请检查网络后再试');
+            showToast('当前处于离线状态，请检查网络后再试');
         }
         return false;
     }

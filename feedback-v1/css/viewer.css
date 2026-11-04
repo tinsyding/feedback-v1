@@ -58,13 +58,13 @@ body.viewer-page {
 }
 
 .brand-icon {
-    width: 34px;
-    height: 34px;
+    width: 32px;
+    height: 32px;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 10px;
-    background: var(--accent-gradient);
+    border-radius: var(--radius-sm, 6px);
+    background: var(--brand-500, #2563eb);
     color: white;
     flex-shrink: 0;
 }
@@ -75,9 +75,9 @@ body.viewer-page {
 }
 
 .brand-text h1 {
-    font-size: 1rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
+    font-size: 1.05rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
     margin: 0;
 }
 
@@ -855,26 +855,13 @@ body.viewer-page {
     transition: opacity var(--transition-normal);
 }
 
-.vw-stat-card:nth-child(1)::before {
-    background: linear-gradient(90deg, var(--system-blue), var(--system-cyan));
-}
-
-.vw-stat-card:nth-child(2)::before {
-    background: linear-gradient(90deg, var(--system-orange), var(--system-yellow));
-}
-
-.vw-stat-card:nth-child(3)::before {
-    background: linear-gradient(90deg, var(--system-purple), var(--system-pink));
-}
-
-.vw-stat-card:nth-child(4)::before {
-    background: linear-gradient(90deg, var(--system-green), var(--system-teal));
+.vw-stat-card::before {
+    background: var(--brand-500, #2563eb);
 }
 
 .vw-stat-card:hover {
-    transform: translateY(-2px);
     border-color: var(--border-hover);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--shadow-sm);
 }
 
 .vw-stat-card:hover::before {
@@ -1357,17 +1344,16 @@ body.viewer-page {
 
 /* ===== Split Plus / 错题本切分模式（渐变强调态，挂在通用 .btn 上） ===== */
 .btn.active-mode-btn {
-    background: var(--accent-gradient, linear-gradient(135deg, #2563eb, #7c3aed));
+    background: var(--brand-500, #2563eb);
     color: #ffffff;
     border-color: transparent;
-    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+    box-shadow: none;
 }
 .btn.active-mode-btn svg {
     color: #ffffff;
 }
 .btn.active-mode-btn:hover {
-    opacity: 0.92;
-    transform: translateY(-1px);
+    background: var(--brand-600, #1d4ed8);
 }
 
 .split-mode-card {

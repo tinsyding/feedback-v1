@@ -2634,7 +2634,7 @@ function copyToNext(text, element) {
                     const ci = allRows.indexOf(currentRow);
                     const nextRow = allRows[ci + 1];
                     if (nextRow) enterFocusMode(parseInt(nextRow.getAttribute('data-row-index')));
-                    else { clearFocusMode(); showToast('全部复制完成！'); }
+                    else { clearFocusMode(); showToast('全部复制完成'); }
                 }, 50);
             } else {
                 currentRow.classList.add('copied-row');

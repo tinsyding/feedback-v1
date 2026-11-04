@@ -3397,7 +3397,7 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
                     <div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px;max-width:520px;width:100%;box-shadow:0 10px 25px rgba(0,0,0,0.5);display:flex;flex-direction:column;gap:12px;">
                         <div style="display:flex;align-items:center;justify-content:space-between;">
                             <h4 style="margin:0;color:#f8fafc;font-size:1rem;font-weight:700;">请手动复制文本</h4>
-                            <button type="button" style="background:none;border:none;color:#94a3b8;font-size:1.2rem;cursor:pointer;" onclick="document.getElementById('copy-fallback-modal').style.display='none'">✕</button>
+                            <button type="button" style="background:none;border:none;color:#94a3b8;font-size:1.2rem;cursor:pointer;" onclick="document.getElementById('copy-fallback-modal').style.display='none'">&times;</button>
                         </div>
                         <p style="margin:0;color:#94a3b8;font-size:0.85rem;" id="copy-fallback-hint">浏览器已自动全选文本，请按下 Ctrl+C 复制：</p>
                         <textarea id="copy-fallback-textarea" rows="8" style="width:100%;background:#0f172a;border:1px solid #334155;color:#e2e8f0;border-radius:6px;padding:10px;font-size:0.85rem;font-family:monospace;resize:vertical;outline:none;" readonly></textarea>

@@ -364,17 +364,17 @@ button, input, select, textarea {
 }
 
 .nav-group {
-    margin-bottom: 20px;
+    margin-top: 24px;
+    margin-bottom: 8px;
 }
 
 .nav-group-title {
-    font-size: 0.7rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.01em;
     color: var(--text-muted);
     padding: 0 10px;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
     display: block;
 }
 
@@ -1288,10 +1288,9 @@ select option {
 .data-table thead th {
     background: var(--bg-subtle);
     color: var(--text-secondary);
-    font-weight: 600;
-    font-size: 0.76rem;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    font-weight: 500;
+    font-size: 0.78rem;
+    letter-spacing: 0.01em;
     padding: 10px 14px;
     border-bottom: 1px solid var(--border-color);
     white-space: nowrap;
@@ -1921,13 +1920,17 @@ select option {
 }
 
 .hero-metric-item .metric-val {
-    font-size: 1.25rem;
-    font-weight: 700;
+    font-size: 1.4rem;
+    font-weight: 500;
     font-family: var(--font-mono);
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
 }
-.hero-metric-item .metric-val.blue { color: var(--primary); }
-.hero-metric-item .metric-val.purple { color: var(--accent); }
-.hero-metric-item .metric-val.green { color: var(--success); }
+.hero-metric-item .metric-val.blue,
+.hero-metric-item .metric-val.purple,
+.hero-metric-item .metric-val.green {
+    color: var(--text-primary);
+}
 
 .glass-card,
 .settings-section-card {
@@ -2201,7 +2204,7 @@ select option {
 .db-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 .db-table th {
     background: var(--bg-subtle); color: var(--text-secondary); padding: 9px 12px;
-    font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;
+    font-weight: 500; font-size: 0.78rem; letter-spacing: 0.01em;
     border-bottom: 1px solid var(--border-color); text-align: left;
 }
 .db-table td { padding: 10px 12px; border-bottom: 1px solid var(--border-color); color: var(--text-secondary); vertical-align: middle; }
