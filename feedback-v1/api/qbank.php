@@ -430,7 +430,7 @@ try {
                 $topic = trim($q['topic'] ?? '');
                 $exUrl = $q['exercisePdf']['url'] ?? ($q['exercise_pdf'] ?? '');
 
-                if ($topic === '') {
+                if ($topic === '' && $bankType !== 'preview') {
                     http_response_code(400);
                     echo json_encode(['success' => false, 'error' => "第 {$qNum} 题【知识点】为必填项，请填写完整！"], JSON_UNESCAPED_UNICODE);
                     exit;

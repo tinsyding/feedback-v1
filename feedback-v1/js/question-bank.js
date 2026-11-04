@@ -381,6 +381,10 @@ function updateBankTypeUi() {
             ? '按题号或知识点过滤...'
             : '按题号、知识点或微课链接过滤...';
     }
+    const previewHintBanner = document.getElementById('qb-preview-hint-banner');
+    if (previewHintBanner) {
+        previewHintBanner.style.display = type === 'preview' ? 'flex' : 'none';
+    }
 }
 
 function onBankTypeChange() {
@@ -1507,13 +1511,10 @@ async function goNextFromMapping() {
     const btn = document.getElementById('mapping-next-btn');
     if (btn) btn.disabled = true;
     try {
-        await importWithLabels(batchExerciseFile, batchAnswerFile);
-        batchImported = currentQuestions.length > 0;
+        const ok = await importWithLabels(batchExerciseFile, batchAnswerFile);
+        batchImported = ok && currentQuestions.length > 0;
     } finally {
         if (btn) btn.disabled = false;
-    }
-    if (currentQuestions.length > 0) {
-        goToStep(4);
     }
 }
 
@@ -1722,15 +1723,26 @@ async function saveQuestions() {
         return;
     }
 
-    // 必填项校验：知识点 和 错题文件（题目 PDF）
+    const isSlicing = currentQuestions.some(q => 
+        (q.exercisePdf && q.exercisePdf.status === 'uploading') ||
+        (q.answerPdf && q.answerPdf.status === 'uploading')
+    );
+    if (isSlicing) {
+        showToast('题目切片正在后台生成与上传中，请稍候...', 'warn');
+        return;
+    }
+
+    // 必填项校验：知识点（预习题库选填）和 错题文件（题目 PDF 必填）
     for (let i = 0; i < currentQuestions.length; i++) {
         const q = currentQuestions[i];
         const qNum = q.id || (i + 1);
         const topic = (q.topic || '').trim();
-        const hasExercise = q.exercisePdf && (q.exercisePdf.url || q.exercisePdf.status === 'uploading');
+        const hasExercise = Boolean(q.exercisePdf && q.exercisePdf.url);
 
-        if (!topic) {
-            const isVar = getBankType() === 'variation';
+        const isVar = getBankType() === 'variation';
+        const isPreview = getBankType() === 'preview';
+
+        if (!topic && !isPreview) {
             if (isVar) {
                 showToast(`第 ${qNum} 题关联的原题缺少知识点，请在课后巩固中完善！`, 'warn');
             } else {
@@ -2115,6 +2127,14 @@ function openTierSyncModal(sourceData = null, isAutoPrompt = false) {
         showToast('当前题目列表为空，无可同步题目', 'warn');
         return;
     }
+    const isSlicing = currentQuestions.some(q => 
+        (q.exercisePdf && q.exercisePdf.status === 'uploading') ||
+        (q.answerPdf && q.answerPdf.status === 'uploading')
+    );
+    if (isSlicing) {
+        showToast('题目切片正在后台生成与上传中，请稍候再同步...', 'warn');
+        return;
+    }
 
     const questionsForSave = (bankType === 'preview' || bankType === 'variation')
         ? currentQuestions.map(q => ({ ...q, videoUrl: '', video_url: '' }))
@@ -2200,7 +2220,18 @@ async function executeSaveQuestions(data) {
             renderQuestionList();
             updateStatus();
             renderSavedDataList();
-            showToast(`已保存 ${currentQuestions.length} 道题目`);
+            if (data.bankType === 'preview') {
+                const filledCount = currentQuestions.filter(q => q.topic && q.topic.trim()).length;
+                if (filledCount === 0) {
+                    showToast(`已保存 ${currentQuestions.length} 道预习题目（未填知识点，错题本将按题号呈现）`);
+                } else if (filledCount < currentQuestions.length) {
+                    showToast(`已保存 ${currentQuestions.length} 道预习题目（${filledCount} 题已填知识点）`);
+                } else {
+                    showToast(`已保存 ${currentQuestions.length} 道预习题目`);
+                }
+            } else {
+                showToast(`已保存 ${currentQuestions.length} 道题目`);
+            }
             
             if (window.Logger) {
                 Logger.action('save_question_bank', {
@@ -2394,6 +2425,24 @@ function clearAllQuestions() {
         confirmText: '清空',
         danger: true,
         onConfirm: () => {
+            currentSlicingSessionId++;
+            const progressPanel = document.getElementById('qb-slice-progress-panel');
+            if (progressPanel) progressPanel.style.display = 'none';
+            const saveBtn = document.getElementById('save-btn');
+            if (saveBtn) {
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = `
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                        <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                        <polyline points="7 3 7 8 15 8"></polyline>
+                    </svg>
+                    保存
+                `;
+            }
+            const syncBtn = document.getElementById('tier-sync-btn');
+            if (syncBtn) syncBtn.disabled = false;
+
             currentQuestions = [];
             isDirty = true;
             renderQuestionList();
@@ -2738,15 +2787,21 @@ function renderQuestionList() {
             const idTagHtml = `
                 <input type="number" class="question-id-input" min="1" step="1" value="${escapeHtml(q.id)}" onwheel="this.blur()" onchange="onIdChange(${originalIndex}, this.value)" ${idReadonlyAttr}>
             `;
+            const topicLabelHtml = isPreviewBank
+                ? `<label class="question-field-label topic-label">知识点<span class="qb-optional-tag">(选填)</span>：</label>`
+                : `<label class="question-field-label topic-label">知识点：</label>`;
+            const topicPlaceholder = isPreviewBank
+                ? '输入知识点 (选填，留空则错题本仅显示题号)...'
+                : '输入知识点 (必填)...';
             item.innerHTML = `
                 <div class="question-id-tags">
                     ${idTagHtml}
                 </div>
                 <div class="question-main-fields">
                     <div class="question-field-row question-topic-row">
-                        <label class="question-field-label topic-label">知识点：</label>
+                        ${topicLabelHtml}
                         <textarea class="question-topic-input"
-                               placeholder="输入知识点 (必填)..."
+                               placeholder="${topicPlaceholder}"
                                rows="1"
                                oninput="onTopicChange(${originalIndex}, this.value); autoResizeTopicTextarea(this);"
                                onfocus="autoResizeTopicTextarea(this)"
@@ -3374,14 +3429,17 @@ function renderPdfBtn(q, index, type) {
     }
 
     if (data.status === 'uploading') {
+        const thumbContent = data.thumb 
+            ? `<div class="q-pdf-mini-thumb qb-skeleton-wrap"><img class="q-pdf-mini-thumb" src="${data.thumb}" alt="缩略图"><div class="qb-skeleton-shimmer"></div></div>`
+            : `<div class="q-pdf-mini-thumb qb-skeleton"><div class="qb-skeleton-shimmer"></div></div>`;
         return `
-            <div class="q-pdf-thumb-card uploading" title="${label}切片上传中...">
-                <div class="q-pdf-mini-thumb empty-thumb-wrap">
-                    ${iconUploading}
-                </div>
+            <div class="q-pdf-thumb-card skeleton-card" title="${label}切片生成与上传中...">
+                ${thumbContent}
                 <div class="q-pdf-info">
                     <span class="q-pdf-tag-title">${label}</span>
-                    <span class="q-pdf-status-text uploading">上传中...</span>
+                    <span class="q-pdf-status-text skeleton-status">
+                        <span class="skeleton-pulse-dot"></span>切片中...
+                    </span>
                 </div>
             </div>
         `;
@@ -3665,14 +3723,186 @@ async function mergePages(srcDoc, indices) {
     return new Blob([bytes], { type: 'application/pdf' });
 }
 
+let currentSlicingSessionId = 0;
+
+function updateSingleQuestionPdfDom(index) {
+    const item = document.querySelector(`.question-item[data-index="${index}"]`);
+    if (!item) return;
+    const actionsEl = item.querySelector('.question-pdf-actions');
+    if (!actionsEl) return;
+    const q = currentQuestions[index];
+    if (!q) return;
+    actionsEl.innerHTML = `
+        ${renderPdfBtn(q, index, 'exercise')}
+        ${renderPdfBtn(q, index, 'answer')}
+    `;
+}
+
+async function startBackgroundSlicing(exerciseSrc, answerSrc, groups, questionNums, isVar) {
+    const sessionId = ++currentSlicingSessionId;
+    const progressPanel = document.getElementById('qb-slice-progress-panel');
+    const progressFill = document.getElementById('qb-slice-progress-fill');
+    const progressText = document.getElementById('qb-slice-progress-text');
+    const progressCount = document.getElementById('qb-slice-progress-count');
+    const saveBtn = document.getElementById('save-btn');
+    const syncBtn = document.getElementById('tier-sync-btn');
+
+    if (progressPanel) progressPanel.style.display = 'block';
+    if (progressFill) progressFill.style.width = '0%';
+    if (progressText) progressText.textContent = '正在后台生成切片并上传...';
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = `
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" class="spin-icon">
+                <line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line>
+            </svg>
+            切片就绪中 (0/${questionNums.length})...
+        `;
+    }
+    if (syncBtn) syncBtn.disabled = true;
+
+    const total = questionNums.length;
+    let completedCount = 0;
+    let failCount = 0;
+
+    const updateProgressUi = () => {
+        if (sessionId !== currentSlicingSessionId) return;
+        const pct = Math.round((completedCount / total) * 100);
+        if (progressFill) progressFill.style.width = `${pct}%`;
+        if (progressCount) progressCount.textContent = `${completedCount} / ${total} (${pct}%)`;
+        if (saveBtn && saveBtn.disabled) {
+            saveBtn.innerHTML = `
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" class="spin-icon">
+                    <line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line>
+                </svg>
+                切片就绪中 (${completedCount}/${total})...
+            `;
+        }
+    };
+
+    updateProgressUi();
+
+    async function processQuestion(idx) {
+        if (sessionId !== currentSlicingSessionId) return;
+        const num = questionNums[idx];
+        const key = String(num);
+        const q = currentQuestions[idx];
+        if (!q) return;
+
+        const qThumb = batchQuestionThumbs[groups[key].question[0]] || null;
+        const exFileName = isVar
+            ? `课后第${q.parentQuestionNum}题_变式${q.subNum}_题目.pdf`
+            : `题目_第${num}题.pdf`;
+        const anFileName = isVar
+            ? `课后第${q.parentQuestionNum}题_变式${q.subNum}_答案.pdf`
+            : `答案_第${num}题.pdf`;
+
+        // 1. 题目切片合并与上传
+        try {
+            const exBlob = await mergePages(exerciseSrc, groups[key].question);
+            const exFile = new File([exBlob], exFileName, { type: 'application/pdf' });
+            const exRes = await uploadPdfBlob(exFile);
+            if (sessionId === currentSlicingSessionId && currentQuestions[idx]) {
+                currentQuestions[idx].exercisePdf = { url: exRes.url, name: exRes.originalName, status: 'uploaded', thumb: qThumb };
+            }
+        } catch (e) {
+            console.error('题目切片上传失败', num, e);
+            if (sessionId === currentSlicingSessionId && currentQuestions[idx]) {
+                currentQuestions[idx].exercisePdf = null;
+            }
+            failCount++;
+        }
+
+        // 2. 答案切片合并与上传（若有答案页）
+        const answerPages = groups[key].answer;
+        if (answerPages && answerPages.length > 0) {
+            const aThumb = batchAnswerThumbs[answerPages[0]] || null;
+            try {
+                const anBlob = await mergePages(answerSrc, answerPages);
+                const anFile = new File([anBlob], anFileName, { type: 'application/pdf' });
+                const anRes = await uploadPdfBlob(anFile);
+                if (sessionId === currentSlicingSessionId && currentQuestions[idx]) {
+                    currentQuestions[idx].answerPdf = { url: anRes.url, name: anRes.originalName, status: 'uploaded', thumb: aThumb };
+                }
+            } catch (e) {
+                console.error('答案切片上传失败', num, e);
+                if (sessionId === currentSlicingSessionId && currentQuestions[idx]) {
+                    currentQuestions[idx].answerPdf = null;
+                }
+                failCount++;
+            }
+        }
+
+        if (sessionId === currentSlicingSessionId) {
+            completedCount++;
+            updateSingleQuestionPdfDom(idx);
+            updateProgressUi();
+            updateStatus();
+        }
+    }
+
+    // 并发池 (并发度 3)
+    const CONCURRENCY = 3;
+    let nextIdx = 0;
+    async function worker() {
+        while (nextIdx < total) {
+            if (sessionId !== currentSlicingSessionId) break;
+            const currentTaskIdx = nextIdx++;
+            await processQuestion(currentTaskIdx);
+        }
+    }
+
+    const workers = [];
+    const actualConcurrency = Math.min(CONCURRENCY, total);
+    for (let i = 0; i < actualConcurrency; i++) {
+        workers.push(worker());
+    }
+    await Promise.all(workers);
+
+    if (sessionId !== currentSlicingSessionId) return;
+
+    // 全部切片完成
+    if (progressText) {
+        progressText.innerHTML = failCount > 0
+            ? `切片处理完成（有 ${failCount} 个附件上传失败）`
+            : `✓ 全部 ${total} 道题目切片已就绪！`;
+    }
+    if (progressFill) progressFill.style.width = '100%';
+
+    // 恢复保存与同步按钮
+    if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                <polyline points="7 3 7 8 15 8"></polyline>
+            </svg>
+            保存
+        `;
+    }
+    if (syncBtn) syncBtn.disabled = false;
+
+    if (failCount > 0) {
+        showToast(`切片完成，但有 ${failCount} 个页面上传失败，可在题目卡片中重试`, 'warn');
+    } else {
+        showToast(`全部 ${total} 道题目切片已就绪`, 'success');
+    }
+
+    setTimeout(() => {
+        if (sessionId === currentSlicingSessionId && progressPanel) {
+            progressPanel.style.display = 'none';
+        }
+    }, 1800);
+}
+
 async function importWithLabels(exerciseFile, answerFile) {
     if (typeof PDFLib === 'undefined') {
         showToast('PDF 处理组件未完全就绪，请刷新重试');
-        return;
+        return false;
     }
     let exerciseSrc, answerSrc;
     try {
-        showToast('正在导入 PDF...');
         const [exBuf, anBuf] = await Promise.all([
             exerciseFile.arrayBuffer(),
             answerFile.arrayBuffer()
@@ -3682,7 +3912,7 @@ async function importWithLabels(exerciseFile, answerFile) {
     } catch (e) {
         console.error('PDF 处理失败', e);
         showToast('PDF 处理失败，请确认文件有效');
-        return;
+        return false;
     }
 
     // 按题号分组：题目页定义题目，答案页归并到对应题号
@@ -3705,7 +3935,7 @@ async function importWithLabels(exerciseFile, answerFile) {
 
     if (questionNums.length === 0) {
         showToast('没有标注任何题目页');
-        return;
+        return false;
     }
 
     const isVar = getBankType() === 'variation';
@@ -3749,64 +3979,15 @@ async function importWithLabels(exerciseFile, answerFile) {
     });
     if (isVar) recalcVariationSubNums(currentQuestions);
     isDirty = true;
+
+    // 立即进入第 4 步呈现骨架屏与题目列表
     renderQuestionList();
     updateStatus();
+    goToStep(4);
 
-    let failCount = 0;
-    const total = questionNums.length;
-    let done = 0;
-
-    for (let idx = 0; idx < questionNums.length; idx++) {
-        const num = questionNums[idx];
-        const key = String(num);
-        const q = currentQuestions[idx];
-        done++;
-        showToast(`正在导入 ${done}/${total}...`);
-
-        const qThumb = batchQuestionThumbs[groups[key].question[0]] || null;
-        const exFileName = isVar
-            ? `课后第${q.parentQuestionNum}题_变式${q.subNum}_题目.pdf`
-            : `题目_第${num}题.pdf`;
-        const anFileName = isVar
-            ? `课后第${q.parentQuestionNum}题_变式${q.subNum}_答案.pdf`
-            : `答案_第${num}题.pdf`;
-
-        // 题目：合并该题号所有题目页
-        try {
-            const exBlob = await mergePages(exerciseSrc, groups[key].question);
-            const exFile = new File([exBlob], exFileName, { type: 'application/pdf' });
-            const exRes = await uploadPdfBlob(exFile);
-            currentQuestions[idx].exercisePdf = { url: exRes.url, name: exRes.originalName, status: 'uploaded', thumb: qThumb };
-        } catch (e) {
-            console.error('题目上传失败', num, e);
-            currentQuestions[idx].exercisePdf = null;
-            failCount++;
-        }
-
-        // 答案：合并该题号所有答案页（可选）
-        const answerPages = groups[key].answer;
-        if (answerPages.length > 0) {
-            const aThumb = batchAnswerThumbs[answerPages[0]] || null;
-            try {
-                const anBlob = await mergePages(answerSrc, answerPages);
-                const anFile = new File([anBlob], anFileName, { type: 'application/pdf' });
-                const anRes = await uploadPdfBlob(anFile);
-                currentQuestions[idx].answerPdf = { url: anRes.url, name: anRes.originalName, status: 'uploaded', thumb: aThumb };
-            } catch (e) {
-                console.error('答案上传失败', num, e);
-                currentQuestions[idx].answerPdf = null;
-                failCount++;
-            }
-        }
-    }
-
-    renderQuestionList();
-    updateStatus();
-    if (failCount > 0) {
-        showToast(`导入完成，但有 ${failCount} 个页面上传失败`);
-    } else {
-        showToast(`已导入 ${currentQuestions.length} 道题`);
-    }
+    // 启动后台异步切片与并发上传，不阻塞界面交互
+    startBackgroundSlicing(exerciseSrc, answerSrc, groups, questionNums, isVar);
+    return true;
 }
 
 async function doBatchImportPdfs(exerciseFile, answerFile) {

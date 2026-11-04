@@ -3988,7 +3988,9 @@ async function onPlusSelectorChange() {
                 const pvCount = (pvResult.data.questions || []).length;
                 const pvFilled = (pvResult.data.questions || []).filter(q => q.topic && q.topic.trim()).length;
                 pvOk = true;
-                pvText = `预习: ${pvFilled}/${pvCount}题`;
+                pvText = (pvFilled === pvCount) 
+                    ? `预习: ${pvCount}题` 
+                    : (pvFilled > 0 ? `预习: ${pvCount}题 (${pvFilled}已填考点)` : `预习: ${pvCount}题 (知识点选填)`);
             } else {
                 plusPreviewQuestionData = null;
                 pvOk = false;

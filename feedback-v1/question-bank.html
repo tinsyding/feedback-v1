@@ -12,7 +12,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261101-2';
+            const v = '20261104-1';
             document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/question-bank.css?v=${v}">`);
@@ -454,6 +454,39 @@
                             </span>
                         </div>
                         <div class="config-card-body">
+                            <!-- Slicing background quiet progress panel -->
+                            <div class="qb-slice-progress-panel" id="qb-slice-progress-panel" style="display: none;">
+                                <div class="qb-slice-progress-header">
+                                    <div class="qb-slice-progress-title">
+                                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" class="spin-icon">
+                                            <line x1="12" y1="2" x2="12" y2="6"></line>
+                                            <line x1="12" y1="18" x2="12" y2="22"></line>
+                                            <line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line>
+                                            <line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line>
+                                            <line x1="2" y1="12" x2="6" y2="12"></line>
+                                            <line x1="18" y1="12" x2="22" y2="12"></line>
+                                            <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line>
+                                            <line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line>
+                                        </svg>
+                                        <span id="qb-slice-progress-text">正在后台生成切片并上传...</span>
+                                    </div>
+                                    <span class="qb-slice-progress-count" id="qb-slice-progress-count">0 / 0</span>
+                                </div>
+                                <div class="qb-slice-progress-track">
+                                    <div class="qb-slice-progress-fill" id="qb-slice-progress-fill" style="width: 0%;"></div>
+                                </div>
+                            </div>
+
+                            <!-- 预习题库专属提示横条 (当 bankType === 'preview' 时展示) -->
+                            <div class="qb-preview-hint-banner" id="qb-preview-hint-banner" style="display: none;">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <line x1="12" y1="16" x2="12" y2="12"></line>
+                                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                                </svg>
+                                <span><strong>预习错题本提示：</strong>知识点为<strong>选填项</strong>。填写后可在学情反馈及错题本中呈现薄弱考点；若不填写，错题本将以<strong>题号</strong>呈现，不影响学生重练。</span>
+                            </div>
+
                             <div class="question-list-header">
                                 <div class="question-list-actions">
                                     <button class="btn sm" onclick="addQuestion()">
@@ -627,7 +660,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261101-2';
+            const v = '20261104-1';
             document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
             document.write(`<script src="js/common.js?v=${v}"><\/script>`);
             document.write(`<script src="js/auth.js?v=${v}"><\/script>`);
