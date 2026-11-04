@@ -2642,4 +2642,146 @@ input[type=number] {
     }
 }
 
+/* ==========================================================================
+   班层题目互通同步 (Tier Cross-Sync Modal)
+   ========================================================================== */
+.tier-sync-box {
+    text-align: left;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.tier-sync-source-card {
+    background: var(--ui-fill-base, rgba(255, 255, 255, 0.04));
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 14px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.tier-sync-source-card strong {
+    color: var(--text-primary);
+}
+
+.tier-sync-label {
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--text-primary);
+    font-size: 0.88rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.tier-sync-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.tier-sync-item {
+    display: flex;
+    flex-direction: column;
+    padding: 9px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.02));
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+    position: relative;
+}
+
+.tier-sync-item:hover {
+    border-color: var(--accent, #3b82f6);
+    background: var(--accent-glow, rgba(59, 130, 246, 0.06));
+}
+
+.tier-sync-item.selected {
+    border-color: var(--accent, #3b82f6);
+    background: rgba(59, 130, 246, 0.12);
+    box-shadow: 0 0 0 1px var(--accent, #3b82f6);
+}
+
+.tier-sync-item-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tier-sync-checkbox {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent, #3b82f6);
+    cursor: pointer;
+    margin: 0;
+}
+
+.tier-sync-item-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text-primary);
+}
+
+.tier-sync-badge {
+    margin-top: 4px;
+    font-size: 0.72rem;
+    border-radius: 4px;
+    padding: 1px 6px;
+    display: inline-block;
+    width: fit-content;
+    font-weight: 500;
+}
+
+.tier-sync-badge.empty {
+    color: var(--text-muted, #94a3b8);
+    background: rgba(148, 163, 184, 0.12);
+}
+
+.tier-sync-badge.exist {
+    color: #f59e0b;
+    background: rgba(245, 158, 11, 0.12);
+}
+
+.tier-sync-tips {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+    padding-top: 2px;
+}
+
+[data-theme="light"] .tier-sync-source-card {
+    background: #f8fafc;
+    border-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .tier-sync-item {
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="light"] .tier-sync-item:hover {
+    background: #eff6ff;
+    border-color: #3b82f6;
+}
+
+[data-theme="light"] .tier-sync-item.selected {
+    background: #eff6ff;
+    border-color: #3b82f6;
+}
+
+[data-theme="light"] .tier-sync-badge.empty {
+    color: #64748b;
+    background: #f1f5f9;
+}
+
+[data-theme="light"] .tier-sync-badge.exist {
+    color: #b45309;
+    background: #fef3c7;
+}
+
+
 

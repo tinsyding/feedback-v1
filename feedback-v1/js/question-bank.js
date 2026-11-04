@@ -1918,35 +1918,279 @@ function showQbankOverwriteModal(options) {
     });
 }
 
-async function doSyncTier(data, targetTier, targetSummary, currentTier) {
-    try {
-        showToast(`正在同步至「${targetSummary}」...`);
-        const syncData = {
-            ...data,
-            tier: targetTier,
-            questions: JSON.parse(JSON.stringify(currentQuestions))
-        };
-        const syncRes = await apiPost(syncData);
-        if (syncRes.success) {
-            renderSavedDataList();
-            showToast(`已成功同步至「${targetSummary}」！`, 'success');
-            if (window.Logger) {
-                Logger.action('sync_question_bank_tier', {
-                    fromTier: currentTier,
-                    toTier: targetTier,
-                    grade: data.grade,
-                    subject: data.subject,
-                    week: data.week
-                });
-            }
-        } else {
-            showToast('同步失败: ' + (syncRes.error || '未知错误'), 'warn');
+// ── 班层互通同步逻辑 (面向内部教师，支持全班层自由多选互通) ──
+window._selectedSyncTiers = new Set();
+
+window.toggleTierSyncItem = function(cardEl, tierName) {
+    if (!cardEl || !tierName) return;
+    if (window._selectedSyncTiers.has(tierName)) {
+        window._selectedSyncTiers.delete(tierName);
+        cardEl.classList.remove('selected');
+        const cb = cardEl.querySelector('.tier-sync-checkbox');
+        if (cb) cb.checked = false;
+    } else {
+        window._selectedSyncTiers.add(tierName);
+        cardEl.classList.add('selected');
+        const cb = cardEl.querySelector('.tier-sync-checkbox');
+        if (cb) cb.checked = true;
+    }
+    const count = window._selectedSyncTiers.size;
+    const confirmBtn = document.getElementById('dialog-confirm');
+    if (confirmBtn) {
+        confirmBtn.textContent = count > 0 ? `立即同步 (${count})` : '立即同步';
+    }
+};
+
+function getCandidateTiers(currentTier) {
+    const predefinedTiers = ['S+', 'S', 'A+', 'A', 'U'];
+    const selectTiers = [];
+    if (tierSelect && tierSelect.options) {
+        for (let i = 0; i < tierSelect.options.length; i++) {
+            const val = String(tierSelect.options[i].value || '').trim();
+            if (val) selectTiers.push(val);
         }
-    } catch (err) {
-        console.error('同步失败:', err);
-        showToast('同步失败，请检查网络连接', 'warn');
+    }
+    const dataTiers = Array.isArray(allSavedDataList)
+        ? allSavedDataList.map(it => String(it.tier || '').trim()).filter(Boolean)
+        : [];
+    const all = Array.from(new Set([...predefinedTiers, ...selectTiers, ...dataTiers]));
+    const curUpper = String(currentTier || '').trim().toUpperCase();
+    return all.filter(t => t && t.toUpperCase() !== curUpper);
+}
+
+function getTierSavedMeta(bankType, year, season, subject, grade, tier, week) {
+    if (!Array.isArray(allSavedDataList)) return null;
+    const curWeek = parseInt(week);
+    const curYear = parseInt(year);
+    const targetUpper = String(tier || '').trim().toUpperCase();
+    return allSavedDataList.find(it => 
+        (it.bankType === bankType || (!it.bankType && bankType === 'homework')) &&
+        parseInt(it.year) === curYear &&
+        it.season === season &&
+        it.subject === subject &&
+        it.grade === grade &&
+        String(it.tier || '').trim().toUpperCase() === targetUpper &&
+        parseInt(it.week) === curWeek
+    ) || null;
+}
+
+async function doBatchSyncTiers(data, targetTiers, currentTier) {
+    if (!targetTiers || targetTiers.length === 0) return;
+    const tierLabels = targetTiers.map(t => `${t}班`).join('、');
+    showToast(`正在同步至 ${tierLabels}...`);
+    let successCount = 0;
+    const errors = [];
+    for (const targetTier of targetTiers) {
+        try {
+            const syncData = {
+                ...data,
+                tier: targetTier,
+                questions: JSON.parse(JSON.stringify(currentQuestions))
+            };
+            const syncRes = await apiPost(syncData);
+            if (syncRes && syncRes.success) {
+                successCount++;
+                if (window.Logger) {
+                    Logger.action('sync_question_bank_tier', {
+                        fromTier: currentTier,
+                        toTier: targetTier,
+                        grade: data.grade,
+                        subject: data.subject,
+                        week: data.week
+                    });
+                }
+            } else {
+                errors.push(`${targetTier}班: ${syncRes?.error || '保存失败'}`);
+            }
+        } catch (err) {
+            console.error(`同步至 ${targetTier}班 失败:`, err);
+            errors.push(`${targetTier}班: 网络异常`);
+        }
+    }
+    renderSavedDataList();
+    if (errors.length === 0) {
+        showToast(`已成功同步至 ${tierLabels}！`, 'success');
+    } else if (successCount > 0) {
+        showToast(`部分同步成功 (${successCount}/${targetTiers.length})，失败: ${errors.join('; ')}`, 'warn');
+    } else {
+        showToast(`同步失败: ${errors.join('; ')}`, 'warn');
     }
 }
+
+async function doSyncTier(data, targetTier, targetSummary, currentTier) {
+    return doBatchSyncTiers(data, [targetTier], currentTier);
+}
+
+async function handleTierSyncConfirm(data, targetTiers) {
+    if (!targetTiers || targetTiers.length === 0) return;
+    showToast('正在检测目标班层配置...');
+    const diffTiers = [];
+    for (const targetTier of targetTiers) {
+        try {
+            const checkRes = await apiGet('get', {
+                year: data.year,
+                season: data.season,
+                bankType: data.bankType,
+                subject: data.subject,
+                grade: data.grade,
+                tier: targetTier,
+                week: data.week
+            });
+            if (checkRes && checkRes.success && checkRes.data && Array.isArray(checkRes.data.questions) && checkRes.data.questions.length > 0) {
+                const diffs = compareQuestions(checkRes.data.questions, currentQuestions);
+                if (diffs.length > 0) {
+                    diffTiers.push({
+                        tier: targetTier,
+                        meta: checkRes.data,
+                        diffs: diffs
+                    });
+                }
+            }
+        } catch (e) {
+            console.warn(`检测班层 ${targetTier} 失败:`, e);
+        }
+    }
+
+    if (diffTiers.length > 0) {
+        const diffsHtml = diffTiers.map(dt => {
+            const op = dt.meta.operatorName || dt.meta.operator || '未知教师';
+            const time = dt.meta.updatedAtFormatted || (dt.meta.updatedAt ? new Date(dt.meta.updatedAt).toLocaleDateString() : '');
+            const items = dt.diffs.map(d => `<div style="padding:2px 0;">• ${d}</div>`).join('');
+            return `
+                <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px 10px; margin-bottom:8px; font-size:0.83rem;">
+                    <div style="font-weight:600; color:var(--text-primary); margin-bottom:4px; display:flex; justify-content:space-between;">
+                        <span>【${escapeHtml(dt.tier)}班】现有 ${dt.meta.questions?.length || 0} 题</span>
+                        <span style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(op)} ${escapeHtml(time)}</span>
+                    </div>
+                    <div style="color:var(--text-secondary); line-height:1.4;">${items}</div>
+                </div>
+            `;
+        }).join('');
+
+        const bodyHtml = `
+            <div style="font-size:0.9rem; line-height:1.5; text-align:left;">
+                <div style="background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.3); border-radius:8px; padding:10px 12px; margin-bottom:12px; color:#fca5a5;">
+                    检测到 <strong>${diffTiers.length}</strong> 个目标班层已有题目变动，同步将<strong>完全覆盖</strong>原有题目！
+                </div>
+                <div style="max-height:220px; overflow-y:auto; margin-bottom:8px;" class="custom-scrollbar">
+                    ${diffsHtml}
+                </div>
+            </div>
+        `;
+
+        showCustomDialog({
+            title: '覆盖目标班层配置确认',
+            body: bodyHtml,
+            maxWidth: '560px',
+            confirmText: `确认覆盖并同步 (${targetTiers.length}个班层)`,
+            cancelText: '取消',
+            danger: true,
+            onConfirm: () => doBatchSyncTiers(data, targetTiers, data.tier)
+        });
+        return;
+    }
+
+    await doBatchSyncTiers(data, targetTiers, data.tier);
+}
+
+function openTierSyncModal(sourceData = null, isAutoPrompt = false) {
+    if (window.currentUser && window.currentUser.role === 'assistant') {
+        showToast('助教账号仅拥有查看权限，无法同步题库！', 'warn');
+        return;
+    }
+
+    const bankType = getBankType();
+    const year = yearSelect ? parseInt(yearSelect.value) : 2026;
+    const season = seasonSelect ? seasonSelect.value : '春';
+    const subject = subjectSelect ? subjectSelect.value : '';
+    const grade = gradeSelect ? gradeSelect.value : '';
+    const tier = tierSelect ? tierSelect.value : '';
+    const week = weekSelect ? parseInt(weekSelect.value) : 0;
+
+    if (!subject || !grade || !tier || !week) {
+        showToast('请先选择学科、年级、班层及专题', 'warn');
+        return;
+    }
+    if (currentQuestions.length === 0) {
+        showToast('当前题目列表为空，无可同步题目', 'warn');
+        return;
+    }
+
+    const questionsForSave = (bankType === 'preview' || bankType === 'variation')
+        ? currentQuestions.map(q => ({ ...q, videoUrl: '', video_url: '' }))
+        : currentQuestions;
+    const data = sourceData || {
+        bankType,
+        year,
+        season,
+        subject,
+        grade,
+        tier,
+        week,
+        questions: questionsForSave,
+        teacher_username: window.currentUser?.username || '',
+        teacher_name: window.currentUser?.real_name || ''
+    };
+
+    const candidateTiers = getCandidateTiers(data.tier);
+    if (candidateTiers.length === 0) {
+        showToast('未找到其他可选的目标班层', 'warn');
+        return;
+    }
+
+    // 默认不勾选任何班层
+    window._selectedSyncTiers = new Set();
+
+    const currentSummary = [data.grade, data.subject, `${data.tier}班`, getTopicLabel(data.week)].filter(Boolean).join(' · ');
+
+    const gridHtml = candidateTiers.map(t => {
+        const meta = getTierSavedMeta(data.bankType, data.year, data.season, data.subject, data.grade, t, data.week);
+        const badgeHtml = meta 
+            ? `<span class="tier-sync-badge exist">已有 ${meta.questionCount || 0} 题 (覆盖)</span>`
+            : `<span class="tier-sync-badge empty">未录入</span>`;
+        return `
+            <div class="tier-sync-item" onclick="window.toggleTierSyncItem(this, '${escapeHtml(t)}')">
+                <div class="tier-sync-item-top">
+                    <input type="checkbox" class="tier-sync-checkbox" onclick="event.stopPropagation(); window.toggleTierSyncItem(this.closest('.tier-sync-item'), '${escapeHtml(t)}');">
+                    <span class="tier-sync-item-name">${escapeHtml(t)} 班</span>
+                </div>
+                ${badgeHtml}
+            </div>
+        `;
+    }).join('');
+
+    const bodyHtml = `
+        <div class="tier-sync-box">
+            <div class="tier-sync-source-card">
+                当前配置：<strong>${escapeHtml(currentSummary)}</strong> (${currentQuestions.length} 道题)
+            </div>
+            <div class="tier-sync-label">选择要同步的目标班层（支持多选）：</div>
+            <div class="tier-sync-grid">
+                ${gridHtml}
+            </div>
+            <div class="tier-sync-tips">
+                💡 同步将完整覆盖目标班层的题目及解析配置。
+            </div>
+        </div>
+    `;
+
+    showCustomDialog({
+        title: '班层题目互通',
+        body: bodyHtml,
+        maxWidth: '520px',
+        confirmText: '立即同步',
+        cancelText: isAutoPrompt ? '暂不同步' : '取消',
+        onConfirm: async () => {
+            const targetTiers = Array.from(window._selectedSyncTiers || []);
+            if (targetTiers.length === 0) {
+                showToast('未选择任何目标班层，已取消同步', 'info');
+                return;
+            }
+            await handleTierSyncConfirm(data, targetTiers);
+        }
+    });
+}
+window.openTierSyncModal = openTierSyncModal;
 
 async function executeSaveQuestions(data) {
     try {
@@ -1971,58 +2215,10 @@ async function executeSaveQuestions(data) {
                 });
             }
 
-            // A班与A+班同班型课后巩固同步提示
-            const currentTier = String(data.tier || '').trim();
-            const upperTier = currentTier.toUpperCase();
-            const targetTier = upperTier === 'A+' ? 'A' : (upperTier === 'A' ? 'A+' : null);
-            if (targetTier) {
-                const targetSummary = [data.grade, data.subject, `${targetTier}班`, getTopicLabel(data.week)].filter(Boolean).join(' · ');
-                setTimeout(() => {
-                    showCustomDialog({
-                        title: `一键同步配置`,
-                        body: `
-                            <div style="font-size:0.95rem; line-height:1.6; color:var(--text-primary,#fff); text-align:left; padding:4px 0;">
-                                是否一键同步至对应的【<strong>${escapeHtml(targetSummary)}</strong>】？
-                            </div>
-                        `,
-                        confirmText: `立即同步`,
-                        cancelText: '暂不同步',
-                        onConfirm: async () => {
-                            // 检查目标班型是否已有题目配置
-                            try {
-                                const targetCheck = await apiGet('get', {
-                                    year: data.year,
-                                    season: data.season,
-                                    bankType: data.bankType,
-                                    subject: data.subject,
-                                    grade: data.grade,
-                                    tier: targetTier,
-                                    week: data.week
-                                });
-                                if (targetCheck && targetCheck.success && targetCheck.data && Array.isArray(targetCheck.data.questions) && targetCheck.data.questions.length > 0) {
-                                    const diffs = compareQuestions(targetCheck.data.questions, currentQuestions);
-                                    // 如果对比没有任何变动，则不弹窗提示覆盖，直接同步
-                                    if (diffs.length > 0) {
-                                        showQbankOverwriteModal({
-                                            title: '覆盖目标班型配置确认',
-                                            summary: `目标班型【<strong>${escapeHtml(targetSummary)}</strong>】现有配置与当前配置存在变动，同步将<strong>完全覆盖</strong>目标班型现有题目！`,
-                                            meta: targetCheck.data,
-                                            diffs: diffs,
-                                            confirmText: `确认覆盖同步至${targetTier}班`,
-                                            onConfirm: () => doSyncTier(data, targetTier, targetSummary, currentTier)
-                                        });
-                                        return;
-                                    }
-                                }
-                                await doSyncTier(data, targetTier, targetSummary, currentTier);
-                            } catch (syncCheckErr) {
-                                console.warn('检查目标班型配置失败:', syncCheckErr);
-                                await doSyncTier(data, targetTier, targetSummary, currentTier);
-                            }
-                        }
-                    });
-                }, 300);
-            }
+            // 保存完成后弹出班层互通提示（默认不勾选，精简直达）
+            setTimeout(() => {
+                openTierSyncModal(data, true);
+            }, 300);
         } else {
             showToast('保存失败: ' + (result.error || '未知错误'));
         }
