@@ -414,6 +414,10 @@ function populateWeekSelector() {
 async function apiGet(action, params = {}) {
     const query = new URLSearchParams({ action, ...params }).toString();
     const resp = await fetch(`${API_BASE}?${query}`, { credentials: 'same-origin' });
+    if (resp.status === 401) {
+        handleUnauthorized();
+        return { success: false, error: '未登录' };
+    }
     return await resp.json();
 }
 
@@ -458,7 +462,7 @@ function handleUnauthorized() {
 }
 
 // ========== Selector Change ==========
-function onSelectorChange() {
+async function onSelectorChange() {
     batchExerciseFile = null;
     batchAnswerFile = null;
     batchImported = false;
@@ -482,16 +486,16 @@ function onSelectorChange() {
             body: '当前题目数据尚未保存，是否放弃更改并切换？',
             confirmText: '放弃更改',
             danger: true,
-            onConfirm: () => {
+            onConfirm: async () => {
                 isDirty = false;
-                loadCurrentData();
+                await loadCurrentData();
                 resetStep();
                 if (typeof applySavedDataFilter === 'function') applySavedDataFilter();
             }
         });
         return;
     }
-    loadCurrentData();
+    await loadCurrentData();
     resetStep();
     if (typeof applySavedDataFilter === 'function') applySavedDataFilter();
 }
@@ -591,8 +595,11 @@ async function handleStepIndicatorClick(n) {
             goToStep(3);
         }
     } else if (n === 4) {
+        if (currentQuestions.length === 0 && subjectSelect?.value && gradeSelect?.value && tierSelect?.value && weekSelect?.value) {
+            await loadCurrentData();
+        }
         if (currentQuestions.length === 0) {
-            showToast('暂无题目，请先上传并标注导入');
+            showToast('暂无题目，请点击下方已有题库卡片「查看 / 更改题目」或上传新题', 'info');
             return;
         }
         goToStep(4);
@@ -600,6 +607,34 @@ async function handleStepIndicatorClick(n) {
 }
 
 window.handleStepIndicatorClick = handleStepIndicatorClick;
+
+function updateStep1ButtonState() {
+    const step1NextBtn = document.querySelector('button[onclick="goNextFromStep1()"]');
+    if (!step1NextBtn) return;
+    const isAssistant = Boolean(window.currentUser && window.currentUser.role === 'assistant');
+    if (isAssistant) {
+        step1NextBtn.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;margin-right:4px;">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+            查看所选专题题目
+        `;
+        return;
+    }
+    if (currentQuestions && currentQuestions.length > 0) {
+        step1NextBtn.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;margin-right:4px;">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+            查看 / 修改已保存题目 (${currentQuestions.length}题)
+        `;
+    } else {
+        step1NextBtn.innerHTML = `录入新错题本 / 下一步`;
+    }
+}
+window.updateStep1ButtonState = updateStep1ButtonState;
 
 async function goNextFromStep1() {
     const isAssistant = Boolean(window.currentUser && window.currentUser.role === 'assistant');
@@ -1598,6 +1633,7 @@ async function loadCurrentData() {
         renderQuestionList();
         updateStatus();
         highlightActiveSavedItem();
+        updateStep1ButtonState();
         return;
     }
 
@@ -1625,6 +1661,7 @@ async function loadCurrentData() {
     renderQuestionList();
     updateStatus();
     highlightActiveSavedItem();
+    updateStep1ButtonState();
 
     // Background load thumbnails for loaded questions
     currentQuestions.forEach(async (q, idx) => {
@@ -3304,7 +3341,7 @@ function applySavedDataFilter() {
                         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
                     </svg>
-                    ${isAssistant ? '查看题目' : '去更改题目'}
+                    ${isAssistant ? '查看题目' : '查看 / 更改题目'}
                 </button>
                 ${isAssistant ? '' : `
                 <button type="button" class="saved-btn delete-btn" onclick="event.stopPropagation(); deleteStoredData('${escapeHtml(item.subject)}', '${escapeHtml(itemGrade)}', '${escapeHtml(item.tier)}', ${item.week}, ${itemYear}, '${escapeHtml(itemSeason)}', '${itemBankType}')" title="删除此专题数据">
