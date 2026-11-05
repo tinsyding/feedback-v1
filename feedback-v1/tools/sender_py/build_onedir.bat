@@ -1,9 +1,10 @@
 @echo off
 chcp 65001 >nul
-title 极方每周反馈程序 - 文件夹模式打包工具 (防360误报)
+title 极方每周反馈程序(Web版) - 文件夹模式打包工具 (防360误报)
 
 echo ========================================================
-echo        极方每周反馈程序 - 文件夹模式 (--onedir) 打包
+echo     极方每周反馈程序 - Web版文件夹模式 (--onedir) 打包
+echo          (注：Tkinter桌面版已停更，以Web版为主)
 echo ========================================================
 echo.
 
@@ -12,12 +13,11 @@ set REPO_ROOT=%~dp0..\..
 set FAVICON=%REPO_ROOT%\favicon.ico
 set EXAMPLE=%REPO_ROOT%\tools\example.png
 set VERSION_FILE=%~dp0version_info.txt
-set SENDER_PY=%~dp0sender.py
 set WEB_MAIN_PY=%~dp0web_main.py
 set WEB_UI=%~dp0web_ui.html
 set "PYTHONPATH=%REPO_ROOT%\tools;%~dp0;%PYTHONPATH%"
 
-echo [1/4] 检查 Python 环境及依赖...
+echo [1/3] 检查 Python 环境及依赖...
 python --version >nul 2>&1
 if errorlevel 1 goto :no_python
 
@@ -31,32 +31,8 @@ if errorlevel 1 goto :pip_error
 python -m pip install pyinstaller
 
 echo.
-echo [2/4] 正在打包【Tkinter 桌面版】(文件夹模式)...
+echo [2/3] 正在打包【极方每周反馈程序 Web版】(文件夹模式)...
 if not exist "%~dp0dist_dir" mkdir "%~dp0dist_dir"
-python -m PyInstaller --noconfirm --clean --noupx --windowed --onedir ^
-    --distpath "%~dp0dist_dir" ^
-    --name "JiFangFeedbackSender" ^
-    --icon "%FAVICON%" ^
-    --version-file "%VERSION_FILE%" ^
-    --add-data "%FAVICON%;." ^
-    --add-data "%EXAMPLE%;." ^
-    --paths "%REPO_ROOT%\tools" ^
-    --paths "%~dp0" ^
-    --collect-submodules sender_py ^
-    --collect-all sv_ttk ^
-    --collect-all rapidocr_onnxruntime ^
-    "%SENDER_PY%"
-
-if exist "%~dp0dist_dir\JiFangFeedbackSender\JiFangFeedbackSender.exe" (
-    ren "%~dp0dist_dir\JiFangFeedbackSender\JiFangFeedbackSender.exe" "极方每周反馈程序.exe"
-)
-if exist "%~dp0dist_dir\极方每周反馈程序-绿色文件夹版" (
-    rd /s /q "%~dp0dist_dir\极方每周反馈程序-绿色文件夹版"
-)
-ren "%~dp0dist_dir\JiFangFeedbackSender" "极方每周反馈程序-绿色文件夹版"
-
-echo.
-echo [3/4] 正在打包【WebUI 浏览器版】(文件夹模式)...
 python -m PyInstaller --noconfirm --clean --noupx --windowed --onedir ^
     --distpath "%~dp0dist_dir" ^
     --name "JiFangFeedbackWeb" ^
@@ -80,9 +56,8 @@ if exist "%~dp0dist_dir\极方每周反馈程序-Web版-绿色文件夹版" (
 ren "%~dp0dist_dir\JiFangFeedbackWeb" "极方每周反馈程序-Web版-绿色文件夹版"
 
 echo.
-echo [4/4] 正在自动压缩生成 ZIP 分发包...
+echo [3/3] 正在自动压缩生成 ZIP 分发包...
 if not exist "%~dp0dist_zip" mkdir "%~dp0dist_zip"
-powershell -NoProfile -Command "Compress-Archive -Path '%~dp0dist_dir\极方每周反馈程序-绿色文件夹版' -DestinationPath '%~dp0dist_zip\极方每周反馈程序-绿色文件夹版.zip' -Force"
 powershell -NoProfile -Command "Compress-Archive -Path '%~dp0dist_dir\极方每周反馈程序-Web版-绿色文件夹版' -DestinationPath '%~dp0dist_zip\极方每周反馈程序-Web版-绿色文件夹版.zip' -Force"
 
 echo.
@@ -91,14 +66,12 @@ echo                  ★ 打包完成！ ★
 echo ========================================================
 echo.
 echo 生成的免报毒绿色文件夹目录位于：
-echo   - %~dp0dist_dir\极方每周反馈程序-绿色文件夹版\
 echo   - %~dp0dist_dir\极方每周反馈程序-Web版-绿色文件夹版\
 echo.
 echo 生成的 ZIP 压缩分发包位于：
-echo   - %~dp0dist_zip\极方每周反馈程序-绿色文件夹版.zip
 echo   - %~dp0dist_zip\极方每周反馈程序-Web版-绿色文件夹版.zip
 echo.
-echo 分发建议：直接把 ZIP 压缩包发给老师，解压后双击内部 exe 运行即可！
+echo 分发建议：直接把 ZIP 压缩包发给老师，解压后双击内部 极方每周反馈程序-Web版.exe 运行即可！
 pause
 exit /b 0
 

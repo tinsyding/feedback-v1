@@ -1,17 +1,18 @@
 @echo off
 chcp 65001 >nul
-title 极方每周反馈程序 - 打包发布综合中心
+title 极方每周反馈程序(Web版) - 打包发布综合中心
 
 :menu
 cls
 echo ========================================================
-echo          极方每周反馈程序 - 打包发布综合中心
+echo        极方每周反馈程序 - Web版打包发布综合中心
+echo       (主线架构：以Web版为主，Tkinter桌面版已停更)
 echo ========================================================
 echo.
-echo   [1] 文件夹模式打包 (PyInstaller --onedir，防360拦截推荐)
-echo   [2] Nuitka 原生机器码编译 (原生 C++ 机器码，支持单文件与文件夹)
-echo   [3] 经典单文件打包 (PyInstaller --onefile，单个 exe 携带方便)
-echo   [4] 一键全量打包 (依次执行上述所有模式并生成对应 ZIP)
+echo   [1] Web版文件夹模式打包 (PyInstaller --onedir，防360拦截推荐)
+echo   [2] Web版 Nuitka 原生机器码编译 (原生 C++ 机器码，免疫误报)
+echo   [3] Web版单文件模式打包 (PyInstaller --onefile，单 exe 便携)
+echo   [4] 一键全量打包 (依次执行上述所有 Web 版模式并生成对应 ZIP)
 echo   [0] 退出
 echo.
 set /p choice=请输入选项编号 (0-4): 

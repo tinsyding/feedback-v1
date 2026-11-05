@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-极方每周反馈程序 - Nuitka 原生机器码编译构建脚本
+极方每周反馈程序 (Web版) - Nuitka 原生机器码编译构建脚本
+以 Web 版为主线，编译原生 C++ 机器码，彻底免疫杀软误报。
 支持：
-  1. 全量打包 (2 个单文件版 + 2 个文件夹版 + 对应 ZIP)
-  2. 仅单文件版 (Web 版 + 桌面版)
-  3. 仅文件夹版 (Web 版 + 桌面版 + ZIP)
+  1. 全量打包 (Web 单文件版 + Web 文件夹版 + 对应 ZIP)
+  2. 仅 Web 单文件版 (--onefile)
+  3. 仅 Web 文件夹版 (--standalone + ZIP)
 """
 
 import os
@@ -51,9 +52,9 @@ def get_paths():
 
 def ensure_dependencies(paths):
     print("=" * 60)
-    print("       极方每周反馈程序 - Nuitka 原生机器码编译中心")
+    print("       极方每周反馈程序(Web版) - Nuitka 原生机器码编译中心")
     print("=" * 60)
-    print(f"\n[1/4] 检查环境与依赖 (Python {sys.version.split()[0]})...")
+    print(f"\n[1/3] 检查环境与依赖 (Python {sys.version.split()[0]})...")
 
     subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "pip"], check=True)
     if os.path.isfile(paths["requirements"]):
@@ -64,11 +65,9 @@ def ensure_dependencies(paths):
 
 def build_standalone(paths):
     print("\n" + "=" * 60)
-    print("正在编译【绿色文件夹模式 (--standalone)】...")
+    print("正在编译【极方每周反馈程序 Web版】绿色文件夹模式 (--standalone)...")
     print("=" * 60)
 
-    # 1. WebUI 版
-    print("\n[文件夹 1/2] 正在编译【WebUI 浏览器版】(C++ 目录版)...")
     cmd_web = [
         sys.executable, "-m", "nuitka",
         "--standalone",
@@ -105,42 +104,6 @@ def build_standalone(paths):
     if os.path.exists(web_dist_orig):
         shutil.move(web_dist_orig, web_dist_target)
 
-    # 2. Tkinter 桌面版
-    print("\n[文件夹 2/2] 正在编译【Tkinter 桌面版】(C++ 目录版)...")
-    cmd_gui = [
-        sys.executable, "-m", "nuitka",
-        "--standalone",
-        "--assume-yes-for-downloads",
-        "--windows-console-mode=disable",
-        f"--windows-icon-from-ico={paths['favicon']}",
-        "--windows-company-name=JiFang",
-        "--windows-product-name=JiFangFeedbackSender",
-        f"--windows-file-version={APP_VERSION}",
-        f"--windows-product-version={APP_VERSION}",
-        "--enable-plugin=tk-inter",
-        "--include-package-data=sv_ttk",
-        "--include-package-data=rapidocr_onnxruntime",
-        "--include-package=sender_py",
-        f"--include-data-files={paths['favicon']}=favicon.ico",
-        f"--include-data-files={paths['example']}=example.png",
-        f"--output-dir={paths['dist_nuitka']}",
-        "--output-filename=JiFangFeedbackSender.exe",
-        paths["sender_py"],
-    ]
-    subprocess.run(cmd_gui, check=True, env=env)
-
-    gui_dist_orig = os.path.join(paths["dist_nuitka"], "sender.dist")
-    gui_exe_orig = os.path.join(gui_dist_orig, "JiFangFeedbackSender.exe")
-    gui_exe_target = os.path.join(gui_dist_orig, "极方每周反馈程序.exe")
-    if os.path.isfile(gui_exe_orig):
-        shutil.move(gui_exe_orig, gui_exe_target)
-
-    gui_dist_target = os.path.join(paths["dist_nuitka"], "极方每周反馈程序-Nuitka原生版")
-    if os.path.exists(gui_dist_target):
-        shutil.rmtree(gui_dist_target, ignore_errors=True)
-    if os.path.exists(gui_dist_orig):
-        shutil.move(gui_dist_orig, gui_dist_target)
-
     # 压缩为 ZIP
     os.makedirs(paths["dist_zip"], exist_ok=True)
     print("\n正在生成 ZIP 压缩分发包...")
@@ -150,26 +113,18 @@ def build_standalone(paths):
         paths["dist_nuitka_web"],
         "极方每周反馈程序-Web版-Nuitka原生版"
     )
-    shutil.make_archive(
-        os.path.join(paths["dist_zip"], "极方每周反馈程序-Nuitka原生版"),
-        "zip",
-        paths["dist_nuitka"],
-        "极方每周反馈程序-Nuitka原生版"
-    )
     print("ZIP 打包完成！")
 
 
 def build_onefile(paths):
     print("\n" + "=" * 60)
-    print("正在编译【单文件模式 (--onefile)】...")
+    print("正在编译【极方每周反馈程序 Web版】单文件模式 (--onefile)...")
     print("=" * 60)
 
     os.makedirs(paths["dist_nuitka_onefile"], exist_ok=True)
     env = os.environ.copy()
     env["PYTHONPATH"] = f"{paths['tools_dir']};{paths['cur_dir']};{env.get('PYTHONPATH', '')}"
 
-    # 1. WebUI 版
-    print("\n[单文件 1/2] 正在编译【WebUI 浏览器版】(单文件 exe)...")
     cmd_web = [
         sys.executable, "-m", "nuitka",
         "--onefile",
@@ -197,35 +152,6 @@ def build_onefile(paths):
     if os.path.isfile(web_exe_orig):
         shutil.copy2(web_exe_orig, web_exe_target)
 
-    # 2. Tkinter 桌面版
-    print("\n[单文件 2/2] 正在编译【Tkinter 桌面版】(单文件 exe)...")
-    cmd_gui = [
-        sys.executable, "-m", "nuitka",
-        "--onefile",
-        "--assume-yes-for-downloads",
-        "--windows-console-mode=disable",
-        f"--windows-icon-from-ico={paths['favicon']}",
-        "--windows-company-name=JiFang",
-        "--windows-product-name=JiFangFeedbackSender",
-        f"--windows-file-version={APP_VERSION}",
-        f"--windows-product-version={APP_VERSION}",
-        "--enable-plugin=tk-inter",
-        "--include-package-data=sv_ttk",
-        "--include-package-data=rapidocr_onnxruntime",
-        "--include-package=sender_py",
-        f"--include-data-files={paths['favicon']}=favicon.ico",
-        f"--include-data-files={paths['example']}=example.png",
-        f"--output-dir={paths['dist_nuitka_onefile']}",
-        "--output-filename=JiFangFeedbackSender.exe",
-        paths["sender_py"],
-    ]
-    subprocess.run(cmd_gui, check=True, env=env)
-
-    gui_exe_orig = os.path.join(paths["dist_nuitka_onefile"], "JiFangFeedbackSender.exe")
-    gui_exe_target = os.path.join(paths["dist_nuitka_onefile"], "极方每周反馈程序.exe")
-    if os.path.isfile(gui_exe_orig):
-        shutil.copy2(gui_exe_orig, gui_exe_target)
-
 
 def main():
     paths = get_paths()
@@ -240,12 +166,13 @@ def main():
         choice = "3"
     else:
         print("=" * 60)
-        print("       极方每周反馈程序 - Nuitka 原生机器码编译中心")
+        print("       极方每周反馈程序(Web版) - Nuitka 原生机器码编译中心")
+        print("          (注：Tkinter桌面版已停更，以Web版为主)")
         print("=" * 60)
         print("\n请选择编译模式：")
-        print("  [1] 全量打包：2 个单文件版本 + 2 个文件夹版本 (含 ZIP) 【推荐】")
-        print("  [2] 仅打包 2 个单文件版本 (--onefile 独立 exe)")
-        print("  [3] 仅打包 2 个文件夹版本 (--standalone 绿色目录 + ZIP)")
+        print("  [1] 全量打包：Web 单文件版 + Web 文件夹版 (含 ZIP) 【推荐】")
+        print("  [2] 仅打包 Web 单文件版本 (--onefile 独立 exe)")
+        print("  [3] 仅打包 Web 文件夹版本 (--standalone 绿色目录 + ZIP)")
         print("  [0] 退出")
         print("-" * 60)
         try:
@@ -279,16 +206,13 @@ def main():
     print("=" * 60 + "\n")
 
     if do_onefile:
-        print("【单文件独立 EXE 版本】（2 个）：")
-        print(f"  - {os.path.join(paths['dist_nuitka_onefile'], '极方每周反馈程序.exe')}")
+        print("【单文件独立 EXE 版本】：")
         print(f"  - {os.path.join(paths['dist_nuitka_onefile'], '极方每周反馈程序-Web版.exe')}\n")
 
     if do_standalone:
-        print("【绿色解压文件夹版本】（2 个）：")
-        print(f"  - {os.path.join(paths['dist_nuitka'], '极方每周反馈程序-Nuitka原生版')}")
+        print("【绿色解压文件夹版本】：")
         print(f"  - {os.path.join(paths['dist_nuitka_web'], '极方每周反馈程序-Web版-Nuitka原生版')}\n")
         print("【对应 ZIP 压缩包】：")
-        print(f"  - {os.path.join(paths['dist_zip'], '极方每周反馈程序-Nuitka原生版.zip')}")
         print(f"  - {os.path.join(paths['dist_zip'], '极方每周反馈程序-Web版-Nuitka原生版.zip')}\n")
 
     print("该版本为原生 C++ 编译机器码，彻底免疫杀软误报！")
