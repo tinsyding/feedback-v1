@@ -753,9 +753,15 @@
 
   <!-- 弹窗 3：运行日志 -->
   <div class="modal-overlay" id="logModal">
-    <div class="modal-card" style="max-width:920px;">
+    <div class="modal-card" style="max-width:960px;">
       <div class="modal-header">
-        <h3>运行日志</h3>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <h3 style="margin:0;">运行日志</h3>
+          <select id="logFileSelect" onchange="onLogFileSelectChanged()" style="font-size:12px; padding:4px 8px; border-radius:4px; border:1px solid #cbd5e1; background:#fff; outline:none; max-width:320px;" title="切换查看实时终端或本地历史日志文件">
+            <option value="">-- 实时运行终端 --</option>
+          </select>
+          <button class="btn btn-sm" onclick="refreshLogFiles()" title="刷新本地日志文件列表" style="padding:2px 8px; font-size:12px;">刷新</button>
+        </div>
         <div style="display:flex; align-items:center; gap:12px;">
           <label style="font-size:12px; color:#64748b; cursor:pointer;"><input type="checkbox" id="autoScrollLog" checked> 自动滚屏</label>
           <button class="modal-close" onclick="closeModal('logModal')">&times;</button>
@@ -765,8 +771,9 @@
         <div class="log-terminal" id="logTerminal"></div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-primary" onclick="downloadLogFile()">下载运行日志</button>
-        <button class="btn" onclick="clearLogConsole()">清空当前日志</button>
+        <button class="btn btn-primary" onclick="downloadLogFile()">下载当前日志</button>
+        <button class="btn" onclick="openLogsFolder()" title="在系统文件管理器中打开本地日志存档文件夹">打开日志文件夹</button>
+        <button class="btn" onclick="clearLogConsole()">清空当前显示</button>
         <button class="btn" onclick="closeModal('logModal')">关闭</button>
       </div>
     </div>
@@ -2486,9 +2493,72 @@
       }
     }
 
+    async function openLogsFolder() {
+      try {
+        const res = await fetch("/api/logs/open_folder", { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
+          showToast("已在系统文件管理器中打开日志文件夹");
+        } else {
+          showToast("无法打开目录: " + (data.error || "未知原因"));
+        }
+      } catch (err) {
+        showToast("打开本地目录失败: " + err.message);
+      }
+    }
+
+    async function refreshLogFiles() {
+      try {
+        const res = await fetch("/api/logs/files");
+        const data = await res.json();
+        const sel = document.getElementById("logFileSelect");
+        if (!sel) return;
+        const curVal = sel.value;
+        sel.innerHTML = '<option value="">-- 实时运行终端 --</option>';
+        (data.files || []).forEach(f => {
+          const opt = document.createElement("option");
+          opt.value = f.name;
+          const tag = f.is_error ? "⚠️ [错误/警告]" : "📄 [全量运行]";
+          opt.textContent = `${tag} ${f.name} (${f.size_kb} KB)`;
+          if (f.is_error) {
+            opt.style.color = "#dc2626";
+            opt.style.fontWeight = "bold";
+          }
+          sel.appendChild(opt);
+        });
+        sel.value = curVal;
+      } catch (e) {}
+    }
+
+    async function onLogFileSelectChanged() {
+      const sel = document.getElementById("logFileSelect");
+      const filename = sel ? sel.value : "";
+      const term = document.getElementById("logTerminal");
+      if (!filename) {
+        try {
+          const res = await fetch("/api/logs?since=0");
+          const data = await res.json();
+          term.innerText = (data.logs || []).join("\n");
+          term.scrollTop = term.scrollHeight;
+        } catch (e) {}
+        return;
+      }
+      try {
+        const res = await fetch(`/api/logs/view?file=${encodeURIComponent(filename)}&lines=2000`);
+        const data = await res.json();
+        term.innerText = data.content || "（文件内容为空）";
+        term.scrollTop = term.scrollHeight;
+      } catch (err) {
+        term.innerText = "读取日志失败: " + err.message;
+      }
+    }
+
     // 弹窗：日志终端
     async function openLogModal() {
       openModal("logModal");
+      await refreshLogFiles();
+      const sel = document.getElementById("logFileSelect");
+      if (sel) sel.value = "";
       try {
         const res = await fetch("/api/logs?since=0");
         const data = await res.json();
@@ -2499,6 +2569,11 @@
     }
 
     function appendLogLine(line) {
+      const sel = document.getElementById("logFileSelect");
+      if (sel && sel.value !== "") {
+        // 当前正在查看特定的历史日志文件，不干扰用户浏览
+        return;
+      }
       const term = document.getElementById("logTerminal");
       term.innerText += (term.innerText ? "\n" : "") + line;
       if (document.getElementById("autoScrollLog").checked) {

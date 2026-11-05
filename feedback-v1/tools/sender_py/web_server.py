@@ -199,6 +199,35 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({"logs": self.controller.get_logs(since)})
             return
 
+        if path == "/api/logs/files":
+            try:
+                try:
+                    from sender_py.file_logger import list_log_files
+                except ModuleNotFoundError:
+                    from file_logger import list_log_files
+                files = list_log_files()
+            except Exception:
+                files = []
+            self._send_json({"files": files})
+            return
+
+        if path == "/api/logs/view":
+            filename = query.get("file", [""])[0]
+            try:
+                lines = int(query.get("lines", [2000])[0])
+            except (ValueError, TypeError):
+                lines = 2000
+            try:
+                try:
+                    from sender_py.file_logger import read_log_file
+                except ModuleNotFoundError:
+                    from file_logger import read_log_file
+                content = read_log_file(filename, max_lines=lines)
+            except Exception as e:
+                content = f"无法读取日志：{e}"
+            self._send_json({"filename": filename, "content": content})
+            return
+
         if path == "/api/reply_notes":
             try:
                 from sender_py.reply_notes import actionable
@@ -478,6 +507,19 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
                     from debug_utils import get_debug_dir
                     from store import open_folder_or_file
                 ok = open_folder_or_file(get_debug_dir())
+                self._send_json({"success": ok})
+            except Exception as exc:
+                self._send_json({"success": False, "error": str(exc)})
+            return
+
+        # 9.95 打开本地日志文件夹
+        if path == "/api/logs/open_folder":
+            try:
+                try:
+                    from sender_py.file_logger import open_logs_dir
+                except ModuleNotFoundError:
+                    from file_logger import open_logs_dir
+                ok = open_logs_dir()
                 self._send_json({"success": ok})
             except Exception as exc:
                 self._send_json({"success": False, "error": str(exc)})

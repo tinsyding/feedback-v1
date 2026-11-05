@@ -269,6 +269,25 @@ class TestWebEdition(unittest.TestCase):
                                 d = json.loads(resp.read().decode("utf-8"))
                                 self.assertTrue(d.get("success"))
 
+                        # 测试 /api/logs/files 与 /api/logs/view
+                        with urllib.request.urlopen(f"{base_url}/api/logs/files") as resp:
+                            self.assertEqual(resp.status, 200)
+                            d = json.loads(resp.read().decode("utf-8"))
+                            self.assertIn("files", d)
+
+                        with urllib.request.urlopen(f"{base_url}/api/logs/view?file=test.log") as resp:
+                            self.assertEqual(resp.status, 200)
+                            d = json.loads(resp.read().decode("utf-8"))
+                            self.assertEqual(d.get("filename"), "test.log")
+
+                        # 测试 /api/logs/open_folder
+                        with unittest.mock.patch("sender_py.file_logger.open_logs_dir", return_value=True):
+                            req = urllib.request.Request(f"{base_url}/api/logs/open_folder", data=b"{}", headers={"Content-Type": "application/json"})
+                            with urllib.request.urlopen(req) as resp:
+                                self.assertEqual(resp.status, 200)
+                                d = json.loads(resp.read().decode("utf-8"))
+                                self.assertTrue(d.get("success"))
+
             finally:
                 server.shutdown()
                 server.server_close()

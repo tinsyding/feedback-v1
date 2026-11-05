@@ -2335,6 +2335,15 @@ class SenderApp:
         self.log_buffer.append(msg)
         if len(self.log_buffer) > 5000:
             del self.log_buffer[:1000]
+
+        try:
+            try:
+                from sender_py.file_logger import write_log
+            except ModuleNotFoundError:
+                from file_logger import write_log
+            write_log(msg)
+        except Exception:
+            pass
         if threading.current_thread() is not threading.main_thread():
             try:
                 self.root.after(0, self._do_emit, msg, _drain)

@@ -25,6 +25,7 @@ try:
     from sender_py.store import HistoryManager, SentFilesManager
     from sender_py.utils import parse_student_identifier
     from sender_py.window_utils import GlobalEscWatcher
+    from sender_py.file_logger import cleanup_old_logs, write_log, open_logs_dir, list_log_files, read_log_file
 except ModuleNotFoundError:
     from pacing import (
         AFTER_SEND_GAP, BATCH_BREAK_EVERY, BATCH_BREAK_GAP,
@@ -42,6 +43,14 @@ except ModuleNotFoundError:
         from window_utils import GlobalEscWatcher
     except Exception:
         GlobalEscWatcher = None
+    try:
+        from file_logger import cleanup_old_logs, write_log, open_logs_dir, list_log_files, read_log_file
+    except ModuleNotFoundError:
+        cleanup_old_logs = lambda max_days=30: None
+        write_log = lambda msg, level=None, exc_info=None: ("", "")
+        open_logs_dir = lambda: False
+        list_log_files = lambda: []
+        read_log_file = lambda filename, max_lines=2000: ""
 
 
 class WebController:
@@ -96,6 +105,11 @@ class WebController:
         self._benchmark_stop_requested = False
         self._benchmark_worker_thread = None
 
+        try:
+            cleanup_old_logs(max_days=30)
+        except Exception:
+            pass
+
     def _start_esc_watcher(self):
         self._stop_esc_watcher()
         if GlobalEscWatcher is None:
@@ -133,8 +147,8 @@ class WebController:
 
     # ================= 日志系统 =================
 
-    def emit(self, msg: str):
-        """记录带精确时间戳的日志，并实时推送到活跃的 SSE 队列。"""
+    def emit(self, msg: str, level: str = None, exc_info: object = None):
+        """记录带精确时间戳的日志，实时推送到活跃的 SSE 队列，并保存到本地日志文件。"""
         now = datetime.datetime.now().strftime("%H:%M:%S")
         line = f"[{now}] {msg}"
         with self._lock:
@@ -142,6 +156,12 @@ class WebController:
             if len(self.logs) > 5000:
                 self.logs = self.logs[-4000:]
             listeners = list(self._log_listeners)
+
+        try:
+            write_log(msg, level=level, exc_info=exc_info)
+        except Exception:
+            pass
+
         for q in listeners:
             try:
                 q.put_nowait({"type": "log", "line": line})
@@ -544,7 +564,7 @@ class WebController:
                             break
 
         except Exception as exc:
-            self.emit(f"发送任务异常中止：{exc}")
+            self.emit(f"发送任务异常中止：{exc}", level="ERROR", exc_info=exc)
             stopped = True
         finally:
             self._finish_run(stopped=stopped, selected_ids=selected_ids)
@@ -908,7 +928,7 @@ class WebController:
 
             self.emit(f"[多引擎评测] 评测任务全部完成！共测试 {len(records)} 人，发现分歧 {summary.get('discrepancy_count', 0)} 例。")
         except Exception as exc:
-            self.emit(f"✗ [多引擎评测] 运行异常: {exc}")
+            self.emit(f"✗ [多引擎评测] 运行异常: {exc}", level="ERROR", exc_info=exc)
         finally:
             with self._lock:
                 self.benchmark_state["running"] = False
