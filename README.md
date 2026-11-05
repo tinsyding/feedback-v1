@@ -47,7 +47,7 @@ feedback/
 ## GitHub 与自动化流水线
 
 - 生产部署：[`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml)，监听 `main` push，SSH 到服务器执行 `git pull`、权限修复与 10 项冒烟检查。
-- 客户端打包：[`.github/workflows/build-sender.yml`](./.github/workflows/build-sender.yml)，监听 `sender-*` tag，编译 Windows 客户端并发布 GitHub Release。
+- 客户端打包：[`.github/workflows/build-sender.yml`](./.github/workflows/build-sender.yml)，监听 `sender-*` tag，编译 Windows Web 版客户端并发布 GitHub Release（Tkinter 桌面版已停止更新，Releases 仅发布 Web 版）。
 
 详细配置与分支约定见 [GitHub 配置与 CI/CD 工具链说明](./docs/github.md)。
 
@@ -59,4 +59,4 @@ feedback/
   - `/www/wwwroot/JF/feedback`：指向旧 `feedback-v1` 的软链接（兼容旧脚本路径，非线上根目录）
 - 线上 Nginx 由宝塔面板管理（`feedback.wxjifang.cn.conf`），仓库内 `feedback-v1/nginx.conf` 为镜像存档；面板侧安全规则位于 `vhost/nginx/extension/feedback.wxjifang.cn/zz-feedback-security.conf`（拦截 `/config.json` 与 `*.local.php`），面板升级不会覆盖该目录。
 - 自动部署：`main` 分支 push 触发 `.github/workflows/deploy.yml`。首次配置需在仓库 Secrets 中填入 `DEPLOY_HOST`、`DEPLOY_PORT`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`（见 workflow 文件头注释）。
-- 桌面发送工具：源码位于 `feedback-v1/tools/sender_py/`，由 `.github/workflows/build-sender.yml` 打包，推送 `sender-*` tag 自动发布 Release。
+- 桌面发送工具：全面以 Web 版（`web_main.py`）为主线，Tkinter 版已停止更新。源码位于 `feedback-v1/tools/sender_py/`，由 `.github/workflows/build-sender.yml` 打包，推送 `sender-*` tag 自动发布 Web 版 Release。

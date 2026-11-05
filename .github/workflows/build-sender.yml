@@ -2,8 +2,8 @@ name: Build sender_py (Windows)
 
 # 推送 sender_py 相关改动到 main / feat/** 时：
 #   1) 在 Linux 跑纯函数单测与 compileall；
-#   2) 在 Windows 用 PyInstaller 打包单文件 exe（极方每周反馈程序.exe）并上传 Artifact。
-# 推送 sender-* tag 时，会额外把 exe 发布到同名 GitHub Release。
+#   2) 在 Windows 用 PyInstaller 打包 Web 文件夹版（极方每周反馈程序-Web版）并上传 Artifact。
+# 推送 sender-* tag 时，把 Web 版 exe 压缩包发布到 GitHub Release（仅放 Web 版，Tk 版已停止维护）。
 # 也可在 Actions 页面手动 Run workflow。
 # 产物未签名，仅供内测/验证；正式分发前请做代码签名与杀软回归。
 
@@ -121,7 +121,12 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}/feedback-v1/tools
         run: python -c "import sender_py.sender, sender_py.window_utils; print('imports OK')"
 
-      - name: UI smoke test
+      - name: Web edition smoke test
+        env:
+          PYTHONPATH: ${{ github.workspace }}/feedback-v1/tools
+        run: python -m sender_py.web_main --smoke-test
+
+      - name: Legacy Tkinter smoke test
         env:
           PYTHONPATH: ${{ github.workspace }}/feedback-v1/tools
         run: |
@@ -141,35 +146,18 @@ jobs:
           root.update_idletasks()
           root.update()
           root.destroy()
-          print("UI smoke OK")
+          print("Tkinter smoke OK (legacy)")
           PY
 
       # ---- 文件夹模式 (--onedir，解压即用，防360拦截首选，极速打包) ----
-      - name: Build Windows Folder Editions (--onedir)
+      # 架构决策：以后以 Web 版为主，Tk 版不再更新；Releases 仅发布 Web 版
+      - name: Build Windows Web Edition (--onedir)
         env:
           PYTHONPATH: ${{ github.workspace }}/feedback-v1/tools
         run: |
           mkdir -p dist dist_dir
-          # 1. Tkinter 文件夹版
-          python -m PyInstaller --noconfirm --clean --noupx --windowed --onedir \
-            --distpath dist_dir \
-            --name "JiFangFeedbackSender" \
-            --icon feedback-v1/favicon.ico \
-            --version-file feedback-v1/tools/sender_py/version_info.txt \
-            --add-data "feedback-v1/favicon.ico;." \
-            --add-data "feedback-v1/tools/example.png;." \
-            --paths feedback-v1/tools \
-            --paths feedback-v1/tools/sender_py \
-            --collect-submodules sender_py \
-            --hidden-import sender_py.sender_token \
-            --collect-all sv_ttk \
-            --collect-all rapidocr_onnxruntime \
-            feedback-v1/tools/sender_py/sender.py
-          mv dist_dir/JiFangFeedbackSender/JiFangFeedbackSender.exe "dist_dir/JiFangFeedbackSender/极方每周反馈程序.exe"
-          mv dist_dir/JiFangFeedbackSender "dist_dir/极方每周反馈程序-绿色文件夹版"
-          powershell -NoProfile -Command "Compress-Archive -Path 'dist_dir/极方每周反馈程序-绿色文件夹版' -DestinationPath 'dist/极方每周反馈程序-绿色文件夹版.zip' -Force"
 
-          # 2. Web 文件夹版
+          # 极方每周反馈程序 Web 文件夹版（主线版本）
           python -m PyInstaller --noconfirm --clean --noupx --windowed --onedir \
             --distpath dist_dir \
             --name "JiFangFeedbackWeb" \
@@ -190,19 +178,16 @@ jobs:
 
       - name: Verify build output
         run: |
-          test -f "dist/极方每周反馈程序-绿色文件夹版.zip"
           test -f "dist/极方每周反馈程序-Web版-绿色文件夹版.zip"
           ls -lh dist/
 
       - name: Frozen exe smoke test
         run: |
-          python -c "import subprocess, sys; p = subprocess.run(['dist_dir/极方每周反馈程序-绿色文件夹版/极方每周反馈程序.exe', '--smoke-test'], timeout=120); sys.exit(p.returncode)"
           python -c "import subprocess, sys; p = subprocess.run(['dist_dir/极方每周反馈程序-Web版-绿色文件夹版/极方每周反馈程序-Web版.exe', '--smoke-test'], timeout=120); sys.exit(p.returncode)"
 
       - name: Prepare ASCII release assets (tags only)
         if: startsWith(github.ref, 'refs/tags/sender-')
         run: |
-          cp "dist/极方每周反馈程序-绿色文件夹版.zip" "dist/JiFangFeedbackSender-onedir-windows-x64.zip"
           cp "dist/极方每周反馈程序-Web版-绿色文件夹版.zip" "dist/JiFangFeedbackWeb-onedir-windows-x64.zip"
 
       - name: Publish GitHub Release (tags only)
@@ -211,7 +196,6 @@ jobs:
         with:
           name: 极方每周反馈程序 ${{ github.ref_name }}
           files: |
-            dist/JiFangFeedbackSender-onedir-windows-x64.zip
             dist/JiFangFeedbackWeb-onedir-windows-x64.zip
           fail_on_unmatched_files: true
           body: ""
@@ -221,9 +205,8 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v5
         with:
-          name: JiFangFeedbackSender-windows-x64
+          name: JiFangFeedbackWeb-windows-x64
           path: |
-            dist/极方每周反馈程序-绿色文件夹版.zip
             dist/极方每周反馈程序-Web版-绿色文件夹版.zip
           retention-days: 7
           if-no-files-found: error

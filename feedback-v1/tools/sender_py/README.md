@@ -2,9 +2,12 @@
 
 基于 `mss` 整窗截图、相对比例裁剪与多级身份核验（本地 OCR + 云端视觉模型）的企业微信学情反馈批量发送工具。
 
-提供本地 Web 控制面板与桌面版（Tkinter + sv-ttk）两种界面；内置零发送评测模块、窗口出屏拉回保护，并通过 GitHub Actions 自动编译发布。
+> [!IMPORTANT]
+> **架构主线声明**：本项目已全面切换为**以 Web 版为主线**（入口：`web_main.py`）。传统的 Tkinter 原生桌面版（`sender.py`）已归档冻结且**不再进行功能更新**；GitHub Releases 仅发布 Web 文件夹版（`JiFangFeedbackWeb-onedir-windows-x64.zip`）。
 
-真实发送需在 Windows + 企业微信桌面版环境运行；95 项纯函数单元测试可在 Linux / Windows 下直接运行。
+提供本地 Web 控制面板（内置零发送评测模块、视窗诊断核验现场留存、窗口出屏拉回保护），并通过 GitHub Actions 自动编译发布。
+
+真实发送需在 Windows + 企业微信桌面版环境运行；全套纯函数单元测试可在 Linux / Windows 下直接运行。
 
 ## 1. 设计背景与机制
 
@@ -30,12 +33,12 @@
 
 ```text
 feedback-v1/tools/sender_py/
-├── web_main.py            # Web 版启动入口（本地 HTTP + 自动打开浏览器）
-├── web_companion.py       # Web 版桌面微型伴随控制台（提供桌面窗口常驻、误关一键恢复与退出联动）
+├── web_main.py            # Web 版主入口（推荐：本地 HTTP 服务 + 自动呼出浏览器）
+├── web_companion.py       # Web 版桌面微型伴随控制台（提供桌面常驻、防误关一键恢复与退出联动）
 ├── web_server.py          # 标准库 REST API 与 SSE 实时事件流服务
 ├── web_controller.py      # Web 端状态管理、文件去重与任务控制
-├── web_ui.html            # Web 控制面板前端页面（原生 JS/CSS）
-├── sender.py              # 桌面版主流程 + sv-ttk 界面 + CLI 入口
+├── web_ui.html            # Web 控制面板前端页面（原生 JS/CSS，主线界面）
+├── sender.py              # Tkinter 桌面版（已冻结不再更新，保留兼容参考）
 ├── local_ocr.py           # 本地双层 OCR（winocr + RapidOCR）
 ├── benchmark.py           # 多引擎识别基准评测模块（零发送、并发比对、CSV 导出）
 ├── version_info.txt       # Windows exe 属性页版本元数据
@@ -132,10 +135,10 @@ setx SENDER_API_TOKEN "你的自定义令牌"
 ```powershell
 cd feedback-v1\tools
 
-# 方式一：Web 控制面板
+# 方式一：Web 控制面板（推荐，主线版本）
 python sender_py\web_main.py
 
-# 方式二：桌面版
+# 方式二：Tkinter 桌面版（已冻结不再更新）
 python sender_py\sender.py --input 测试.json
 ```
 
@@ -290,7 +293,7 @@ Windows 真机回归建议覆盖：
 | 2. Nuitka 编译版 | ZIP 压缩包（原生二进制目录） | 转译为 C++ 编译为本地机器码 | 极低 | 杀软策略严格的机房或终端 | `build_nuitka.bat` |
 | 3. 单文件版 (`--onefile`) | 单个 `.exe` 文件 | 启动时自解压至 `AppData\Local\Temp` | 较高（易触发启发式拦截） | 临时单文件拷贝测试 | `build_onefile.bat` |
 
-本地可运行 `tools/sender_py/build_all.bat` 选择打包模式；推送 `sender-*` tag（如 `sender-v1.8.20`）或手动触发 GitHub Actions 工作流时会自动构建对应产物。
+本地可运行 `tools/sender_py/build_all.bat` 选择打包模式；推送 `sender-*` tag（如 `sender-v1.8.22`）或手动触发 GitHub Actions 工作流时会自动构建并发布 **Web 文件夹版**（`JiFangFeedbackWeb-onedir-windows-x64.zip`）。GitHub Releases 已停止收录 Tkinter 桌面版产物。
 
 ## 13. 已知限制
 

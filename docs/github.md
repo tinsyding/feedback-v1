@@ -32,8 +32,9 @@
   - `DEPLOY_SSH_KEY`：部署私钥
 
 ### 2. 客户端构建与发布：[`build-sender.yml`](../.github/workflows/build-sender.yml)
+- 架构主线：以 Web 版客户端（`web_main.py`）为主，Tkinter 桌面版已停止更新。
 - 触发条件：
-  - 推送 `sender-*` 格式的 tag（如 `git tag sender-v1.8.12 && git push origin sender-v1.8.12`）；
+  - 推送 `sender-*` 格式的 tag（如 `git tag sender-v1.8.22 && git push origin sender-v1.8.22`）；
   - 或在 GitHub Actions 页面手动触发（`workflow_dispatch`）。
 - 运行环境：Linux（单元测试）+ Windows（打包与冒烟验证）。
-- 发布流程：编译打包后通过 `softprops/action-gh-release@v2` 创建对应 tag 的 GitHub Release 并上传附件。
+- 发布流程：编译打包后通过 `softprops/action-gh-release@v2` 创建对应 tag 的 GitHub Release 并上传附件（**仅上传 Web 文件夹版压缩包** `JiFangFeedbackWeb-onedir-windows-x64.zip`）。
