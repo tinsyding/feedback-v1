@@ -45,7 +45,7 @@ python -m PyInstaller --noconfirm --clean --noupx --windowed --onefile ^
     "%WEB_MAIN_PY%"
 
 if exist "%~dp0dist\JiFangFeedbackWeb.exe" (
-    copy /y "%~dp0dist\JiFangFeedbackWeb.exe" "%~dp0dist\极方每周反馈程序-Web版.exe" >nul
+    move /y "%~dp0dist\JiFangFeedbackWeb.exe" "%~dp0dist\极方每周反馈程序-Web版.exe" >nul
 )
 
 echo.

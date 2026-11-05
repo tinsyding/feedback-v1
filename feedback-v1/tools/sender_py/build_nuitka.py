@@ -150,7 +150,9 @@ def build_onefile(paths):
     web_exe_orig = os.path.join(paths["dist_nuitka_onefile"], "JiFangFeedbackWeb.exe")
     web_exe_target = os.path.join(paths["dist_nuitka_onefile"], "极方每周反馈程序-Web版.exe")
     if os.path.isfile(web_exe_orig):
-        shutil.copy2(web_exe_orig, web_exe_target)
+        if os.path.exists(web_exe_target):
+            os.remove(web_exe_target)
+        shutil.move(web_exe_orig, web_exe_target)
 
 
 def main():
