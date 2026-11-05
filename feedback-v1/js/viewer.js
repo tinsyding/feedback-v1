@@ -354,6 +354,9 @@ function getCommentByScore(score, maxScore, avgScore, rank, totalStudents) {
 
 function getPreviewCommentByMetric(pvInfo, stats, mode) {
     const comments = getPreviewManualComments();
+    const isWenjuanxing = getPhysicsPreviewSource() === 'wenjuanxing';
+    const fallback = (text) => isWenjuanxing ? '' : text;
+
     const submittedCount = stats?.submittedCount || 0;
     const top20Cutoff = Math.ceil(submittedCount * 0.2);
     const bestValue = parseFloat(String(stats?.displayMax || '').replace('%', ''));
@@ -364,17 +367,17 @@ function getPreviewCommentByMetric(pvInfo, stats, mode) {
     if (mode === 'score_rank' || mode === 'score_only') metricValue = pvInfo.score;
     else if (mode === 'accuracy') metricValue = pvInfo.accuracy;
     else metricValue = pvInfo.correctCount;
-    if (metricValue === null || metricValue === undefined) return comments.belowAvg || '预习完成情况良好，请继续保持。';
+    if (metricValue === null || metricValue === undefined) return comments.belowAvg || fallback('预习完成情况良好，请继续保持。');
     if ((mode === 'score_rank' || mode === 'score_only' || mode === 'accuracy') && metricValue === 0) {
-        return comments.zero || '（零分评语未填写）';
+        return comments.zero || fallback('（零分评语未填写）');
     }
-    if (hasBest && metricValue === bestValue) return comments.full || '（满分评语未填写）';
-    if (pvInfo.rank && top20Cutoff > 0 && pvInfo.rank <= top20Cutoff) return comments.top20 || '（前20%评语未填写）';
+    if (hasBest && metricValue === bestValue) return comments.full || fallback('（满分评语未填写）');
+    if (pvInfo.rank && top20Cutoff > 0 && pvInfo.rank <= top20Cutoff) return comments.top20 || fallback('（前20%评语未填写）');
     if (hasAvg) {
-        if (metricValue >= avgValue) return comments.aboveAvg || '（均分以上评语未填写）';
-        return comments.belowAvg || '（均分以下评语未填写）';
+        if (metricValue >= avgValue) return comments.aboveAvg || fallback('（均分以上评语未填写）');
+        return comments.belowAvg || fallback('（均分以下评语未填写）');
     }
-    return comments.belowAvg || '预习完成情况良好，请继续保持。';
+    return comments.belowAvg || fallback('预习完成情况良好，请继续保持。');
 }
 
 function getFocusCommentSource() {
@@ -842,7 +845,10 @@ function buildPreviewFeedbackSection(pvInfo, pvLesson, stats, mode, rankFormat) 
                 text += `${pvInfo.comment.trim()}\n`;
             }
         } else if (previewSource === 'manual') {
-            text += `${getPreviewCommentByMetric(pvInfo, stats, mode)}\n`;
+            const manualComment = getPreviewCommentByMetric(pvInfo, stats, mode);
+            if (manualComment) {
+                text += `${manualComment}\n`;
+            }
         } else if (previewSource === 'merge') {
             // Merge mode: file comment first, then manual comment
             const parts = [];
@@ -875,7 +881,10 @@ function buildPreviewFeedbackSection(pvInfo, pvLesson, stats, mode, rankFormat) 
                 text += `${pvInfo.comment.trim()}\n`;
             }
         } else if (previewSource === 'manual') {
-            text += `${getPreviewCommentByMetric(pvInfo, stats, mode)}\n`;
+            const manualComment = getPreviewCommentByMetric(pvInfo, stats, mode);
+            if (manualComment) {
+                text += `${manualComment}\n`;
+            }
         } else if (previewSource === 'merge') {
             const parts = [];
             if (pvInfo.comment) {
@@ -907,7 +916,10 @@ function buildPreviewFeedbackSection(pvInfo, pvLesson, stats, mode, rankFormat) 
                 text += `${pvInfo.comment.trim()}\n`;
             }
         } else if (previewSource === 'manual') {
-            text += `${getPreviewCommentByMetric(pvInfo, stats, mode)}\n`;
+            const manualComment = getPreviewCommentByMetric(pvInfo, stats, mode);
+            if (manualComment) {
+                text += `${manualComment}\n`;
+            }
         } else if (previewSource === 'merge') {
             const parts = [];
             if (pvInfo.comment) {
@@ -951,7 +963,10 @@ function buildPreviewFeedbackSection(pvInfo, pvLesson, stats, mode, rankFormat) 
             text += `${pvInfo.comment.trim()}\n`;
         }
     } else if (previewSource === 'manual') {
-        text += `${getPreviewCommentByMetric(pvInfo, stats, mode)}\n`;
+        const manualComment = getPreviewCommentByMetric(pvInfo, stats, mode);
+        if (manualComment) {
+            text += `${manualComment}\n`;
+        }
     } else if (previewSource === 'merge') {
         const parts = [];
         if (pvInfo.comment) {

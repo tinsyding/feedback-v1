@@ -221,7 +221,42 @@ function goToStep(step) {
             if (pvFileBtn) pvFileBtn.style.display = '';
             if (pvMergeBtn) pvMergeBtn.style.display = '';
         }
+        updatePreviewCommentFieldsRequiredState();
     }
+}
+
+// ========== Preview Comment Field Required/Optional State ==========
+function updatePreviewCommentFieldsRequiredState() {
+    const isWenjuanxing = physicsPreviewSource === 'wenjuanxing';
+    const tipEl = document.getElementById('preview-wjx-comment-tip');
+    if (tipEl) {
+        tipEl.style.display = isWenjuanxing ? 'flex' : 'none';
+    }
+    const fields = [
+        { id: 'preview-comment-full', name: '满分评语' },
+        { id: 'preview-comment-top20', name: '前20%' },
+        { id: 'preview-comment-above-avg', name: '平均分以上' },
+        { id: 'preview-comment-below-avg', name: '平均分以下' },
+        { id: 'preview-comment-zero', name: '零分' }
+    ];
+    fields.forEach(f => {
+        const input = document.getElementById(f.id);
+        if (!input) return;
+        const fieldEl = input.closest('.comment-field');
+        const labelEl = fieldEl ? fieldEl.querySelector('label') : null;
+        if (labelEl) {
+            if (isWenjuanxing) {
+                labelEl.innerHTML = `${f.name} <span class="comment-optional-tag" style="color: var(--text-tertiary); font-weight: normal; font-size: 0.82rem;">（选填）</span>`;
+            } else {
+                labelEl.innerHTML = `${f.name} <span style="color:red">*</span>`;
+            }
+        }
+        if (isWenjuanxing) {
+            input.placeholder = `（选填）输入${f.name}学生的评语模板，未填则不附加分段评语...`;
+        } else {
+            input.placeholder = `输入${f.name}学生的评语模板...`;
+        }
+    });
 }
 
 window.goToStep = goToStep;
@@ -2449,6 +2484,7 @@ function selectFeedbackSubject(btn, subject) {
     }
 
     updateUploadCardsState(); // Update upload cards state (locks all cards if physics source is pending)
+    updatePreviewCommentFieldsRequiredState();
     checkNextButton();
 }
 
@@ -2465,6 +2501,7 @@ function selectPhysicsPreviewSource(btn, source) {
     
     // Re-enable all subsequent upload cards once physics source is selected
     updateUploadCardsState();
+    updatePreviewCommentFieldsRequiredState();
     
     // Update file accept types and clear files if source changed
     if (previousSource !== source) {
@@ -2711,7 +2748,9 @@ function generateFeedback() {
         goToStep(1);
         return;
     }
-    if (previewCommentSource === 'manual' && previewData) {
+    const isWenjuanxing = physicsPreviewSource === 'wenjuanxing';
+    // 问卷星预习已自动匹配错题与得分，5个阶段评语改为选填；其他学科或非问卷星维持必填
+    if (previewCommentSource === 'manual' && previewData && !isWenjuanxing) {
         if (!previewCommentFullInput.value.trim() ||
             !previewCommentTop20Input.value.trim() ||
             !previewCommentAboveAvgInput.value.trim() ||
@@ -2731,7 +2770,6 @@ function generateFeedback() {
             return;
         }
     }
-    const isWenjuanxing = physicsPreviewSource === 'wenjuanxing';
     const previewMetricMode = isWenjuanxing ? 'score_rank' : (document.querySelector('input[name="preview-metric-mode"]:checked')?.value || 'score_rank');
     const previewTotalEl = document.getElementById('preview-total-questions');
     const previewTotalQuestions = previewTotalEl ? parseInt(previewTotalEl.value) || 0 : 0;

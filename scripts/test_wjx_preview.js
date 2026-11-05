@@ -228,4 +228,49 @@ if (namesExtracted.includes('物理王老师(测试)') || wjxNamesExtracted.incl
 }
 console.log('PASS: upload.js correctly excluded teacher from roster and mismatch dialogs.');
 
+// 7. Test optional preview comments for Wenjuanxing in upload & viewer
+console.log('\n--- Testing optional preview comments for Wenjuanxing ---');
+// Test viewer.js getPreviewCommentByMetric with empty comments
+const getPreviewCommentMatch = viewerCode.match(/function getPreviewCommentByMetric[\s\S]*?\n\}/);
+const getPhysicsPreviewSourceMatch = viewerCode.match(/function getPhysicsPreviewSource[\s\S]*?\n\}/);
+const getPreviewManualCommentsMatch = viewerCode.match(/function getPreviewManualComments[\s\S]*?\n\}/);
+
+const viewerSandbox = {
+    sessionPayload: {
+        physicsPreviewSource: 'wenjuanxing',
+        previewManualComments: { full: '', top20: '', aboveAvg: '', belowAvg: '', zero: '' }
+    }
+};
+vm.createContext(viewerSandbox);
+vm.runInContext(getPreviewManualCommentsMatch[0], viewerSandbox);
+vm.runInContext(getPhysicsPreviewSourceMatch[0], viewerSandbox);
+vm.runInContext(getPreviewCommentMatch[0], viewerSandbox);
+
+const pvFullScoreInfo = { score: 100, rank: 1, isSubmitted: true };
+const pvStats = { submittedCount: 10, displayMax: '100', displayAvg: '80' };
+const commentWhenEmpty = viewerSandbox.getPreviewCommentByMetric(pvFullScoreInfo, pvStats, 'score_rank');
+if (commentWhenEmpty !== '') {
+    console.error(`FAIL: Expected empty string when Wenjuanxing comment is blank, got: "${commentWhenEmpty}"`);
+    process.exit(1);
+}
+
+// When teacher filled only "full" comment
+viewerSandbox.sessionPayload.previewManualComments.full = '预习表现极佳！';
+const commentWhenFilled = viewerSandbox.getPreviewCommentByMetric(pvFullScoreInfo, pvStats, 'score_rank');
+if (commentWhenFilled !== '预习表现极佳！') {
+    console.error(`FAIL: Expected "预习表现极佳！", got: "${commentWhenFilled}"`);
+    process.exit(1);
+}
+
+// Non-wenjuanxing should fallback to '(满分评语未填写)'
+viewerSandbox.sessionPayload.physicsPreviewSource = 'aiwenyun';
+viewerSandbox.sessionPayload.previewManualComments.full = '';
+const commentAiwenyunFallback = viewerSandbox.getPreviewCommentByMetric(pvFullScoreInfo, pvStats, 'score_rank');
+if (commentAiwenyunFallback !== '（满分评语未填写）') {
+    console.error(`FAIL: Non-wenjuanxing should keep '(满分评语未填写)' fallback, got: "${commentAiwenyunFallback}"`);
+    process.exit(1);
+}
+
+console.log('PASS: getPreviewCommentByMetric correctly handles optional comments for Wenjuanxing vs required for others.');
+
 console.log('\nALL VERIFICATION TESTS PASSED SUCCESSFULLY! ✅');

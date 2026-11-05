@@ -12,7 +12,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 Date.now()（会杀死全部缓存）
-            const v = '20261105-2';
+            const v = '20261105-3';
             document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/auth.css?v=${v}">`);
@@ -718,6 +718,14 @@
                                 </div>
                             </div>
                             <div class="source-content" id="preview-manual-comment-content" style="display: none;">
+                                <div class="info-callout" id="preview-wjx-comment-tip" style="display: none; margin-bottom: 12px;">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <circle cx="12" cy="12" r="10"></circle>
+                                        <line x1="12" y1="16" x2="12" y2="12"></line>
+                                        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                                    </svg>
+                                    <span>问卷星预习已自动匹配错题与得分。五个阶段评语为选填，未填写的分段将不附加模板评语。</span>
+                                </div>
                                 <div class="comment-fields">
                                     <div class="comment-field">
                                         <label>满分评语 <span style="color:red">*</span></label>
@@ -1532,7 +1540,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 Date.now()（会杀死全部缓存）
-            const v = '20261105-2';
+            const v = '20261105-3';
             document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
             document.write(`<script src="js/common.js?v=${v}"><\/script>`);
             document.write(`<script src="js/auth.js?v=${v}"><\/script>`);
