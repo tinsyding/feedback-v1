@@ -1969,6 +1969,7 @@ function showQbankOverwriteModal(options) {
 
 // ── 班层互通同步逻辑 (面向内部教师，支持全班层自由多选互通) ──
 window._selectedSyncTiers = new Set();
+window._isTierSyncAutoPrompt = false;
 
 window.toggleTierSyncItem = function(cardEl, tierName) {
     if (!cardEl || !tierName) return;
@@ -1986,7 +1987,11 @@ window.toggleTierSyncItem = function(cardEl, tierName) {
     const count = window._selectedSyncTiers.size;
     const confirmBtn = document.getElementById('dialog-confirm');
     if (confirmBtn) {
-        confirmBtn.textContent = count > 0 ? `立即同步 (${count})` : '立即同步';
+        if (window._isTierSyncAutoPrompt) {
+            confirmBtn.textContent = count > 0 ? `立即保存 (${count})` : '立即保存';
+        } else {
+            confirmBtn.textContent = count > 0 ? `立即同步 (${count})` : '立即同步';
+        }
     }
 };
 
@@ -2023,7 +2028,7 @@ function getTierSavedMeta(bankType, year, season, subject, grade, tier, week) {
     ) || null;
 }
 
-async function doBatchSyncTiers(data, targetTiers, currentTier) {
+async function doBatchSyncTiers(data, targetTiers, currentTier, isAutoPrompt = false) {
     if (!targetTiers || targetTiers.length === 0) return;
     const tierLabels = targetTiers.map(t => `${t}班`).join('、');
     showToast(`正在同步至 ${tierLabels}...`);
@@ -2058,7 +2063,7 @@ async function doBatchSyncTiers(data, targetTiers, currentTier) {
     }
     renderSavedDataList();
     if (errors.length === 0) {
-        showToast(`已成功同步至 ${tierLabels}！`, 'success');
+        showToast(isAutoPrompt ? `保存成功！已同步至 ${tierLabels}` : `已成功同步至 ${tierLabels}！`, 'success');
     } else if (successCount > 0) {
         showToast(`部分同步成功 (${successCount}/${targetTiers.length})，失败: ${errors.join('; ')}`, 'warn');
     } else {
@@ -2070,7 +2075,7 @@ async function doSyncTier(data, targetTier, targetSummary, currentTier) {
     return doBatchSyncTiers(data, [targetTier], currentTier);
 }
 
-async function handleTierSyncConfirm(data, targetTiers) {
+async function handleTierSyncConfirm(data, targetTiers, isAutoPrompt = false) {
     if (!targetTiers || targetTiers.length === 0) return;
     showToast('正在检测目标班层配置...');
     const diffTiers = [];
@@ -2134,12 +2139,17 @@ async function handleTierSyncConfirm(data, targetTiers) {
             confirmText: `确认覆盖并同步 (${targetTiers.length}个班层)`,
             cancelText: '取消',
             danger: true,
-            onConfirm: () => doBatchSyncTiers(data, targetTiers, data.tier)
+            onConfirm: () => doBatchSyncTiers(data, targetTiers, data.tier, isAutoPrompt),
+            onCancel: () => {
+                if (isAutoPrompt) {
+                    showToast('保存成功（已取消同步至其他班层）', 'info');
+                }
+            }
         });
         return;
     }
 
-    await doBatchSyncTiers(data, targetTiers, data.tier);
+    await doBatchSyncTiers(data, targetTiers, data.tier, isAutoPrompt);
 }
 
 function openTierSyncModal(sourceData = null, isAutoPrompt = false) {
@@ -2191,12 +2201,15 @@ function openTierSyncModal(sourceData = null, isAutoPrompt = false) {
 
     const candidateTiers = getCandidateTiers(data.tier);
     if (candidateTiers.length === 0) {
-        showToast('未找到其他可选的目标班层', 'warn');
+        if (!isAutoPrompt) {
+            showToast('未找到其他可选的目标班层', 'warn');
+        }
         return;
     }
 
     // 默认不勾选任何班层
     window._selectedSyncTiers = new Set();
+    window._isTierSyncAutoPrompt = Boolean(isAutoPrompt);
 
     const currentSummary = [data.grade, data.subject, `${data.tier}班`, getTopicLabel(data.week)].filter(Boolean).join(' · ');
 
@@ -2235,15 +2248,24 @@ function openTierSyncModal(sourceData = null, isAutoPrompt = false) {
         title: '班层题目互通',
         body: bodyHtml,
         maxWidth: '520px',
-        confirmText: '立即同步',
-        cancelText: isAutoPrompt ? '暂不同步' : '取消',
+        confirmText: isAutoPrompt ? '立即保存' : '立即同步',
+        cancelText: isAutoPrompt ? '不同步直接保存' : '取消',
+        onCancel: () => {
+            if (isAutoPrompt) {
+                showToast('保存成功', 'success');
+            }
+        },
         onConfirm: async () => {
             const targetTiers = Array.from(window._selectedSyncTiers || []);
             if (targetTiers.length === 0) {
-                showToast('未选择任何目标班层，已取消同步', 'info');
+                if (isAutoPrompt) {
+                    showToast('保存成功', 'success');
+                } else {
+                    showToast('未选择任何目标班层，已取消同步', 'info');
+                }
                 return;
             }
-            await handleTierSyncConfirm(data, targetTiers);
+            await handleTierSyncConfirm(data, targetTiers, isAutoPrompt);
         }
     });
 }
@@ -2257,17 +2279,21 @@ async function executeSaveQuestions(data) {
             renderQuestionList();
             updateStatus();
             renderSavedDataList();
+
+            const candidateTiers = getCandidateTiers(data.tier);
+            const hasCandidates = candidateTiers && candidateTiers.length > 0;
+
             if (data.bankType === 'preview') {
                 const filledCount = currentQuestions.filter(q => q.topic && q.topic.trim()).length;
                 if (filledCount === 0) {
-                    showToast(`已保存 ${currentQuestions.length} 道预习题目（未填知识点，错题本将按题号呈现）`);
+                    showToast(`已保存 ${currentQuestions.length} 道预习题目（未填知识点，错题本将按题号呈现）`, 'success');
                 } else if (filledCount < currentQuestions.length) {
-                    showToast(`已保存 ${currentQuestions.length} 道预习题目（${filledCount} 题已填知识点）`);
+                    showToast(`已保存 ${currentQuestions.length} 道预习题目（${filledCount} 题已填知识点）`, 'success');
                 } else {
-                    showToast(`已保存 ${currentQuestions.length} 道预习题目`);
+                    showToast(`已保存 ${currentQuestions.length} 道预习题目`, 'success');
                 }
             } else {
-                showToast(`已保存 ${currentQuestions.length} 道题目`);
+                showToast(`已保存 ${currentQuestions.length} 道题目`, 'success');
             }
             
             if (window.Logger) {
@@ -2283,16 +2309,18 @@ async function executeSaveQuestions(data) {
                 });
             }
 
-            // 保存完成后弹出班层互通提示（默认不勾选，精简直达）
-            setTimeout(() => {
-                openTierSyncModal(data, true);
-            }, 300);
+            // 保存完成后若有其他候选班层，弹出班层互通提示（默认不勾选，精简直达）
+            if (hasCandidates) {
+                setTimeout(() => {
+                    openTierSyncModal(data, true);
+                }, 300);
+            }
         } else {
-            showToast('保存失败: ' + (result.error || '未知错误'));
+            showToast('保存失败: ' + (result.error || '未知错误'), 'error');
         }
     } catch (e) {
         console.error('保存失败:', e);
-        showToast('保存失败，请检查网络');
+        showToast('保存失败，请检查网络', 'error');
     }
 }
 
