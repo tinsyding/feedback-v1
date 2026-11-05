@@ -821,15 +821,29 @@ async function handlePreviewFiles(files, isAppend = false) {
                 const sheet = workbook.Sheets[sheetName];
                 const rawJsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
                 if (rawJsonData.length > 0) {
-                    // 数据源瘦身：问卷星表格通常包含大量题目长文本描述与答题选项，动辄数兆。
-                    // 仅保留后续业务需要的“您的姓名”和“总分”列（以及序号列），体积降低 95%+，彻底避免配额溢出。
+                    // 数据源瘦身：问卷星表格保留必要列（序号、姓名、总分及各题目作答列），剔除无用的提交时间、IP、来源等臃肿列。
                     const header = rawJsonData[0].map(h => String(h).trim());
-                    const nameIdx = header.findIndex(h => h.includes('您的姓名'));
+                    const nameIdx = header.findIndex(h => h.includes('您的姓名') || (h.includes('姓名') && !h.includes('时间')));
                     const scoreIdx = header.findIndex(h => h === '总分' || h.includes('总分'));
                     let jsonData = rawJsonData;
                     if (nameIdx >= 0 && scoreIdx >= 0) {
-                        const colIndices = [0, nameIdx, scoreIdx].filter((v, i, a) => a.indexOf(v) === i);
+                        const qCols = typeof extractWenjuanxingQuestionColumns === 'function'
+                            ? extractWenjuanxingQuestionColumns(header)
+                            : [];
+                        const qColIndices = qCols.map(c => c.colIdx);
+                        const colIndices = [0, nameIdx, scoreIdx, ...qColIndices].filter((v, i, a) => a.indexOf(v) === i);
                         jsonData = rawJsonData.map(row => colIndices.map(idx => row[idx] ?? ''));
+
+                        if (typeof getWenjuanxingBenchmark === 'function') {
+                            const bm = getWenjuanxingBenchmark(jsonData);
+                            if (bm && bm.questionCount > 0) {
+                                if (bm.isR1Benchmark) {
+                                    showToast(`问卷星已识别 ${bm.questionCount} 道题，首行（${bm.benchmarkName}）为满分标定卷已设为标准答案`, 'success');
+                                } else {
+                                    showToast(`问卷星已识别 ${bm.questionCount} 道题，已根据最高分（${bm.maxScore}分）答卷提取标准答案`, 'info');
+                                }
+                            }
+                        }
                     }
                     // Convert to CSV text for payload persistence
                     const csvText = jsonData.map(row => row.map(cell => {
@@ -1838,7 +1852,14 @@ function extractStudentNamesFromData(data) {
     const header = data[0];
     const nameIdx = header.findIndex(h => String(h).includes('姓名'));
     if (nameIdx < 0) return [];
-    return data.slice(1)
+    let rows = data.slice(1);
+    if (data === previewData && physicsPreviewSource === 'wenjuanxing' && typeof getWenjuanxingBenchmark === 'function') {
+        const bm = getWenjuanxingBenchmark(previewData);
+        if (bm && bm.isR1Benchmark) {
+            rows = rows.slice(1);
+        }
+    }
+    return rows
         .map(r => {
             const fullName = String(r[nameIdx] || '').trim();
             const match = fullName.match(/\d+(.+)/);
@@ -2453,7 +2474,7 @@ function selectPhysicsPreviewSource(btn, source) {
         if (source === 'wenjuanxing') {
             if (previewInput) previewInput.accept = '.xlsx,.xls';
             if (previewAppendInput) previewAppendInput.accept = '.xlsx,.xls';
-            if (dropSecondary) dropSecondary.textContent = '问卷星导出的 XLSX 文件';
+            if (dropSecondary) dropSecondary.textContent = '问卷星导出的 XLSX 文件（首行为满分参考卷）';
         } else {
             if (previewInput) previewInput.accept = '.csv';
             if (previewAppendInput) previewAppendInput.accept = '.csv';
@@ -2491,9 +2512,17 @@ function getHomeworkStudentNames() {
 function getWenjuanxingNames() {
     if (!previewData || previewData.length < 2) return [];
     const header = previewData[0].map(h => String(h).trim());
-    const nameIdx = header.findIndex(h => h.includes('您的姓名'));
+    const nameIdx = header.findIndex(h => h.includes('您的姓名') || (h.includes('姓名') && !h.includes('时间')));
     if (nameIdx < 0) return [];
-    return previewData.slice(1)
+    let rows = previewData.slice(1);
+    // 若首行为满分标定卷，排除首行（老师本人），避免其出现在姓名修改弹窗中
+    if (physicsPreviewSource === 'wenjuanxing' && typeof getWenjuanxingBenchmark === 'function') {
+        const bm = getWenjuanxingBenchmark(previewData);
+        if (bm && bm.isR1Benchmark) {
+            rows = rows.slice(1);
+        }
+    }
+    return rows
         .map(r => String(r[nameIdx] || '').trim())
         .filter(n => n);
 }
@@ -2620,6 +2649,11 @@ function extractLessonNumber(fileName, type) {
         const arabicMatch = fileName.match(/专题(\d+)/);
         if (arabicMatch) {
             return parseInt(arabicMatch[1]);
+        }
+        // Match physics patterns like 9P-8, 9PS06, 9P08, 8P-3, 26PS06
+        const physicsMatch = fileName.match(/(?:[789]\s*P\s*S?|PS)[-_]?0*(\d+)/i);
+        if (physicsMatch) {
+            return parseInt(physicsMatch[1]);
         }
         // Fallback: 第X次作业 pattern
         const lessonChinese = fileName.match(/第([一二三四五六七八九十百]+)[次周]/);

@@ -297,6 +297,8 @@ function extractLessonNumber(fileName, type) {
         if (cm) return chineseToNumber(cm[1]);
         const am = fileName.match(/专题(\d+)/);
         if (am) return parseInt(am[1]);
+        const pm = fileName.match(/(?:[789]\s*P\s*S?|PS)[-_]?0*(\d+)/i);
+        if (pm) return parseInt(pm[1]);
         const lc = fileName.match(/第([一二三四五六七八九十百]+)[次周]/);
         if (lc) return chineseToNumber(lc[1]);
         const la = fileName.match(/第(\d+)[次周]/);
@@ -604,13 +606,59 @@ function buildPreviewMetrics(data, mode, totalQuestions = 0) {
 
 // ========== Wenjuanxing (问卷星) Preview Metrics ==========
 function buildWenjuanxingPreviewMetrics(data, hwStudentNames) {
+    if (typeof parseWenjuanxingBenchmarkAndErrors === 'function') {
+        const parsed = parseWenjuanxingBenchmarkAndErrors(data, hwStudentNames);
+        const { rows, map, benchmark } = parsed;
+        const scoreEntries = [];
+        
+        Object.entries(map).forEach(([name, info]) => {
+            if (info.score !== null) {
+                scoreEntries.push({ name, score: info.score });
+            }
+        });
+        
+        const stats = {
+            mode: 'wenjuanxing',
+            submittedCount: Object.keys(map).length,
+            displayMax: '-',
+            displayAvg: '-',
+            displayExtra: `${Object.keys(map).length}`,
+            maxLabel: '最高分',
+            avgLabel: '平均分',
+            extraLabel: '已提交',
+            rankEnabled: true,
+            rankEntries: [],
+            rankTitle: '预习作业得分排名',
+            rankColLabel: '得分',
+            benchmark: benchmark || null
+        };
+        
+        if (scoreEntries.length > 0) {
+            const max = Math.max(...scoreEntries.map(s => s.score));
+            const avg = scoreEntries.reduce((a, b) => a + b.score, 0) / scoreEntries.length;
+            stats.displayMax = formatMetricValue(max);
+            stats.displayAvg = formatMetricValue(avg);
+            const sorted = [...scoreEntries].sort((a, b) => b.score - a.score);
+            let curRank = 1;
+            let prevScore = null;
+            sorted.forEach((item, idx) => {
+                if (prevScore !== null && item.score < prevScore) curRank = idx + 1;
+                if (map[item.name]) map[item.name].rank = curRank;
+                prevScore = item.score;
+            });
+            stats.rankEntries = sorted;
+        }
+        
+        return { rows, map, stats };
+    }
+
     const header = data[0].map(h => String(h).trim());
     // Find the "您的姓名：" column and "总分" column
-    const nameIdx = header.findIndex(h => h.includes('您的姓名'));
+    const nameIdx = header.findIndex(h => h.includes('您的姓名') || (h.includes('姓名') && !h.includes('时间')));
     const scoreIdx = header.findIndex(h => h === '总分' || h.includes('总分'));
     
     if (nameIdx < 0 || scoreIdx < 0) {
-        console.error('问卷星数据缺少必要列。需要"您的姓名："和"总分"列。找到的列：', header);
+        console.error('问卷星数据缺少必要列。需要姓名和总分列。找到的列：', header);
         return { rows: data.slice(1), map: {}, stats: getEmptyWenjuanxingStats() };
     }
     
@@ -618,15 +666,10 @@ function buildWenjuanxingPreviewMetrics(data, hwStudentNames) {
     const map = {};
     const scoreEntries = [];
     
-    // Build a reverse lookup: wenjuanxing raw name -> matched homework student name
-    // hwStudentNames is an array of student names extracted from homework data (without student IDs)
-    
     rows.forEach(r => {
         const rawName = String(r[nameIdx]).trim();
         const score = parseScoreValue(r[scoreIdx]);
         
-        // Match the raw name to a homework student name
-        // The wenjuanxing name has no student ID, so we need to find the matching name
         let matchedName = rawName;
         if (hwStudentNames && hwStudentNames.length > 0) {
             const found = hwStudentNames.find(n => n === rawName);
@@ -640,7 +683,9 @@ function buildWenjuanxingPreviewMetrics(data, hwStudentNames) {
             isSubmitted: true,
             score: score,
             rank: null,
-            comment: '' // wenjuanxing has no comments
+            errors: [],
+            errorCount: 0,
+            comment: ''
         };
         
         if (score !== null) {
@@ -1319,13 +1364,16 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                 const previewParsedForPlus = previewCommentForPlus
                     ? parseErrorQuestionsFromComment(previewCommentForPlus)
                     : null;
+                const effectivePreviewErrors = (isWenjuanxing && Array.isArray(pvInfo?.errors))
+                    ? pvInfo.errors
+                    : (previewParsedForPlus?.errorNums || []);
                 batchPayload.students.push({
                     id: studentId,
                     name: studentName,
                     fullName: fullName,
                     key: studentKey,
                     errors: commentForPlus.errorNums,
-                    previewErrors: previewParsedForPlus?.errorNums || [],
+                    previewErrors: effectivePreviewErrors,
                     previewComment: previewCommentForPlus,
                     previewWeek: sessionPayload.plusData.previewWeek || pvLesson || sessionPayload.plusData.week,
                     homeworkScore: homeworkScore,
@@ -1438,7 +1486,14 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
         let previewTopics = [];
         if (previewData && pvLesson) {
             const pvInfo = previewMap[studentName];
-            previewParsed = pvInfo?.comment ? parseErrorQuestionsFromComment(String(pvInfo.comment)) : null;
+            if (isWenjuanxing && Array.isArray(pvInfo?.errors)) {
+                previewParsed = {
+                    errorNums: pvInfo.errors,
+                    cleanComment: pvInfo?.comment || ''
+                };
+            } else {
+                previewParsed = pvInfo?.comment ? parseErrorQuestionsFromComment(String(pvInfo.comment)) : null;
+            }
             const previewDisplayInfo = (sessionPayload.plusData?.enabled && previewParsed && previewParsed.errorNums.length > 0)
                 ? { ...pvInfo, comment: previewParsed.cleanComment }
                 : pvInfo;
@@ -2138,7 +2193,9 @@ async function doGeneratePreviewOnlyFeedback() {
                 : studentName;
             const pvInfo = previewMap[studentName];
             const previewComment = pvInfo?.comment ? String(pvInfo.comment) : '';
-            const parsed = previewComment ? parseErrorQuestionsFromComment(previewComment) : null;
+            const parsed = (isWenjuanxing && Array.isArray(pvInfo?.errors))
+                ? { errorNums: pvInfo.errors, cleanComment: previewComment }
+                : (previewComment ? parseErrorQuestionsFromComment(previewComment) : null);
             batchPayload.students.push({
                 id: studentId,
                 name: studentName,
@@ -2216,7 +2273,9 @@ async function doGeneratePreviewOnlyFeedback() {
         if (summaryPart) feedback += summaryPart;
         feedback += `以下是${getStudentDisplayName(studentName)}${feedbackSubject}作业情况反馈：\n`;
 
-        const previewParsed = pvInfo?.comment ? parseErrorQuestionsFromComment(String(pvInfo.comment)) : null;
+        const previewParsed = (isWenjuanxing && Array.isArray(pvInfo?.errors))
+            ? { errorNums: pvInfo.errors, cleanComment: pvInfo?.comment || '' }
+            : (pvInfo?.comment ? parseErrorQuestionsFromComment(String(pvInfo.comment)) : null);
         const previewDisplayInfo = (sessionPayload.plusData?.enabled && previewParsed && previewParsed.errorNums.length > 0)
             ? { ...pvInfo, comment: previewParsed.cleanComment }
             : pvInfo;

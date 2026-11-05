@@ -1276,3 +1276,186 @@ window.checkNetworkReachability = checkNetworkReachability;
 window.requestWithTimeout = requestWithTimeout;
 window.withButtonLoading = withButtonLoading;
 
+// ========== 问卷星 (Wenjuanxing) 预习作答与错题匹配核心工具库 ==========
+
+/**
+ * 问卷星作答选项归一化：
+ * 1. 数字代码转字母：'1'->'A', '2'->'B', '3'->'C', '4'->'D', '5'->'E', '6'->'F'
+ * 2. 字母选项标准化：去除首尾空格、统一转大写
+ * 3. 多选分隔符支持：支持问卷星特有的 '┋' 分隔符以及逗号、顿号、分号，排序去重后以 '┋' 重新拼接（如 '2┋1' -> 'A┋B'）
+ */
+function normalizeWenjuanxingAnswer(val) {
+    if (val === null || val === undefined) return '';
+    let str = String(val).trim().toUpperCase();
+    if (!str) return '';
+    const numToLetter = { '1': 'A', '2': 'B', '3': 'C', '4': 'D', '5': 'E', '6': 'F' };
+    if (numToLetter[str]) return numToLetter[str];
+    if (str.includes('┋') || str.includes(',') || str.includes('、') || str.includes(';') || str.includes('；')) {
+        const parts = str.split(/[┋,、;；]/).map(p => p.trim()).filter(Boolean);
+        const mapped = parts.map(p => numToLetter[p] || p);
+        return [...new Set(mapped)].sort().join('┋');
+    }
+    return str;
+}
+
+/**
+ * 从问卷星表格表头中精准提取所有题目列
+ * 排除非题目列（如姓名、总分、学号、提交时间、IP、来源、序号、班级等）
+ * 支持形如：'第1题'、'第 1 题'、'第1题：...'、'1、...'、'1. ...'、'1．...' 等格式
+ */
+function extractWenjuanxingQuestionColumns(header) {
+    if (!Array.isArray(header)) return [];
+    const qCols = [];
+    header.forEach((h, idx) => {
+        const text = String(h || '').trim();
+        if (!text) return;
+        // 排除常见元数据列
+        if (/姓名|总分|得分|学号|时间|IP|来源|序号|用户ID|班级/i.test(text)) return;
+        let qNum = null;
+        const m1 = text.match(/第\s*(\d+)\s*题/);
+        const m2 = text.match(/^(\d+)[\.、．\s]/);
+        if (m1) qNum = parseInt(m1[1]);
+        else if (m2) qNum = parseInt(m2[1]);
+        if (qNum !== null && !isNaN(qNum) && qNum > 0) {
+            qCols.push({ colIdx: idx, qNum, headerText: text });
+        }
+    });
+    qCols.sort((a, b) => a.qNum - b.qNum);
+    return qCols;
+}
+
+/**
+ * 获取问卷星数据的标定行与标准答案
+ * 标定规则：
+ * 1. 优先校验首行（Row 1）：若首行得分为全表最高分（通常为老师自己答的满分测试卷），认定为标定卷；
+ * 2. 容错兜底：若首行非最高分，取全表中首个达到最高分的答卷作为标准答案。
+ */
+function getWenjuanxingBenchmark(data) {
+    if (!data || data.length < 2) return null;
+    const header = data[0].map(h => String(h || '').trim());
+    const nameIdx = header.findIndex(h => h.includes('您的姓名') || (h.includes('姓名') && !h.includes('时间')));
+    const scoreIdx = header.findIndex(h => h === '总分' || h.includes('总分'));
+    if (nameIdx < 0 || scoreIdx < 0) return null;
+
+    const qCols = extractWenjuanxingQuestionColumns(header);
+    const rawRows = data.slice(1).filter(r => r[nameIdx] && String(r[nameIdx]).trim());
+    if (rawRows.length === 0) return null;
+
+    let maxScore = -Infinity;
+    rawRows.forEach(r => {
+        const s = parseScoreValue(r[scoreIdx]);
+        if (s !== null && !isNaN(s) && s > maxScore) maxScore = s;
+    });
+    if (maxScore === -Infinity || maxScore <= 0) maxScore = 100;
+
+    const r1 = rawRows[0];
+    const r1Score = parseScoreValue(r1[scoreIdx]);
+    let benchmarkRow = null;
+    let isR1Benchmark = false;
+    let benchmarkRowIdxInRaw = 0;
+
+    if (r1Score !== null && r1Score === maxScore) {
+        benchmarkRow = r1;
+        isR1Benchmark = true;
+        benchmarkRowIdxInRaw = 0;
+    } else {
+        const bestIdx = rawRows.findIndex(r => parseScoreValue(r[scoreIdx]) === maxScore);
+        benchmarkRowIdxInRaw = bestIdx >= 0 ? bestIdx : 0;
+        benchmarkRow = rawRows[benchmarkRowIdxInRaw];
+        isR1Benchmark = (benchmarkRowIdxInRaw === 0);
+    }
+
+    const standardAnswers = {};
+    if (benchmarkRow && qCols.length > 0) {
+        qCols.forEach(qc => {
+            standardAnswers[qc.qNum] = normalizeWenjuanxingAnswer(benchmarkRow[qc.colIdx]);
+        });
+    }
+
+    return {
+        isR1Benchmark,
+        benchmarkName: benchmarkRow ? String(benchmarkRow[nameIdx] || '').trim() : '',
+        benchmarkScore: benchmarkRow ? benchmarkRow[scoreIdx] : null,
+        benchmarkRowIdx: benchmarkRowIdxInRaw + 1,
+        maxScore,
+        questionCount: qCols.length,
+        questionNums: qCols.map(q => q.qNum),
+        standardAnswers
+    };
+}
+
+/**
+ * 解析问卷星表格数据，输出学生错题匹配映射与统计
+ */
+function parseWenjuanxingBenchmarkAndErrors(data, hwStudentNames = []) {
+    if (!data || data.length < 2) {
+        return { rows: [], map: {}, benchmark: null, qCols: [] };
+    }
+    const header = data[0].map(h => String(h || '').trim());
+    const nameIdx = header.findIndex(h => h.includes('您的姓名') || (h.includes('姓名') && !h.includes('时间')));
+    const scoreIdx = header.findIndex(h => h === '总分' || h.includes('总分'));
+    if (nameIdx < 0 || scoreIdx < 0) {
+        return { rows: data.slice(1), map: {}, benchmark: null, qCols: [] };
+    }
+
+    const qCols = extractWenjuanxingQuestionColumns(header);
+    const rawRows = data.slice(1).filter(r => r[nameIdx] && String(r[nameIdx]).trim());
+    const benchmark = getWenjuanxingBenchmark(data);
+
+    let studentRows = rawRows;
+    if (benchmark && benchmark.isR1Benchmark) {
+        studentRows = rawRows.slice(1);
+    }
+
+    const standardAnswers = benchmark?.standardAnswers || {};
+    const map = {};
+
+    studentRows.forEach(r => {
+        const rawName = String(r[nameIdx]).trim();
+        const score = parseScoreValue(r[scoreIdx]);
+
+        const errors = [];
+        if (qCols.length > 0 && benchmark) {
+            qCols.forEach(qc => {
+                const stdAns = standardAnswers[qc.qNum];
+                const studentAns = normalizeWenjuanxingAnswer(r[qc.colIdx]);
+                if (stdAns && studentAns !== stdAns) {
+                    errors.push(qc.qNum);
+                }
+            });
+        }
+        errors.sort((a, b) => a - b);
+
+        let matchedName = rawName;
+        if (hwStudentNames && hwStudentNames.length > 0) {
+            const found = hwStudentNames.find(n => n === rawName);
+            if (found) {
+                matchedName = found;
+            }
+        }
+
+        map[matchedName] = {
+            fullName: rawName,
+            isSubmitted: true,
+            score: score,
+            rank: null,
+            errors: errors,
+            errorCount: errors.length,
+            comment: ''
+        };
+    });
+
+    return {
+        rows: studentRows,
+        map,
+        benchmark,
+        qCols
+    };
+}
+
+window.normalizeWenjuanxingAnswer = normalizeWenjuanxingAnswer;
+window.extractWenjuanxingQuestionColumns = extractWenjuanxingQuestionColumns;
+window.getWenjuanxingBenchmark = getWenjuanxingBenchmark;
+window.parseWenjuanxingBenchmarkAndErrors = parseWenjuanxingBenchmarkAndErrors;
+
+
