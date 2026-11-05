@@ -944,7 +944,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             if (tagText === '巩固知识点') tagText = '巩固·考点';
             if (tagText === '预习知识点') tagText = '预习·考点';
             if (tagText === '举一反三知识点' || tagText === '举一反三·知识点') tagText = '举一反三';
-            if (tagText === '知识点') tagText = '重点考点';
+            if (tagText === '知识点') tagText = '考点';
 
             spec = {
                 tagText: tagText || '考点',
@@ -1127,7 +1127,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
     /**
      * 为多道错题共享的同一考点生成专属“考点聚合导读栏” PNG DataURL
-     * 视觉呈现：跨栏优雅卡片，左侧蓝/橙渐变胶囊【重点考点】，右侧深色加粗考点名称及涉及错题小标注
+     * 视觉呈现：跨栏优雅卡片，左侧竖直主色标条，右侧深色加粗知识点名称及涉及错题小标注（不加冗余“重点考点”字样）
      */
     function generateTopicGroupBanner(spec, widthPt) {
         if (!spec || !spec.topic) return null;
@@ -1172,42 +1172,28 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 ctx.stroke();
             }
 
-            // 2. 左侧胶囊药丸 (Left Pill)
-            const pillText = isPreview ? '预习·重点考点' : '重点考点';
-            const fontPill = '700 ' + Math.round(10 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
-            ctx.font = fontPill;
-            const pillTextW = ctx.measureText(pillText).width;
-            const pillPadX = 8 * K;
-            const pillWidth = Math.round(pillTextW + pillPadX * 2);
-            const pillHeight = Math.round(18 * K);
-            const pillRadius = Math.round(pillHeight / 2);
-
-            const pillX = 6 * K;
-            const pillY = Math.round((hpx - pillHeight) / 2);
-
-            questionTopicBadgeRoundRect(ctx, pillX, pillY, pillWidth, pillHeight, pillRadius);
+            // 2. 左侧优雅色条标识（不显示“重点考点”等冗余标签，直接聚焦知识点本身）
+            const barW = Math.round(3.5 * K);
+            const barH = Math.round(14 * K);
+            const barX = Math.round(10 * K);
+            const barY = Math.round((hpx - barH) / 2);
+            questionTopicBadgeRoundRect(ctx, barX, barY, barW, barH, Math.round(barW / 2));
             if (isPreview) {
-                const pillGrad = ctx.createLinearGradient(pillX, pillY, pillX + pillWidth, pillY + pillHeight);
-                pillGrad.addColorStop(0, '#f59e0b');
-                pillGrad.addColorStop(1, '#d97706');
-                ctx.fillStyle = pillGrad;
+                const barGrad = ctx.createLinearGradient(barX, barY, barX, barY + barH);
+                barGrad.addColorStop(0, '#f59e0b');
+                barGrad.addColorStop(1, '#d97706');
+                ctx.fillStyle = barGrad;
             } else {
-                const pillGrad = ctx.createLinearGradient(pillX, pillY, pillX + pillWidth, pillY + pillHeight);
-                pillGrad.addColorStop(0, '#2563eb');
-                pillGrad.addColorStop(1, '#1d4ed8');
-                ctx.fillStyle = pillGrad;
+                const barGrad = ctx.createLinearGradient(barX, barY, barX, barY + barH);
+                barGrad.addColorStop(0, '#2563eb');
+                barGrad.addColorStop(1, '#1d4ed8');
+                ctx.fillStyle = barGrad;
             }
             ctx.fill();
 
-            // 胶囊内文字
-            ctx.fillStyle = '#ffffff';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(pillText, pillX + pillWidth / 2, pillY + pillHeight / 2 + 0.5 * K);
-
-            // 3. 右侧正文：考点名称 + 涉及错题副标
-            const textStartX = pillX + pillWidth + 8 * K;
-            const fontTitle = '700 ' + Math.round(11.5 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+            // 3. 正文：知识点名称 + 涉及错题副标
+            const textStartX = barX + barW + 8 * K;
+            const fontTitle = '700 ' + Math.round(12 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
             const fontSubtitle = '500 ' + Math.round(9.5 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
 
             ctx.font = fontTitle;
@@ -1833,7 +1819,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
                         if (isGroupBannerNeeded) {
                             const bannerTheme = (qSourceType === 'preview') ? 'preview' : 'original';
-                            const bannerTopic = hideTopicInBadge ? '重点错题集中强化' : qTopicRaw;
+                            const bannerTopic = hideTopicInBadge ? '错题集中强化' : qTopicRaw;
                             groupBannerInfo = generateTopicGroupBanner({
                                 topic: bannerTopic,
                                 parentNums: qItem.groupParentNums || [qParentNum],
