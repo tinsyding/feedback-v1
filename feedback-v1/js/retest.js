@@ -856,6 +856,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         const variationCount = Number.isFinite(rawVariationCount) ? rawVariationCount : variationTotal;
         const isVariation = Boolean(item.isVariation) || item.sourceType === 'variation';
         const isPreview = !isVariation && item.sourceType === 'preview';
+        const isGroupMerged = Boolean(item.isGroupMerged);
 
         const weekNum = parseInt(week, 10);
         const weekPart = weekNum > 0 ? ('专题' + numToChinese(weekNum)) : '';
@@ -868,11 +869,17 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 : ('变式' + subNum);
             const contentParts = ['举一反三 · 同类题'];
             if (parentNum) contentParts.push('对应第' + parentNum + '题');
-            if (subjectPart) contentParts.push(subjectPart);
             return { tagText, contentText: contentParts.join(' · '), theme: 'variation' };
         }
 
         if (isPreview) {
+            if (isGroupMerged) {
+                return {
+                    tagText: parentNum ? ('第' + parentNum + '题·预习') : '预习',
+                    contentText: '预习错题重练',
+                    theme: 'preview'
+                };
+            }
             return {
                 tagText: parentNum ? ('第' + parentNum + '题·预习') : '预习',
                 contentText: subjectPart || '预习',
@@ -881,6 +888,16 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         }
 
         // 课后巩固原题
+        if (isGroupMerged) {
+            const contentParts = [];
+            contentParts.push(variationCount > 0 ? ('错题重练 · 含 ' + variationCount + ' 道同类变式') : '错题重练');
+            return {
+                tagText: parentNum ? ('第' + parentNum + '题·原题') : '原题',
+                contentText: contentParts.join(' · '),
+                theme: 'original'
+            };
+        }
+
         const contentParts = [];
         if (subjectPart) contentParts.push(subjectPart);
         if (variationCount > 0) contentParts.push('含 ' + variationCount + ' 道同类变式');
@@ -1105,6 +1122,147 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         return badge ? badge.dataUrl : null;
     }
 
+    // 考点聚合大导读栏缓存（相同考点与宽度复用）
+    const topicGroupBannerCache = {};
+
+    /**
+     * 为多道错题共享的同一考点生成专属“考点聚合导读栏” PNG DataURL
+     * 视觉呈现：跨栏优雅卡片，左侧蓝/橙渐变胶囊【重点考点】，右侧深色加粗考点名称及涉及错题小标注
+     */
+    function generateTopicGroupBanner(spec, widthPt) {
+        if (!spec || !spec.topic) return null;
+        const topic = String(spec.topic || '').trim().slice(0, 150);
+        if (!topic) return null;
+
+        const wPt = Math.max(120, Math.min(540, Number(widthPt) || 540));
+        const heightPt = 26;
+        const isPreview = spec.theme === 'preview';
+        const parentNums = Array.isArray(spec.parentNums) ? spec.parentNums : [];
+        const varCount = parseInt(spec.variationCount, 10) || 0;
+
+        const cacheKey = (isPreview ? 'prev_' : 'hw_') + wPt.toFixed(1) + '___' + topic + '___' + parentNums.join(',') + '___' + varCount;
+        if (topicGroupBannerCache[cacheKey]) {
+            return topicGroupBannerCache[cacheKey];
+        }
+
+        try {
+            const K = 2; // 2x 超采样保证高清
+            const wpx = Math.max(240, Math.round(wPt * K));
+            const hpx = Math.round(heightPt * K);
+
+            const canvas = document.createElement('canvas');
+            canvas.width = wpx;
+            canvas.height = hpx;
+            const ctx = canvas.getContext('2d');
+
+            // 1. 卡片底色与微边框 (Card Background & Hairline Border)
+            const cardRadius = 6 * K;
+            questionTopicBadgeRoundRect(ctx, 1, 1, wpx - 2, hpx - 2, cardRadius);
+            if (isPreview) {
+                ctx.fillStyle = '#fffdfa'; // 温暖柔和暖白天色
+                ctx.fill();
+                ctx.lineWidth = 1.5;
+                ctx.strokeStyle = '#fed7aa'; // 浅琥珀色精致边框
+                ctx.stroke();
+            } else {
+                ctx.fillStyle = '#eff6ff'; // 极淡科技蓝背景底色
+                ctx.fill();
+                ctx.lineWidth = 1.5;
+                ctx.strokeStyle = '#bfdbfe'; // 浅天蓝微边框
+                ctx.stroke();
+            }
+
+            // 2. 左侧胶囊药丸 (Left Pill)
+            const pillText = isPreview ? '预习·重点考点' : '重点考点';
+            const fontPill = '700 ' + Math.round(10 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+            ctx.font = fontPill;
+            const pillTextW = ctx.measureText(pillText).width;
+            const pillPadX = 8 * K;
+            const pillWidth = Math.round(pillTextW + pillPadX * 2);
+            const pillHeight = Math.round(18 * K);
+            const pillRadius = Math.round(pillHeight / 2);
+
+            const pillX = 6 * K;
+            const pillY = Math.round((hpx - pillHeight) / 2);
+
+            questionTopicBadgeRoundRect(ctx, pillX, pillY, pillWidth, pillHeight, pillRadius);
+            if (isPreview) {
+                const pillGrad = ctx.createLinearGradient(pillX, pillY, pillX + pillWidth, pillY + pillHeight);
+                pillGrad.addColorStop(0, '#f59e0b');
+                pillGrad.addColorStop(1, '#d97706');
+                ctx.fillStyle = pillGrad;
+            } else {
+                const pillGrad = ctx.createLinearGradient(pillX, pillY, pillX + pillWidth, pillY + pillHeight);
+                pillGrad.addColorStop(0, '#2563eb');
+                pillGrad.addColorStop(1, '#1d4ed8');
+                ctx.fillStyle = pillGrad;
+            }
+            ctx.fill();
+
+            // 胶囊内文字
+            ctx.fillStyle = '#ffffff';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(pillText, pillX + pillWidth / 2, pillY + pillHeight / 2 + 0.5 * K);
+
+            // 3. 右侧正文：考点名称 + 涉及错题副标
+            const textStartX = pillX + pillWidth + 8 * K;
+            const fontTitle = '700 ' + Math.round(11.5 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+            const fontSubtitle = '500 ' + Math.round(9.5 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+
+            ctx.font = fontTitle;
+            ctx.fillStyle = isPreview ? '#78350f' : '#0f172a';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+
+            const topicStr = topic;
+            let subInfoParts = [];
+            if (parentNums.length > 0) {
+                subInfoParts.push('错题：第' + parentNums.join('、') + '题');
+            }
+            if (varCount > 0) {
+                subInfoParts.push('含 ' + varCount + ' 道同类变式');
+            }
+            const subInfoStr = subInfoParts.length > 0 ? ('(' + subInfoParts.join(' · ') + ')') : '';
+
+            // 测量文字宽度
+            const topicW = ctx.measureText(topicStr).width;
+            ctx.font = fontSubtitle;
+            const subW = subInfoStr ? ctx.measureText('  ' + subInfoStr).width : 0;
+            const availW = wpx - textStartX - 10 * K;
+
+            ctx.font = fontTitle;
+            if (topicW + subW <= availW) {
+                ctx.fillText(topicStr, textStartX, hpx / 2 + 0.5 * K);
+                if (subInfoStr) {
+                    ctx.font = fontSubtitle;
+                    ctx.fillStyle = isPreview ? '#b45309' : '#475569';
+                    ctx.fillText('  ' + subInfoStr, textStartX + topicW, hpx / 2 + 0.5 * K);
+                }
+            } else {
+                // 超长时优先保留考点名称并截断
+                let fitTopic = topicStr;
+                while (fitTopic.length > 0 && ctx.measureText(fitTopic + '…').width > availW) {
+                    fitTopic = fitTopic.slice(0, -1);
+                }
+                ctx.fillText(fitTopic + '…', textStartX, hpx / 2 + 0.5 * K);
+            }
+
+            const dataUrl = canvas.toDataURL('image/png');
+            const result = {
+                dataUrl: dataUrl,
+                heightPt: heightPt,
+                blockPt: heightPt + 8, // 包含下方 8pt 间距
+                widthPt: wPt
+            };
+            topicGroupBannerCache[cacheKey] = result;
+            return result;
+        } catch (err) {
+            console.warn('generateTopicGroupBanner failed:', err);
+            return null;
+        }
+    }
+
     // 多页题目的续页抬头（pdf-lib 内置字体无中文，仍走 canvas PNG）
     const questionRunningHeaderCache = {};
     function generateQuestionRunningHeader(text, widthPt, theme) {
@@ -1204,61 +1362,112 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                     return rankA - rankB;
                 });
 
-                // 题组化：原题 + 其全部变式必须连续排版。
-                // 考点只作为题头文案，绝不能拿来做分组键，否则同考点的多道原题会把变式挤到最后。
-                const clusters = [];
-                const clusterByParent = new Map();
+                const cleanTopic = t => String(t || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
+
+                // 1. 建立 parentNum -> 原题 topic 映射表（供变式题继承考点归属）
+                const parentTopicMap = new Map();
                 validItems.forEach(item => {
-                    const parentNum = parseQNum(item.parentNum || item.errorNum);
-                    if (!item.isVariation) {
-                        const cluster = {
-                            parentNum: parentNum,
-                            topic: item.topic || '',
-                            items: [item]
-                        };
-                        clusters.push(cluster);
-                        if (!clusterByParent.has(parentNum)) {
-                            clusterByParent.set(parentNum, cluster);
-                        }
-                    } else {
-                        const cluster = clusterByParent.get(parentNum);
-                        if (cluster) {
-                            cluster.items.push(item);
-                        } else {
-                            // 原题缺失时变式仍保留父题号，单独成组，避免丢失题目
-                            const orphan = {
-                                parentNum: parentNum,
-                                topic: item.topic || '',
-                                items: [item]
-                            };
-                            clusters.push(orphan);
-                            clusterByParent.set(parentNum, orphan);
-                        }
+                    if (!item.isVariation && cleanTopic(item.topic)) {
+                        parentTopicMap.set(item.parentNum, cleanTopic(item.topic));
                     }
                 });
 
-                clusters.forEach(cluster => {
-                    cluster.items.sort((a, b) => {
-                        const roleA = a.isVariation ? 1 : 0;
-                        const roleB = b.isVariation ? 1 : 0;
-                        return roleA - roleB || ((a.subNum || 1) - (b.subNum || 1));
+                // 2. 按考点聚合分组：
+                // 若考点相同，且属于多道原题（或原题+变式），聚合为同一组；
+                // 若考点为空，则按原题 parentNum 独立成组，不合并。
+                const groups = [];
+                const groupByTopicKey = new Map();
+
+                validItems.forEach(item => {
+                    const parentNum = item.parentNum;
+                    const itemTopic = cleanTopic(item.topic) || parentTopicMap.get(parentNum) || '';
+                    const topicKey = itemTopic ? ('topic:' + itemTopic) : ('orphan_parent:' + parentNum);
+
+                    let group = groupByTopicKey.get(topicKey);
+                    if (!group) {
+                        group = {
+                            topicKey: topicKey,
+                            topic: itemTopic,
+                            sourceType: item.sourceType,
+                            firstOrder: parentNum,
+                            parentNumsSet: new Set(),
+                            originalItems: [],
+                            variationItems: []
+                        };
+                        groups.push(group);
+                        groupByTopicKey.set(topicKey, group);
+                    }
+
+                    group.parentNumsSet.add(parentNum);
+                    if (parentNum < group.firstOrder) {
+                        group.firstOrder = parentNum;
+                    }
+
+                    if (!item.isVariation) {
+                        group.originalItems.push(item);
+                    } else {
+                        group.variationItems.push(item);
+                    }
+                });
+
+                // 3. 组间排序：按组内最小题号升序，确保第1题所在考点排在第5题所在考点前面
+                groups.sort((a, b) => a.firstOrder - b.firstOrder);
+
+                // 4. 组内排版展开：
+                // 核心规则：同一考点下，所有原题集中排在前面（按题号升序）；
+                // 然后所有原题后面跟的是它们的同类题（变式题，按原题号升序、再按变式序号升序）。
+                groups.forEach(group => {
+                    const parentNums = Array.from(group.parentNumsSet).sort((a, b) => a - b);
+                    // 是否为多道原题合并的考点组
+                    const isGroupMerged = group.topic !== '' && group.originalItems.length >= 2;
+
+                    // 原题排序
+                    group.originalItems.sort((a, b) => a.parentNum - b.parentNum);
+
+                    // 变式题排序
+                    group.variationItems.sort((a, b) => {
+                        const pDiff = a.parentNum - b.parentNum;
+                        if (pDiff !== 0) return pDiff;
+                        return (a.subNum || 1) - (b.subNum || 1);
                     });
 
-                    // 分母取最大学号，缺失中间某个变式时也不会出现“变式2/1”
-                    const variationTotal = cluster.items.reduce((max, x) => {
-                        if (!x.isVariation) return max;
-                        return Math.max(max, parseInt(x.subNum, 10) || 1);
-                    }, 0);
-                    const variationCount = cluster.items.filter(x => x.isVariation).length;
-                    cluster.items.forEach((item, idx) => {
+                    // 计算每道原题各自拥有的变式题总数与最大学号
+                    const variationTotalByParent = new Map();
+                    const variationCountByParent = new Map();
+                    group.variationItems.forEach(v => {
+                        const p = v.parentNum;
+                        const s = parseInt(v.subNum, 10) || 1;
+                        variationTotalByParent.set(p, Math.max(variationTotalByParent.get(p) || 0, s));
+                        variationCountByParent.set(p, (variationCountByParent.get(p) || 0) + 1);
+                    });
+
+                    // 组内所有条目：原题全部在前，同类题全部在后！
+                    const groupItems = group.originalItems.concat(group.variationItems);
+                    if (groupItems.length === 0) return;
+
+                    const totalVariationsInGroup = group.variationItems.length;
+
+                    groupItems.forEach((item, idx) => {
+                        const pNum = item.parentNum;
+                        const varTotal = variationTotalByParent.get(pNum) || 0;
+                        const varCount = variationCountByParent.get(pNum) || 0;
+
                         pdfsToMerge.push({
                             ...item,
-                            parentNum: cluster.parentNum,
-                            clusterTopic: cluster.topic,
-                            variationTotal: variationTotal,
-                            variationCount: variationCount,
-                            isClusterStart: idx === 0,
-                            isClusterEnd: idx === cluster.items.length - 1
+                            parentNum: pNum,
+                            clusterTopic: group.topic,
+                            variationTotal: varTotal,
+                            variationCount: varCount,
+                            // 组与考点元数据
+                            isGroupMerged: isGroupMerged,
+                            groupTopic: group.topic,
+                            groupParentNums: parentNums,
+                            groupVariationCount: totalVariationsInGroup,
+                            isGroupStart: idx === 0,
+                            isGroupEnd: idx === groupItems.length - 1,
+                            // 单题的开始与结束（供作答区与二维码判断）
+                            isClusterStart: idx === 0 || groupItems[idx - 1].parentNum !== pNum || groupItems[idx - 1].isVariation !== item.isVariation || groupItems[idx - 1].subNum !== item.subNum,
+                            isClusterEnd: idx === groupItems.length - 1 || groupItems[idx + 1].parentNum !== pNum || groupItems[idx + 1].isVariation !== item.isVariation || groupItems[idx + 1].subNum !== item.subNum
                         });
                     });
                 });
@@ -1618,6 +1827,25 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             currentBannerBlock = headerInfo.heightPt + headerGap;
                         }
 
+                        let groupBannerInfo = null;
+                        let groupBannerBlock = 0;
+                        const isGroupBannerNeeded = isFirstPageOfQuestion && Boolean(qItem.isGroupStart && qItem.isGroupMerged && qTopicRaw);
+
+                        if (isGroupBannerNeeded) {
+                            const bannerTheme = (qSourceType === 'preview') ? 'preview' : 'original';
+                            const bannerTopic = hideTopicInBadge ? '重点错题集中强化' : qTopicRaw;
+                            groupBannerInfo = generateTopicGroupBanner({
+                                topic: bannerTopic,
+                                parentNums: qItem.groupParentNums || [qParentNum],
+                                variationCount: qItem.groupVariationCount || 0,
+                                week: qWeek,
+                                theme: bannerTheme
+                            }, BOX_WIDTH);
+                            if (groupBannerInfo) {
+                                groupBannerBlock = groupBannerInfo.blockPt;
+                            }
+                        }
+
                         const innerContentW = boxW - 12;
                         const contentAreaH = PAGE_HEIGHT - TOP_MARGIN - BOTTOM_MARGIN;
                         const maxAvailContentH = contentAreaH - BOX_PAD_TOP - BOX_PAD_BOTTOM - currentBannerBlock - answerH;
@@ -1635,14 +1863,31 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                         const needsClusterRoom = isFirstPageOfQuestion && !qIsVariation
                             && qVariationTotal > 0 && !isPageTop;
                         const clusterReserve = needsClusterRoom ? 110 : 0;
+                        const neededH = (isGroupBannerNeeded ? groupBannerBlock : 0) + boxH;
 
                         if (!currentPage
-                            || (!isPageTop && currentY - boxH < BOTTOM_MARGIN)
-                            || (needsClusterRoom && currentY - boxH - clusterReserve < BOTTOM_MARGIN)
+                            || (!isPageTop && currentY - neededH < BOTTOM_MARGIN)
+                            || (needsClusterRoom && currentY - neededH - clusterReserve < BOTTOM_MARGIN)
                             || (isFullPage && !isPageTop)) {
-                            // 空间不足、原题与变式可能被拆散，或当前是整页大题且当前页已被占用 -> 开新 A4 页
+                            // 空间不足、考点横条与题目可能被拆散，或当前是整页大题且当前页已被占用 -> 开新 A4 页
                             currentPage = mergedPdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
                             currentY = PAGE_HEIGHT - TOP_MARGIN;
+                        }
+
+                        // 0. 若当前为考点聚合组的首道题目，先绘制横跨整行的“考点聚合导读卡”
+                        if (isGroupBannerNeeded && groupBannerInfo && groupBannerInfo.dataUrl) {
+                            try {
+                                const groupBannerImg = await mergedPdf.embedPng(groupBannerInfo.dataUrl);
+                                currentPage.drawImage(groupBannerImg, {
+                                    x: BOX_MARGIN_X,
+                                    y: currentY - groupBannerInfo.heightPt,
+                                    width: BOX_WIDTH,
+                                    height: groupBannerInfo.heightPt
+                                });
+                                currentY -= groupBannerBlock;
+                            } catch (gbErr) {
+                                console.warn('Draw group banner failed:', gbErr);
+                            }
                         }
 
                         const boxTopY = currentY;
@@ -1781,10 +2026,10 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             }
                         }
 
-                        // 为下一题预留纵向间距：组内紧凑，组间留白
+                        // 为下一题预留纵向间距：同考点组内紧凑，考点组间留白
                         const nextGap = (!isLastPageOfQuestion)
                             ? BOX_GAP_ITEM
-                            : ((typeof qItem === 'object' && qItem.isClusterEnd === false) ? BOX_GAP_ITEM : BOX_GAP_CLUSTER);
+                            : ((typeof qItem === 'object' && qItem.isGroupEnd === false) ? BOX_GAP_ITEM : BOX_GAP_CLUSTER);
                         currentY = boxBottomY - nextGap;
                     }
                 } catch (err) {
