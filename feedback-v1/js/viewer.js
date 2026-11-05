@@ -1633,7 +1633,15 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                     plusFeedbackPart += `课后巩固的“举一反三”题目也已加入错题本，方便${studentDesc}后续复习。\n`;
                 }
 
-                if (hasAnyErrors) {
+                // 严格校验：结合分数、正确率、推算满分以及评语多维判定是否真正满分
+                const studentAcc = (accIdx >= 0) ? parsePercentValue(row[accIdx]) : null;
+                const studentTot = (totalScoreIdx >= 0) ? parseScoreValue(row[totalScoreIdx]) : batchTotalScore;
+                const isFullScore = (typeof checkStudentFullScore === 'function')
+                    ? checkStudentFullScore({ score, accuracy: studentAcc, totalScore: studentTot, comment: [originalCommentForPlus, fileCommentForPlus].filter(Boolean).join('\n') || comment || '' })
+                    : ((score >= 100 || (studentTot && score >= studentTot && score > 0)) || /(?:全对|全部正确|零失误|无错题|免除加练|错题(?:题号)?(?:为|是)?\s*[:：]\s*(?:无|0|零))/i.test([originalCommentForPlus, fileCommentForPlus].filter(Boolean).join('\n') || comment || ''));
+
+                // 预习已有错题本，因此无论是有作业/预习错题，还是课后作业满分，均生成错题本链接供复习与历史练习
+                if (hasAnyErrors || isFullScore) {
                     const token = plusTokens[studentKey]
                         || plusTokens[legacyStudentKey]
                         || (!studentId ? (plusTokens[fullName] || plusTokens[studentName]) : '');
@@ -1644,37 +1652,22 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                         plusFeedbackPart += `【错题本】：(生成链接失败，请联系老师)\n`;
                     }
                 } else {
-                    // 严格校验：结合分数、正确率、推算满分以及评语多维判定是否真正满分
-                    const studentAcc = (accIdx >= 0) ? parsePercentValue(row[accIdx]) : null;
-                    const studentTot = (totalScoreIdx >= 0) ? parseScoreValue(row[totalScoreIdx]) : batchTotalScore;
-                    const isFullScore = (typeof checkStudentFullScore === 'function')
-                        ? checkStudentFullScore({ score, accuracy: studentAcc, totalScore: studentTot, comment: [originalCommentForPlus, fileCommentForPlus].filter(Boolean).join('\n') || comment || '' })
-                        : ((score >= 100 || (studentTot && score >= studentTot && score > 0)) || /(?:全对|全部正确|零失误|无错题|免除加练|错题(?:题号)?(?:为|是)?\s*[:：]\s*(?:无|0|零))/i.test([originalCommentForPlus, fileCommentForPlus].filter(Boolean).join('\n') || comment || ''));
-
-                    if (isFullScore) {
-                        plusFeedbackPart += `【错题本】：本次作业满分，暂无错题需要重练，表现优异，继续加油！\n`;
-                    } else {
-                        plusFeedbackPart += `【课后复习建议】：本次作业得分为${score}分，请${studentName}同学针对课堂疑难点与错题认真完成错题整理与订正，及时查漏补缺！\n`;
-                    }
+                    plusFeedbackPart += `【课后复习建议】：本次作业得分为${score}分，请${studentName}同学针对课堂疑难点与错题认真完成错题整理与订正，及时查漏补缺！\n`;
                 }
             }
         } else {
             const plusData = sessionPayload.plusData;
             if (plusData && plusData.enabled) {
-                const hasPreviewErrors = previewTopics.length > 0 || Boolean(previewParsed && previewParsed.errorNums && previewParsed.errorNums.length > 0);
-                if (hasPreviewErrors) {
-                    plusFeedbackPart = `第${hwLesson}${getLessonUnit()}${getHomeworkLabelFull()}未提交。\n`;
-                    const token = plusTokens[studentKey]
-                        || plusTokens[legacyStudentKey]
-                        || (!studentId ? (plusTokens[fullName] || plusTokens[studentName]) : '');
-                    if (token) {
-                        const retestBase = getRetestBaseUrl();
-                        plusFeedbackPart += `【错题本】：${retestBase}?token=${token}\n`;
-                    } else {
-                        plusFeedbackPart += `【错题本】：(生成链接失败，请联系老师)\n`;
-                    }
+                // 课后未提交时，同样生成错题本链接（便于练习预习错题或往期历史错题）
+                plusFeedbackPart = `第${hwLesson}${getLessonUnit()}${getHomeworkLabelFull()}未提交。\n`;
+                const token = plusTokens[studentKey]
+                    || plusTokens[legacyStudentKey]
+                    || (!studentId ? (plusTokens[fullName] || plusTokens[studentName]) : '');
+                if (token) {
+                    const retestBase = getRetestBaseUrl();
+                    plusFeedbackPart += `【错题本】：${retestBase}?token=${token}\n`;
                 } else {
-                    plusFeedbackPart = `第${hwLesson}${getLessonUnit()}${getHomeworkLabelFull()}未提交，暂无错题加练数据。\n`;
+                    plusFeedbackPart += `【错题本】：(生成链接失败，请联系老师)\n`;
                 }
             }
         }
@@ -2301,25 +2294,27 @@ async function doGeneratePreviewOnlyFeedback() {
         }
 
         let previewOnlyPlusPart = '';
-        if (sessionPayload.plusData?.enabled && previewParsed && previewParsed.errorNums.length > 0) {
-            const previewQuestions = sessionPayload.plusData.previewQuestions || sessionPayload.plusData.questions || [];
-            if (previewQuestions.length > 0) {
-                const previewQuestionMap = {};
-                previewQuestions.forEach(q => {
-                    const ids = String(q.id || q.question_num || '').split(/[,、，]/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
-                    const cleanT = typeof cleanTopicTrailingPunctuation === 'function' 
-                        ? cleanTopicTrailingPunctuation(q.topic) 
-                        : (q.topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
-                    ids.forEach(id => { previewQuestionMap[id] = cleanT; });
-                });
-                const previewTopics = [...new Set(previewParsed.errorNums.map(num => previewQuestionMap[num] || `第${num}题`).filter(Boolean))];
+        if (sessionPayload.plusData?.enabled) {
+            if (previewParsed && previewParsed.errorNums && previewParsed.errorNums.length > 0) {
+                const previewQuestions = sessionPayload.plusData.previewQuestions || sessionPayload.plusData.questions || [];
+                if (previewQuestions.length > 0) {
+                    const previewQuestionMap = {};
+                    previewQuestions.forEach(q => {
+                        const ids = String(q.id || q.question_num || '').split(/[,、，]/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+                        const cleanT = typeof cleanTopicTrailingPunctuation === 'function' 
+                            ? cleanTopicTrailingPunctuation(q.topic) 
+                            : (q.topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
+                        ids.forEach(id => { previewQuestionMap[id] = cleanT; });
+                    });
+                    const previewTopics = [...new Set(previewParsed.errorNums.map(num => previewQuestionMap[num] || `第${num}题`).filter(Boolean))];
+                }
+                const isEnglishSubject = (feedbackSubject === '英语') || String(sessionPayload.subject || '').includes('英语') || String(sessionPayload.title || '').includes('英语');
+                const previewNotice = isEnglishSubject 
+                    ? `预习题错题已加入错题本。\n` 
+                    : `预习题错题已加入错题本，建议结合讲义中的同类题进行巩固。\n`;
+                feedback += previewNotice;
+                previewOnlyPlusPart += previewNotice;
             }
-            const isEnglishSubject = (feedbackSubject === '英语') || String(sessionPayload.subject || '').includes('英语') || String(sessionPayload.title || '').includes('英语');
-            const previewNotice = isEnglishSubject 
-                ? `预习题错题已加入错题本。\n` 
-                : `预习题错题已加入错题本，建议结合讲义中的同类题进行巩固。\n`;
-            feedback += previewNotice;
-            previewOnlyPlusPart += previewNotice;
 
             const tokenIdMatch = fullName.match(/^(\d+)/);
             const tokenStudentId = tokenIdMatch ? tokenIdMatch[1] : '';

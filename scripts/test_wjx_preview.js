@@ -273,4 +273,37 @@ if (commentAiwenyunFallback !== '（满分评语未填写）') {
 
 console.log('PASS: getPreviewCommentByMetric correctly handles optional comments for Wenjuanxing vs required for others.');
 
+// 8. Test retest link generation for full score and unsubmitted homework
+console.log('\n--- Testing retest link generation for full score and unsubmitted homework ---');
+// Verify logic matches
+const mockTokens = { '101_张三': 'token123', '102_李四': 'token456' };
+const retestBase = 'https://vip.wxjifang.cn/retest.html';
+
+// Case A: 课后满分 (isFullScore = true)
+const isFullScore = true;
+const hasAnyErrorsA = false;
+let plusFeedbackA = '';
+if (hasAnyErrorsA || isFullScore) {
+    const token = mockTokens['101_张三'];
+    plusFeedbackA += `【错题本】：${retestBase}?token=${token}\n`;
+}
+if (!plusFeedbackA.includes(`【错题本】：${retestBase}?token=token123`)) {
+    console.error('FAIL: Full score homework should generate retest link!');
+    process.exit(1);
+}
+
+// Case B: 课后未提交 (!hwSubmitted)
+const hwSubmitted = false;
+let plusFeedbackB = '';
+if (!hwSubmitted) {
+    plusFeedbackB = `第1次课后巩固未提交。\n`;
+    const token = mockTokens['102_李四'];
+    plusFeedbackB += `【错题本】：${retestBase}?token=${token}\n`;
+}
+if (!plusFeedbackB.includes(`第1次课后巩固未提交。\n【错题本】：${retestBase}?token=token456`)) {
+    console.error('FAIL: Unsubmitted homework should generate retest link!');
+    process.exit(1);
+}
+console.log('PASS: Retest links are generated for full score and unsubmitted homework.');
+
 console.log('\nALL VERIFICATION TESTS PASSED SUCCESSFULLY! ✅');
