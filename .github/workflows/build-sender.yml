@@ -1,10 +1,11 @@
 name: Build sender_py (Windows)
 
-# 推送 sender_py 相关改动到 main / feat/** 时：
-#   1) 在 Linux 跑纯函数单测与 compileall；
-#   2) 在 Windows 打包 Web 版普通压缩包 (--onedir) 与 Nuitka 单文件版 (--onefile) 并上传 Artifact。
-# 推送 sender-* tag 时，发布普通压缩包与 Nuitka 单文件版到 GitHub Release（仅放 Web 版，Tk 版已停止维护）。
-# 也可在 Actions 页面手动 Run workflow。
+# 触发机制（分层构建，杜绝重复耗时打包）：
+#   1) 推送 sender_py 改动到 main / feat/** 或提交 PR 时：
+#      仅在 Linux 运行纯函数单测与 compileall（~25 秒快速校验，默认跳过 40 分钟的 Windows 打包）；
+#      若某次提交确需提前在分支上打包验证，在 commit message 中包含 [build-windows] 即可放行。
+#   2) 推送 sender-* tag 时（或手动在 Actions 页面触发 workflow_dispatch）：
+#      全量执行 Windows 打包（普通压缩包 + Nuitka 单文件版），并直接发布到 GitHub Release（仅需跑一次）。
 # 产物未签名，仅供内测/验证；正式分发前请做代码签名与杀软回归。
 
 on:
@@ -63,6 +64,7 @@ jobs:
   build-windows:
     name: Windows package
     needs: test
+    if: startsWith(github.ref, 'refs/tags/sender-') || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[build-windows]')
     runs-on: windows-latest
     timeout-minutes: 45
     permissions:
