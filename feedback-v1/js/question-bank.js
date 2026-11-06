@@ -2915,27 +2915,53 @@ function renderQuestionList() {
                 return curTopicClean && cleanTopicStr(b.topic) === curTopicClean && !parentNums.includes(Number(b.parentNum));
             });
 
+            const previewBtnsHtml = parentNums.length === 1
+                ? `<button type="button" class="var-hw-preview-btn"
+                           onclick="previewHomeworkQuestion(${primaryParentNum}, event)"
+                           onmouseenter="onHoverHomeworkPreview(event, ${primaryParentNum})"
+                           onmouseleave="hideHoverPopover()"
+                           title="查阅课后第 ${primaryParentNum} 题原题 PDF">
+                       <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                           <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                           <circle cx="12" cy="12" r="3"></circle>
+                       </svg>
+                       <span>原题</span>
+                   </button>`
+                : `<div class="var-hw-preview-group" title="查阅关联原题 PDF">
+                       <span class="var-hw-preview-label">原题:</span>
+                       ${parentNums.map(p => `
+                           <button type="button" class="var-hw-preview-btn compact"
+                                   onclick="previewHomeworkQuestion(${p}, event)"
+                                   onmouseenter="onHoverHomeworkPreview(event, ${p})"
+                                   onmouseleave="hideHoverPopover()"
+                                   title="查阅课后第 ${p} 题原题 PDF">${p}</button>
+                       `).join('')}
+                   </div>`;
+
+            const mergePillHtml = (unselectedSameTopicBuckets.length > 0 && !isAssistant)
+                ? `<button type="button" class="var-parent-pill var-parent-pill-merge"
+                           onclick="onVariationMergeSameTopic(${originalIndex})"
+                           title="一键将考点相同的第 ${unselectedSameTopicBuckets.map(b => b.parentNum).join('、')} 题合并关联">
+                       <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2">
+                           <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                           <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                       </svg>
+                       <span>关联同考点(第${unselectedSameTopicBuckets.map(b => b.parentNum).join('、')}题)</span>
+                   </button>`
+                : '';
+
             item.innerHTML = `
                 <div class="question-id-tags">
-                    <span class="question-id-var-badge" title="课后第 ${parentNumsLabel} 题 · 变式 ${subNum}">${badgeLabel}</span>
+                    <span class="question-id-var-badge" title="课后第 ${parentNumsLabel} 题 · 变式 ${subNum}">
+                        <span class="var-badge-parent">${parentNums.length > 1 ? parentNumsLabel : ('第' + primaryParentNum + '题')}</span>
+                        <span class="var-badge-sub">变式 ${subNum}</span>
+                    </span>
                 </div>
                 <div class="var-item-left">
                     <div class="var-parent-header">
                         <span class="var-parent-current" title="当前关联课后巩固第 ${parentNumsLabel} 题">课后第 <strong>${parentNumsLabel}</strong> 题</span>
                         <span class="var-sub-badge">变式 ${subNum}</span>
-                        ${parentNums.map(p => `
-                            <button type="button" class="var-hw-preview-btn"
-                                    onclick="previewHomeworkQuestion(${p}, event)"
-                                    onmouseenter="onHoverHomeworkPreview(event, ${p})"
-                                    onmouseleave="hideHoverPopover()"
-                                    title="查阅课后第 ${p} 题原题 PDF">
-                                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                                    <circle cx="12" cy="12" r="3"></circle>
-                                </svg>
-                                <span>原题${parentNums.length > 1 ? p : ''}</span>
-                            </button>
-                        `).join('')}
+                        ${previewBtnsHtml}
                     </div>
                     <div class="var-topic-readonly" title="${escapeHtml(q.topic || '跟随原题自动同步')}">
                         <span class="var-topic-label">知识点：</span>
@@ -2946,14 +2972,7 @@ function renderQuestionList() {
                     </div>
                 </div>
                 <div class="var-item-center">
-                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px; flex-wrap:wrap; gap:4px;">
-                        <span class="var-selector-label">选择原题：</span>
-                        ${unselectedSameTopicBuckets.length > 0 && !isAssistant ? `
-                            <button type="button" class="var-quick-merge-btn" onclick="onVariationMergeSameTopic(${originalIndex})" title="一键将考点相同的第 ${unselectedSameTopicBuckets.map(b => b.parentNum).join('、')} 题合并至本变式关联">
-                                ⚡ 关联同考点(第${unselectedSameTopicBuckets.map(b => b.parentNum).join('、')}题)
-                            </button>
-                        ` : ''}
-                    </div>
+                    <span class="var-selector-label">选择原题：</span>
                     <div class="variation-parent-pills">
                         ${variationBuckets.map(b => {
                             const isSelected = parentNums.includes(Number(b.parentNum));
@@ -2968,6 +2987,7 @@ function renderQuestionList() {
                                 title="关联课后第 ${b.parentNum} 题${b.topic ? '：' + escapeHtml(b.topic) : ''}${isSameTopic ? ' (同知识点)' : ''}"
                                 ${isAssistant ? 'disabled' : ''}>第${b.parentNum}题</button>`;
                         }).join('')}
+                        ${mergePillHtml}
                     </div>
                 </div>
                 <div class="question-pdf-actions">

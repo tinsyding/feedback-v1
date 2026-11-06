@@ -490,12 +490,17 @@
                             <!-- 举一反三同考点共享变式提示横条 (当 bankType === 'variation' 时展示) -->
                             <div class="qb-preview-hint-banner qb-variation-hint-banner" id="qb-variation-hint-banner" style="display: none;">
                                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
+                                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
                                 </svg>
-                                <div style="flex:1; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+                                <div class="qb-variation-hint-inner">
                                     <span id="qb-variation-hint-text"><strong>举一反三智能考点提示：</strong>支持一道变式题同时关联多道同考点原题。学生做错同考点任一题或多题时，错题本均自动输出该变式且仅练一次。</span>
-                                    <button type="button" class="btn sm secondary" id="qb-merge-same-topic-btn" onclick="mergeAllSameTopicVariations()" style="font-size:0.75rem; padding:3px 10px; display:none;">
-                                        ⚡ 一键关联同考点原题
+                                    <button type="button" class="btn sm secondary qb-merge-same-topic-btn" id="qb-merge-same-topic-btn" onclick="mergeAllSameTopicVariations()" style="display: none;">
+                                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                                        </svg>
+                                        <span>一键关联同考点原题</span>
                                     </button>
                                 </div>
                             </div>
