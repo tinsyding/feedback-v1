@@ -34,7 +34,9 @@
 ### 2. 客户端构建与发布：[`build-sender.yml`](../.github/workflows/build-sender.yml)
 - 架构主线：以 Web 版客户端（`web_main.py`）为主，Tkinter 桌面版已停止更新。
 - 触发条件：
-  - 推送 `sender-*` 格式的 tag（如 `git tag sender-v1.8.22 && git push origin sender-v1.8.22`）；
+  - 推送 `sender-*` 格式的 tag（如 `git tag sender-v1.8.23 && git push origin sender-v1.8.23`）；
   - 或在 GitHub Actions 页面手动触发（`workflow_dispatch`）。
-- 运行环境：Linux（单元测试）+ Windows（打包与冒烟验证）。
-- 发布流程：编译打包后通过 `softprops/action-gh-release@v2` 创建对应 tag 的 GitHub Release 并上传附件（**仅上传 Web 文件夹版压缩包** `JiFangFeedbackWeb-onedir-windows-x64.zip`）。
+- 运行环境：Linux（单元测试）+ Windows（MSVC 编译打包与冒烟验证）。
+- 发布流程：编译打包后通过 `softprops/action-gh-release@v2` 创建对应 tag 的 GitHub Release 并上传双附件：
+  1. **Nuitka 原生机器码单文件版**：`JiFangFeedbackWeb-nuitka-onefile-windows-x64.exe`（原生 C++ 编译，彻底免疫杀软误报，推荐）；
+  2. **普通绿色文件夹压缩包版**：`JiFangFeedbackWeb-onedir-windows-x64.zip`（解压即用）。

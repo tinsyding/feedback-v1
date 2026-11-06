@@ -3,7 +3,7 @@
 基于 `mss` 整窗截图、相对比例裁剪与多级身份核验（本地 OCR + 云端视觉模型）的企业微信学情反馈批量发送工具。
 
 > [!IMPORTANT]
-> **架构主线声明**：本项目已全面切换为**以 Web 版为主线**（入口：`web_main.py`）。传统的 Tkinter 原生桌面版（`sender.py`）已归档冻结且**不再进行功能更新**；GitHub Releases 仅发布 Web 文件夹版（`JiFangFeedbackWeb-onedir-windows-x64.zip`）。
+> **架构主线声明**：本项目已全面切换为**以 Web 版为主线**（入口：`web_main.py`）。传统的 Tkinter 原生桌面版（`sender.py`）已归档冻结且**不再进行功能更新**；GitHub Releases 同时发布 **Nuitka 原生机器码单文件版**（`JiFangFeedbackWeb-nuitka-onefile-windows-x64.exe`，彻底免疫杀软误报）与 **普通绿色文件夹压缩包版**（`JiFangFeedbackWeb-onedir-windows-x64.zip`）。
 
 提供本地 Web 控制面板（内置零发送评测模块、视窗诊断核验现场留存、窗口出屏拉回保护），并通过 GitHub Actions 自动编译发布。
 
@@ -293,7 +293,7 @@ Windows 真机回归建议覆盖：
 | 2. Nuitka 编译版 | ZIP 压缩包（原生二进制目录） | 转译为 C++ 编译为本地机器码 | 极低 | 杀软策略严格的机房或终端 | `build_nuitka.bat` |
 | 3. 单文件版 (`--onefile`) | 单个 `.exe` 文件 | 启动时自解压至 `AppData\Local\Temp` | 较高（易触发启发式拦截） | 临时单文件拷贝测试 | `build_onefile.bat` |
 
-本地可运行 `tools/sender_py/build_all.bat` 选择打包模式；推送 `sender-*` tag（如 `sender-v1.8.22`）或手动触发 GitHub Actions 工作流时会自动构建并发布 **Web 文件夹版**（`JiFangFeedbackWeb-onedir-windows-x64.zip`）。GitHub Releases 已停止收录 Tkinter 桌面版产物。
+本地可运行 `tools/sender_py/build_all.bat` 选择打包模式；推送 `sender-*` tag（如 `sender-v1.8.23`）或手动触发 GitHub Actions 工作流时会自动构建并发布 **Nuitka 原生机器码单文件版**（`JiFangFeedbackWeb-nuitka-onefile-windows-x64.exe`）与 **普通绿色文件夹压缩包版**（`JiFangFeedbackWeb-onedir-windows-x64.zip`）。GitHub Releases 已停止收录 Tkinter 桌面版产物。
 
 ## 13. 已知限制
 

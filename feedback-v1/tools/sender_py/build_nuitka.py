@@ -15,7 +15,7 @@ import sys
 import shutil
 import subprocess
 
-APP_VERSION = "1.8.22.0"
+APP_VERSION = "1.8.23.0"
 
 def get_paths():
     cur_dir = os.path.dirname(os.path.abspath(__file__))
@@ -114,10 +114,15 @@ def build_standalone(paths):
         f"--include-data-files={paths['example']}=sender_py/example.png",
         f"--include-data-files={paths['web_ui']}=sender_py/web_ui.html",
         f"--include-data-files={paths['web_ui']}=web_ui.html",
+    ]
+    if os.path.isfile(os.path.join(paths["cur_dir"], "sender_token.py")):
+        cmd_web.append("--include-module=sender_py.sender_token")
+
+    cmd_web.extend([
         f"--output-dir={paths['dist_nuitka_web']}",
         "--output-filename=JiFangFeedbackWeb.exe",
         paths["web_main_py"],
-    ]
+    ])
     env = os.environ.copy()
     env["PYTHONPATH"] = f"{paths['tools_dir']};{paths['cur_dir']};{env.get('PYTHONPATH', '')}"
     subprocess.run(cmd_web, check=True, env=env)
@@ -183,10 +188,15 @@ def build_onefile(paths):
         f"--include-data-files={paths['example']}=sender_py/example.png",
         f"--include-data-files={paths['web_ui']}=sender_py/web_ui.html",
         f"--include-data-files={paths['web_ui']}=web_ui.html",
+    ]
+    if os.path.isfile(os.path.join(paths["cur_dir"], "sender_token.py")):
+        cmd_web.append("--include-module=sender_py.sender_token")
+
+    cmd_web.extend([
         f"--output-dir={paths['dist_nuitka_onefile']}",
         "--output-filename=JiFangFeedbackWeb.exe",
         paths["web_main_py"],
-    ]
+    ])
     subprocess.run(cmd_web, check=True, env=env)
 
     web_exe_orig = os.path.join(paths["dist_nuitka_onefile"], "JiFangFeedbackWeb.exe")
@@ -194,7 +204,7 @@ def build_onefile(paths):
     if os.path.isfile(web_exe_orig):
         if os.path.exists(web_exe_target):
             os.remove(web_exe_target)
-        shutil.move(web_exe_orig, web_exe_target)
+        shutil.copy2(web_exe_orig, web_exe_target)
 
     # 清理 onefile 构建留存的多余 dist 目录，保持输出目录整洁
     intermediate_dist = os.path.join(paths["dist_nuitka_onefile"], "web_main.dist")
@@ -245,7 +255,11 @@ def main():
         print(f"无效选项: {choice}")
         return
 
-    ensure_dependencies(paths)
+    skip_deps = any(a in ("--skip-deps", "--no-deps", "nodeps") for a in args)
+    if not skip_deps:
+        ensure_dependencies(paths)
+    else:
+        ensure_multisize_icon(paths["favicon"])
 
     do_standalone = choice in ("1", "3")
     do_onefile = choice in ("1", "2")
