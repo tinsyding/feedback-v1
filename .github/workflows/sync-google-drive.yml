@@ -1,0 +1,86 @@
+name: Sync to Google Drive
+
+# 代码变更自动同步到 Google Drive 备份目录
+# 所需 Secrets（仓库 Settings → Secrets and variables → Actions → New repository secret）：
+#   GDRIVE_SA_JSON       Google Cloud 服务账号 JSON 密钥全文
+#   GDRIVE_FOLDER_ID     Google Drive 目标备份文件夹的 ID（URL 中 folders/ 后的字符串）
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.github/workflows/apply-nginx-hardening.yml'
+  workflow_dispatch: # 支持在 GitHub 网页界面手动点击一键触发
+
+concurrency:
+  group: gdrive-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync code to Google Drive
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Preflight check secrets
+        env:
+          GDRIVE_SA_JSON: ${{ secrets.GDRIVE_SA_JSON }}
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+        run: |
+          missing=""
+          [ -z "$GDRIVE_SA_JSON" ] && missing="$missing GDRIVE_SA_JSON"
+          [ -z "$GDRIVE_FOLDER_ID" ] && missing="$missing GDRIVE_FOLDER_ID"
+          if [ -n "$missing" ]; then
+            echo "❌ 缺少必要的 GitHub Secrets:$missing"
+            echo "请前往 GitHub 仓库: Settings → Secrets and variables → Actions → New repository secret 添加。"
+            exit 1
+          fi
+          echo "✅ Secrets 预检通过"
+
+      - name: Install rclone
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rclone
+
+      - name: Configure rclone for Google Drive
+        env:
+          GDRIVE_SA_JSON: ${{ secrets.GDRIVE_SA_JSON }}
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+        run: |
+          mkdir -p ~/.config/rclone
+          echo "$GDRIVE_SA_JSON" > /tmp/gdrive_sa.json
+
+          cat << EOF > ~/.config/rclone/rclone.conf
+          [gdrive]
+          type = drive
+          scope = drive
+          service_account_file = /tmp/gdrive_sa.json
+          root_folder_id = $GDRIVE_FOLDER_ID
+          EOF
+
+      - name: Sync code tree to Google Drive
+        run: |
+          echo "🚀 开始增量镜像同步代码至 Google Drive..."
+          rclone sync . gdrive:latest \
+            --exclude ".git/**" \
+            --exclude ".github/**" \
+            --exclude "node_modules/**" \
+            --exclude "tmp/**" \
+            --exclude ".commandcode/**" \
+            --exclude "*.log" \
+            --verbose \
+            --fast-list
+
+          echo "✅ 代码目录同步完成！"
+
+      - name: Cleanup temporary credentials
+        if: always()
+        run: |
+          rm -f /tmp/gdrive_sa.json
+          rm -rf ~/.config/rclone
