@@ -2891,7 +2891,7 @@ function renderQuestionList() {
         }
         if (hintText && sameTopicGroups.length > 0) {
             const sampleGroup = topicMap[sameTopicGroups[0]];
-            hintText.innerHTML = `<strong>举一反三智能考点提示：</strong>检测到本专题有 <strong>${sameTopicGroups.length} 组</strong> 同知识点原题（如第 ${sampleGroup.join('、')} 题【${escapeHtml(sameTopicGroups[0])}】），支持一道变式同时覆盖！`;
+            hintText.innerHTML = `<strong>举一反三智能考点提示：</strong>检测到本专题有 <strong>${sameTopicGroups.length} 组</strong> 同知识点原题（如第 ${sampleGroup.join('、')} 题【${escapeHtml(sameTopicGroups[0])}】）。`;
         }
     }
 
