@@ -1,0 +1,227 @@
+name: Backup Production Data to Google Drive
+
+# 生产环境数据定时备份到 Google Drive
+# 覆盖范围：
+#   1. MySQL 数据库（feedback 全表结构与数据，按日生成 gzip 压缩快照）
+#   2. 教学与题库材料（老师上传的 PDF、错题本与采集上传、题库数据、学生学情记录）
+#   3. 核心生产配置（config.json、db.local.php、secret_key.local.php 敏感凭据备份）
+#
+# 运行方式：
+#   - 定时触发：每天北京时间凌晨 03:30 自动执行（19:30 UTC）
+#   - 手动触发：GitHub Actions 网页控制台支持一键立即备份 (workflow_dispatch)
+#
+# 所需 Secrets（完全复用现有配置，无需新增）：
+#   - 服务器 SSH：DEPLOY_HOST, DEPLOY_PORT, DEPLOY_USER, DEPLOY_SSH_KEY
+#   - 云盘凭据：GDRIVE_RCLONE_CONFIG（个人账号）或 GDRIVE_SA_JSON + GDRIVE_FOLDER_ID（团队盘）
+
+on:
+  schedule:
+    # 每天北京时间 03:30 执行 (对应 UTC 19:30)
+    - cron: '30 19 * * *'
+  workflow_dispatch:
+    inputs:
+      retention_days:
+        description: '数据库历史备份保留天数 (默认 30 天)'
+        required: false
+        default: '30'
+
+concurrency:
+  group: production-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: Backup DB & Materials to Google Drive
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Preflight check secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          GDRIVE_RCLONE_CONFIG: ${{ secrets.GDRIVE_RCLONE_CONFIG }}
+          GDRIVE_SA_JSON: ${{ secrets.GDRIVE_SA_JSON }}
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+        run: |
+          missing=""
+          [ -z "$DEPLOY_HOST" ] && missing="$missing DEPLOY_HOST"
+          [ -z "$DEPLOY_PORT" ] && missing="$missing DEPLOY_PORT"
+          [ -z "$DEPLOY_USER" ] && missing="$missing DEPLOY_USER"
+          [ -z "$DEPLOY_SSH_KEY" ] && missing="$missing DEPLOY_SSH_KEY"
+          if [ -n "$missing" ]; then
+            echo "❌ 缺少服务器 SSH Secrets:$missing"
+            exit 1
+          fi
+
+          if [ -z "$GDRIVE_RCLONE_CONFIG" ] && { [ -z "$GDRIVE_SA_JSON" ] || [ -z "$GDRIVE_FOLDER_ID" ]; }; then
+            echo "❌ 缺少 Google Drive 凭据 Secrets (需 GDRIVE_RCLONE_CONFIG 或 GDRIVE_SA_JSON+GDRIVE_FOLDER_ID)"
+            exit 1
+          fi
+          echo "✅ 基础 Secrets 校验通过"
+
+      - name: Set up SSH key
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      - name: Install rclone
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rclone
+
+      - name: Configure rclone for Google Drive
+        env:
+          GDRIVE_RCLONE_CONFIG: ${{ secrets.GDRIVE_RCLONE_CONFIG }}
+          GDRIVE_SA_JSON: ${{ secrets.GDRIVE_SA_JSON }}
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+        run: |
+          mkdir -p ~/.config/rclone
+          if [ -n "$GDRIVE_RCLONE_CONFIG" ]; then
+            echo "$GDRIVE_RCLONE_CONFIG" > ~/.config/rclone/rclone.conf
+          else
+            echo "$GDRIVE_SA_JSON" > /tmp/gdrive_sa.json
+            cat << EOF > ~/.config/rclone/rclone.conf
+          [gdrive]
+          type = drive
+          scope = drive
+          service_account_file = /tmp/gdrive_sa.json
+          root_folder_id = $GDRIVE_FOLDER_ID
+          EOF
+          fi
+
+      - name: Prepare backup staging area
+        run: |
+          mkdir -p ./staging/database ./staging/materials ./staging/configs
+          # 生成带时区的时间戳 (北京时间 UTC+8)
+          BACKUP_TIME=$(TZ='Asia/Shanghai' date +'%Y%m%d_%H%M%S')
+          echo "BACKUP_TIME=${BACKUP_TIME}" >> $GITHUB_ENV
+          echo "📦 本次备份时间标记: ${BACKUP_TIME}"
+
+      - name: Dump MySQL database via SSH stream
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          echo "🚀 正在从生产服务器导出 MySQL 数据库..."
+          SSH="ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 $DEPLOY_USER@$DEPLOY_HOST"
+          
+          # 通过 SSH 远程调用 mysqldump 并利用 gzip 压缩流式传输回 Actions 容器
+          $SSH 'bash -s' << 'EOF' > ./staging/database/feedback_db_${BACKUP_TIME}.sql.gz
+            set -e
+            PHP_BIN=$(command -v php || echo /www/server/php/82/bin/php)
+            MYSQLDUMP=$(command -v mysqldump || echo /www/server/mysql/bin/mysqldump)
+            
+            # 动态读取生产机实际配置
+            DB_PASS=$($PHP_BIN -r '$c = @include "/www/wwwroot/JF/feedback-git/feedback-v1/api/db.local.php"; echo is_array($c) ? ($c["password"] ?? "") : "";')
+            DB_USER=$($PHP_BIN -r '$c = @include "/www/wwwroot/JF/feedback-git/feedback-v1/api/db.local.php"; echo is_array($c) ? ($c["username"] ?? "root") : "root";')
+            DB_NAME=$($PHP_BIN -r '$c = @include "/www/wwwroot/JF/feedback-git/feedback-v1/api/db.local.php"; echo is_array($c) ? ($c["dbname"] ?? "feedback") : "feedback";')
+
+            if [ -n "$DB_PASS" ]; then
+              $MYSQLDUMP -u"$DB_USER" -p"$DB_PASS" --single-transaction --quick --default-character-set=utf8mb4 "$DB_NAME" 2>/dev/null | gzip -c
+            else
+              $MYSQLDUMP -u"$DB_USER" --single-transaction --quick --default-character-set=utf8mb4 "$DB_NAME" 2>/dev/null | gzip -c
+            fi
+          EOF
+
+          # 校验导出的 SQL gzip 文件是否完整且有效
+          if [ ! -s ./staging/database/feedback_db_${BACKUP_TIME}.sql.gz ]; then
+            echo "❌ 数据库导出失败：备份文件为空！"
+            exit 1
+          fi
+          gzip -t ./staging/database/feedback_db_${BACKUP_TIME}.sql.gz
+          echo "✅ 数据库导出完成，大小: $(ls -lh ./staging/database/feedback_db_${BACKUP_TIME}.sql.gz | awk '{print $5}')"
+
+      - name: Fetch materials (PDFs & uploads) via SSH stream
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          echo "🚀 正在从生产服务器拉取老师上传的 PDF 与重要数据..."
+          SSH="ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 $DEPLOY_USER@$DEPLOY_HOST"
+
+          # 压缩打包 data 目录下的 pdfs, uploads, history, qbank 并解压到 staging 目录
+          $SSH "cd /www/wwwroot/JF/feedback-git/feedback-v1 && tar -czf - data/pdfs data/uploads data/history data/qbank 2>/dev/null || true" | tar -xzf - -C ./staging/materials/ || true
+
+          echo "✅ 材料同步就绪："
+          find ./staging/materials/ -maxdepth 2 -type d -exec ls -d {} +
+
+      - name: Backup server configurations via SSH stream
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          echo "🚀 正在拉取生产环境敏感配置 (config.json, db.local.php, secret_key.local.php)..."
+          SSH="ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 $DEPLOY_USER@$DEPLOY_HOST"
+
+          $SSH "cd /www/wwwroot/JF/feedback-git/feedback-v1 && tar -czf - config.json api/db.local.php api/secret_key.local.php 2>/dev/null || true" > ./staging/configs/feedback_configs_${BACKUP_TIME}.tar.gz
+
+          if [ -s ./staging/configs/feedback_configs_${BACKUP_TIME}.tar.gz ]; then
+            echo "✅ 生产配置归档完成，大小: $(ls -lh ./staging/configs/feedback_configs_${BACKUP_TIME}.tar.gz | awk '{print $5}')"
+          fi
+
+      - name: Upload to Google Drive via rclone
+        run: |
+          echo "☁️ 正在上传备份至 Google Drive..."
+          
+          # 1. 上传数据库快照
+          echo "📤 上传数据库备份..."
+          rclone copy ./staging/database gdrive:backup/database --verbose
+
+          # 2. 上传生产配置快照
+          if [ -s ./staging/configs/feedback_configs_${BACKUP_TIME}.tar.gz ]; then
+            echo "📤 上传生产配置备份..."
+            rclone copy ./staging/configs gdrive:backup/configs --verbose
+          fi
+
+          # 3. 增量同步教学材料与 PDF (使用 copy 策略，增量追加，不删除云盘已存历史)
+          if [ -d ./staging/materials/data/pdfs ]; then
+            echo "📤 增量同步老师上传的 PDF (data/pdfs)..."
+            rclone copy ./staging/materials/data/pdfs gdrive:backup/materials/pdfs --verbose --fast-list
+          fi
+
+          if [ -d ./staging/materials/data/uploads ]; then
+            echo "📤 增量同步上传文件与采集数据 (data/uploads)..."
+            rclone copy ./staging/materials/data/uploads gdrive:backup/materials/uploads --verbose --fast-list
+          fi
+
+          if [ -d ./staging/materials/data/history ]; then
+            echo "📤 增量同步学情档案数据 (data/history)..."
+            rclone copy ./staging/materials/data/history gdrive:backup/materials/history --verbose --fast-list
+          fi
+
+          if [ -d ./staging/materials/data/qbank ]; then
+            echo "📤 增量同步题库元数据 (data/qbank)..."
+            rclone copy ./staging/materials/data/qbank gdrive:backup/materials/qbank --verbose --fast-list
+          fi
+
+          echo "✅ 全部文件上传至 Google Drive 完毕！"
+
+      - name: Rotate old backups on Google Drive (Retention policy)
+        env:
+          RETENTION_DAYS: ${{ github.event.inputs.retention_days || '30' }}
+        run: |
+          echo "🧹 执行云盘旧备份清理策略（保留最近 ${RETENTION_DAYS} 天）..."
+          
+          # 自动清理 30 天前的旧数据库全量快照，防止撑满个人 Google One 空间
+          rclone delete gdrive:backup/database --min-age "${RETENTION_DAYS}d" --verbose || true
+          
+          # 自动清理 30 天前的旧配置快照
+          rclone delete gdrive:backup/configs --min-age "${RETENTION_DAYS}d" --verbose || true
+
+          echo "✅ 云盘过期备份轮转清理完成！"
+
+      - name: Cleanup temporary credentials & staging
+        if: always()
+        run: |
+          rm -f ~/.ssh/deploy_key /tmp/gdrive_sa.json
+          rm -rf ~/.config/rclone ./staging
+          echo "🧹 临时凭证与中转缓存已清理完毕"
