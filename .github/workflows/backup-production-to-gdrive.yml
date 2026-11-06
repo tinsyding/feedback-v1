@@ -33,7 +33,7 @@ jobs:
   backup:
     name: Backup DB & Materials to Google Drive
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Preflight check secrets
@@ -147,14 +147,17 @@ jobs:
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
-          echo "🚀 正在从生产服务器拉取老师上传的 PDF 与重要数据..."
+          echo "🚀 正在从生产服务器打包拉取老师上传的 PDF 与重要数据..."
           SSH="ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 $DEPLOY_USER@$DEPLOY_HOST"
 
-          # 压缩打包 data 目录下的 pdfs, uploads, history, qbank 并解压到 staging 目录
-          $SSH "cd /www/wwwroot/JF/feedback-git/feedback-v1 && tar -czf - data/pdfs data/uploads data/history data/qbank 2>/dev/null || true" | tar -xzf - -C ./staging/materials/ || true
+          # 压缩打包 data 目录下的 pdfs, uploads, history, qbank 为整体归档文件，避开解压数万个小文件导致 Google Drive API 超频卡死与严重超时
+          $SSH "cd /www/wwwroot/JF/feedback-git/feedback-v1 && tar -czf - data/pdfs data/uploads data/history data/qbank 2>/dev/null || true" > ./staging/materials/feedback_materials_${BACKUP_TIME}.tar.gz
 
-          echo "✅ 材料同步就绪："
-          find ./staging/materials/ -maxdepth 2 -type d -exec ls -d {} +
+          if [ -s ./staging/materials/feedback_materials_${BACKUP_TIME}.tar.gz ]; then
+            echo "✅ 材料归档完成，大小: $(ls -lh ./staging/materials/feedback_materials_${BACKUP_TIME}.tar.gz | awk '{print $5}')"
+          else
+            echo "⚠️ 警告：材料归档为空或不存在"
+          fi
 
       - name: Backup server configurations via SSH stream
         env:
@@ -185,25 +188,10 @@ jobs:
             rclone copy ./staging/configs gdrive:backup/configs --verbose
           fi
 
-          # 3. 增量同步教学材料与 PDF (使用 copy 策略，增量追加，不删除云盘已存历史)
-          if [ -d ./staging/materials/data/pdfs ]; then
-            echo "📤 增量同步老师上传的 PDF (data/pdfs)..."
-            rclone copy ./staging/materials/data/pdfs gdrive:backup/materials/pdfs --verbose --fast-list
-          fi
-
-          if [ -d ./staging/materials/data/uploads ]; then
-            echo "📤 增量同步上传文件与采集数据 (data/uploads)..."
-            rclone copy ./staging/materials/data/uploads gdrive:backup/materials/uploads --verbose --fast-list
-          fi
-
-          if [ -d ./staging/materials/data/history ]; then
-            echo "📤 增量同步学情档案数据 (data/history)..."
-            rclone copy ./staging/materials/data/history gdrive:backup/materials/history --verbose --fast-list
-          fi
-
-          if [ -d ./staging/materials/data/qbank ]; then
-            echo "📤 增量同步题库元数据 (data/qbank)..."
-            rclone copy ./staging/materials/data/qbank gdrive:backup/materials/qbank --verbose --fast-list
+          # 3. 上传教学材料与 PDF 归档快照（整包上传，单文件流式高速传输，避开 Google Drive 离散文件 QPS 瓶颈）
+          if [ -s ./staging/materials/feedback_materials_${BACKUP_TIME}.tar.gz ]; then
+            echo "📤 上传教学材料与 PDF 归档快照 (feedback_materials_${BACKUP_TIME}.tar.gz)..."
+            rclone copy ./staging/materials gdrive:backup/materials --verbose --drive-chunk-size 64M --drive-upload-cutoff 64M
           fi
 
           echo "✅ 全部文件上传至 Google Drive 完毕！"
@@ -219,6 +207,9 @@ jobs:
           
           # 自动清理 30 天前的旧配置快照
           rclone delete gdrive:backup/configs --min-age "${RETENTION_DAYS}d" --verbose || true
+
+          # 自动清理 30 天前的旧材料归档快照
+          rclone delete gdrive:backup/materials --min-age "${RETENTION_DAYS}d" --verbose || true
 
           echo "✅ 云盘过期备份轮转清理完成！"
 

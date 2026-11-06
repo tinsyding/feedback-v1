@@ -14,7 +14,10 @@ on:
     paths-ignore:
       - 'docs/**'
       - '**/*.md'
-      - '.github/workflows/apply-nginx-hardening.yml'
+      - '.github/**'
+      - '.gitignore'
+      - '.gitattributes'
+      - '_scan.py'
   workflow_dispatch: # 支持在 GitHub 网页界面手动点击一键触发
 
 concurrency:
@@ -29,7 +32,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Preflight check secrets
         env:

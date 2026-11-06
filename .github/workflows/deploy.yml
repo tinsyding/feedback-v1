@@ -118,3 +118,9 @@ jobs:
           check "https://feedback.wxjifang.cn/css/tokens.css"
           check "https://feedback.wxjifang.cn/js/upload.js"
           check "https://vip.wxjifang.cn/retest.html"
+
+      - name: Cleanup temporary credentials
+        if: always()
+        run: |
+          rm -f ~/.ssh/deploy_key
+          echo "🧹 临时部署私钥已清理完毕"

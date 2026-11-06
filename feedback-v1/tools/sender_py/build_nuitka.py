@@ -107,6 +107,9 @@ def build_standalone(paths):
         "--nofollow-import-to=unittest",
         "--nofollow-import-to=test",
         "--include-package-data=rapidocr_onnxruntime",
+        # 编译加速：多核并行编译 + 禁用 MSVC 耗时极长且提升微弱的全程序 LTO 链接优化
+        "--jobs=4",
+        "--lto=no",
         # 静态资源双向挂载
         f"--include-data-files={paths['favicon']}=favicon.ico",
         f"--include-data-files={paths['favicon']}=sender_py/favicon.ico",
@@ -181,6 +184,9 @@ def build_onefile(paths):
         "--nofollow-import-to=unittest",
         "--nofollow-import-to=test",
         "--include-package-data=rapidocr_onnxruntime",
+        # 编译加速：多核并行编译 + 禁用 MSVC 耗时极长且提升微弱的全程序 LTO 链接优化
+        "--jobs=4",
+        "--lto=no",
         # 静态资源双向挂载
         f"--include-data-files={paths['favicon']}=favicon.ico",
         f"--include-data-files={paths['favicon']}=sender_py/favicon.ico",

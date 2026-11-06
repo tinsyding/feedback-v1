@@ -56,3 +56,9 @@ jobs:
           SSH="ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 $DEPLOY_USER@$DEPLOY_HOST"
           $SSH "cd /www/wwwroot/JF/feedback-git && git pull --ff-only"
           $SSH "bash /www/wwwroot/JF/feedback-git/feedback-v1/scripts/install_nginx_hardening.sh"
+
+      - name: Cleanup temporary credentials
+        if: always()
+        run: |
+          rm -f ~/.ssh/deploy_key
+          echo "🧹 临时部署私钥已清理完毕"
