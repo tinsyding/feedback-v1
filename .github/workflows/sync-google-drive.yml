@@ -1,9 +1,12 @@
 name: Sync to Google Drive
 
 # 代码变更自动同步到 Google Drive 备份目录
-# 所需 Secrets（仓库 Settings → Secrets and variables → Actions → New repository secret）：
-#   GDRIVE_SA_JSON       Google Cloud 服务账号 JSON 密钥全文
-#   GDRIVE_FOLDER_ID     Google Drive 目标备份文件夹的 ID（URL 中 folders/ 后的字符串）
+# 支持两种凭证（二选一，个人 Google One 会员推荐方式 1）：
+#   方式 1（个人账号推荐）：
+#     GDRIVE_RCLONE_CONFIG  个人授权生成的 rclone.conf 全文（直接使用您的会员存储空间）
+#   方式 2（企业/团队盘）：
+#     GDRIVE_SA_JSON        Google Cloud 服务账号 JSON 密钥
+#     GDRIVE_FOLDER_ID      Google Drive 目标备份文件夹 ID
 
 on:
   push:
@@ -30,18 +33,19 @@ jobs:
 
       - name: Preflight check secrets
         env:
+          GDRIVE_RCLONE_CONFIG: ${{ secrets.GDRIVE_RCLONE_CONFIG }}
           GDRIVE_SA_JSON: ${{ secrets.GDRIVE_SA_JSON }}
           GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
         run: |
-          missing=""
-          [ -z "$GDRIVE_SA_JSON" ] && missing="$missing GDRIVE_SA_JSON"
-          [ -z "$GDRIVE_FOLDER_ID" ] && missing="$missing GDRIVE_FOLDER_ID"
-          if [ -n "$missing" ]; then
-            echo "❌ 缺少必要的 GitHub Secrets:$missing"
-            echo "请前往 GitHub 仓库: Settings → Secrets and variables → Actions → New repository secret 添加。"
+          if [ -n "$GDRIVE_RCLONE_CONFIG" ]; then
+            echo "✅ 检测到个人 OAuth 授权配置 (GDRIVE_RCLONE_CONFIG)，将直接使用您的个人会员空间同步"
+          elif [ -n "$GDRIVE_SA_JSON" ] && [ -n "$GDRIVE_FOLDER_ID" ]; then
+            echo "✅ 检测到服务账号配置 (GDRIVE_SA_JSON)"
+          else
+            echo "❌ 缺少必要的 GitHub Secrets!"
+            echo "个人会员账号请在仓库添加 Secret: GDRIVE_RCLONE_CONFIG"
             exit 1
           fi
-          echo "✅ Secrets 预检通过"
 
       - name: Install rclone
         run: |
@@ -50,19 +54,23 @@ jobs:
 
       - name: Configure rclone for Google Drive
         env:
+          GDRIVE_RCLONE_CONFIG: ${{ secrets.GDRIVE_RCLONE_CONFIG }}
           GDRIVE_SA_JSON: ${{ secrets.GDRIVE_SA_JSON }}
           GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
         run: |
           mkdir -p ~/.config/rclone
-          echo "$GDRIVE_SA_JSON" > /tmp/gdrive_sa.json
-
-          cat << EOF > ~/.config/rclone/rclone.conf
+          if [ -n "$GDRIVE_RCLONE_CONFIG" ]; then
+            echo "$GDRIVE_RCLONE_CONFIG" > ~/.config/rclone/rclone.conf
+          else
+            echo "$GDRIVE_SA_JSON" > /tmp/gdrive_sa.json
+            cat << EOF > ~/.config/rclone/rclone.conf
           [gdrive]
           type = drive
           scope = drive
           service_account_file = /tmp/gdrive_sa.json
           root_folder_id = $GDRIVE_FOLDER_ID
           EOF
+          fi
 
       - name: Sync code tree to Google Drive
         run: |
