@@ -1807,7 +1807,8 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 const qBadgeSpec = buildQuestionBadgeSpec(qItem, qWeek, qTopic);
 
                 try {
-                    const pdfBytes = await fetch(targetUrl).then(res => {
+                    const fetchUrl = targetUrl + (targetUrl.includes('?') ? '&' : '?') + 't=' + (window.retestCacheVersion || Date.now());
+                    const pdfBytes = await fetch(fetchUrl, { cache: 'no-cache' }).then(res => {
                         if (!res.ok) throw new Error('Fetch failed');
                         return res.arrayBuffer();
                     });
