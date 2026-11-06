@@ -116,9 +116,9 @@ jobs:
           
           # 通过 SSH 远程调用 mysqldump 并利用 gzip 压缩流式传输回 Actions 容器
           $SSH 'bash -s' << 'EOF' > ./staging/database/feedback_db_${BACKUP_TIME}.sql.gz
-            set -e
+            set -eo pipefail
             PHP_BIN=$(if [ -x /www/server/php/82/bin/php ]; then echo /www/server/php/82/bin/php; else command -v php; fi)
-            MYSQLDUMP=$(command -v mysqldump || echo /www/server/mysql/bin/mysqldump)
+            MYSQLDUMP=$(if [ -x /www/server/mysql/bin/mysqldump ]; then echo /www/server/mysql/bin/mysqldump; else command -v mysqldump; fi)
             
             # 动态读取生产机实际配置
             DB_PASS=$($PHP_BIN -r '$c = @include "/www/wwwroot/JF/feedback-git/feedback-v1/api/db.local.php"; echo is_array($c) ? ($c["password"] ?? "") : "";')
@@ -126,15 +126,16 @@ jobs:
             DB_NAME=$($PHP_BIN -r '$c = @include "/www/wwwroot/JF/feedback-git/feedback-v1/api/db.local.php"; echo is_array($c) ? ($c["dbname"] ?? "feedback") : "feedback";')
 
             if [ -n "$DB_PASS" ]; then
-              $MYSQLDUMP -u"$DB_USER" -p"$DB_PASS" --single-transaction --quick --default-character-set=utf8mb4 "$DB_NAME" 2>/dev/null | gzip -c
+              $MYSQLDUMP -u"$DB_USER" -p"$DB_PASS" --single-transaction --quick --default-character-set=utf8mb4 "$DB_NAME" | gzip -c
             else
-              $MYSQLDUMP -u"$DB_USER" --single-transaction --quick --default-character-set=utf8mb4 "$DB_NAME" 2>/dev/null | gzip -c
+              $MYSQLDUMP -u"$DB_USER" --single-transaction --quick --default-character-set=utf8mb4 "$DB_NAME" | gzip -c
             fi
           EOF
 
-          # 校验导出的 SQL gzip 文件是否完整且有效
-          if [ ! -s ./staging/database/feedback_db_${BACKUP_TIME}.sql.gz ]; then
-            echo "❌ 数据库导出失败：备份文件为空！"
+          # 校验导出的 SQL gzip 文件是否完整且有效（必须大于 200 字节，防止 mysqldump 失败时输出仅 20 字节空 gzip 假象）
+          FILE_SIZE=$(wc -c < ./staging/database/feedback_db_${BACKUP_TIME}.sql.gz || echo 0)
+          if [ "$FILE_SIZE" -le 200 ]; then
+            echo "❌ 数据库导出失败：备份文件为空或仅含 gzip 空文件头 (大小: ${FILE_SIZE} bytes)！"
             exit 1
           fi
           gzip -t ./staging/database/feedback_db_${BACKUP_TIME}.sql.gz

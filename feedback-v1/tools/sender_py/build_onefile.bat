@@ -30,7 +30,7 @@ if errorlevel 1 goto :pip_error
 python -m pip install pyinstaller
 
 rem 确保生成 16~256px 多尺寸高清 ICO，保证任务栏与标题栏高清显示公司 Logo
-python -c "from PIL import Image; im=Image.open(r'%FAVICON%'); im.save(r'%FAVICON%', format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])" >nul 2>&1
+python -c "from PIL import Image; im=Image.open(r'%FAVICON%'); img=im.copy(); im.close(); img.save(r'%FAVICON%', format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])" >nul 2>&1
 
 echo.
 echo [2/2] 正在打包【极方每周反馈程序 Web版】(单文件 exe)...

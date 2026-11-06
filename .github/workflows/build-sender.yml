@@ -158,7 +158,7 @@ jobs:
           mkdir -p dist dist_dir
 
           # 确保 ICO 包含 16~256px 多尺寸高清位图
-          python -c "from PIL import Image; im=Image.open('feedback-v1/favicon.ico'); im.save('feedback-v1/favicon.ico', format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])" || true
+          python -c "from PIL import Image; im=Image.open('feedback-v1/favicon.ico'); img=im.copy(); im.close(); img.save('feedback-v1/favicon.ico', format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])" || true
 
           # 极方每周反馈程序 Web 文件夹版（主线版本）
           python -m PyInstaller --noconfirm --clean --noupx --windowed --onedir \

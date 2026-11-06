@@ -61,8 +61,9 @@ def ensure_multisize_icon(favicon_path):
             return
         with Image.open(favicon_path) as im:
             sizes = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
-            im.save(favicon_path, format="ICO", sizes=sizes)
-            print(f"[Icon 优化] 已优化为 16~256px 多分辨率 ICO 图标: {favicon_path}")
+            img = im.copy()
+        img.save(favicon_path, format="ICO", sizes=sizes)
+        print(f"[Icon 优化] 已优化为 16~256px 多分辨率 ICO 图标: {favicon_path}")
     except Exception as exc:
         print(f"[Icon 优化] 跳过多分辨率注入 ({exc})")
 
