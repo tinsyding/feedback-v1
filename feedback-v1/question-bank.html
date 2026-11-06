@@ -487,6 +487,19 @@
                                 <span><strong>预习错题本提示：</strong>知识点为<strong>选填项</strong>。填写后可在学情反馈及错题本中呈现薄弱考点；若不填写，错题本将以<strong>题号</strong>呈现，不影响学生重练。</span>
                             </div>
 
+                            <!-- 举一反三同考点共享变式提示横条 (当 bankType === 'variation' 时展示) -->
+                            <div class="qb-preview-hint-banner qb-variation-hint-banner" id="qb-variation-hint-banner" style="display: none;">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
+                                </svg>
+                                <div style="flex:1; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+                                    <span id="qb-variation-hint-text"><strong>举一反三智能考点提示：</strong>支持一道变式题同时关联多道同考点原题。学生做错同考点任一题或多题时，错题本均自动输出该变式且仅练一次。</span>
+                                    <button type="button" class="btn sm secondary" id="qb-merge-same-topic-btn" onclick="mergeAllSameTopicVariations()" style="font-size:0.75rem; padding:3px 10px; display:none;">
+                                        ⚡ 一键关联同考点原题
+                                    </button>
+                                </div>
+                            </div>
+
                             <div class="question-list-header">
                                 <div class="question-list-actions">
                                     <button class="btn sm" onclick="addQuestion()">

@@ -864,11 +864,24 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         const subjectPart = [weekPart, topicText].filter(Boolean).join(' · ');
 
         if (isVariation) {
-            const tagText = parentNum
-                ? ('第' + parentNum + '题·变式' + subNum + (variationTotal > 0 ? ('/' + variationTotal) : ''))
+            const subNum = parseInt(item.subNum, 10) || 1;
+            const parentNum = parseInt(item.parentNum || item.errorNum, 10) || 0;
+            const matchedParentNums = Array.isArray(item.matchedParentNums) && item.matchedParentNums.length > 0
+                ? item.matchedParentNums
+                : (Array.isArray(item.parentNums) && item.parentNums.length > 0 ? item.parentNums : (parentNum ? [parentNum] : []));
+            const parentLabel = matchedParentNums.length > 1
+                ? ('第' + matchedParentNums.join('、') + '题')
+                : (matchedParentNums.length === 1 ? ('第' + matchedParentNums[0] + '题') : (parentNum ? ('第' + parentNum + '题') : ''));
+
+            const tagText = parentLabel
+                ? (parentLabel + '·变式' + subNum + (variationTotal > 0 ? ('/' + variationTotal) : ''))
                 : ('变式' + subNum);
             const contentParts = ['举一反三 · 同类题'];
-            if (parentNum) contentParts.push('对应第' + parentNum + '题');
+            if (matchedParentNums.length > 1) {
+                contentParts.push('综合巩固第' + matchedParentNums.join('、') + '题');
+            } else if (parentLabel) {
+                contentParts.push('对应' + parentLabel);
+            }
             return { tagText, contentText: contentParts.join(' · '), theme: 'variation' };
         }
 
@@ -1324,10 +1337,26 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                     if (url) {
                         const actualSourceType = (sourceType === 'preview') ? 'preview' : (p.sourceType || sourceType);
                         const isVar = actualSourceType === 'variation' || Boolean(p.isVariation);
+
+                        let pNums = [];
+                        if (Array.isArray(p.matchedParentNums) && p.matchedParentNums.length > 0) {
+                            pNums = p.matchedParentNums.map(parseQNum).filter(n => n > 0);
+                        } else if (Array.isArray(p.parentNums) && p.parentNums.length > 0) {
+                            pNums = p.parentNums.map(parseQNum).filter(n => n > 0);
+                        } else if (typeof p.parent_question_nums === 'string' && p.parent_question_nums) {
+                            pNums = p.parent_question_nums.split(',').map(parseQNum).filter(n => n > 0);
+                        }
+                        const pNum = parseQNum(p.parentNum || p.parent_question_num || p.errorNum);
+                        if (pNums.length === 0 && pNum > 0) {
+                            pNums = [pNum];
+                        }
+
                         validItems.push({
                             url: url,
                             errorNum: parseQNum(p.errorNum),
-                            parentNum: parseQNum(p.parentNum || p.parent_question_num || p.errorNum),
+                            parentNum: pNum,
+                            parentNums: pNums,
+                            matchedParentNums: pNums,
                             subNum: p.subNum || 1,
                             videoUrl: p.videoUrl || p.video_url || '',
                             topic: p.topic || '',
@@ -1392,7 +1421,17 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                     if (!item.isVariation) {
                         group.originalItems.push(item);
                     } else {
-                        group.variationItems.push(item);
+                        // 同一考点组内变式按 url 去重并合并关联原题
+                        const existingVar = group.variationItems.find(v => v.url === item.url);
+                        if (existingVar) {
+                            const mergedPNums = Array.from(new Set(
+                                (existingVar.parentNums || []).concat(item.parentNums || [])
+                            )).sort((a, b) => a - b);
+                            existingVar.parentNums = mergedPNums;
+                            existingVar.matchedParentNums = mergedPNums;
+                        } else {
+                            group.variationItems.push(item);
+                        }
                     }
                 });
 
@@ -1410,37 +1449,39 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                     // 原题排序
                     group.originalItems.sort((a, b) => a.parentNum - b.parentNum);
 
+                    // 计算组内各变式命中的原题
+                    group.variationItems.forEach(v => {
+                        const allP = Array.isArray(v.parentNums) && v.parentNums.length > 0 ? v.parentNums : [v.parentNum];
+                        const matched = allP.filter(p => parentNums.includes(p));
+                        v.matchedParentNums = matched.length > 0 ? matched : (allP.length > 0 ? allP : [v.parentNum]);
+                    });
+
                     // 变式题排序
                     group.variationItems.sort((a, b) => {
-                        const pDiff = a.parentNum - b.parentNum;
+                        const pA = Array.isArray(a.matchedParentNums) && a.matchedParentNums.length > 0 ? a.matchedParentNums[0] : a.parentNum;
+                        const pB = Array.isArray(b.matchedParentNums) && b.matchedParentNums.length > 0 ? b.matchedParentNums[0] : b.parentNum;
+                        const pDiff = pA - pB;
                         if (pDiff !== 0) return pDiff;
                         return (a.subNum || 1) - (b.subNum || 1);
                     });
 
-                    // 计算每道原题各自拥有的变式题总数与最大学号
-                    const variationTotalByParent = new Map();
-                    const variationCountByParent = new Map();
-                    group.variationItems.forEach(v => {
-                        const p = v.parentNum;
-                        const s = parseInt(v.subNum, 10) || 1;
-                        variationTotalByParent.set(p, Math.max(variationTotalByParent.get(p) || 0, s));
-                        variationCountByParent.set(p, (variationCountByParent.get(p) || 0) + 1);
-                    });
+                    // 计算变式总数（多题共享考点下统一展示该考点的总变式数）
+                    const totalVariationsInGroup = group.variationItems.length;
 
                     // 组内所有条目：原题全部在前，同类题全部在后！
                     const groupItems = group.originalItems.concat(group.variationItems);
                     if (groupItems.length === 0) return;
 
-                    const totalVariationsInGroup = group.variationItems.length;
-
                     groupItems.forEach((item, idx) => {
                         const pNum = item.parentNum;
-                        const varTotal = variationTotalByParent.get(pNum) || 0;
-                        const varCount = variationCountByParent.get(pNum) || 0;
+                        const varTotal = totalVariationsInGroup;
+                        const varCount = totalVariationsInGroup;
 
                         pdfsToMerge.push({
                             ...item,
                             parentNum: pNum,
+                            parentNums: item.parentNums || [pNum],
+                            matchedParentNums: item.matchedParentNums || [pNum],
                             clusterTopic: group.topic,
                             variationTotal: varTotal,
                             variationCount: varCount,
@@ -1452,8 +1493,8 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             isGroupStart: idx === 0,
                             isGroupEnd: idx === groupItems.length - 1,
                             // 单题的开始与结束（供作答区与二维码判断）
-                            isClusterStart: idx === 0 || groupItems[idx - 1].parentNum !== pNum || groupItems[idx - 1].isVariation !== item.isVariation || groupItems[idx - 1].subNum !== item.subNum,
-                            isClusterEnd: idx === groupItems.length - 1 || groupItems[idx + 1].parentNum !== pNum || groupItems[idx + 1].isVariation !== item.isVariation || groupItems[idx + 1].subNum !== item.subNum
+                            isClusterStart: idx === 0 || groupItems[idx - 1].url !== item.url || groupItems[idx - 1].isVariation !== item.isVariation,
+                            isClusterEnd: idx === groupItems.length - 1 || groupItems[idx + 1].url !== item.url || groupItems[idx + 1].isVariation !== item.isVariation
                         });
                     });
                 });
@@ -1801,8 +1842,14 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             headerInfo = generateQuestionTopicBadge(qBadgeSpec, bannerW);
                             headerGap = QUESTION_TOPIC_BANNER_GAP;
                         } else {
+                            const matchedParents = Array.isArray(qItem.matchedParentNums) && qItem.matchedParentNums.length > 0
+                                ? qItem.matchedParentNums
+                                : (Array.isArray(qItem.parentNums) && qItem.parentNums.length > 0 ? qItem.parentNums : (qParentNum ? [qParentNum] : []));
+                            const parentStr = matchedParents.length > 1
+                                ? ('第' + matchedParents.join('、') + '题')
+                                : (matchedParents.length === 1 ? ('第' + matchedParents[0] + '题') : ('第' + qParentNum + '题'));
                             const runningLabel = qIsVariation
-                                ? ('第' + qParentNum + '题 · 变式' + qSubNum + (qVariationTotal > 0 ? ('/' + qVariationTotal) : '') + '（续）')
+                                ? (parentStr + ' · 变式' + qSubNum + (qVariationTotal > 0 ? ('/' + qVariationTotal) : '') + '（续）')
                                 : (qSourceType === 'preview'
                                     ? ('第' + qParentNum + '题 · 预习（续）')
                                     : ('第' + qParentNum + '题 · 原题（续）'));

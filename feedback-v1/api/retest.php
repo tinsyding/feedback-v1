@@ -144,7 +144,19 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
             $varMap = [];
             if ($bankType === 'homework') {
                 try {
-                    $varWhereParts = ["`bank_type` = 'variation'", "`subject` = ?", "`grade` = ?", "`tier` = ?", "`week` = ?", "`parent_question_num` IN ({$inNums})"];
+                    $findInSetClauses = [];
+                    foreach ($errorNums as $errNum) {
+                        $errInt = intval($errNum);
+                        if ($errInt > 0) {
+                            $findInSetClauses[] = "FIND_IN_SET('{$errInt}', `parent_question_nums`) > 0";
+                        }
+                    }
+                    $matchClause = "`parent_question_num` IN ({$inNums})";
+                    if (!empty($findInSetClauses)) {
+                        $matchClause = "({$matchClause} OR " . implode(' OR ', $findInSetClauses) . ")";
+                    }
+
+                    $varWhereParts = ["`bank_type` = 'variation'", "`subject` = ?", "`grade` = ?", "`tier` = ?", "`week` = ?", $matchClause];
                     $varParams = [$subject, $grade, $tier, intval($weekNum)];
                     if ($year) {
                         $varWhereParts[] = "`year` = ?";
@@ -155,16 +167,35 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                         $varParams[] = $season;
                         $varParams[] = $seasonMap[$season] ?? $season;
                     }
-                    $varSql = "SELECT `parent_question_num`, `sub_num`, `topic`, `exercise_pdf`, `answer_pdf`
+                    $varSql = "SELECT `id`, `parent_question_num`, `parent_question_nums`, `sub_num`, `topic`, `exercise_pdf`, `answer_pdf`
                                FROM `qbank_questions`
                                WHERE " . implode(' AND ', $varWhereParts) . "
                                ORDER BY `parent_question_num` ASC, `sub_num` ASC, `id` ASC";
                     $varRows = $db->fetchAll($varSql, $varParams);
                     if (!empty($varRows)) {
+                        $errInts = array_map('intval', $errorNums);
                         foreach ($varRows as $vr) {
                             $pNum = intval($vr['parent_question_num']);
-                            if (!isset($varMap[$pNum])) $varMap[$pNum] = [];
-                            $varMap[$pNum][] = $vr;
+                            $rawNumsStr = $vr['parent_question_nums'] ?? '';
+                            $allParentNums = !empty($rawNumsStr)
+                                ? array_values(array_unique(array_filter(array_map('intval', explode(',', $rawNumsStr)))))
+                                : ($pNum > 0 ? [$pNum] : []);
+                            if (empty($allParentNums) && $pNum > 0) {
+                                $allParentNums = [$pNum];
+                            }
+                            // 计算该变式命中的错题号
+                            $matchedParents = array_values(array_intersect($allParentNums, $errInts));
+                            sort($matchedParents);
+                            if (empty($matchedParents) && in_array($pNum, $errInts, true)) {
+                                $matchedParents = [$pNum];
+                            }
+                            $vr['parent_nums'] = $allParentNums;
+                            $vr['matched_parent_nums'] = $matchedParents;
+
+                            foreach ($matchedParents as $mParent) {
+                                if (!isset($varMap[$mParent])) $varMap[$mParent] = [];
+                                $varMap[$mParent][] = $vr;
+                            }
                         }
                     }
                 } catch (Throwable $varErr) {
@@ -202,6 +233,9 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                             if ($vExUrl && !isset($uniquePdfs[$vExUrl])) {
                                 $pdfList[] = [
                                     'errorNum' => $errNum,
+                                    'parentNum' => $qNum,
+                                    'parentNums' => $vRow['parent_nums'] ?? [$qNum],
+                                    'matchedParentNums' => $vRow['matched_parent_nums'] ?? [$qNum],
                                     'subNum' => intval($vRow['sub_num'] ?? 1),
                                     'topic' => $vRow['topic'] ?? '',
                                     'videoUrl' => null,

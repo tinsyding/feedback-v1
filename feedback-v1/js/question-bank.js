@@ -385,6 +385,10 @@ function updateBankTypeUi() {
     if (previewHintBanner) {
         previewHintBanner.style.display = type === 'preview' ? 'flex' : 'none';
     }
+    const variationHintBanner = document.getElementById('qb-variation-hint-banner');
+    if (variationHintBanner) {
+        variationHintBanner.style.display = type === 'variation' ? 'flex' : 'none';
+    }
 }
 
 function onBankTypeChange() {
@@ -726,10 +730,17 @@ function recalcVariationSubNums(questions = currentQuestions) {
     const counts = {};
     questions.forEach((q, idx) => {
         q.id = idx + 1;
-        const pNum = parseInt(q.parentQuestionNum, 10) || 1;
-        q.parentQuestionNum = pNum;
-        counts[pNum] = (counts[pNum] || 0) + 1;
-        q.subNum = counts[pNum];
+        if (Array.isArray(q.parentQuestionNums) && q.parentQuestionNums.length > 0) {
+            q.parentQuestionNums = Array.from(new Set(q.parentQuestionNums.map(n => parseInt(n, 10)).filter(n => n > 0))).sort((a, b) => a - b);
+            q.parentQuestionNum = q.parentQuestionNums[0];
+        } else {
+            const pNum = parseInt(q.parentQuestionNum, 10) || 1;
+            q.parentQuestionNum = pNum;
+            q.parentQuestionNums = [pNum];
+        }
+        const pKey = q.parentQuestionNums.join(',');
+        counts[pKey] = (counts[pKey] || 0) + 1;
+        q.subNum = counts[pKey];
     });
 }
 
@@ -739,16 +750,113 @@ function onVariationParentChange(index, parentNum) {
     const pNum = parseInt(parentNum, 10);
     if (!pNum || pNum <= 0) return;
 
-    q.parentQuestionNum = pNum;
+    let pNums = Array.isArray(q.parentQuestionNums) && q.parentQuestionNums.length > 0
+        ? [...q.parentQuestionNums]
+        : [parseInt(q.parentQuestionNum || 1, 10)];
+
     const hwQ = (homeworkQuestionsForVariation || []).find(item => Number(item.id) === pNum);
-    if (hwQ && hwQ.topic) {
+    const cleanTopicStr = t => String(t || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
+    const isSameTopic = hwQ && cleanTopicStr(hwQ.topic) === cleanTopicStr(q.topic);
+
+    if (pNums.includes(pNum)) {
+        if (pNums.length > 1) {
+            pNums = pNums.filter(n => n !== pNum);
+        } else {
+            return;
+        }
+    } else {
+        if (isSameTopic && q.topic) {
+            pNums.push(pNum);
+        } else {
+            pNums = [pNum];
+            if (hwQ && hwQ.topic) {
+                q.topic = hwQ.topic.trim();
+            }
+        }
+    }
+
+    pNums = Array.from(new Set(pNums)).sort((a, b) => a - b);
+    q.parentQuestionNums = pNums;
+    q.parentQuestionNum = pNums[0];
+
+    if (!q.topic && hwQ && hwQ.topic) {
         q.topic = hwQ.topic.trim();
     }
+
     recalcVariationSubNums(currentQuestions);
     isDirty = true;
     renderQuestionList();
     updateStatus();
 }
+window.onVariationParentChange = onVariationParentChange;
+
+function onVariationMergeSameTopic(index) {
+    if (index < 0 || index >= currentQuestions.length) return;
+    const q = currentQuestions[index];
+    const cleanTopicStr = t => String(t || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
+    const curTopicClean = cleanTopicStr(q.topic);
+    if (!curTopicClean) return;
+
+    let pNums = Array.isArray(q.parentQuestionNums) && q.parentQuestionNums.length > 0
+        ? [...q.parentQuestionNums]
+        : [parseInt(q.parentQuestionNum || 1, 10)];
+
+    (homeworkQuestionsForVariation || []).forEach(hw => {
+        const p = parseInt(hw.id, 10);
+        if (p > 0 && cleanTopicStr(hw.topic) === curTopicClean) {
+            if (!pNums.includes(p)) {
+                pNums.push(p);
+            }
+        }
+    });
+
+    pNums = Array.from(new Set(pNums)).sort((a, b) => a - b);
+    q.parentQuestionNums = pNums;
+    q.parentQuestionNum = pNums[0];
+
+    recalcVariationSubNums(currentQuestions);
+    isDirty = true;
+    renderQuestionList();
+    updateStatus();
+    showToast(`已关联同考点所有原题（第 ${pNums.join('、')} 题）`, 'success');
+}
+window.onVariationMergeSameTopic = onVariationMergeSameTopic;
+
+function mergeAllSameTopicVariations() {
+    if (getBankType() !== 'variation' || !Array.isArray(currentQuestions) || currentQuestions.length === 0) return;
+    const cleanTopicStr = t => String(t || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
+    let mergedCount = 0;
+
+    currentQuestions.forEach(q => {
+        const curTopic = cleanTopicStr(q.topic);
+        if (!curTopic) return;
+        const matchedHwNums = (homeworkQuestionsForVariation || [])
+            .filter(hw => cleanTopicStr(hw.topic) === curTopic)
+            .map(hw => parseInt(hw.id, 10))
+            .filter(n => n > 0);
+
+        if (matchedHwNums.length > 1) {
+            const currentNums = Array.isArray(q.parentQuestionNums) ? q.parentQuestionNums : [parseInt(q.parentQuestionNum || 1, 10)];
+            const newNums = Array.from(new Set(currentNums.concat(matchedHwNums))).sort((a, b) => a - b);
+            if (newNums.length > currentNums.length) {
+                q.parentQuestionNums = newNums;
+                q.parentQuestionNum = newNums[0];
+                mergedCount++;
+            }
+        }
+    });
+
+    if (mergedCount > 0) {
+        recalcVariationSubNums(currentQuestions);
+        isDirty = true;
+        renderQuestionList();
+        updateStatus();
+        showToast(`已为 ${mergedCount} 道变式题自动扩展关联同考点原题`, 'success');
+    } else {
+        showToast('当前变式题已完整关联同考点原题', 'info');
+    }
+}
+window.mergeAllSameTopicVariations = mergeAllSameTopicVariations;
 window.onVariationParentChange = onVariationParentChange;
 
 async function onHoverHomeworkPreview(event, parentNum) {
@@ -2399,6 +2507,7 @@ function addQuestion() {
         currentQuestions.push({
             id: nextId,
             parentQuestionNum: pNum,
+            parentQuestionNums: [pNum],
             subNum: 1,
             topic: inheritedTopic,
             videoUrl: ''
@@ -2735,7 +2844,8 @@ function renderQuestionList() {
         const idStr = String(q.id).toLowerCase();
         const topicStr = (q.topic || '').toLowerCase();
         const videoStr = (isPreviewBank || isVariationBank) ? '' : (q.videoUrl || q.video_url || '').toLowerCase();
-        const varStr = (q.parentQuestionNum ? `第${q.parentQuestionNum}题 变式${q.subNum || 1}` : '').toLowerCase();
+        const parentLabelStr = Array.isArray(q.parentQuestionNums) && q.parentQuestionNums.length > 0 ? q.parentQuestionNums.join('、') : (q.parentQuestionNum || '');
+        const varStr = (parentLabelStr ? `第${parentLabelStr}题 变式${q.subNum || 1}` : '').toLowerCase();
         return idStr.includes(questionSearchFilter) || topicStr.includes(questionSearchFilter) || videoStr.includes(questionSearchFilter) || varStr.includes(questionSearchFilter);
     });
 
@@ -2763,36 +2873,69 @@ function renderQuestionList() {
                 variationBuckets.push({ parentNum: k, topic: '', exercisePdf: null });
             }
         }
+
+        const cleanTopicStr = t => String(t || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
+        const topicMap = {};
+        (homeworkQuestionsForVariation || []).forEach(hw => {
+            const ct = cleanTopicStr(hw.topic);
+            if (ct) {
+                if (!topicMap[ct]) topicMap[ct] = [];
+                topicMap[ct].push(parseInt(hw.id, 10));
+            }
+        });
+        const sameTopicGroups = Object.keys(topicMap).filter(k => topicMap[k].length > 1);
+        const mergeBtn = document.getElementById('qb-merge-same-topic-btn');
+        const hintText = document.getElementById('qb-variation-hint-text');
+        if (mergeBtn) {
+            mergeBtn.style.display = sameTopicGroups.length > 0 && !isAssistant ? 'inline-flex' : 'none';
+        }
+        if (hintText && sameTopicGroups.length > 0) {
+            const sampleGroup = topicMap[sameTopicGroups[0]];
+            hintText.innerHTML = `<strong>举一反三智能考点提示：</strong>检测到本专题有 <strong>${sameTopicGroups.length} 组</strong> 同知识点原题（如第 ${sampleGroup.join('、')} 题【${escapeHtml(sameTopicGroups[0])}】），支持一道变式同时覆盖！`;
+        }
     }
 
     filtered.forEach(({ q, originalIndex }) => {
         const item = document.createElement('div');
         item.className = 'question-item' + (isAssistant ? ' readonly-item' : '');
         item.dataset.index = originalIndex;
-        const parentNum = parseInt(q.parentQuestionNum || q.id, 10) || 1;
+        const parentNums = Array.isArray(q.parentQuestionNums) && q.parentQuestionNums.length > 0
+            ? q.parentQuestionNums
+            : [parseInt(q.parentQuestionNum || q.id, 10) || 1];
+        const primaryParentNum = parentNums[0] || 1;
         const subNum = parseInt(q.subNum, 10) || 1;
+        const parentNumsLabel = parentNums.join('、');
+        const badgeLabel = parentNums.length > 1 ? `${parentNums.join('+')}-${subNum}` : `${primaryParentNum}-${subNum}`;
 
         if (isVariationBank) {
             item.classList.add('variation-item');
+            const cleanTopicStr = t => String(t || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
+            const curTopicClean = cleanTopicStr(q.topic);
+            const unselectedSameTopicBuckets = variationBuckets.filter(b => {
+                return curTopicClean && cleanTopicStr(b.topic) === curTopicClean && !parentNums.includes(Number(b.parentNum));
+            });
+
             item.innerHTML = `
                 <div class="question-id-tags">
-                    <span class="question-id-var-badge" title="课后第 ${parentNum} 题 · 变式 ${subNum}">${parentNum}-${subNum}</span>
+                    <span class="question-id-var-badge" title="课后第 ${parentNumsLabel} 题 · 变式 ${subNum}">${badgeLabel}</span>
                 </div>
                 <div class="var-item-left">
                     <div class="var-parent-header">
-                        <span class="var-parent-current" title="当前关联课后巩固第 ${parentNum} 题">课后第 <strong>${parentNum}</strong> 题</span>
+                        <span class="var-parent-current" title="当前关联课后巩固第 ${parentNumsLabel} 题">课后第 <strong>${parentNumsLabel}</strong> 题</span>
                         <span class="var-sub-badge">变式 ${subNum}</span>
-                        <button type="button" class="var-hw-preview-btn"
-                                onclick="previewHomeworkQuestion(${parentNum}, event)"
-                                onmouseenter="onHoverHomeworkPreview(event, ${parentNum})"
-                                onmouseleave="hideHoverPopover()"
-                                title="查阅课后第 ${parentNum} 题原题 PDF">
-                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                                <circle cx="12" cy="12" r="3"></circle>
-                            </svg>
-                            <span>原题</span>
-                        </button>
+                        ${parentNums.map(p => `
+                            <button type="button" class="var-hw-preview-btn"
+                                    onclick="previewHomeworkQuestion(${p}, event)"
+                                    onmouseenter="onHoverHomeworkPreview(event, ${p})"
+                                    onmouseleave="hideHoverPopover()"
+                                    title="查阅课后第 ${p} 题原题 PDF">
+                                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                </svg>
+                                <span>原题${parentNums.length > 1 ? p : ''}</span>
+                            </button>
+                        `).join('')}
                     </div>
                     <div class="var-topic-readonly" title="${escapeHtml(q.topic || '跟随原题自动同步')}">
                         <span class="var-topic-label">知识点：</span>
@@ -2803,15 +2946,26 @@ function renderQuestionList() {
                     </div>
                 </div>
                 <div class="var-item-center">
-                    <span class="var-selector-label">选择原题：</span>
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px; flex-wrap:wrap; gap:4px;">
+                        <span class="var-selector-label">选择原题：</span>
+                        ${unselectedSameTopicBuckets.length > 0 && !isAssistant ? `
+                            <button type="button" class="var-quick-merge-btn" onclick="onVariationMergeSameTopic(${originalIndex})" title="一键将考点相同的第 ${unselectedSameTopicBuckets.map(b => b.parentNum).join('、')} 题合并至本变式关联">
+                                ⚡ 关联同考点(第${unselectedSameTopicBuckets.map(b => b.parentNum).join('、')}题)
+                            </button>
+                        ` : ''}
+                    </div>
                     <div class="variation-parent-pills">
                         ${variationBuckets.map(b => {
-                            const isActive = Number(b.parentNum) === Number(parentNum);
-                            return `<button type="button" class="var-parent-pill${isActive ? ' active' : ''}"
+                            const isSelected = parentNums.includes(Number(b.parentNum));
+                            const isSameTopic = curTopicClean && cleanTopicStr(b.topic) === curTopicClean;
+                            const cls = ['var-parent-pill'];
+                            if (isSelected) cls.push('active');
+                            else if (isSameTopic) cls.push('same-topic-hint');
+                            return `<button type="button" class="${cls.join(' ')}"
                                 onclick="onVariationParentChange(${originalIndex}, ${b.parentNum})"
                                 onmouseenter="onHoverHomeworkPreview(event, ${b.parentNum})"
                                 onmouseleave="hideHoverPopover()"
-                                title="关联课后第 ${b.parentNum} 题${b.topic ? '：' + escapeHtml(b.topic) : ''}"
+                                title="关联课后第 ${b.parentNum} 题${b.topic ? '：' + escapeHtml(b.topic) : ''}${isSameTopic ? ' (同知识点)' : ''}"
                                 ${isAssistant ? 'disabled' : ''}>第${b.parentNum}题</button>`;
                         }).join('')}
                     </div>
@@ -3855,11 +4009,14 @@ async function startBackgroundSlicing(exerciseSrc, answerSrc, groups, questionNu
         if (!q) return;
 
         const qThumb = batchQuestionThumbs[groups[key].question[0]] || null;
+        const pLabel = Array.isArray(q.parentQuestionNums) && q.parentQuestionNums.length > 1
+            ? q.parentQuestionNums.join('_')
+            : (q.parentQuestionNum || 1);
         const exFileName = isVar
-            ? `课后第${q.parentQuestionNum}题_变式${q.subNum}_题目.pdf`
+            ? `课后第${pLabel}题_变式${q.subNum}_题目.pdf`
             : `题目_第${num}题.pdf`;
         const anFileName = isVar
-            ? `课后第${q.parentQuestionNum}题_变式${q.subNum}_答案.pdf`
+            ? `课后第${pLabel}题_变式${q.subNum}_答案.pdf`
             : `答案_第${num}题.pdf`;
 
         // 1. 题目切片合并与上传
@@ -4147,11 +4304,14 @@ async function doBatchImportPdfs(exerciseFile, answerFile) {
         const q = currentQuestions[i];
         showToast(`正在导入 ${no}/${pageCount}...`);
 
+        const pLabel = Array.isArray(q.parentQuestionNums) && q.parentQuestionNums.length > 1
+            ? q.parentQuestionNums.join('_')
+            : (q.parentQuestionNum || 1);
         const exFileName = isVar
-            ? `课后第${q.parentQuestionNum}题_变式${q.subNum}_题目.pdf`
+            ? `课后第${pLabel}题_变式${q.subNum}_题目.pdf`
             : `题目_第${no}题.pdf`;
         const anFileName = isVar
-            ? `课后第${q.parentQuestionNum}题_变式${q.subNum}_答案.pdf`
+            ? `课后第${pLabel}题_变式${q.subNum}_答案.pdf`
             : `答案_第${no}题.pdf`;
 
         try {

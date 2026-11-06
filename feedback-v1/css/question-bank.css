@@ -2542,6 +2542,42 @@ input[type=number] {
     color: #ffffff;
 }
 
+.var-parent-pill.same-topic-hint:not(.active) {
+    border-color: rgba(16, 185, 129, 0.5);
+    color: #10b981;
+    background: rgba(16, 185, 129, 0.08);
+}
+
+.var-parent-pill.same-topic-hint:not(.active):hover:not(:disabled) {
+    border-color: #10b981;
+    background: rgba(16, 185, 129, 0.16);
+    color: #059669;
+}
+
+.var-quick-merge-btn {
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 4px;
+    border: 1px dashed rgba(16, 185, 129, 0.6);
+    background: rgba(16, 185, 129, 0.08);
+    color: #10b981;
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    transition: all 0.15s ease;
+    margin-left: 6px;
+    font-family: inherit;
+}
+
+.var-quick-merge-btn:hover {
+    background: #10b981;
+    border-color: #10b981;
+    color: #ffffff;
+}
+
 [data-theme="light"] .var-parent-pill {
     background: #f8fafc;
     border-color: rgba(0, 0, 0, 0.12);
@@ -2966,6 +3002,26 @@ input[type=number] {
 
 [data-theme="light"] .qb-preview-hint-banner strong {
     color: #1e293b;
+}
+
+/* 举一反三同考点共享变式专属提示条 */
+.qb-variation-hint-banner {
+    background: rgba(16, 185, 129, 0.08);
+    border: 1px solid rgba(16, 185, 129, 0.28);
+}
+
+.qb-variation-hint-banner svg {
+    color: #10b981;
+}
+
+[data-theme="light"] .qb-variation-hint-banner {
+    background: #ecfdf5;
+    border-color: #a7f3d0;
+    color: #065f46;
+}
+
+[data-theme="light"] .qb-variation-hint-banner strong {
+    color: #047857;
 }
 
 .qb-optional-tag {

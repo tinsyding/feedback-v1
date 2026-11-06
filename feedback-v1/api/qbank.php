@@ -291,7 +291,7 @@ try {
 
                     if ($qbank) {
                         $qRows = DB::fetchAll(
-                            "SELECT `question_num` AS `id`, `parent_question_num` AS `parentQuestionNum`, `sub_num` AS `subNum`,
+                            "SELECT `question_num` AS `id`, `parent_question_num` AS `parentQuestionNum`, `parent_question_nums` AS `parentQuestionNums`, `sub_num` AS `subNum`,
                                     `topic`, `video_url`, `exercise_pdf`, `exercise_name`, `exercise_thumb`,
                                     `answer_pdf`, `answer_name`, `answer_thumb`
                              FROM `qbank_questions`
@@ -302,9 +302,20 @@ try {
 
                         $questions = [];
                         foreach ($qRows as $qr) {
+                            $rawParentNums = $qr['parentQuestionNums'] ?? null;
+                            $parsedParentNums = [];
+                            if (!empty($rawParentNums)) {
+                                $parsedParentNums = array_values(array_unique(array_filter(array_map('intval', explode(',', $rawParentNums)))));
+                                sort($parsedParentNums);
+                            } elseif ($qr['parentQuestionNum'] !== null) {
+                                $parsedParentNums = [intval($qr['parentQuestionNum'])];
+                            }
+                            $primaryParentNum = $qr['parentQuestionNum'] !== null ? intval($qr['parentQuestionNum']) : (!empty($parsedParentNums) ? $parsedParentNums[0] : null);
+
                             $questions[] = [
                                 'id' => intval($qr['id']),
-                                'parentQuestionNum' => $qr['parentQuestionNum'] !== null ? intval($qr['parentQuestionNum']) : null,
+                                'parentQuestionNum' => $primaryParentNum,
+                                'parentQuestionNums' => $parsedParentNums,
                                 'subNum' => intval($qr['subNum'] ?? 1),
                                 'topic' => $qr['topic'] ?? '',
                                 'videoUrl' => $qr['video_url'] ?? '',
@@ -473,12 +484,13 @@ try {
                         $keepQnums = [];
                         $stmtQuestion = $db->prepare("
                             INSERT INTO `qbank_questions`
-                                (`qbank_id`, `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week`, `question_num`, `parent_question_num`, `sub_num`, `topic`, `video_url`,
+                                (`qbank_id`, `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week`, `question_num`, `parent_question_num`, `parent_question_nums`, `sub_num`, `topic`, `video_url`,
                                  `exercise_pdf`, `exercise_name`, `exercise_thumb`,
                                  `answer_pdf`, `answer_name`, `answer_thumb`, `created_by`, `updated_by`, `updated_at`)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                             ON DUPLICATE KEY UPDATE
                                 `parent_question_num` = VALUES(`parent_question_num`),
+                                `parent_question_nums` = VALUES(`parent_question_nums`),
                                 `sub_num` = VALUES(`sub_num`),
                                 `topic` = VALUES(`topic`),
                                 `video_url` = VALUES(`video_url`),
@@ -498,9 +510,28 @@ try {
                             if ($qNum <= 0) continue;
                             $keepQnums[] = $qNum;
 
+                            $rawParentNums = $q['parentQuestionNums'] ?? ($q['parent_question_nums'] ?? null);
+                            $parentNumsArray = [];
+                            if (is_array($rawParentNums)) {
+                                $parentNumsArray = array_values(array_unique(array_filter(array_map('intval', $rawParentNums))));
+                                sort($parentNumsArray);
+                            } elseif (is_string($rawParentNums) && trim($rawParentNums) !== '') {
+                                $parentNumsArray = array_values(array_unique(array_filter(array_map('intval', explode(',', $rawParentNums)))));
+                                sort($parentNumsArray);
+                            }
+
                             $parentQNum = isset($q['parentQuestionNum']) && $q['parentQuestionNum'] !== null && $q['parentQuestionNum'] !== ''
                                 ? intval($q['parentQuestionNum'])
                                 : (isset($q['parent_question_num']) && $q['parent_question_num'] !== null && $q['parent_question_num'] !== '' ? intval($q['parent_question_num']) : null);
+
+                            if (empty($parentNumsArray) && $parentQNum !== null && $parentQNum > 0) {
+                                $parentNumsArray = [$parentQNum];
+                            }
+                            if ($parentQNum === null && !empty($parentNumsArray)) {
+                                $parentQNum = $parentNumsArray[0];
+                            }
+                            $parentNumsStr = !empty($parentNumsArray) ? implode(',', $parentNumsArray) : null;
+
                             $subNum = intval($q['subNum'] ?? ($q['sub_num'] ?? 1));
 
                             $topic = trim($q['topic'] ?? '');
@@ -517,7 +548,7 @@ try {
 
                             $stmtQuestion->execute([
                                 $qbankId, $bankType, $year, $season, $subject, $grade, $tier, $week,
-                                $qNum, $parentQNum, $subNum, $topic, $videoUrl, $exUrl, $exName, $exThumb, $ansUrl, $ansName, $ansThumb,
+                                $qNum, $parentQNum, $parentNumsStr, $subNum, $topic, $videoUrl, $exUrl, $exName, $exThumb, $ansUrl, $ansName, $ansThumb,
                                 $currentTeacher, $currentTeacher
                             ]);
                         }
