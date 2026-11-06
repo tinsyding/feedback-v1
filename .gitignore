@@ -96,3 +96,7 @@ feedback-v1/data/logs/*
 !feedback-v1/data/logs/.gitkeep
 feedback-v1/data/temp/*
 !feedback-v1/data/temp/.gitkeep
+
+# 本地测试数据包（含线上真实学生姓名，绝不入库）
+test-data/
+

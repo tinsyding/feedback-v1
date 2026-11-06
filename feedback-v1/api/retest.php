@@ -172,6 +172,20 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                                WHERE " . implode(' AND ', $varWhereParts) . "
                                ORDER BY `parent_question_num` ASC, `sub_num` ASC, `id` ASC";
                     $varRows = $db->fetchAll($varSql, $varParams);
+                    if (DB::getLastError() !== null) {
+                        $fallbackVarWhere = ["`bank_type` = 'variation'", "`subject` = ?", "`grade` = ?", "`tier` = ?", "`week` = ?", "`parent_question_num` IN ({$inNums})"];
+                        if ($year) {
+                            $fallbackVarWhere[] = "`year` = ?";
+                        }
+                        if ($season) {
+                            $fallbackVarWhere[] = "(`season` = ? OR `season` = ?)";
+                        }
+                        $fallbackVarSql = "SELECT `id`, `parent_question_num`, `sub_num`, `topic`, `exercise_pdf`, `answer_pdf`
+                                           FROM `qbank_questions`
+                                           WHERE " . implode(' AND ', $fallbackVarWhere) . "
+                                           ORDER BY `parent_question_num` ASC, `sub_num` ASC, `id` ASC";
+                        $varRows = $db->fetchAll($fallbackVarSql, $varParams);
+                    }
                     if (!empty($varRows)) {
                         $errInts = array_map('intval', $errorNums);
                         foreach ($varRows as $vr) {

@@ -76,6 +76,8 @@ jobs:
           $SSH "chown -R www:www /www/wwwroot/JF/feedback-git && cd /www/wwwroot/JF/feedback-git && find feedback-v1 -type d -exec chmod 755 {} + && find feedback-v1 -type f -exec chmod 644 {} + && chmod 700 .git && echo PERMS-OK"
           # 4. 重新加锁 .user.ini 恢复宝塔目录安全防御
           $SSH "find /www/wwwroot/JF/feedback-git -name '.user.ini' -exec chattr +i {} + 2>/dev/null || true"
+          # 5. 自动执行数据库增量迁移（幂等）
+          $SSH "cd /www/wwwroot/JF/feedback-git/feedback-v1 && PHP_BIN=\$(command -v php || echo /www/server/php/82/bin/php) && \$PHP_BIN scripts/migrate.php migrate"
 
       - name: Reload PHP-FPM (clear opcache)
         env:

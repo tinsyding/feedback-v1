@@ -168,7 +168,15 @@ function cmdMigrate(): void {
                 if ($head === '' || str_starts_with($head, 'USE ')) {
                     continue;
                 }
-                $db->exec($stmt);
+                try {
+                    $db->exec($stmt);
+                } catch (PDOException $stmtErr) {
+                    // 兼容幂等重入：1060 Duplicate column name / 1061 Duplicate key name
+                    $driverCode = intval($stmtErr->errorInfo[1] ?? 0);
+                    if (!in_array($driverCode, [1060, 1061], true)) {
+                        throw $stmtErr;
+                    }
+                }
             }
             $ins = $db->prepare("INSERT INTO `" . TRACKING_TABLE . "` (`version`) VALUES (?)");
             $ins->execute([$ver]);

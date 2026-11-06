@@ -57,6 +57,155 @@ function normalizeSeason($season, $fallback = '秋') {
 $defaultSeasonZh = normalizeSeason($defaultSeasonCode, '春');
 
 /**
+ * 自动检测并补齐 qbank_questions 表结构 (004_shared_topic_variation: parent_question_nums)
+ * 若此前因缺少字段导致 MySQL 事务回滚而仅写入了 JSON 灾备文件，自动将近期 JSON 灾备恢复回数据库。
+ */
+function ensureQbankSchema($dataDir, $defaultYear, $defaultSeason) {
+    $flagFile = $dataDir . '/.schema_v4_migrated';
+    if (file_exists($flagFile)) {
+        return;
+    }
+    try {
+        $db = DB::getConnection();
+        if (!$db) {
+            return;
+        }
+        $col = DB::fetchOne("SHOW COLUMNS FROM `qbank_questions` LIKE 'parent_question_nums'");
+        if (!$col) {
+            $db->exec("ALTER TABLE `qbank_questions` ADD COLUMN `parent_question_nums` VARCHAR(128) NULL DEFAULT NULL COMMENT '举一反三关联的多个原题号（逗号分隔，如 2,5）' AFTER `parent_question_num`");
+        }
+        try {
+            $db->exec("INSERT IGNORE INTO `schema_migrations` (`version`) VALUES ('004_shared_topic_variation')");
+        } catch (Throwable $ignore) {}
+
+        // 扫描最近 48 小时内写入的 JSON 灾备文件，恢复因字段缺失回滚而未入库的专题数据
+        $files = glob($dataDir . '/*.json') ?: [];
+        $cutoff = time() - 172800;
+        foreach ($files as $file) {
+            if (@filemtime($file) < $cutoff) {
+                continue;
+            }
+            $content = @json_decode(@file_get_contents($file), true);
+            if (!is_array($content) || empty($content['questions']) || !is_array($content['questions'])) {
+                continue;
+            }
+            $meta = parseFileName(basename($file), $defaultYear, $defaultSeason);
+            $bType = normalizeBankType($content['bankType'] ?? ($meta['bankType'] ?? 'homework'));
+            $yr = intval($content['year'] ?? ($meta['year'] ?? $defaultYear));
+            $sn = normalizeSeason($content['season'] ?? ($meta['season'] ?? $defaultSeason), $defaultSeason);
+            $sub = trim($content['subject'] ?? ($meta['subject'] ?? ''));
+            $grd = trim($content['grade'] ?? ($meta['grade'] ?? ''));
+            $tr = trim($content['tier'] ?? ($meta['tier'] ?? ''));
+            $wk = intval($content['week'] ?? ($meta['week'] ?? 0));
+            if (!$sub || !$grd || !$tr || $wk <= 0) {
+                continue;
+            }
+            $existingWeek = DB::fetchOne(
+                "SELECT `id`, ROUND(UNIX_TIMESTAMP(`updated_at`)*1000) AS `updatedAt` FROM `qbank_weeks`
+                 WHERE `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? AND `bank_type` = ? LIMIT 1",
+                [$yr, $sn, $sub, $grd, $tr, $wk, $bType]
+            );
+            $jsonUpdatedAt = floatval($content['updatedAt'] ?? (@filemtime($file) * 1000));
+            $needRecover = !$existingWeek || ($jsonUpdatedAt > floatval($existingWeek['updatedAt']) + 2000);
+            if (!$needRecover && $existingWeek) {
+                $qCnt = intval(DB::fetchValue("SELECT COUNT(*) FROM `qbank_questions` WHERE `qbank_id` = ?", [$existingWeek['id']]));
+                if ($qCnt === 0 && count($content['questions']) > 0) {
+                    $needRecover = true;
+                }
+            }
+            if ($needRecover) {
+                $db->beginTransaction();
+                try {
+                    $stmtW = $db->prepare("
+                        INSERT INTO `qbank_weeks` (`bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week`, `question_count`, `created_by`, `updated_by`, `updated_at`)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', CURRENT_TIMESTAMP)
+                        ON DUPLICATE KEY UPDATE
+                            `question_count` = VALUES(`question_count`),
+                            `updated_at` = CURRENT_TIMESTAMP
+                    ");
+                    $stmtW->execute([$bType, $yr, $sn, $sub, $grd, $tr, $wk, count($content['questions'])]);
+                    $qbId = DB::fetchValue(
+                        "SELECT `id` FROM `qbank_weeks` WHERE `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? AND `bank_type` = ? LIMIT 1",
+                        [$yr, $sn, $sub, $grd, $tr, $wk, $bType]
+                    );
+                    if ($qbId) {
+                        $stmtQ = $db->prepare("
+                            INSERT INTO `qbank_questions`
+                                (`qbank_id`, `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week`, `question_num`, `parent_question_num`, `parent_question_nums`, `sub_num`, `topic`, `video_url`,
+                                 `exercise_pdf`, `exercise_name`, `exercise_thumb`,
+                                 `answer_pdf`, `answer_name`, `answer_thumb`, `created_by`, `updated_by`, `updated_at`)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', CURRENT_TIMESTAMP)
+                            ON DUPLICATE KEY UPDATE
+                                `parent_question_num` = VALUES(`parent_question_num`),
+                                `parent_question_nums` = VALUES(`parent_question_nums`),
+                                `sub_num` = VALUES(`sub_num`),
+                                `topic` = VALUES(`topic`),
+                                `video_url` = VALUES(`video_url`),
+                                `exercise_pdf` = VALUES(`exercise_pdf`),
+                                `exercise_name` = VALUES(`exercise_name`),
+                                `exercise_thumb` = VALUES(`exercise_thumb`),
+                                `answer_pdf` = VALUES(`answer_pdf`),
+                                `answer_name` = VALUES(`answer_name`),
+                                `answer_thumb` = VALUES(`answer_thumb`),
+                                `updated_at` = CURRENT_TIMESTAMP
+                        ");
+                        foreach ($content['questions'] as $q) {
+                            $qNum = intval($q['id'] ?? ($q['question_num'] ?? ($q['num'] ?? 0)));
+                            if ($qNum <= 0) continue;
+                            $rawPNums = $q['parentQuestionNums'] ?? ($q['parent_question_nums'] ?? null);
+                            $pArr = [];
+                            if (is_array($rawPNums)) {
+                                $pArr = array_values(array_unique(array_filter(array_map('intval', $rawPNums))));
+                                sort($pArr);
+                            } elseif (is_string($rawPNums) && trim($rawPNums) !== '') {
+                                $pArr = array_values(array_unique(array_filter(array_map('intval', explode(',', $rawPNums)))));
+                                sort($pArr);
+                            }
+                            $pQNum = isset($q['parentQuestionNum']) && $q['parentQuestionNum'] !== null && $q['parentQuestionNum'] !== ''
+                                ? intval($q['parentQuestionNum'])
+                                : null;
+                            if (empty($pArr) && $pQNum !== null && $pQNum > 0) {
+                                $pArr = [$pQNum];
+                            }
+                            if ($pQNum === null && !empty($pArr)) {
+                                $pQNum = $pArr[0];
+                            }
+                            $pNumsStr = !empty($pArr) ? implode(',', $pArr) : null;
+                            $sNum = intval($q['subNum'] ?? ($q['sub_num'] ?? 1));
+                            $tpc = trim($q['topic'] ?? '');
+                            $vUrl = trim($q['videoUrl'] ?? ($q['video_url'] ?? ''));
+                            $exU = $q['exercisePdf']['url'] ?? '';
+                            $exN = $q['exercisePdf']['name'] ?? '';
+                            $exT = $q['exercisePdf']['thumb'] ?? '';
+                            $anU = $q['answerPdf']['url'] ?? '';
+                            $anN = $q['answerPdf']['name'] ?? '';
+                            $anT = $q['answerPdf']['thumb'] ?? '';
+                            $stmtQ->execute([
+                                $qbId, $bType, $yr, $sn, $sub, $grd, $tr, $wk,
+                                $qNum, $pQNum, $pNumsStr, $sNum, $tpc, $vUrl, $exU, $exN, $exT, $anU, $anN, $anT
+                            ]);
+                        }
+                    }
+                    $db->commit();
+                } catch (Throwable $recErr) {
+                    if ($db->inTransaction()) {
+                        $db->rollBack();
+                    }
+                    error_log("Recover qbank JSON error: " . $recErr->getMessage());
+                }
+            }
+        }
+
+        $colVerify = DB::fetchOne("SHOW COLUMNS FROM `qbank_questions` LIKE 'parent_question_nums'");
+        if ($colVerify) {
+            @file_put_contents($flagFile, date('Y-m-d H:i:s'));
+        }
+    } catch (Throwable $e) {
+        error_log("ensureQbankSchema error: " . $e->getMessage());
+    }
+}
+
+/**
  * 规范题库类型：homework=课后巩固（旧数据默认），preview=预习，variation=课后举一反三
  */
 function normalizeBankType($bankType) {
@@ -152,6 +301,8 @@ function parseFileName($filename, $defaultYear, $defaultSeason) {
 // ========== 路由请求 ==========
 $method = $_SERVER['REQUEST_METHOD'];
 
+ensureQbankSchema($dataDir, $defaultSemesterYear, $defaultSeasonZh);
+
 try {
     switch ($method) {
         case 'GET':
@@ -207,7 +358,7 @@ try {
                             FROM `qbank_weeks` {$whereClause}
                             ORDER BY `year` DESC, `season` ASC, `updated_at` DESC";
                     $dbItems = DB::fetchAll($sql, $params);
-                    $dbSuccess = true;
+                    $dbSuccess = (DB::getLastError() === null);
                 } catch (Throwable $e) {
                     error_log("DB qbank list query error: " . $e->getMessage());
                     $dbSuccess = false;
@@ -299,6 +450,17 @@ try {
                              ORDER BY `question_num` ASC",
                             [$qbank['id']]
                         );
+                        if (DB::getLastError() !== null) {
+                            $qRows = DB::fetchAll(
+                                "SELECT `question_num` AS `id`, `parent_question_num` AS `parentQuestionNum`, `sub_num` AS `subNum`,
+                                        `topic`, `video_url`, `exercise_pdf`, `exercise_name`, `exercise_thumb`,
+                                        `answer_pdf`, `answer_name`, `answer_thumb`
+                                 FROM `qbank_questions`
+                                 WHERE `qbank_id` = ?
+                                 ORDER BY `question_num` ASC",
+                                [$qbank['id']]
+                            );
+                        }
 
                         $questions = [];
                         foreach ($qRows as $qr) {
