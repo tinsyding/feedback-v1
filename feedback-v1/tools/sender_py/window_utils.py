@@ -50,6 +50,25 @@ def set_per_monitor_dpi_awareness():
     return ok
 
 
+def set_app_user_model_id(app_id: str = "JiFang.Feedback.WebEdition") -> bool:
+    """在 Windows 下为当前进程设置独立的 AppUserModelID。
+
+    必须在创建任何窗口/Tk/GUI 之前调用，以确保 Windows 任务栏将程序识别为独立应用，
+    显示公司专属 Logo 图标，彻底避免显示为 Python 默认的羽毛/叶子图标或被归入 Python 组。
+    非 Windows 环境安全返回 False。
+    """
+    try:
+        import ctypes
+        windll = ctypes.windll
+    except Exception:
+        return False
+    try:
+        windll.shell32.SetCurrentProcessExplicitAppUserModelID(str(app_id))
+        return True
+    except Exception:
+        return False
+
+
 # 模块导入时即自动初始化进程与主线程 DPI 感知
 set_per_monitor_dpi_awareness()
 

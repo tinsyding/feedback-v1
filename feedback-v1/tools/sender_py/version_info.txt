@@ -16,14 +16,14 @@ VSVersionInfo(
       StringTable(
         '080404B0',
         [StringStruct('CompanyName', '极方教育'),
-         StringStruct('FileDescription', '极方教育 - 教师端企业微信反馈发送工具'),
+         StringStruct('FileDescription', '极方教育 - 教师端企业微信反馈发送工具(Web版)'),
          StringStruct('FileVersion', '1.8.22.0'),
-         StringStruct('InternalName', 'JiFangFeedbackSender'),
+         StringStruct('InternalName', 'JiFangFeedbackWeb'),
          StringStruct('LegalCopyright', 'Copyright (C) 极方教育'),
-         StringStruct('OriginalFilename', '极方每周反馈程序.exe'),
-         StringStruct('ProductName', '极方每周反馈程序'),
+         StringStruct('OriginalFilename', '极方每周反馈程序-Web版.exe'),
+         StringStruct('ProductName', '极方每周反馈程序(Web版)'),
          StringStruct('ProductVersion', '1.8.22'),
-         StringStruct('Comments', '教师端企业微信反馈批量发送客户端，需配合企业微信 PC 客户端使用。')]
+         StringStruct('Comments', '教师端企业微信反馈批量发送客户端(Web版)，需配合企业微信 PC 客户端使用。')]
       )
     ]),
     VarFileInfo([VarStruct('Translation', [2052, 1200])])

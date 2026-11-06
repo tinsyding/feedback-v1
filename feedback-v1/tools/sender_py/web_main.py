@@ -61,13 +61,15 @@ def run_smoke_test() -> int:
 
 
 def main():
-    # 1. 最优先启用 Per-Monitor DPI 感知（必须在创建任何窗口/Tk/Win32调用前执行，确保 GetWindowRect 与 mss 物理像素 1:1 对齐）
+    # 1. 最优先启用 Per-Monitor DPI 感知与独立 AppUserModelID
+    # (必须在创建任何窗口/Tk/Win32调用前执行，确保物理像素对齐与任务栏公司 Logo 正常显示)
     try:
         try:
-            from sender_py.window_utils import set_per_monitor_dpi_awareness
+            from sender_py.window_utils import set_per_monitor_dpi_awareness, set_app_user_model_id
         except ModuleNotFoundError:
-            from window_utils import set_per_monitor_dpi_awareness
+            from window_utils import set_per_monitor_dpi_awareness, set_app_user_model_id
         set_per_monitor_dpi_awareness()
+        set_app_user_model_id()
     except Exception:
         pass
 

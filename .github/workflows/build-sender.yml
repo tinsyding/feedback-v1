@@ -157,6 +157,9 @@ jobs:
         run: |
           mkdir -p dist dist_dir
 
+          # 确保 ICO 包含 16~256px 多尺寸高清位图
+          python -c "from PIL import Image; im=Image.open('feedback-v1/favicon.ico'); im.save('feedback-v1/favicon.ico', format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])" || true
+
           # 极方每周反馈程序 Web 文件夹版（主线版本）
           python -m PyInstaller --noconfirm --clean --noupx --windowed --onedir \
             --distpath dist_dir \
@@ -164,11 +167,17 @@ jobs:
             --icon feedback-v1/favicon.ico \
             --version-file feedback-v1/tools/sender_py/version_info.txt \
             --add-data "feedback-v1/favicon.ico;." \
+            --add-data "feedback-v1/favicon.ico;sender_py" \
             --add-data "feedback-v1/tools/example.png;." \
+            --add-data "feedback-v1/tools/example.png;sender_py" \
             --add-data "feedback-v1/tools/sender_py/web_ui.html;sender_py" \
+            --add-data "feedback-v1/tools/sender_py/web_ui.html;." \
             --paths feedback-v1/tools \
             --paths feedback-v1/tools/sender_py \
             --collect-submodules sender_py \
+            --exclude-module sender_py.tests \
+            --exclude-module unittest \
+            --exclude-module test \
             --hidden-import sender_py.sender_token \
             --collect-all rapidocr_onnxruntime \
             feedback-v1/tools/sender_py/web_main.py

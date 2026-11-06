@@ -29,6 +29,9 @@ python -m pip install -r "%~dp0requirements.txt"
 if errorlevel 1 goto :pip_error
 python -m pip install pyinstaller
 
+rem 确保生成 16~256px 多尺寸高清 ICO，保证任务栏与标题栏高清显示公司 Logo
+python -c "from PIL import Image; im=Image.open(r'%FAVICON%'); im.save(r'%FAVICON%', format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])" >nul 2>&1
+
 echo.
 echo [2/2] 正在打包【极方每周反馈程序 Web版】(单文件 exe)...
 python -m PyInstaller --noconfirm --clean --noupx --windowed --onefile ^
@@ -36,15 +39,23 @@ python -m PyInstaller --noconfirm --clean --noupx --windowed --onefile ^
     --icon "%FAVICON%" ^
     --version-file "%VERSION_FILE%" ^
     --add-data "%FAVICON%;." ^
+    --add-data "%FAVICON%;sender_py" ^
     --add-data "%EXAMPLE%;." ^
+    --add-data "%EXAMPLE%;sender_py" ^
     --add-data "%WEB_UI%;sender_py" ^
+    --add-data "%WEB_UI%;." ^
     --paths "%REPO_ROOT%\tools" ^
     --paths "%~dp0" ^
     --collect-submodules sender_py ^
+    --exclude-module sender_py.tests ^
+    --exclude-module unittest ^
+    --exclude-module test ^
+    --hidden-import sender_py.sender_token ^
     --collect-all rapidocr_onnxruntime ^
     "%WEB_MAIN_PY%"
 
 if exist "%~dp0dist\JiFangFeedbackWeb.exe" (
+    if exist "%~dp0dist\极方每周反馈程序-Web版.exe" del /f /q "%~dp0dist\极方每周反馈程序-Web版.exe"
     move /y "%~dp0dist\JiFangFeedbackWeb.exe" "%~dp0dist\极方每周反馈程序-Web版.exe" >nul
 )
 
@@ -56,7 +67,8 @@ echo.
 echo 输出单文件位于：
 echo   - %~dp0dist\极方每周反馈程序-Web版.exe
 echo.
-pause
+echo %* | findstr /i "nopause" >nul
+if errorlevel 1 pause
 exit /b 0
 
 :no_python

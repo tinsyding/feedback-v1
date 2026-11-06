@@ -37,7 +37,18 @@ call "%~dp0build_onefile.bat"
 goto menu
 
 :all
-call "%~dp0build_onedir.bat"
-call "%~dp0build_nuitka.bat" all
-call "%~dp0build_onefile.bat"
+echo.
+echo ========================================================
+echo               正在开始执行一键全量打包...
+echo ========================================================
+echo.
+call "%~dp0build_onedir.bat" nopause
+call "%~dp0build_nuitka.bat" all nopause
+call "%~dp0build_onefile.bat" nopause
+echo.
+echo ========================================================
+echo         ★ 所有 Web 版模式打包已全部顺利完成！ ★
+echo ========================================================
+echo.
+pause
 goto menu

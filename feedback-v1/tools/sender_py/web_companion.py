@@ -31,6 +31,81 @@ def app_icon_path():
         return None
 
 
+def apply_window_icon(root, ico_path=None):
+    """为 Tk 窗口设置应用程序图标（标题栏与任务栏图标），确保任务栏显示公司 Logo 而非默认羽毛/叶子。
+
+    多重适配保障：
+      1. 确保已设置进程级 AppUserModelID（Windows 任务栏识别独立应用的关键）；
+      2. 优先通过 PIL 加载并调用 root.iconphoto(True, photo)（对各种尺寸 ico/png 兼容性最佳，直接更新任务栏大图标）；
+      3. Windows 原生 root.iconbitmap(default=ico) 设置缺省图标；
+      4. Windows Win32 API 终极兜底：直接向顶层窗口句柄发送 WM_SETICON (ICON_BIG & ICON_SMALL)；
+      5. 返回 PhotoImage 强引用，调用方需挂载在实例上防止被 Python GC 回收导致图标失效。
+    """
+    if not ico_path:
+        ico_path = app_icon_path()
+    if not ico_path or not os.path.isfile(ico_path):
+        return None
+
+    # 1. 设置进程级 AppUserModelID
+    try:
+        try:
+            from sender_py.window_utils import set_app_user_model_id
+        except ModuleNotFoundError:
+            from window_utils import set_app_user_model_id
+        set_app_user_model_id()
+    except Exception:
+        pass
+
+    photo_ref = None
+
+    # 2. PIL + root.iconphoto (Windows / Linux 均通用，最稳妥的任务栏大图标设置机制)
+    try:
+        from PIL import Image, ImageTk
+        with Image.open(ico_path) as im:
+            rgba = im.convert("RGBA")
+            photo_ref = ImageTk.PhotoImage(rgba, master=root)
+            if hasattr(root, "iconphoto"):
+                root.iconphoto(True, photo_ref)
+    except Exception:
+        pass
+
+    # 3. 原生 iconbitmap 兜底
+    try:
+        if hasattr(root, "iconbitmap"):
+            try:
+                root.iconbitmap(default=ico_path)
+            except Exception:
+                root.iconbitmap(ico_path)
+    except Exception:
+        pass
+
+    # 4. Windows Win32 API 终极兜底：向 OS 顶层窗口发送 WM_SETICON 消息
+    if sys.platform.startswith("win"):
+        try:
+            import ctypes
+            if hasattr(root, "update_idletasks") and hasattr(root, "winfo_id"):
+                root.update_idletasks()
+                client_hwnd = root.winfo_id()
+                user32 = ctypes.windll.user32
+                parent_hwnd = user32.GetParent(client_hwnd)
+                target_hwnds = [h for h in (parent_hwnd, client_hwnd) if h]
+
+                # LR_LOADFROMFILE = 0x0010; IMAGE_ICON = 1; WM_SETICON = 0x0080
+                # 任务栏使用 ICON_BIG (1)，标题栏使用 ICON_SMALL (0)
+                hicon_big = user32.LoadImageW(None, os.path.abspath(ico_path), 1, 32, 32, 0x0010)
+                hicon_small = user32.LoadImageW(None, os.path.abspath(ico_path), 1, 16, 16, 0x0010)
+
+                for hwnd in target_hwnds:
+                    if hicon_big:
+                        user32.SendMessageW(hwnd, 0x0080, 1, hicon_big)
+                    if hicon_small:
+                        user32.SendMessageW(hwnd, 0x0080, 0, hicon_small)
+        except Exception:
+            pass
+
+    return photo_ref
+
+
 class WebCompanionWindow:
     def __init__(self, controller, server, port: int, url: str, root=None):
         self.controller = controller
@@ -53,13 +128,8 @@ class WebCompanionWindow:
         self.root.minsize(420, 310)
         self.root.resizable(True, True)
 
-        # 尝试设置窗口图标
-        ico = app_icon_path()
-        if ico and os.path.isfile(ico):
-            try:
-                self.root.iconbitmap(ico)
-            except Exception:
-                pass
+        # 尝试设置窗口与任务栏图标（杜绝 Tk 默认羽毛/叶子）
+        self._window_icon = apply_window_icon(self.root)
 
         # 居中显示
         try:
@@ -403,6 +473,15 @@ def launch_web_gui_companion(controller, server, port: int, url: str) -> bool:
     返回 True 表示桌面控制台成功启动并在用户退出后正常结束；
     返回 False 表示运行环境不支持图形界面（如 Linux CI / 无头服务器），由调用方回退至纯控制台阻塞。
     """
+    try:
+        try:
+            from sender_py.window_utils import set_app_user_model_id
+        except ModuleNotFoundError:
+            from window_utils import set_app_user_model_id
+        set_app_user_model_id()
+    except Exception:
+        pass
+
     try:
         import tkinter as tk
         # 探测是否能连接显示服务

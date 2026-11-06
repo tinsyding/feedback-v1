@@ -126,6 +126,16 @@ def run_calibration(parent, base_image, example_max_w=EXAMPLE_MAX_W, initial_roi
     accent_style = "Accent.TButton" if using_sv_ttk else "TButton"
     win.title("企业微信窗口校准：框标题栏 + 输入框")
 
+    # 设置校准窗口与任务栏图标（避免出现 Tk 默认羽毛/叶子图标）
+    try:
+        try:
+            from sender_py.web_companion import apply_window_icon
+        except ModuleNotFoundError:
+            from web_companion import apply_window_icon
+        win._window_icon = apply_window_icon(win)
+    except Exception:
+        pass
+
     sw = win.winfo_screenwidth()
     sh = win.winfo_screenheight()
 

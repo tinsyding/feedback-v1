@@ -3,10 +3,11 @@
 """
 极方每周反馈程序 (Web版) - Nuitka 原生机器码编译构建脚本
 以 Web 版为主线，编译原生 C++ 机器码，彻底免疫杀软误报。
-支持：
-  1. 全量打包 (Web 单文件版 + Web 文件夹版 + 对应 ZIP)
-  2. 仅 Web 单文件版 (--onefile)
-  3. 仅 Web 文件夹版 (--standalone + ZIP)
+优化项：
+  1. 排除测试用例与 unittest 框架，杜绝 anti-bloat 告警，加快编译并缩小体积；
+  2. 自动检查并优化注入 16~256px 全尺寸 ICO，搭配 AppUserModelID 彻底解决任务栏 Python/Tk 默认羽毛图标；
+  3. 静态资源多路径双向映射（根目录 + sender_py 子目录双重挂载），杜绝运行时资源找不到；
+  4. 产物规范化清理与打包。
 """
 
 import os
@@ -50,6 +51,22 @@ def get_paths():
     }
 
 
+def ensure_multisize_icon(favicon_path):
+    """自动检查并优化 favicon.ico 为多分辨率 Windows 标准图标 (16/24/32/48/64/128/256)。
+    保证 Windows 任务栏、窗口标题栏、Alt-Tab 及资源管理器均能高清呈现公司 Logo。
+    """
+    try:
+        from PIL import Image
+        if not os.path.isfile(favicon_path):
+            return
+        with Image.open(favicon_path) as im:
+            sizes = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+            im.save(favicon_path, format="ICO", sizes=sizes)
+            print(f"[Icon 优化] 已优化为 16~256px 多分辨率 ICO 图标: {favicon_path}")
+    except Exception as exc:
+        print(f"[Icon 优化] 跳过多分辨率注入 ({exc})")
+
+
 def ensure_dependencies(paths):
     print("=" * 60)
     print("       极方每周反馈程序(Web版) - Nuitka 原生机器码编译中心")
@@ -60,6 +77,9 @@ def ensure_dependencies(paths):
     if os.path.isfile(paths["requirements"]):
         subprocess.run([sys.executable, "-m", "pip", "install", "-r", paths["requirements"]], check=True)
     subprocess.run([sys.executable, "-m", "pip", "install", "nuitka", "zstandard"], check=True)
+
+    # 预先优化并注入多尺寸 Logo 图标
+    ensure_multisize_icon(paths["favicon"])
     print("依赖安装与检查完成！\n")
 
 
@@ -74,16 +94,25 @@ def build_standalone(paths):
         "--assume-yes-for-downloads",
         "--windows-console-mode=disable",
         f"--windows-icon-from-ico={paths['favicon']}",
-        "--windows-company-name=JiFang",
-        "--windows-product-name=JiFangFeedbackWeb",
+        "--windows-company-name=极方教育",
+        "--windows-product-name=极方每周反馈程序(Web版)",
+        "--windows-file-description=极方每周反馈程序 (Web版)",
         f"--windows-file-version={APP_VERSION}",
         f"--windows-product-version={APP_VERSION}",
         "--enable-plugin=tk-inter",
         "--include-package=sender_py",
+        # 排除测试模块与 unittest，避免 anti-bloat 告警并缩短编译时间
+        "--nofollow-import-to=sender_py.tests",
+        "--nofollow-import-to=unittest",
+        "--nofollow-import-to=test",
         "--include-package-data=rapidocr_onnxruntime",
+        # 静态资源双向挂载
         f"--include-data-files={paths['favicon']}=favicon.ico",
+        f"--include-data-files={paths['favicon']}=sender_py/favicon.ico",
         f"--include-data-files={paths['example']}=example.png",
+        f"--include-data-files={paths['example']}=sender_py/example.png",
         f"--include-data-files={paths['web_ui']}=sender_py/web_ui.html",
+        f"--include-data-files={paths['web_ui']}=web_ui.html",
         f"--output-dir={paths['dist_nuitka_web']}",
         "--output-filename=JiFangFeedbackWeb.exe",
         paths["web_main_py"],
@@ -106,6 +135,9 @@ def build_standalone(paths):
 
     # 压缩为 ZIP
     os.makedirs(paths["dist_zip"], exist_ok=True)
+    zip_dest = os.path.join(paths["dist_zip"], "极方每周反馈程序-Web版-Nuitka原生版.zip")
+    if os.path.isfile(zip_dest):
+        os.remove(zip_dest)
     print("\n正在生成 ZIP 压缩分发包...")
     shutil.make_archive(
         os.path.join(paths["dist_zip"], "极方每周反馈程序-Web版-Nuitka原生版"),
@@ -131,16 +163,25 @@ def build_onefile(paths):
         "--assume-yes-for-downloads",
         "--windows-console-mode=disable",
         f"--windows-icon-from-ico={paths['favicon']}",
-        "--windows-company-name=JiFang",
-        "--windows-product-name=JiFangFeedbackWeb",
+        "--windows-company-name=极方教育",
+        "--windows-product-name=极方每周反馈程序(Web版)",
+        "--windows-file-description=极方每周反馈程序 (Web版)",
         f"--windows-file-version={APP_VERSION}",
         f"--windows-product-version={APP_VERSION}",
         "--enable-plugin=tk-inter",
         "--include-package=sender_py",
+        # 排除测试模块与 unittest，避免 anti-bloat 告警并缩短编译时间
+        "--nofollow-import-to=sender_py.tests",
+        "--nofollow-import-to=unittest",
+        "--nofollow-import-to=test",
         "--include-package-data=rapidocr_onnxruntime",
+        # 静态资源双向挂载
         f"--include-data-files={paths['favicon']}=favicon.ico",
+        f"--include-data-files={paths['favicon']}=sender_py/favicon.ico",
         f"--include-data-files={paths['example']}=example.png",
+        f"--include-data-files={paths['example']}=sender_py/example.png",
         f"--include-data-files={paths['web_ui']}=sender_py/web_ui.html",
+        f"--include-data-files={paths['web_ui']}=web_ui.html",
         f"--output-dir={paths['dist_nuitka_onefile']}",
         "--output-filename=JiFangFeedbackWeb.exe",
         paths["web_main_py"],
@@ -154,19 +195,30 @@ def build_onefile(paths):
             os.remove(web_exe_target)
         shutil.move(web_exe_orig, web_exe_target)
 
+    # 清理 onefile 构建留存的多余 dist 目录，保持输出目录整洁
+    intermediate_dist = os.path.join(paths["dist_nuitka_onefile"], "web_main.dist")
+    if os.path.exists(intermediate_dist):
+        shutil.rmtree(intermediate_dist, ignore_errors=True)
+
 
 def main():
     paths = get_paths()
 
     # 检查命令行参数
-    arg = sys.argv[1].lower() if len(sys.argv) > 1 else ""
-    if arg in ("all", "1"):
-        choice = "1"
-    elif arg in ("onefile", "2"):
-        choice = "2"
-    elif arg in ("standalone", "folder", "3"):
-        choice = "3"
-    else:
+    args = [a.lower() for a in sys.argv[1:]]
+    choice = ""
+    for a in args:
+        if a in ("all", "1"):
+            choice = "1"
+            break
+        elif a in ("onefile", "2"):
+            choice = "2"
+            break
+        elif a in ("standalone", "folder", "3"):
+            choice = "3"
+            break
+
+    if not choice:
         print("=" * 60)
         print("       极方每周反馈程序(Web版) - Nuitka 原生机器码编译中心")
         print("          (注：Tkinter桌面版已停更，以Web版为主)")

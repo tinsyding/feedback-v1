@@ -20,30 +20,47 @@ def asset_path(filename: str) -> str:
     # 0. Nuitka onefile 临时解压目录
     nuitka_dir = os.environ.get("NUITKA_ONEFILE_DIRECTORY")
     if nuitka_dir:
-        for p in (os.path.join(nuitka_dir, filename), os.path.join(nuitka_dir, "sender_py", filename)):
+        for p in (
+            os.path.join(nuitka_dir, filename),
+            os.path.join(nuitka_dir, "sender_py", filename),
+        ):
             if os.path.isfile(p):
                 return p
     # 1. PyInstaller _MEIPASS 优先 (onefile / onedir 临时目录)
     if getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", None):
-        p = os.path.join(sys._MEIPASS, filename)
-        if os.path.isfile(p):
-            return p
+        for p in (
+            os.path.join(sys._MEIPASS, filename),
+            os.path.join(sys._MEIPASS, "sender_py", filename),
+        ):
+            if os.path.isfile(p):
+                return p
     # 2. Nuitka standalone 或 PyInstaller onedir (exe 同级目录)
-    if getattr(sys, "frozen", False) or "__compiled__" in globals():
+    if getattr(sys, "frozen", False) or "__compiled__" in globals() or hasattr(sys, "__compiled__"):
         exe_dir = os.path.dirname(os.path.abspath(sys.executable))
-        p = os.path.join(exe_dir, filename)
-        if os.path.isfile(p):
-            return p
-    # 3. 源码同级目录
+        for p in (
+            os.path.join(exe_dir, filename),
+            os.path.join(exe_dir, "sender_py", filename),
+        ):
+            if os.path.isfile(p):
+                return p
+    # 3. 源码同级与上级多层查找
     here = os.path.dirname(os.path.abspath(__file__))
-    p = os.path.join(here, filename)
-    if os.path.isfile(p):
-        return p
-    # 4. 回退到上级仓库根目录
-    repo_fallback = os.path.normpath(os.path.join(here, "..", "..", filename))
-    if os.path.isfile(repo_fallback):
-        return repo_fallback
-    return p
+    candidates = [
+        os.path.join(here, filename),
+        os.path.join(here, "sender_py", filename),
+        os.path.normpath(os.path.join(here, "..", filename)),
+        os.path.normpath(os.path.join(here, "..", "..", filename)),
+    ]
+    if sys.argv and sys.argv[0]:
+        argv_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        candidates.extend([
+            os.path.join(argv_dir, filename),
+            os.path.join(argv_dir, "sender_py", filename),
+        ])
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return candidates[0]
 
 
 def app_icon_path():
@@ -1254,6 +1271,17 @@ class SenderApp:
 
         self._logo_image = None
         self._window_icon = None
+
+        # 确保设置独立 AppUserModelID，使任务栏识别极方应用图标
+        try:
+            try:
+                from sender_py.window_utils import set_app_user_model_id
+            except ModuleNotFoundError:
+                from window_utils import set_app_user_model_id
+            set_app_user_model_id()
+        except Exception:
+            pass
+
         icon_path = app_icon_path()
         if icon_path:
             try:
