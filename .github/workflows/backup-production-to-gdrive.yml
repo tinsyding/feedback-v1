@@ -84,6 +84,8 @@ jobs:
           mkdir -p ~/.config/rclone
           if [ -n "$GDRIVE_RCLONE_CONFIG" ]; then
             echo "$GDRIVE_RCLONE_CONFIG" > ~/.config/rclone/rclone.conf
+            # 保证第一个 remote 名称标准化为 [gdrive]，兼容用户以任意名称导出的 rclone.conf
+            sed -i '0,/^\[.*\]/{s/^\[.*\]/[gdrive]/}' ~/.config/rclone/rclone.conf
           else
             echo "$GDRIVE_SA_JSON" > /tmp/gdrive_sa.json
             cat << EOF > ~/.config/rclone/rclone.conf
@@ -115,7 +117,7 @@ jobs:
           # 通过 SSH 远程调用 mysqldump 并利用 gzip 压缩流式传输回 Actions 容器
           $SSH 'bash -s' << 'EOF' > ./staging/database/feedback_db_${BACKUP_TIME}.sql.gz
             set -e
-            PHP_BIN=$(command -v php || echo /www/server/php/82/bin/php)
+            PHP_BIN=$(if [ -x /www/server/php/82/bin/php ]; then echo /www/server/php/82/bin/php; else command -v php; fi)
             MYSQLDUMP=$(command -v mysqldump || echo /www/server/mysql/bin/mysqldump)
             
             # 动态读取生产机实际配置

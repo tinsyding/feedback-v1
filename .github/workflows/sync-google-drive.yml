@@ -61,6 +61,8 @@ jobs:
           mkdir -p ~/.config/rclone
           if [ -n "$GDRIVE_RCLONE_CONFIG" ]; then
             echo "$GDRIVE_RCLONE_CONFIG" > ~/.config/rclone/rclone.conf
+            # 保证第一个 remote 名称标准化为 [gdrive]，兼容用户以任意名称导出的 rclone.conf
+            sed -i '0,/^\[.*\]/{s/^\[.*\]/[gdrive]/}' ~/.config/rclone/rclone.conf
           else
             echo "$GDRIVE_SA_JSON" > /tmp/gdrive_sa.json
             cat << EOF > ~/.config/rclone/rclone.conf

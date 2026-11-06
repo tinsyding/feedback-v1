@@ -1881,7 +1881,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
                         const innerContentW = boxW - 12;
                         const contentAreaH = PAGE_HEIGHT - TOP_MARGIN - BOTTOM_MARGIN;
-                        const maxAvailContentH = contentAreaH - BOX_PAD_TOP - BOX_PAD_BOTTOM - currentBannerBlock - answerH;
+                        const maxAvailContentH = contentAreaH - (isGroupBannerNeeded ? groupBannerBlock : 0) - BOX_PAD_TOP - BOX_PAD_BOTTOM - currentBannerBlock - answerH;
                         const scale = isFullPage
                             ? Math.min(innerContentW / origW, Math.max(0.1, (maxAvailContentH - 10) / effectiveHeightPt), 1.0)
                             : Math.min(innerContentW / origW, 1.0);
