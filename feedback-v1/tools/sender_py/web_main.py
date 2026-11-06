@@ -10,6 +10,38 @@ import threading
 import time
 import webbrowser
 
+# 确保在各平台（尤其 Windows 终端默认 cp1252/gbk）下标准输出流支持 UTF-8，避免打印中文抛出 UnicodeEncodeError
+for _stream_name in ("stdout", "stderr"):
+    _stream = getattr(sys, _stream_name, None)
+    if _stream is not None and hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+def safe_print(*args, **kwargs):
+    """安全控制台输出：防御 sys.stdout is None (PyInstaller windowed 模式) 及编码不支持异常。"""
+    stream = kwargs.get("file", sys.stdout)
+    if stream is None:
+        return
+    try:
+        print(*args, **kwargs)
+    except UnicodeEncodeError:
+        try:
+            encoding = getattr(stream, "encoding", None) or "utf-8"
+            sep = kwargs.get("sep", " ")
+            end = kwargs.get("end", "\n")
+            text = sep.join(str(a) for a in args)
+            encoded = text.encode(encoding, errors="replace").decode(encoding)
+            stream.write(encoded + end)
+            stream.flush()
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
 APP_NAME = "极方每周反馈程序 (Web版)"
 APP_VERSION = "1.8.22"
 
@@ -31,7 +63,7 @@ def find_free_port(start: int = 8765, max_attempts: int = 100) -> int:
 
 def run_smoke_test() -> int:
     """CI/CD 烟雾测试模式：启动微型实例验证模块与服务器能否正常实例化并立刻退出。"""
-    print(f"[{APP_NAME}] 正在执行 smoke test (v{APP_VERSION})...")
+    safe_print(f"[{APP_NAME}] 正在执行 smoke test (v{APP_VERSION})...")
     try:
         try:
             from sender_py.web_controller import WebController
@@ -42,7 +74,7 @@ def run_smoke_test() -> int:
 
         html_path = get_web_ui_html_path()
         if not html_path or not os.path.isfile(html_path):
-            print("ERROR: web_ui.html not found!")
+            safe_print("ERROR: web_ui.html not found!")
             return 1
 
         controller = WebController()
@@ -53,10 +85,10 @@ def run_smoke_test() -> int:
         time.sleep(0.5)
         server.shutdown()
         server.server_close()
-        print("Smoke test passed successfully!")
+        safe_print("Smoke test passed successfully!")
         return 0
     except Exception as exc:
-        print(f"Smoke test failed: {exc}")
+        safe_print(f"Smoke test failed: {exc}")
         return 1
 
 
@@ -107,11 +139,11 @@ def main():
     server_thread.start()
 
     url = f"http://127.0.0.1:{port}"
-    print(f"==================================================")
-    print(f"  {APP_NAME} v{APP_VERSION}")
-    print(f"  本地服务已启动: {url}")
-    print(f"  按 Ctrl+C 可停止程序")
-    print(f"==================================================")
+    safe_print(f"==================================================")
+    safe_print(f"  {APP_NAME} v{APP_VERSION}")
+    safe_print(f"  本地服务已启动: {url}")
+    safe_print(f"  按 Ctrl+C 可停止程序")
+    safe_print(f"==================================================")
 
     # 启动 Windows 全局 ESC 键监听（按 ESC 即可打断发送）
     try:
@@ -143,7 +175,7 @@ def main():
                 from web_companion import launch_web_gui_companion
             gui_started = launch_web_gui_companion(controller, server, port, url)
         except Exception as exc:
-            print(f"伴随控制台未启动 ({exc})，继续以纯后台/终端模式运行。")
+            safe_print(f"伴随控制台未启动 ({exc})，继续以纯后台/终端模式运行。")
             gui_started = False
 
     if not gui_started:
@@ -151,7 +183,7 @@ def main():
             while server_thread.is_alive():
                 time.sleep(1.0)
         except (KeyboardInterrupt, SystemExit):
-            print("\n正在停止本地服务...")
+            safe_print("\n正在停止本地服务...")
             server.shutdown()
             server.server_close()
 
