@@ -143,21 +143,7 @@ function handleUploadStepClick(n) {
 window.handleUploadStepClick = handleUploadStepClick;
 
 function confirmReupload() {
-    if (typeof showCustomDialog === 'function') {
-        showCustomDialog({
-            title: '重新上传',
-            body: '确定要重新上传吗？当前已上传的数据和配置将会重置。<br><span style="font-size: 0.85em; color: var(--text-secondary); margin-top: 6px; display: inline-block;">若仅需修改已上传文件，可使用页面底部的「返回上传」按钮。</span>',
-            confirmText: '重新上传',
-            cancelText: '取消',
-            onConfirm: () => {
-                window.location.href = 'upload.html';
-            }
-        });
-    } else {
-        if (confirm('确定要重新上传吗？当前已上传的数据和配置将会重置。')) {
-            window.location.href = 'upload.html';
-        }
-    }
+    window.location.href = 'upload.html';
 }
 window.confirmReupload = confirmReupload;
 
