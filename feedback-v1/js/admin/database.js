@@ -3242,6 +3242,61 @@
             copyTextToClipboard(text, '已复制学员薄弱考点内容，可直接发送给家长！');
         }
 
+        const COMPOUND_SURNAMES_FOR_HONORIFIC = [
+            '欧阳', '司马', '上官', '诸葛', '慕容', '令狐', '公孙', '西门', '南宫', '夏侯',
+            '尉迟', '轩辕', '端木', '东方', '闾丘', '亓官', '司寇', '子车', '颛孙', '巫马',
+            '公西', '漆雕', '乐正', '壤驷', '公良', '拓跋', '夹谷', '宰父', '谷利', '句容',
+            '鲜于', '伯夷', '申屠', '公羊', '南荣', '赫连', '皇甫', '宗政', '濮阳', '公冶',
+            '太叔', '钟离', '长孙', '宇文', '司徒', '司空', '百里', '呼延', '梁丘', '左丘',
+            '东郭'
+        ];
+
+        function getStudentHonorific(studentName) {
+            const s = (studentName || '').trim();
+            if (!s) return '同学';
+            for (const surname of COMPOUND_SURNAMES_FOR_HONORIFIC) {
+                if (s.startsWith(surname)) {
+                    return `${surname}同学`;
+                }
+            }
+            const firstChar = s.charAt(0);
+            if (/[\u4e00-\u9fa5]/.test(firstChar)) {
+                return `小${firstChar}同学`;
+            }
+            return `${s}同学`;
+        }
+
+        const VARIATION_NOTICE_TEMPLATES = [
+            (name) => `课后巩固的“举一反三”题目也已加入错题本，方便${name}后续复习。\n`,
+            (name) => `针对课后错题配套的“举一反三”同类练习已同步到错题本，${name}课后可以趁热打铁练一练。\n`,
+            (name) => `这次课后错题对应的变式练习已经整理进错题本，方便${name}针对薄弱点查漏补缺。\n`,
+            (name) => `错题本里已配好针对薄弱考点的“举一反三”题目，建议${name}复习时顺手过一遍。\n`,
+            (name) => `课后巩固的同类变式题已放进错题本，方便${name}把同类题型彻底吃透。\n`,
+            (name) => `针对今天这几道错题，错题本已补充了对应的“举一反三”，${name}有空可以练练巩固一下。\n`,
+            (name) => `相关的“举一反三”题目已经录入错题本，方便${name}后续巩固思路、加深印象。\n`,
+            (name) => `错题本中已加入针对性的“举一反三”巩固题，${name}复习时别忘了重点看看。\n`
+        ];
+
+        function hashStudentName(str) {
+            let hash = 0;
+            const s = String(str || '');
+            for (let i = 0; i < s.length; i++) {
+                hash = ((hash << 5) - hash) + s.charCodeAt(i);
+                hash |= 0;
+            }
+            return Math.abs(hash);
+        }
+
+        function getVariationNotice(studentName, weekNum) {
+            const name = getStudentHonorific(studentName);
+            const pool = VARIATION_NOTICE_TEMPLATES;
+            const week = parseInt(weekNum, 10) || 1;
+            const weekShift = week * 3;
+            const studentSeed = hashStudentName(studentName);
+            const index = (studentSeed + weekShift) % pool.length;
+            return pool[index](name);
+        }
+
         function copyParentFullFeedback(recordIdx, currentTable) {
             let r = window.currentDetailModalRecord;
             if (!r) {
@@ -3308,11 +3363,8 @@
                 ? '预习题错题已加入错题本。' 
                 : '预习题错题已加入错题本，建议结合讲义中的同类题进行巩固。';
 
-            const sTrimmed = (r.student_name || '').trim();
-            const nameSuffix = sTrimmed ? (sTrimmed.length >= 2 ? sTrimmed.slice(-2) : sTrimmed) : '';
-            const studentDesc = nameSuffix ? `${nameSuffix}同学` : '同学';
             const consolidationNotice = (validDetails.length > 0 || errs.length > 0) 
-                ? `课后巩固的“举一反三”题目也已加入错题本，方便${studentDesc}后续复习。\n` 
+                ? getVariationNotice(r.student_name, r.week_num || 1)
                 : '';
 
             let previewFeedbackBlock = '';
