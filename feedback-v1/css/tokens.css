@@ -85,6 +85,13 @@
     --z-toast: 1200;
     --z-max: 9999;
 
+    /* ---------- 7.1 移动端安全区与触控规范 ---------- */
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+    --touch-min-size: 42px;
+
     /* ---------- 8. 存量兼容收敛映射（强制覆盖各页旧变量） ---------- */
     --accent: var(--brand-500);
     --accent-hover: var(--brand-600);
@@ -196,3 +203,10 @@ body {
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
 }
+
+/* 移动端触控优化：消除点击延迟与灰色/蓝色高亮闪烁 */
+button, .btn, a, select, input, textarea, [role="button"], label {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+

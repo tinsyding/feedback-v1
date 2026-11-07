@@ -224,8 +224,15 @@ async function initViewerSemester() {
     document.addEventListener('click', (e) => {
         const trigger = e.target.closest('.vw-dropdown-trigger');
         if (trigger) {
-            // 功能区下拉按钮纯悬停触发，直接点击不切换常驻 active 状态，防止下拉区卡住
             e.preventDefault();
+            const dd = trigger.closest('.vw-dropdown');
+            if (dd) {
+                const wasActive = dd.classList.contains('hover-active');
+                document.querySelectorAll('.vw-dropdown.hover-active').forEach(other => other.classList.remove('hover-active'));
+                if (!wasActive) {
+                    dd.classList.add('hover-active');
+                }
+            }
             return;
         }
 
@@ -2738,7 +2745,10 @@ function fallbackCopy(text) {
 
 function copyText(text, element) {
     const onSuccess = () => {
-        showToast('已复制姓名，请复制右侧评语');
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+            try { navigator.vibrate(15); } catch(e) {}
+        }
+        showToast('已复制姓名，请复制评语');
         if (element) { element.style.transform = 'scale(0.98)'; setTimeout(() => { element.style.transform = ''; }, 150); }
         const currentRow = element ? element.closest('tr') : null;
         if (currentRow) enterFocusMode(parseInt(currentRow.getAttribute('data-row-index')));
@@ -2791,6 +2801,9 @@ function clearFocusMode() {
 function copyToNext(text, element) {
     Logger.action('content_copied', { length: text.length });
     const onSuccess = () => {
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+            try { navigator.vibrate(15); } catch(e) {}
+        }
         const currentRow = element.closest('tr');
         if (currentRow) {
             const nameEl = currentRow.querySelector('.student-name');
@@ -4332,13 +4345,14 @@ async function saveSnapshot() {
 
         // 4. Inline JS for snapshot (plain string, no template literals)
         var snapshotJS = [
+            'function vibrate(){if(typeof navigator!=="undefined"&&navigator.vibrate){try{navigator.vibrate(15);}catch(e){}}}',
             'function toggleTheme(cb){document.documentElement.setAttribute("data-theme",cb.checked?"light":"dark");}',
             'function showToast(m){var t=document.getElementById("toast");if(!t)return;t.textContent=m;t.classList.add("show");setTimeout(function(){t.classList.remove("show");},2000);}',
-            'function copyText(text){if(navigator.clipboard && window.isSecureContext){navigator.clipboard.writeText(text).then(function(){showToast("已复制: "+text);}).catch(function(){fallbackCopy(text);});}else{fallbackCopy(text);}}',
+            'function copyText(text){if(navigator.clipboard && window.isSecureContext){navigator.clipboard.writeText(text).then(function(){vibrate();showToast("已复制: "+text);}).catch(function(){fallbackCopy(text);});}else{fallbackCopy(text);}}',
             'function copyFeedback(el){var text=el.innerText;var tr=el.closest("tr");if(navigator.clipboard && window.isSecureContext){navigator.clipboard.writeText(text).then(function(){afterCopy(tr);}).catch(function(){fallbackCopy(text);setTimeout(function(){afterCopy(tr);},0);});}else{fallbackCopy(text);setTimeout(function(){afterCopy(tr);},0);}}',
-            'function afterCopy(tr){if(!tr)return;var ne=tr.querySelector(".student-name");showToast("已复制\\"" + (ne?ne.textContent:"") + "\\"的评语");tr.classList.add("copied-row");setTimeout(function(){focusNextRow(tr);},80);}',
+            'function afterCopy(tr){if(!tr)return;vibrate();var ne=tr.querySelector(".student-name");showToast("已复制\\"" + (ne?ne.textContent:"") + "\\"的评语");tr.classList.add("copied-row");setTimeout(function(){focusNextRow(tr);},80);}',
             'function focusNextRow(currentTr){var tbody=document.getElementById("result-tbody");if(!tbody)return;var rows=Array.from(tbody.querySelectorAll("tr"));var ci=rows.indexOf(currentTr);for(var i=ci+1;i<rows.length;i++){var r=rows[i];if(r.style.display!=="none"&&!r.classList.contains("copied-row")){r.scrollIntoView({behavior:"smooth",block:"center"});r.classList.add("highlight-row");setTimeout(function(){r.classList.remove("highlight-row");},2000);return;}}showToast("全部复制完成！");}',
-            'function fallbackCopy(text){var ta=document.createElement("textarea");ta.value=text;ta.style.cssText="position:fixed;left:-9999px;";document.body.appendChild(ta);ta.select();document.execCommand("copy");document.body.removeChild(ta);showToast("已复制");}',
+            'function fallbackCopy(text){var ta=document.createElement("textarea");ta.value=text;ta.style.cssText="position:fixed;left:-9999px;";document.body.appendChild(ta);ta.select();document.execCommand("copy");document.body.removeChild(ta);vibrate();showToast("已复制");}',
             'function applySorting(){var tbody=document.getElementById("result-tbody");if(!tbody)return;var sv=(document.getElementById("sort-field")||{value:"id-asc"}).value;var rows=Array.from(tbody.querySelectorAll("tr"));rows.sort(function(a,b){switch(sv){case"id-asc":return parseInt(a.dataset.studentId||0)-parseInt(b.dataset.studentId||0);case"id-desc":return parseInt(b.dataset.studentId||0)-parseInt(a.dataset.studentId||0);case"score-desc":return parseFloat(b.dataset.score||0)-parseFloat(a.dataset.score||0);case"score-asc":return parseFloat(a.dataset.score||0)-parseFloat(b.dataset.score||0);case"offline-focus":var ta=(parseInt(a.dataset.online||0)===0&&parseFloat(a.dataset.focus||-1)>0)?1:0;var tb=(parseInt(b.dataset.online||0)===0&&parseFloat(b.dataset.focus||-1)>0)?1:0;return ta!==tb?tb-ta:parseInt(a.dataset.studentId||0)-parseInt(b.dataset.studentId||0);default:return 0;}});rows.forEach(function(r){tbody.appendChild(r);});applyFiltering();}',
             'function applyFiltering(){var si=document.getElementById("search-input");if(!si)return;var term=si.value.toLowerCase().trim();var tbody=document.getElementById("result-tbody");if(!tbody)return;var rows=tbody.querySelectorAll("tr");var vc=0;rows.forEach(function(row){var ne=row.querySelector(".student-name");var name=ne?ne.textContent.toLowerCase():"";var match=name.indexOf(term)>=0;row.style.display=match?"":"none";if(match)vc++;});var cb=document.getElementById("result-count");if(cb)cb.textContent=term?("筛选: "+vc+" / "+rows.length+" 人"):("共 "+rows.length+" 位同学");}',
             'document.addEventListener("click",function(e){var tr=e.target.closest("tr");if(tr&&tr.classList.contains("copied-row"))tr.classList.remove("copied-row");});',
@@ -4351,7 +4365,7 @@ async function saveSnapshot() {
         html.push('<html lang="zh-CN" data-theme="' + currentTheme + '">');
         html.push('<head>');
         html.push('<meta charset="UTF-8">');
-        html.push('<meta name="viewport" content="width=device-width, initial-scale=1.0">');
+        html.push('<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">');
         html.push('<title>' + escapeHtml(brandTitle) + ' - 快照 ' + ds + '</title>');
         html.push('<meta name="description" content="反馈快照 - 生成于 ' + ds + ' ' + ts + '">');
         html.push('<style>' + safeCSSForStyle(allCSS) + '</style>');

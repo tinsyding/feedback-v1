@@ -49,6 +49,13 @@ body.viewer-page {
     min-width: 0;
 }
 
+.toolbar-aux {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
 /* Brand */
 .nav-brand {
     display: flex;
@@ -1560,57 +1567,402 @@ body.viewer-page {
     color: var(--text-primary);
 }
 
-/* Mobile & Tablet Responsive Polish */
+/* ========================================
+   Mobile & Tablet Responsive Polish (卡片流与底部抽屉优化)
+   ======================================== */
+@keyframes slideUpSheet {
+    from {
+        opacity: 0;
+        transform: translateY(100%);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes fadeInOverlay {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
 @media (max-width: 768px) {
-    .viewer-content {
-        padding: 12px;
+    /* 1. 顶栏：紧凑两行网格布局（Row 1: 品牌与重传/主题，Row 2: 顺滑横向胶囊工具条） */
+    .viewer-toolbar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        grid-template-rows: auto auto;
+        align-items: center;
+        gap: 8px 10px;
+        padding: 8px 12px;
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        background: var(--ui-glass-nav);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border-bottom: 1px solid var(--border-color);
     }
-    .result-table td {
-        padding: 14px 10px;
+    .toolbar-left {
+        grid-column: 1;
+        grid-row: 1;
+        min-width: 0;
+        display: flex;
+        align-items: center;
     }
-    .name-td {
-        width: 120px;
-        min-width: 110px;
+    .nav-brand .brand-text h1 {
+        font-size: 1.05rem;
     }
-    .name-main {
+    .toolbar-right {
+        display: contents;
+    }
+    .toolbar-aux {
+        grid-column: 2;
+        grid-row: 1;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .toolbar-aux #reupload-btn {
         padding: 6px 10px;
-        font-size: 0.8rem;
-    }
-    .student-name {
-        font-size: 0.82rem;
-    }
-    .student-tag {
-        font-size: 0.7rem;
-        padding: 3px 8px;
-    }
-    .feedback-content {
-        padding: 12px;
         font-size: 0.78rem;
-        line-height: 1.65;
+        min-height: 32px;
     }
-    .toolbar-btn {
-        padding: 8px 6px;
-        font-size: 0.72rem;
+    .toolbar-divider {
+        display: none;
+    }
+    .toolbar-actions {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        display: flex;
+        align-items: center;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        gap: 6px;
+        width: 100%;
+        padding: 2px 0 4px;
+        scrollbar-width: none;
+    }
+    .toolbar-actions::-webkit-scrollbar {
+        display: none;
+    }
+    .toolbar-actions .btn,
+    .toolbar-actions .vw-dropdown {
+        flex-shrink: 0;
+    }
+    .toolbar-actions .btn.sm,
+    .toolbar-actions .vw-dropdown-trigger {
+        padding: 6px 11px;
+        font-size: 0.76rem;
+        min-height: 34px;
+        border-radius: var(--radius-sm);
+        white-space: nowrap;
+    }
+
+    /* 2. 下拉菜单变身原生质感底部抽屉 (Bottom Sheet) */
+    .vw-dropdown-menu {
+        position: fixed !important;
+        top: auto !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        width: 100% !important;
+        min-width: 100% !important;
+        max-height: 75vh !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch;
+        border-radius: 20px 20px 0 0 !important;
+        border-bottom: none !important;
+        border-left: none !important;
+        border-right: none !important;
+        padding: 14px 16px max(18px, env(safe-area-inset-bottom)) !important;
+        box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.45) !important;
+        z-index: 9999 !important;
+        background: var(--ui-modal-bg, var(--n-2)) !important;
+        animation: slideUpSheet 0.22s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    }
+    [data-theme="light"] .vw-dropdown-menu {
+        background: #ffffff !important;
+        box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.15) !important;
+    }
+    .vw-dropdown-menu::before {
+        display: none !important;
+    }
+    .vw-dropdown-menu::after {
+        content: '';
+        display: block;
+        width: 38px;
+        height: 4px;
+        background: var(--line-strong, rgba(255, 255, 255, 0.2));
+        border-radius: 999px;
+        margin: -4px auto 14px;
+        order: -1;
+    }
+    [data-theme="light"] .vw-dropdown-menu::after {
+        background: rgba(0, 0, 0, 0.16);
+    }
+    .vw-dropdown-item {
+        min-height: 44px;
+        padding: 12px 14px;
+        font-size: 0.92rem;
+        font-weight: 500;
+        border-radius: var(--radius-md);
+        gap: 12px;
+    }
+    .vw-dropdown-item svg {
+        width: 18px;
+        height: 18px;
+    }
+    .vw-dropdown.hover-active::after {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.55);
+        z-index: 9998;
+        backdrop-filter: blur(2px);
+        -webkit-backdrop-filter: blur(2px);
+        animation: fadeInOverlay 0.18s ease;
+    }
+
+    /* 3. 结果容器与搜索栏 */
+    .viewer-content {
+        padding: 10px 12px max(24px, env(safe-area-inset-bottom));
+        gap: 10px;
+    }
+    .viewer-content .result-section {
+        padding: 10px;
+        border-radius: var(--radius-lg);
     }
     .result-header {
         flex-direction: column;
         align-items: stretch;
         gap: 8px;
+        margin-bottom: 10px;
     }
     .result-header-left {
         display: flex;
-        justify-content: flex-start;
+        justify-content: space-between;
+        align-items: center;
+        width: 100%;
+    }
+    .result-count-badge {
+        font-size: 0.78rem;
+        padding: 5px 12px;
     }
     .header-controls {
         width: 100%;
-        justify-content: space-between;
+        display: flex;
+        gap: 8px;
     }
     .header-controls .ui-search {
-        width: 200px;
         flex: 1;
-        max-width: 320px;
+        min-width: 0;
+        max-width: none;
+        min-height: 40px;
+    }
+    .header-controls .ui-search input {
+        font-size: 0.86rem;
+    }
+    .sort-controls {
+        flex: 0 0 auto;
+        min-height: 40px;
+    }
+    .sort-select {
+        min-height: 40px;
+        font-size: 0.82rem;
+        padding-left: 10px;
+        padding-right: 28px;
+    }
+
+    /* 4. 表格转卡片流 (Table -> Card Flow) */
+    .table-container {
+        border: none !important;
+        background: transparent !important;
+        overflow: visible !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+    }
+    .result-table {
+        display: block;
+        width: 100% !important;
+        border: none !important;
+    }
+    .result-table thead {
+        display: none !important;
+    }
+    .result-table tbody {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        width: 100%;
+    }
+    .result-table tbody tr {
+        display: flex;
+        flex-direction: column;
+        width: 100% !important;
+        background: var(--ui-fill-base);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        padding: 12px 14px;
+        box-sizing: border-box;
+        box-shadow: var(--shadow-xs);
+        position: relative;
+        overflow: hidden;
+        transition: border-color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
+    }
+    [data-theme="light"] .result-table tbody tr {
+        background: #ffffff;
+        border-color: rgba(0, 0, 0, 0.08);
+    }
+    .result-table tbody tr.highlight-row {
+        border-color: var(--brand-500) !important;
+        box-shadow: 0 0 0 2px rgba(var(--brand-rgb), 0.25) !important;
+    }
+
+    /* 卡片头部：姓名与线上/线下状态 */
+    .result-table td.name-td {
+        display: block;
+        width: 100% !important;
+        min-width: 0 !important;
+        padding: 0 0 8px 0 !important;
+        border-bottom: 1px dashed var(--border-separator) !important;
+    }
+    .name-cell {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+    }
+    .name-main {
+        padding: 6px 12px;
+        font-size: 0.9rem;
+        font-weight: 700;
+        border-radius: var(--radius-md);
+        min-height: 34px;
+        gap: 6px;
+        cursor: pointer;
+    }
+    .student-name {
+        font-size: 0.92rem;
+        font-weight: 700;
+    }
+    .student-tag {
+        font-size: 0.74rem;
+        padding: 4px 10px;
+        border-radius: 6px;
+        min-height: 26px;
+        cursor: pointer;
+        user-select: none;
+    }
+
+    /* 卡片主体：评语正文通栏排版，无细条挤压 */
+    .result-table td.feedback-cell {
+        display: flex;
+        flex-direction: column;
+        width: 100% !important;
+        padding: 10px 0 0 0 !important;
+        border-bottom: none !important;
+    }
+    .feedback-wrapper {
+        width: 100%;
+    }
+    .feedback-content {
+        padding: 10px 12px;
+        font-size: 0.88rem;
+        line-height: 1.65;
+        background: var(--ui-fill-weak);
+        border: 1px solid var(--border-light);
+        border-radius: var(--radius-md);
+        margin-bottom: 10px;
+        cursor: pointer;
+        word-break: break-word;
+        white-space: pre-wrap;
+        user-select: text;
+    }
+    [data-theme="light"] .feedback-content {
+        background: #f8fafc;
+        border-color: rgba(0, 0, 0, 0.06);
+    }
+    .feedback-editor {
+        width: 100%;
+        min-height: 130px;
+        font-size: 0.88rem;
+        line-height: 1.6;
+        padding: 10px 12px;
+        margin-bottom: 10px;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--accent-primary);
+        background: var(--ui-fill-strong);
+        color: var(--text-primary);
+        box-sizing: border-box;
+    }
+    .editor-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-bottom: 10px;
+    }
+    .editor-btn {
+        min-height: 38px;
+        padding: 0 16px;
+        font-size: 0.84rem;
+    }
+
+    /* 卡片底部操作栏：大号拇指触控复制按钮 */
+    .feedback-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        background: transparent;
+        border: none;
+        padding: 0;
+        border-radius: 0;
+    }
+    .feedback-toolbar .toolbar-btn {
+        min-height: 42px;
+        padding: 8px 14px;
+        font-size: 0.86rem;
+        font-weight: 600;
+        border-radius: var(--radius-md);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        cursor: pointer;
+    }
+    .feedback-toolbar .toolbar-btn.copy-btn {
+        flex: 1;
+        background: var(--brand-500);
+        color: #ffffff;
+        border: 1px solid var(--brand-600);
+        box-shadow: 0 2px 6px rgba(var(--brand-rgb), 0.2);
+    }
+    .feedback-toolbar .toolbar-btn.copy-btn svg {
+        width: 16px;
+        height: 16px;
+        color: #ffffff;
+    }
+    .feedback-toolbar .toolbar-btn.copy-btn:active {
+        transform: scale(0.98);
+        background: var(--brand-600);
+    }
+    .feedback-toolbar .toolbar-btn.edit-toolbar-btn {
+        flex: 0 0 auto;
+        min-width: 68px;
+        background: var(--ui-fill-weak);
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+    }
+
+    /* 已复制覆盖层 */
+    .copied-row::after {
+        font-size: 1rem;
+        border-radius: var(--radius-lg);
     }
 }
+
 
 /* ========================================
    Print：只打反馈表，隐藏工具条与弹窗

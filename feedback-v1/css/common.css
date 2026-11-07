@@ -2542,11 +2542,25 @@ tr.masked-row.copied-row {
 .dialog-box.wide {
     max-width: 560px;
     max-height: 88vh;
+    max-height: 88dvh;
 }
 
 .dialog-box.xwide {
     max-width: 680px;
     max-height: 88vh;
+    max-height: 88dvh;
+}
+
+@media (max-width: 640px) {
+    .dialog-overlay {
+        padding: 12px;
+    }
+    .dialog-box,
+    .dialog-box.wide,
+    .dialog-box.xwide {
+        max-width: 100%;
+        max-height: 92dvh;
+    }
 }
 
 /* 内边距变体：供登录/助教等整卡表单场景（替代已下线的 front-auth-card 内边距） */

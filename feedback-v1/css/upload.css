@@ -1325,11 +1325,19 @@ select.modern-input option {
 /* --- Responsive --- */
 @media (max-width: 768px) {
     .upload-shell {
-        padding: 20px 16px 16px;
+        padding: 16px 12px max(24px, env(safe-area-inset-bottom));
+    }
+
+    .drop-zone-label {
+        padding: 18px 14px;
+    }
+
+    .drop-secondary {
+        display: none;
     }
 
     .hero-title {
-        font-size: 1.5rem;
+        font-size: 1.4rem;
     }
 
     .panel-grid {
@@ -1363,6 +1371,7 @@ select.modern-input option {
     .upload-shell .btn {
         padding: 10px 16px;
         font-size: 0.82rem;
+        min-height: 38px;
     }
 }
 
