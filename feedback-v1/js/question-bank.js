@@ -2892,9 +2892,9 @@ function renderQuestionList() {
         if (hintText) {
             if (sameTopicGroups.length > 0) {
                 const sampleGroup = topicMap[sameTopicGroups[0]];
-                hintText.innerHTML = `<strong>举一反三智能考点提示：</strong>检测到本专题有 <strong>${sameTopicGroups.length} 组</strong> 同知识点原题（如第 ${sampleGroup.join('、')} 题【${escapeHtml(sameTopicGroups[0])}】）。`;
+                hintText.innerHTML = `<strong>同考点关联提示：</strong>检测到本专题有 <strong>${sameTopicGroups.length} 组</strong> 同知识点原题（如第 ${sampleGroup.join('、')} 题【${escapeHtml(sameTopicGroups[0])}】）。`;
             } else {
-                hintText.innerHTML = `<strong>举一反三智能考点提示：</strong>支持一道变式题同时关联多道同考点原题。学生做错同考点任一题或多题时，错题本均自动输出该变式且仅练一次。`;
+                hintText.innerHTML = `<strong>同考点关联提示：</strong>支持一道变式题同时关联多道同考点原题。学生做错任一对应原题时，错题本均自动输出该变式且仅练一次。`;
             }
         }
     }

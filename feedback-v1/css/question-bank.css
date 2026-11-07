@@ -2710,13 +2710,13 @@ input[type=number] {
     padding: 0 4px;
     font-size: 0.72rem;
     border: none;
-    border-radius: 3px;
+    border-radius: 4px;
     background: transparent;
     color: var(--text-secondary);
     cursor: pointer;
     font-weight: 600;
     font-family: inherit;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .var-hw-preview-btn.compact:hover {
@@ -3135,7 +3135,7 @@ input[type=number] {
     gap: 6px;
     flex-shrink: 0;
     border-radius: var(--radius-xs, 6px);
-    transition: all 0.15s ease;
+    transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 .qb-merge-same-topic-btn svg {

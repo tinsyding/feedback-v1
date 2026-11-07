@@ -1191,22 +1191,12 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             const barX = Math.round(10 * K);
             const barY = Math.round((hpx - barH) / 2);
             questionTopicBadgeRoundRect(ctx, barX, barY, barW, barH, Math.round(barW / 2));
-            if (isPreview) {
-                const barGrad = ctx.createLinearGradient(barX, barY, barX, barY + barH);
-                barGrad.addColorStop(0, '#f59e0b');
-                barGrad.addColorStop(1, '#d97706');
-                ctx.fillStyle = barGrad;
-            } else {
-                const barGrad = ctx.createLinearGradient(barX, barY, barX, barY + barH);
-                barGrad.addColorStop(0, '#2563eb');
-                barGrad.addColorStop(1, '#1d4ed8');
-                ctx.fillStyle = barGrad;
-            }
+            ctx.fillStyle = isPreview ? '#d97706' : '#2563eb';
             ctx.fill();
 
             // 3. 正文：知识点名称 + 涉及错题副标
             const textStartX = barX + barW + 8 * K;
-            const fontTitle = '700 ' + Math.round(12 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+            const fontTitle = '600 ' + Math.round(12 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
             const fontSubtitle = '500 ' + Math.round(9.5 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
 
             ctx.font = fontTitle;
@@ -1783,7 +1773,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             let currentY = PAGE_HEIGHT - TOP_MARGIN;
 
             for (let i = 0; i < pdfsToMerge.length; i++) {
-                modalDesc.textContent = '正在智能分析与排版切片 (' + (i + 1) + '/' + pdfsToMerge.length + ')...';
+                modalDesc.textContent = '正在排版题目切片 (' + (i + 1) + '/' + pdfsToMerge.length + ')...';
                 const qItem = pdfsToMerge[i];
                 const targetUrl = typeof qItem === 'string' ? qItem : qItem.url;
                 const videoUrl = (typeof qItem === 'object' && qItem.videoUrl) ? String(qItem.videoUrl).trim() : '';

@@ -12,7 +12,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261106-1';
+            const v = '20261107-2';
             document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/question-bank.css?v=${v}">`);
@@ -494,7 +494,7 @@
                                     <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
                                 </svg>
                                 <div class="qb-variation-hint-inner">
-                                    <span id="qb-variation-hint-text"><strong>举一反三智能考点提示：</strong>支持一道变式题同时关联多道同考点原题。学生做错同考点任一题或多题时，错题本均自动输出该变式且仅练一次。</span>
+                                    <span id="qb-variation-hint-text"><strong>同考点关联提示：</strong>支持一道变式题同时关联多道同考点原题。学生做错任一对应原题时，错题本均自动输出该变式且仅练一次。</span>
                                     <button type="button" class="btn sm secondary qb-merge-same-topic-btn" id="qb-merge-same-topic-btn" onclick="mergeAllSameTopicVariations()" style="display: none;">
                                         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
                                             <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
@@ -678,7 +678,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261106-1';
+            const v = '20261107-2';
             document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
             document.write(`<script src="js/common.js?v=${v}"><\/script>`);
             document.write(`<script src="js/auth.js?v=${v}"><\/script>`);
