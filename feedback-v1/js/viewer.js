@@ -118,6 +118,8 @@ let homeworkReminderText = '';
 let noteReminderText = '';
 let classTestReminderText = '';
 let currentFeedbackViewMode = 'full'; // 'full' | 'plus-with-name' | 'plus-pure' | 'academic-only'
+let detectedOfflineToOnlineStudents = [];
+let dismissedOfflineToOnlineNotice = false;
 
 const hwStatsSection = document.getElementById('hw-stats-section');
 const pvStatsSection = document.getElementById('pv-stats-section');
@@ -268,6 +270,7 @@ function hydrateFromPayload(payload) {
     }
     const runtime = payload.runtime || {};
     onlineOverrides = runtime.onlineOverrides || {};
+    dismissedOfflineToOnlineNotice = !!runtime.dismissedOfflineToOnlineNotice;
     if (payload.plusTokens && typeof payload.plusTokens === 'object' && Object.keys(payload.plusTokens).length > 0) {
         cachedPlusTokens = payload.plusTokens;
     }
@@ -1430,6 +1433,9 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
         }
     }
 
+    detectedOfflineToOnlineStudents = [];
+    const detectedStudentNamesSet = new Set();
+
     hwRows.forEach((row, index) => {
         const fullName = (row[nameIdx] || '').trim();
         const nameMatch = fullName.match(/\d+(.+)/);
@@ -1488,6 +1494,17 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
         const onlineInfo = onlineStudents[studentName] || null;
         const isOnline = onlineInfo?.isOnline || false;
         const focusScore = onlineInfo?.reward ?? -1;
+
+        if (!isOnline && onlineOverrides[studentName] !== 'offline' && onlineInfo && !onlineInfo.isAbsent && typeof onlineInfo.reward === 'number' && onlineInfo.reward > 0) {
+            if (!detectedStudentNamesSet.has(studentName)) {
+                detectedStudentNamesSet.add(studentName);
+                detectedOfflineToOnlineStudents.push({
+                    name: studentName,
+                    score: onlineInfo.reward,
+                    className: onlineInfo.className || ''
+                });
+            }
+        }
 
         // ===== Build feedback text =====
         let feedback = `${studentName}家长您好，\n`;
@@ -1982,6 +1999,7 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
     }
 
     updateReminderBadges();
+    renderOfflineToOnlineNotice(detectedOfflineToOnlineStudents);
 
     // Notify about dropped students if any
     if (!skipUnsubmittedCheck && allDroppedSet.size > 0) {
@@ -2259,6 +2277,9 @@ async function doGeneratePreviewOnlyFeedback() {
         }
     });
 
+    detectedOfflineToOnlineStudents = [];
+    const detectedStudentNamesSet = new Set();
+
     pvRows.forEach((row, index) => {
         const fullName = row[pvNameIdx] || '';
         const nameMatch = fullName.match(/\d+(.+)/);
@@ -2274,6 +2295,17 @@ async function doGeneratePreviewOnlyFeedback() {
         const onlineInfo = onlineStudents[studentName] || null;
         const isOnline = onlineInfo?.isOnline || false;
         const focusScore = onlineInfo?.reward ?? -1;
+
+        if (!isOnline && onlineOverrides[studentName] !== 'offline' && onlineInfo && !onlineInfo.isAbsent && typeof onlineInfo.reward === 'number' && onlineInfo.reward > 0) {
+            if (!detectedStudentNamesSet.has(studentName)) {
+                detectedStudentNamesSet.add(studentName);
+                detectedOfflineToOnlineStudents.push({
+                    name: studentName,
+                    score: onlineInfo.reward,
+                    className: onlineInfo.className || ''
+                });
+            }
+        }
 
         const commentSummary = getCommentSummary();
         let summaryPart = commentSummary ? `本节课总结：\n${commentSummary.trim()}\n` : '';
@@ -2612,6 +2644,7 @@ async function doGeneratePreviewOnlyFeedback() {
     }
 
     updateReminderBadges();
+    renderOfflineToOnlineNotice(detectedOfflineToOnlineStudents);
 
     if (!hasLoggedFeedbackGenerated) {
         Logger.action('feedback_generated', { totalStudents: pvRows.length, hasHomework: false, skipped: droppedPvSet.size });
@@ -2742,6 +2775,78 @@ function toggleStudentOnlineStatus(studentKey, tagElement) {
             doGenerateFeedback(true);
         }
     });
+}
+
+function renderOfflineToOnlineNotice(detectedList) {
+    const container = document.getElementById('offline-to-online-banner-container');
+    if (!container) return;
+    if (dismissedOfflineToOnlineNotice || !detectedList || detectedList.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+
+    const count = detectedList.length;
+    const pillsHTML = detectedList.map(s => {
+        const safeName = (typeof escapeHtml === 'function') ? escapeHtml(s.name) : s.name;
+        const score = s.score;
+        return `<span class="notice-student-pill">${safeName} <span class="notice-student-score">${score}分</span></span>`;
+    }).join('');
+
+    container.innerHTML = `
+        <div class="offline-online-notice-banner" id="offline-online-notice-banner" role="alert">
+            <div class="notice-banner-main">
+                <div class="notice-banner-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="8.5" cy="7" r="4"></circle>
+                        <polyline points="17 8 20 11 23 8"></polyline>
+                        <line x1="20" y1="11" x2="20" y2="17"></line>
+                    </svg>
+                </div>
+                <div class="notice-banner-content">
+                    <div class="notice-banner-text">
+                        <span>检测到 <strong>${count}</strong> 位线下学员在统计报告中有专注度积分：</span>
+                        <div class="notice-banner-students">${pillsHTML}</div>
+                        <span>是否一键转为线上并生成专注度反馈？</span>
+                    </div>
+                </div>
+            </div>
+            <div class="notice-banner-actions">
+                <button type="button" class="btn primary sm notice-btn-confirm" onclick="batchConvertOfflineToOnline()">
+                    一键转为线上
+                </button>
+                <button type="button" class="btn secondary sm notice-btn-dismiss" onclick="dismissOfflineToOnlineNotice()" title="忽略此提示">
+                    忽略
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+function batchConvertOfflineToOnline() {
+    if (!detectedOfflineToOnlineStudents || detectedOfflineToOnlineStudents.length === 0) return;
+    const studentNames = detectedOfflineToOnlineStudents.map(s => s.name);
+    studentNames.forEach(name => {
+        onlineOverrides[name] = 'online';
+    });
+    updateRuntimeState({ onlineOverrides });
+    if (typeof Logger !== 'undefined' && Logger.action) {
+        Logger.action('batch_convert_offline_to_online', {
+            count: studentNames.length,
+            students: studentNames.map(n => n.charAt(0) + '*')
+        });
+    }
+    showToast(`已将 ${studentNames.join('、')} 转为线上并更新反馈`);
+    doGenerateFeedback(true);
+}
+
+function dismissOfflineToOnlineNotice() {
+    dismissedOfflineToOnlineNotice = true;
+    updateRuntimeState({ dismissedOfflineToOnlineNotice: true });
+    const container = document.getElementById('offline-to-online-banner-container');
+    if (container) {
+        container.innerHTML = '';
+    }
 }
 
 function checkUnsubmittedStudents(previewMap, homeworkMap, pvLesson, hwLesson, noteMap, noteLesson, classTestMap, classTestLesson) {
@@ -3877,6 +3982,11 @@ function applySorting() {
             case 'offline': { const ao=parseInt(a.dataset.online||0),bo=parseInt(b.dataset.online||0); return ao!==bo?ao-bo:parseInt(a.dataset.studentId||0)-parseInt(b.dataset.studentId||0); }
             case 'focus-desc': { const af=parseFloat(a.dataset.focus||-1),bf=parseFloat(b.dataset.focus||-1); return af!==bf?bf-af:parseInt(a.dataset.studentId||0)-parseInt(b.dataset.studentId||0); }
             case 'focus-asc': { const af=parseFloat(a.dataset.focus||-1),bf=parseFloat(b.dataset.focus||-1); return af!==bf?af-bf:parseInt(a.dataset.studentId||0)-parseInt(b.dataset.studentId||0); }
+            case 'offline-focus': {
+                const isTargetA = (parseInt(a.dataset.online||0) === 0 && parseFloat(a.dataset.focus||-1) > 0) ? 1 : 0;
+                const isTargetB = (parseInt(b.dataset.online||0) === 0 && parseFloat(b.dataset.focus||-1) > 0) ? 1 : 0;
+                return isTargetA !== isTargetB ? isTargetB - isTargetA : parseInt(a.dataset.studentId||0)-parseInt(b.dataset.studentId||0);
+            }
             default: return 0;
         }
     });
@@ -4161,7 +4271,7 @@ async function saveSnapshot() {
             'function afterCopy(tr){if(!tr)return;var ne=tr.querySelector(".student-name");showToast("已复制\\"" + (ne?ne.textContent:"") + "\\"的评语");tr.classList.add("copied-row");setTimeout(function(){focusNextRow(tr);},80);}',
             'function focusNextRow(currentTr){var tbody=document.getElementById("result-tbody");if(!tbody)return;var rows=Array.from(tbody.querySelectorAll("tr"));var ci=rows.indexOf(currentTr);for(var i=ci+1;i<rows.length;i++){var r=rows[i];if(r.style.display!=="none"&&!r.classList.contains("copied-row")){r.scrollIntoView({behavior:"smooth",block:"center"});r.classList.add("highlight-row");setTimeout(function(){r.classList.remove("highlight-row");},2000);return;}}showToast("全部复制完成！");}',
             'function fallbackCopy(text){var ta=document.createElement("textarea");ta.value=text;ta.style.cssText="position:fixed;left:-9999px;";document.body.appendChild(ta);ta.select();document.execCommand("copy");document.body.removeChild(ta);showToast("已复制");}',
-            'function applySorting(){var tbody=document.getElementById("result-tbody");if(!tbody)return;var sv=(document.getElementById("sort-field")||{value:"id-asc"}).value;var rows=Array.from(tbody.querySelectorAll("tr"));rows.sort(function(a,b){switch(sv){case"id-asc":return parseInt(a.dataset.studentId||0)-parseInt(b.dataset.studentId||0);case"id-desc":return parseInt(b.dataset.studentId||0)-parseInt(a.dataset.studentId||0);case"score-desc":return parseFloat(b.dataset.score||0)-parseFloat(a.dataset.score||0);case"score-asc":return parseFloat(a.dataset.score||0)-parseFloat(b.dataset.score||0);default:return 0;}});rows.forEach(function(r){tbody.appendChild(r);});applyFiltering();}',
+            'function applySorting(){var tbody=document.getElementById("result-tbody");if(!tbody)return;var sv=(document.getElementById("sort-field")||{value:"id-asc"}).value;var rows=Array.from(tbody.querySelectorAll("tr"));rows.sort(function(a,b){switch(sv){case"id-asc":return parseInt(a.dataset.studentId||0)-parseInt(b.dataset.studentId||0);case"id-desc":return parseInt(b.dataset.studentId||0)-parseInt(a.dataset.studentId||0);case"score-desc":return parseFloat(b.dataset.score||0)-parseFloat(a.dataset.score||0);case"score-asc":return parseFloat(a.dataset.score||0)-parseFloat(b.dataset.score||0);case"offline-focus":var ta=(parseInt(a.dataset.online||0)===0&&parseFloat(a.dataset.focus||-1)>0)?1:0;var tb=(parseInt(b.dataset.online||0)===0&&parseFloat(b.dataset.focus||-1)>0)?1:0;return ta!==tb?tb-ta:parseInt(a.dataset.studentId||0)-parseInt(b.dataset.studentId||0);default:return 0;}});rows.forEach(function(r){tbody.appendChild(r);});applyFiltering();}',
             'function applyFiltering(){var si=document.getElementById("search-input");if(!si)return;var term=si.value.toLowerCase().trim();var tbody=document.getElementById("result-tbody");if(!tbody)return;var rows=tbody.querySelectorAll("tr");var vc=0;rows.forEach(function(row){var ne=row.querySelector(".student-name");var name=ne?ne.textContent.toLowerCase():"";var match=name.indexOf(term)>=0;row.style.display=match?"":"none";if(match)vc++;});var cb=document.getElementById("result-count");if(cb)cb.textContent=term?("筛选: "+vc+" / "+rows.length+" 人"):("共 "+rows.length+" 位同学");}',
             'document.addEventListener("click",function(e){var tr=e.target.closest("tr");if(tr&&tr.classList.contains("copied-row"))tr.classList.remove("copied-row");});',
             'requestAnimationFrame(function(){document.body.classList.add("page-ready");});'
@@ -4293,6 +4403,8 @@ function escapeJsString(text) {
 window.copyText = copyText;
 window.copyToNext = copyToNext;
 window.toggleStudentOnlineStatus = toggleStudentOnlineStatus;
+window.batchConvertOfflineToOnline = batchConvertOfflineToOnline;
+window.dismissOfflineToOnlineNotice = dismissOfflineToOnlineNotice;
 window.toggleEdit = toggleEdit;
 window.saveEdit = saveEdit;
 window.cancelEdit = cancelEdit;

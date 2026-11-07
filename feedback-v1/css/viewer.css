@@ -955,6 +955,136 @@ body.viewer-page {
     box-shadow: none;
 }
 
+/* Offline-to-Online Batch Prompt Banner */
+#offline-to-online-banner-container {
+    width: 100%;
+}
+
+.offline-online-notice-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 18px;
+    margin-bottom: 14px;
+    background: rgba(10, 132, 255, 0.08);
+    border: 1px solid rgba(10, 132, 255, 0.28);
+    border-radius: 10px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    animation: noticeBannerSlideDown 0.25s ease-out;
+}
+
+[data-theme="light"] .offline-online-notice-banner {
+    background: rgba(0, 113, 227, 0.06);
+    border-color: rgba(0, 113, 227, 0.22);
+}
+
+@keyframes noticeBannerSlideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.notice-banner-main {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+}
+
+.notice-banner-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: rgba(10, 132, 255, 0.15);
+    color: var(--accent-primary, #0a84ff);
+    flex-shrink: 0;
+}
+
+.notice-banner-icon svg {
+    width: 18px;
+    height: 18px;
+}
+
+.notice-banner-content {
+    font-size: 0.88rem;
+    color: var(--text-primary);
+    line-height: 1.6;
+}
+
+.notice-banner-text {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+}
+
+.notice-banner-students {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.notice-student-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: var(--ui-fill-hover, rgba(255, 255, 255, 0.1));
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));
+    font-size: 0.82rem;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+[data-theme="light"] .notice-student-pill {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.1);
+}
+
+.notice-student-score {
+    color: #f59e0b;
+    font-weight: 600;
+    font-size: 0.78rem;
+}
+
+.notice-banner-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.notice-btn-confirm {
+    white-space: nowrap;
+}
+
+.notice-btn-dismiss {
+    white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+    .offline-online-notice-banner {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .notice-banner-actions {
+        justify-content: flex-end;
+    }
+}
+
 /* Result Header */
 .result-header {
     display: flex;
