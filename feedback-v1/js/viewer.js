@@ -1493,14 +1493,15 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
 
         const onlineInfo = onlineStudents[studentName] || null;
         const isOnline = onlineInfo?.isOnline || false;
-        const focusScore = onlineInfo?.reward ?? -1;
+        const rawFocusReward = onlineInfo?.reward;
+        const focusScore = (onlineInfo && typeof rawFocusReward === 'number') ? getAdjustedFocusScore(rawFocusReward) : (rawFocusReward ?? -1);
 
-        if (!isOnline && onlineOverrides[studentName] !== 'offline' && onlineInfo && !onlineInfo.isAbsent && typeof onlineInfo.reward === 'number' && onlineInfo.reward > 0) {
+        if (!isOnline && onlineOverrides[studentName] !== 'offline' && onlineInfo && !onlineInfo.isAbsent && typeof rawFocusReward === 'number' && rawFocusReward > 0) {
             if (!detectedStudentNamesSet.has(studentName)) {
                 detectedStudentNamesSet.add(studentName);
                 detectedOfflineToOnlineStudents.push({
                     name: studentName,
-                    score: onlineInfo.reward,
+                    score: focusScore,
                     className: onlineInfo.className || ''
                 });
             }
@@ -2294,14 +2295,15 @@ async function doGeneratePreviewOnlyFeedback() {
         const pvInfo = previewMap[studentName];
         const onlineInfo = onlineStudents[studentName] || null;
         const isOnline = onlineInfo?.isOnline || false;
-        const focusScore = onlineInfo?.reward ?? -1;
+        const rawFocusReward = onlineInfo?.reward;
+        const focusScore = (onlineInfo && typeof rawFocusReward === 'number') ? getAdjustedFocusScore(rawFocusReward) : (rawFocusReward ?? -1);
 
-        if (!isOnline && onlineOverrides[studentName] !== 'offline' && onlineInfo && !onlineInfo.isAbsent && typeof onlineInfo.reward === 'number' && onlineInfo.reward > 0) {
+        if (!isOnline && onlineOverrides[studentName] !== 'offline' && onlineInfo && !onlineInfo.isAbsent && typeof rawFocusReward === 'number' && rawFocusReward > 0) {
             if (!detectedStudentNamesSet.has(studentName)) {
                 detectedStudentNamesSet.add(studentName);
                 detectedOfflineToOnlineStudents.push({
                     name: studentName,
-                    score: onlineInfo.reward,
+                    score: focusScore,
                     className: onlineInfo.className || ''
                 });
             }
