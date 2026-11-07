@@ -113,6 +113,7 @@ body.upload-page {
 
 .nav-actions {
     display: flex;
+    align-items: center;
     gap: 8px;
 }
 
@@ -300,7 +301,9 @@ body.upload-page {
 }
 
 .step-item {
-    cursor: pointer;
+    cursor: default;
+    user-select: none;
+    pointer-events: none;
     display: flex;
     align-items: center;
     gap: 8px;

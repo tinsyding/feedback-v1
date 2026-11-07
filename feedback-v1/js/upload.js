@@ -135,12 +135,31 @@ if (document.readyState === 'loading') {
 }
 
 // ========== Step Navigation ==========
-// 顶部步骤条点击跳转（与题库页一致）：后退直接切，前进走 goToStep 既有校验
+// 步骤指示条仅作状态展示，已禁用点击跳转；后退请使用底部「返回上传」或导航栏「重新上传」
 function handleUploadStepClick(n) {
-    if (n === currentStep) return;
-    goToStep(n);
+    // 已禁用点击跳转
+    return;
 }
 window.handleUploadStepClick = handleUploadStepClick;
+
+function confirmReupload() {
+    if (typeof showCustomDialog === 'function') {
+        showCustomDialog({
+            title: '重新上传',
+            body: '确定要重新上传吗？当前已上传的数据和配置将会重置。<br><span style="font-size: 0.85em; color: var(--text-secondary); margin-top: 6px; display: inline-block;">若仅需修改已上传文件，可使用页面底部的「返回上传」按钮。</span>',
+            confirmText: '重新上传',
+            cancelText: '取消',
+            onConfirm: () => {
+                window.location.href = 'upload.html';
+            }
+        });
+    } else {
+        if (confirm('确定要重新上传吗？当前已上传的数据和配置将会重置。')) {
+            window.location.href = 'upload.html';
+        }
+    }
+}
+window.confirmReupload = confirmReupload;
 
 function goToStep(step) {
     if (step === 2) {
@@ -198,6 +217,12 @@ function goToStep(step) {
     document.querySelectorAll('.step-line').forEach((line, i) => {
         line.classList.toggle('active', i < step - 1);
     });
+
+    // 控制导航栏「重新上传」按钮显隐（在步骤2配置页面显示，与生成页面体验一致）
+    const reuploadBtn = document.getElementById('reupload-btn');
+    if (reuploadBtn) {
+        reuploadBtn.style.display = (step === 2) ? 'inline-flex' : 'none';
+    }
 
     // Show/hide preview config card based on whether preview data exists
     if (step === 2) {
