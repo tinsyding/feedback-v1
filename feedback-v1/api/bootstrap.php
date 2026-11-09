@@ -27,9 +27,7 @@ $allowedOrigins = [
     'http://127.0.0.1',
     'https://feedback.wxjifang.cn',
     'https://vip.wxjifang.cn',
-    'https://vip.jokerx.top',
-    'https://feedback2.wxjifang.cn',
-    'https://vip2.wxjifang.cn'
+    'https://vip.jokerx.top'
 ];
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 $isAllowedOrigin = in_array($origin, $allowedOrigins, true);

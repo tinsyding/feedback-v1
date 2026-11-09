@@ -7,8 +7,8 @@
 | 维度 | 主站（生产环境） |
 | :--- | :--- |
 | **服务器 IP** | `43.142.104.218`（4核4G，原 `106.14.62.196`） |
-| **教师端域名** | `https://feedback.wxjifang.cn`（测试别名：`https://feedback2.wxjifang.cn`） |
-| **学生端错题本** | `https://vip.wxjifang.cn`（别名：`vip.jokerx.top`、测试别名：`vip2.wxjifang.cn`） |
+| **教师端域名** | `https://feedback.wxjifang.cn` |
+| **学生端错题本** | `https://vip.wxjifang.cn`（别名：`vip.jokerx.top`） |
 | **Git 分支** | `main` |
 | **服务器目录** | `/www/wwwroot/JF/feedback-git/feedback-v1` |
 | **数据库** | `feedback`（账户：`tinsy`） |
