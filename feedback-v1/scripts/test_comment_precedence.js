@@ -99,4 +99,25 @@ result = parseCommentForPlus('本次作业的错题题号为：7', '全对！\n�
 expectNums(result.errorNums, [7]);
 assert.strictEqual(result.displayComment, '全对！\n非常优秀！');
 
+// 冒号后换行容错测试（如助教改预习作业时在冒号后多了个回车）
+const { parseErrorQuestionsFromComment } = sandbox;
+let pvParsed = parseErrorQuestionsFromComment('本次作业的错题题号为：\n1，5，11，12，14，17，20，24，25');
+expectNums(pvParsed.errorNums, [1, 5, 11, 12, 14, 17, 20, 24, 25]);
+assert.strictEqual(pvParsed.cleanComment, '');
+
+// 冒号后换行，且题号后跟随着评价评语
+pvParsed = parseErrorQuestionsFromComment('本次作业的错题题号为：\n1，11，12，14\n订正得很认真，字迹工整！');
+expectNums(pvParsed.errorNums, [1, 11, 12, 14]);
+assert.strictEqual(pvParsed.cleanComment, '订正得很认真，字迹工整！');
+
+// 冒号后换行，下一行为“无”或“全对”
+pvParsed = parseErrorQuestionsFromComment('本次作业的错题题号为：\n无\n表现非常优异！');
+expectNums(pvParsed.errorNums, []);
+assert.strictEqual(pvParsed.cleanComment, '表现非常优异！');
+
+// 冒号后有多个换行与空格
+pvParsed = parseErrorQuestionsFromComment('本次作业的错题题号为：\n\n   2、4、6\n继续加油！');
+expectNums(pvParsed.errorNums, [2, 4, 6]);
+assert.strictEqual(pvParsed.cleanComment, '继续加油！');
+
 console.log('comment precedence tests passed');

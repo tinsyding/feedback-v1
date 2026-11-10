@@ -390,13 +390,23 @@ function parseErrorQuestionsFromComment(comment, options = {}) {
     const prefixMatch = firstLine.match(errorPrefixRegex);
 
     if (prefixMatch) {
-        const afterColon = prefixMatch[1].trim();
+        let afterColon = prefixMatch[1].trim();
+        let targetRemainingLines = remainingLines;
 
-        // 冒号后如果是 "无"、"全对"、"0" 等
+        // 容错：如果冒号后直接换行（afterColon 为空），向后探查第一非空行作为题号行
+        if (!afterColon && remainingLines.length > 0) {
+            const nextNonEmptyIdx = remainingLines.findIndex(l => l.trim().length > 0);
+            if (nextNonEmptyIdx !== -1) {
+                afterColon = remainingLines[nextNonEmptyIdx].trim();
+                targetRemainingLines = remainingLines.slice(nextNonEmptyIdx + 1);
+            }
+        }
+
+        // 冒号后（或换行后）如果是 "无"、"全对"、"0" 等
         if (/^(?:无|没有|0|零|全对|全部正确|无错题|none)\s*[。!！.]?$/i.test(afterColon)) {
             return {
                 errorNums: [],
-                cleanComment: remainingLines.join('\n').trim()
+                cleanComment: targetRemainingLines.join('\n').trim()
             };
         }
 
@@ -417,7 +427,7 @@ function parseErrorQuestionsFromComment(comment, options = {}) {
             if (errorNums.length > 0) {
                 const cleanParts = [];
                 if (inlineComment) cleanParts.push(inlineComment);
-                if (remainingLines.length > 0) cleanParts.push(remainingLines.join('\n').trim());
+                if (targetRemainingLines.length > 0) cleanParts.push(targetRemainingLines.join('\n').trim());
                 return {
                     errorNums,
                     cleanComment: cleanParts.filter(Boolean).join('\n').trim()
@@ -428,7 +438,7 @@ function parseErrorQuestionsFromComment(comment, options = {}) {
         // 冒号后没有提取到有效题号，回退为评语
         return {
             errorNums: [],
-            cleanComment: remainingLines.join('\n').trim() || afterColon
+            cleanComment: targetRemainingLines.join('\n').trim() || afterColon
         };
     }
 

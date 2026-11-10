@@ -967,45 +967,52 @@ if ($action === 'encrypt_batch') {
             $previewErrors = array_values(array_unique(array_filter($previewErrors)));
         }
 
-        // 服务端智能兜底：若前端传来的 errors 为空，但评语包含错题声明，自动解析题号
-        if (empty($errors) && !empty($comment)) {
-            $commentNorm = strtr($comment, [
+        // 服务端智能兜底辅助：从评语中跨行提取题号（容忍冒号后回车、全角数字等）
+        $extractErrorsFallback = function(string $rawComment): array {
+            $commentNorm = strtr($rawComment, [
                 '０'=>'0','１'=>'1','２'=>'2','３'=>'3','４'=>'4',
                 '５'=>'5','６'=>'6','７'=>'7','８'=>'8','９'=>'9'
             ]);
-            $firstLine = trim(explode("\n", $commentNorm)[0]);
-            if (preg_match('/^(?:本次|本周|这周|今天)?(?:的)?(?:家庭)?(?:作业|测验|测试|练习)?(?:的)?(?:错题|做错的题|做错|错误)(?:题号|序号|编号|列表)?(?:为|是)?(?:\s*[:：]\s*|\s*(?=\d|第|无|0|零|全对|全部))(.*)$/iu', $firstLine, $m)) {
-                $after = trim($m[1]);
-                if (!preg_match('/^(?:无|没有|0|零|全对|全部正确|无错题|none)/iu', $after)) {
+            $lines = array_values(array_filter(array_map('trim', explode("\n", $commentNorm))));
+            if (empty($lines)) return [];
+
+            $prefixPattern = '/^(?:本次|本周|这周|今天)?(?:的)?(?:家庭)?(?:作业|测验|测试|练习)?(?:的)?(?:错题|做错的题|做错|错误)(?:题号|序号|编号|列表)?(?:为|是)?(?:\s*[:：]\s*|\s*(?=\d|第|无|0|零|全对|全部))(.*)$/iu';
+            foreach ($lines as $idx => $line) {
+                if (preg_match($prefixPattern, $line, $m)) {
+                    $after = trim($m[1] ?? '');
+                    // 若冒号后直接换行，向后探查下一非空行作为题号行
+                    if ($after === '' && isset($lines[$idx + 1])) {
+                        $after = $lines[$idx + 1];
+                    }
+                    if (preg_match('/^(?:无|没有|0|零|全对|全部正确|无错题|none)/iu', $after)) {
+                        return [];
+                    }
                     $numsPart = preg_split('/[。!！;；\n]|(?=[\x{4e00}-\x{9fa5}]{2,})/u', $after)[0];
                     if (preg_match_all('/\d+/', $numsPart, $numMatches)) {
                         $parsedNums = array_values(array_unique(array_filter(array_map('intval', $numMatches[0]))));
-                        if (!empty($parsedNums)) {
-                            $errors = $parsedNums;
+                        $valid = array_values(array_filter($parsedNums, fn($n) => $n >= 1 && $n <= 100));
+                        if (!empty($valid)) {
+                            return $valid;
                         }
                     }
                 }
+            }
+            return [];
+        };
+
+        // 服务端智能兜底：若前端传来的 errors 为空，但评语包含错题声明，自动解析题号
+        if (empty($errors) && !empty($comment)) {
+            $parsed = $extractErrorsFallback($comment);
+            if (!empty($parsed)) {
+                $errors = $parsed;
             }
         }
 
         // 预习评语同样兜底解析；预习评语为空时不影响课后巩固错题
         if (empty($previewErrors) && !empty($previewComment)) {
-            $previewCommentNorm = strtr($previewComment, [
-                '０'=>'0','１'=>'1','２'=>'2','３'=>'3','４'=>'4',
-                '５'=>'5','６'=>'6','７'=>'7','８'=>'8','９'=>'9'
-            ]);
-            $firstLine = trim(explode("\n", $previewCommentNorm)[0]);
-            if (preg_match('/^(?:本次|本周|这周|今天)?(?:的)?(?:家庭)?(?:作业|测验|测试|练习)?(?:的)?(?:错题|做错的题|做错|错误)(?:题号|序号|编号|列表)?(?:为|是)?(?:\s*[:：]\s*|\s*(?=\d|第|无|0|零|全对|全部))(.*)$/iu', $firstLine, $m)) {
-                $after = trim($m[1]);
-                if (!preg_match('/^(?:无|没有|0|零|全对|全部正确|无错题|none)/iu', $after)) {
-                    $numsPart = preg_split('/[。!！;；\n]|(?=[\x{4e00}-\x{9fa5}]{2,})/u', $after)[0];
-                    if (preg_match_all('/\d+/', $numsPart, $numMatches)) {
-                        $parsedNums = array_values(array_unique(array_filter(array_map('intval', $numMatches[0]))));
-                        if (!empty($parsedNums)) {
-                            $previewErrors = $parsedNums;
-                        }
-                    }
-                }
+            $parsedPv = $extractErrorsFallback($previewComment);
+            if (!empty($parsedPv)) {
+                $previewErrors = $parsedPv;
             }
         }
 
