@@ -102,11 +102,15 @@ def build_standalone(paths):
         f"--windows-product-version={APP_VERSION}",
         "--enable-plugin=tk-inter",
         "--include-package=sender_py",
+        "--include-package=winocr",
+        "--include-package=winrt",
         # 排除测试模块与 unittest，避免 anti-bloat 告警并缩短编译时间
         "--nofollow-import-to=sender_py.tests",
         "--nofollow-import-to=unittest",
         "--nofollow-import-to=test",
         "--include-package-data=rapidocr_onnxruntime",
+        "--include-package-data=winrt",
+        "--include-package-data=certifi",
         # 编译加速：多核并行编译 + 禁用 MSVC 耗时极长且提升微弱的全程序 LTO 链接优化
         "--jobs=4",
         "--lto=no",
@@ -179,11 +183,15 @@ def build_onefile(paths):
         f"--windows-product-version={APP_VERSION}",
         "--enable-plugin=tk-inter",
         "--include-package=sender_py",
+        "--include-package=winocr",
+        "--include-package=winrt",
         # 排除测试模块与 unittest，避免 anti-bloat 告警并缩短编译时间
         "--nofollow-import-to=sender_py.tests",
         "--nofollow-import-to=unittest",
         "--nofollow-import-to=test",
         "--include-package-data=rapidocr_onnxruntime",
+        "--include-package-data=winrt",
+        "--include-package-data=certifi",
         # 编译加速：多核并行编译 + 禁用 MSVC 耗时极长且提升微弱的全程序 LTO 链接优化
         "--jobs=4",
         "--lto=no",

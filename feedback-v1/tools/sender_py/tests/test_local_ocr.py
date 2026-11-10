@@ -109,6 +109,32 @@ class LocalOcrTest(unittest.TestCase):
         res_mismatch = parse_title_judgment("65405李四 @微信", "65405", "胡耔墨")
         self.assertFalse(res_mismatch["matched"])
 
+    def test_identify_title_local_cascade_fallback(self):
+        # 1. 模拟 winocr 抛异常/返回空（如缺失 projection table），由 RapidOCR 稳健兜底
+        with patch("sender_py.local_ocr._ocr_via_winocr", return_value=""), \
+             patch("sender_py.local_ocr._ocr_via_rapidocr", return_value="65405胡耔墨"):
+            res = identify_title_local("dummy_img", "65405", "胡耔墨")
+            self.assertTrue(res["matched"])
+            self.assertEqual(res["engine"], "rapidocr")
+            self.assertIn("RapidOCR全流程通过", res["reason"])
+
+        # 2. 模拟 winocr 识别出了错误名字（未匹配），由 RapidOCR 兜底识别出正确名字
+        with patch("sender_py.local_ocr._ocr_via_winocr", return_value="65405错误人名"), \
+             patch("sender_py.local_ocr._ocr_via_rapidocr", return_value="65405胡耔墨"):
+            res = identify_title_local("dummy_img", "65405", "胡耔墨")
+            self.assertTrue(res["matched"])
+            self.assertEqual(res["engine"], "rapidocr")
+            self.assertIn("RapidOCR全流程通过", res["reason"])
+
+        # 3. 模拟 winocr 成功匹配，直接 47ms 极速放行，不再调用 RapidOCR
+        with patch("sender_py.local_ocr._ocr_via_winocr", return_value="65405胡耔墨"), \
+             patch("sender_py.local_ocr._ocr_via_rapidocr") as mock_rapid:
+            res = identify_title_local("dummy_img", "65405", "胡耔墨")
+            self.assertTrue(res["matched"])
+            self.assertEqual(res["engine"], "winocr")
+            self.assertIn("winocr极速通过", res["reason"])
+            mock_rapid.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

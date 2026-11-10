@@ -584,7 +584,7 @@
     <div class="brand" onclick="onBrandBadgeClick()" style="cursor:pointer;" title="极方每周反馈程序">
       <img src="/favicon.ico" class="logo-badge" alt="极方每周反馈" style="object-fit:contain; background:transparent; box-shadow:none;" onerror="this.outerHTML='<div class=\'logo-badge\'>极</div>'">
       <div class="brand-title">极方每周反馈程序</div>
-      <div class="brand-badge">Web版 v1.8.20</div>
+      <div class="brand-badge">Web版 v1.8.23</div>
     </div>
     <div class="nav-actions">
       <button class="btn btn-sm" id="calibNavBtn" onclick="triggerCalibrate()">校准视野</button>
@@ -1163,8 +1163,13 @@
         const rateEl = document.getElementById(rateElId);
         const latEl = document.getElementById(latElId);
         if (!engData || !engData.evaluated_count) {
-          if (rateEl) rateEl.innerText = "-";
-          if (latEl) latEl.innerText = "平均耗时: - ms";
+          if (engData && engData.disabled_count) {
+            if (rateEl) rateEl.innerText = "已停用";
+            if (latEl) latEl.innerText = "已开启强制本地OCR";
+          } else {
+            if (rateEl) rateEl.innerText = "-";
+            if (latEl) latEl.innerText = "平均耗时: - ms";
+          }
         } else {
           if (rateEl) rateEl.innerText = `${engData.match_rate_pct}%`;
           if (latEl) latEl.innerText = `平均 ${engData.avg_latency_ms} ms (${engData.min_latency_ms}~${engData.max_latency_ms}ms)`;
@@ -1198,6 +1203,16 @@
 
         const cell = (e) => {
           if (!e || !e.name) return '<span style="color:#cbd5e1;">-</span>';
+          if (e.status === 'disabled') {
+            return `
+              <div style="font-family:monospace; line-height:1.3;">
+                <div style="display:flex; align-items:center; gap:4px; margin-bottom:2px;">
+                  <span style="background:rgba(100,116,139,0.12); color:#475569; font-weight:700; padding:1px 5px; border-radius:3px; font-size:10px;">⏸ 已停用</span>
+                </div>
+                <div style="font-size:11px; color:#64748b; word-break:break-all;">${escapeHtml(e.text || '已关闭')}</div>
+              </div>
+            `;
+          }
           const matched = e.matched;
           const bg = matched ? "rgba(22,163,74,0.1)" : "rgba(239,68,68,0.1)";
           const clr = matched ? "#16a34a" : "#dc2626";

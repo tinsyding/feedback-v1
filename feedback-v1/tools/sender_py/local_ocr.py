@@ -278,7 +278,7 @@ def _ocr_via_rapidocr(img) -> str:
     return ""
 
 
-def _ocr_via_winocr(img) -> str:
+def _ocr_via_winocr(img, raise_exc: bool = False) -> str:
     """若环境中装有 winocr，直接在 Python 进程内调用，无子进程开销。
     
     真实基准评测验证：耗时仅 46.9ms，准确率 84.0%。
@@ -291,7 +291,8 @@ def _ocr_via_winocr(img) -> str:
         if hasattr(res, "text") and res.text:
             return str(res.text).strip()
     except Exception:
-        pass
+        if raise_exc:
+            raise
     return ""
 
 
@@ -344,17 +345,23 @@ def identify_title_local(title_img, target_id: str, target_name: str) -> dict:
     win_text = _ocr_via_winocr(proc_img)
     if win_text:
         judgment = parse_title_judgment(win_text, target_id, target_name)
-        if judgment.get("title_in_header"):
+        # winocr 具有高确信度判定（成功匹配或拦截群聊）时直接放行/拦截
+        if judgment.get("matched") or judgment.get("is_group"):
             judgment["reason"] = f"[winocr极速通过] {judgment.get('reason', '')}"
             judgment["engine"] = "winocr"
             return judgment
 
     # 第 2 层：RapidOCR 全流程 (Det+Rec 稳健兜底 ~800ms)
+    # 若 winocr 报错、未安装、或 winocr 虽识别出部分文字但未匹配目标学号姓名，由 RapidOCR 深度精准兜底
     rapid_text = _ocr_via_rapidocr(proc_img)
     if rapid_text:
         judgment = parse_title_judgment(rapid_text, target_id, target_name)
-        if judgment.get("title_in_header"):
+        if judgment.get("matched") or judgment.get("is_group"):
             judgment["reason"] = f"[RapidOCR全流程通过] {judgment.get('reason', '')}"
+            judgment["engine"] = "rapidocr"
+            return judgment
+        elif judgment.get("title_in_header"):
+            judgment["reason"] = f"[RapidOCR深度未匹配] {judgment.get('reason', '')}"
             judgment["engine"] = "rapidocr"
             return judgment
 

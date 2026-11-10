@@ -100,12 +100,14 @@ def evaluate_title_image_all_engines(
         }
     except Exception as exc:
         t_ms = round((time.perf_counter() - t0) * 1000)
+        err_msg = str(exc)
+        is_disabled = "ADMIN_FORCED_LOCAL_OCR" in err_msg
         results["qwen_flash"] = {
             "name": "Qwen3.8-Flash",
-            "status": "error",
+            "status": "disabled" if is_disabled else "error",
             "matched": False,
-            "text": f"调用失败: {exc}",
-            "reason": str(exc),
+            "text": "云端已停用(强制本地OCR)" if is_disabled else f"调用失败: {exc}",
+            "reason": err_msg,
             "latency_ms": t_ms,
         }
 
@@ -147,7 +149,7 @@ def evaluate_title_image_all_engines(
         if sys.platform != "win32":
             raise RuntimeError("仅限 Windows")
         import winocr  # noqa: F401
-        text = _ocr_via_winocr(proc_img)
+        text = _ocr_via_winocr(proc_img, raise_exc=True)
         t_ms = round((time.perf_counter() - t0) * 1000)
         judgment = parse_title_judgment(text, sid, sname)
         judgment = rescue_option1_fuzzy_match(judgment, sid, sname)
@@ -362,6 +364,8 @@ def compute_benchmark_summary(records: List[dict]) -> dict:
                     ed["max_latency_ms"] = lat
             elif status == "error":
                 ed["error_count"] += 1
+            elif status == "disabled":
+                ed["disabled_count"] = ed.get("disabled_count", 0) + 1
 
     for ek, ed in engine_data.items():
         cnt = ed["evaluated_count"]

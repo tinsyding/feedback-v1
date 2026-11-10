@@ -715,6 +715,9 @@ def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
             if local_res and local_res.get("matched"):
                 judgment = local_res
                 judgment["reason"] = f"[备选方案: 本地OCR] {judgment.get('reason', '')}"
+            elif local_res and local_res.get("is_group"):
+                # 本地两层已明确检测到群聊特征，安全红线直接拦截，坚决不调用云端 API 放行
+                judgment = local_res
             else:
                 # 第 3 层：Qwen3.8-Flash 云端多模态大模型终极兜底（本地未通过时才介入）
                 try:

@@ -52,6 +52,8 @@ python -m PyInstaller --noconfirm --clean --noupx --windowed --onefile ^
     --exclude-module test ^
     --hidden-import sender_py.sender_token ^
     --collect-all rapidocr_onnxruntime ^
+    --collect-all winocr ^
+    --collect-all winrt ^
     "%WEB_MAIN_PY%"
 
 if exist "%~dp0dist\JiFangFeedbackWeb.exe" (
