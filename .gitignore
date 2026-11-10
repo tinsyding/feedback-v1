@@ -100,3 +100,17 @@ feedback-v1/data/temp/*
 # 本地测试数据包（含线上真实学生姓名，绝不入库）
 test-data/
 
+# 本地排课、教师花名册与班级学情统计报表（绝不入库）
+*.xlsx
+*.xls
+各教师带班及班级人数统计表.*
+
+# 本地教研、课件样本与测试材料（绝不入库）
+files-examples/
+
+# 编辑器与本地 IDE 插件配置
+.commandcode/
+
+# 本地手动更新日志缓存（线上由数据库/后台统一维护）
+feedback-v1/data/changelog.json
+

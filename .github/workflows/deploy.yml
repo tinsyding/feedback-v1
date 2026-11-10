@@ -18,7 +18,6 @@ on:
       - '.github/**'
       - '.gitignore'
       - '.gitattributes'
-      - '_scan.py'
 
 concurrency:
   group: production-deploy
