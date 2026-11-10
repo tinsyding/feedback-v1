@@ -293,7 +293,7 @@ Windows 真机回归建议覆盖：
 | 2. Nuitka 编译版 | ZIP 压缩包（原生二进制目录） | 转译为 C++ 编译为本地机器码 | 极低 | 杀软策略严格的机房或终端 | `build_nuitka.bat` |
 | 3. 单文件版 (`--onefile`) | 单个 `.exe` 文件 | 启动时自解压至 `AppData\Local\Temp` | 较高（易触发启发式拦截） | 临时单文件拷贝测试 | `build_onefile.bat` |
 
-本地可运行 `tools/sender_py/build_all.bat` 选择打包模式；推送 `sender-*` tag（如 `sender-v1.8.23`）或手动触发 GitHub Actions 工作流时会自动构建并发布 **Nuitka 原生机器码单文件版**（`JiFangFeedbackWeb-nuitka-onefile-windows-x64.exe`）与 **普通绿色文件夹压缩包版**（`JiFangFeedbackWeb-onedir-windows-x64.zip`）。GitHub Releases 已停止收录 Tkinter 桌面版产物。
+本地可运行 `tools/sender_py/build_all.bat` 选择打包模式；推送 `sender-*` tag（如 `sender-v1.8.24`）或手动触发 GitHub Actions 工作流时会自动构建并发布 **Nuitka 原生机器码单文件版**（`JiFangFeedbackWeb-nuitka-onefile-windows-x64.exe`）与 **普通绿色文件夹压缩包版**（`JiFangFeedbackWeb-onedir-windows-x64.zip`）。GitHub Releases 已停止收录 Tkinter 桌面版产物。
 
 ## 13. 已知限制
 
