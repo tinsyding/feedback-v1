@@ -2,7 +2,7 @@ name: Deploy to production
 
 # main 分支每次 push 自动部署到宝塔生产机。
 # 所需 Secrets（仓库 Settings → Secrets and variables → Actions → New repository secret）：
-#   DEPLOY_HOST     服务器 IP（当前 106.14.62.196）
+#   DEPLOY_HOST     服务器 IP（当前 43.142.104.218，原 106.14.62.196）
 #   DEPLOY_PORT     SSH 端口（当前 28964）
 #   DEPLOY_USER     SSH 用户（当前 root）
 #   DEPLOY_SSH_KEY  私钥内容（id_github_actions，含 BEGIN/END 行）

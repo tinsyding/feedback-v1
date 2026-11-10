@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# 安装 feedback-v1 的 nginx 安全硬化片段到主站/测试站/备份站。
+# 安装 feedback-v1 的 nginx 安全硬化片段到生产主站。
 #
 # 用法（在服务器上以 root 运行）：
 #   sudo bash feedback-v1/scripts/install_nginx_hardening.sh
 #
 # 可用 SITES 覆盖站点列表：
-#   SITES="feedbacktest.wxjifang.cn" sudo -E bash feedback-v1/scripts/install_nginx_hardening.sh
+#   SITES="feedback.wxjifang.cn" sudo -E bash feedback-v1/scripts/install_nginx_hardening.sh
 #
 # 脚本会：
 #   1. 备份旧的 zz-feedback-security.conf 到 /root/nginx-hardening-backups/
@@ -26,7 +26,7 @@ EXT_ROOT="/www/server/panel/vhost/nginx/extension"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_ROOT="/root/nginx-hardening-backups/$STAMP"
 
-DEFAULT_SITES="feedback.wxjifang.cn feedbacktest.wxjifang.cn feedbackbackup.wxjifang.cn"
+DEFAULT_SITES="feedback.wxjifang.cn"
 SITES="${SITES:-$DEFAULT_SITES}"
 
 NGINX_BIN="${NGINX_BIN:-}"
