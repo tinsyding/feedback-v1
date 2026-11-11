@@ -2171,7 +2171,7 @@ async function doBatchSyncTiers(data, targetTiers, currentTier, isAutoPrompt = f
     }
     renderSavedDataList();
     if (errors.length === 0) {
-        showToast(isAutoPrompt ? `保存成功！已同步至 ${tierLabels}` : `已成功同步至 ${tierLabels}！`, 'success');
+        showToast(isAutoPrompt ? `保存成功，已同步至 ${tierLabels}` : `已同步至 ${tierLabels}`, 'success');
     } else if (successCount > 0) {
         showToast(`部分同步成功 (${successCount}/${targetTiers.length})，失败: ${errors.join('; ')}`, 'warn');
     } else {
@@ -2262,7 +2262,7 @@ async function handleTierSyncConfirm(data, targetTiers, isAutoPrompt = false) {
 
 function openTierSyncModal(sourceData = null, isAutoPrompt = false) {
     if (window.currentUser && window.currentUser.role === 'assistant') {
-        showToast('助教账号仅拥有查看权限，无法同步题库！', 'warn');
+        showToast('助教账号仅拥有查看权限，无法同步题库', 'warn');
         return;
     }
 
@@ -2434,7 +2434,7 @@ async function executeSaveQuestions(data) {
 
 function deleteStoredData(subject, grade, tier, week, year, season, bankType) {
     if (window.currentUser && window.currentUser.role === 'assistant') {
-        showToast('助教账号仅拥有查看权限，无法删除题库！', 'warn');
+        showToast('助教账号仅拥有查看权限，无法删除题库', 'warn');
         return;
     }
     const delYear = year || (yearSelect ? parseInt(yearSelect.value) : 2026);
