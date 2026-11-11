@@ -2033,7 +2033,7 @@
                 const retestToken = document.getElementById('field-retest_token')?.value.trim();
 
                 if (!studentId || !studentName) {
-                    showToast('学号与学员姓名为必填项目！', 'warn');
+                    showToast('学号与学员姓名为必填项', 'warn');
                     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存数据记录'; }
                     return;
                 }
@@ -2060,7 +2060,7 @@
                 data.class_name = document.getElementById('field-class_name')?.value.trim();
 
                 if (!data.class_name) {
-                    showToast('班级全称为必填项！', 'warn');
+                    showToast('班级全称为必填项', 'warn');
                     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存数据记录'; }
                     return;
                 }
@@ -2091,12 +2091,12 @@
                 data.answer_name = document.getElementById('field-answer_name')?.value.trim();
 
                 if (!data.topic) {
-                    showToast('考查知识点 (Topic) 为必填项！', 'warn');
+                    showToast('考查知识点 (Topic) 为必填项', 'warn');
                     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存数据记录'; }
                     return;
                 }
                 if (!data.exercise_pdf) {
-                    showToast('错题 / 题目 PDF 文件路径为必填项！', 'warn');
+                    showToast('题目 PDF 文件路径为必填项', 'warn');
                     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存数据记录'; }
                     return;
                 }
@@ -2108,12 +2108,12 @@
                 const status = document.getElementById('field-status')?.value;
 
                 if (!username) {
-                    showToast('登录用户名不能为空！', 'warn');
+                    showToast('登录用户名不能为空', 'warn');
                     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存数据记录'; }
                     return;
                 }
                 if (!isEdit && !password) {
-                    showToast('新增管理员必须设置初始登录密码！', 'warn');
+                    showToast('新增管理员必须设置初始登录密码', 'warn');
                     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存数据记录'; }
                     return;
                 }
@@ -2132,7 +2132,7 @@
                 const initialPassword = document.getElementById('field-initial_password')?.value.trim();
 
                 if (!username) {
-                    showToast('教师账号不能为空！', 'warn');
+                    showToast('教师账号不能为空', 'warn');
                     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存数据记录'; }
                     return;
                 }
@@ -2165,7 +2165,7 @@
                 const json = await res.json();
                 if (json.success) {
                     closeDbRecordModal();
-                    showToast(isEdit ? '记录更新成功！' : '新记录已成功入库！', 'success');
+                    showToast(isEdit ? '记录更新成功' : '新记录已入库', 'success');
                     if (activeTable === 'student_records') {
                         loadRecordsStats();
                         loadRecordsData(recCurrentPage);
@@ -2189,7 +2189,7 @@
 
         async function promptResetTeacherPwd(id, username, realName) {
             if (username === '0') {
-                showToast('测试账号（0）为系统公共体验账号，不支持重置密码！', 'warn');
+                showToast('测试账号（0）为系统公共体验账号，不支持重置密码', 'warn');
                 return;
             }
             const displayName = realName ? `${realName} (${username})` : username;
@@ -2197,7 +2197,7 @@
             if (newPwd === null) return;
             const trimmed = newPwd.trim();
             if (!trimmed || trimmed.length < 6) {
-                showToast('新密码长度不能少于 6 位！', 'warn');
+                showToast('新密码长度不能少于 6 位', 'warn');
                 return;
             }
 
@@ -2209,7 +2209,7 @@
                 });
                 const json = await res.json();
                 if (json.success) {
-                    showToast(`教师【${displayName}】密码已成功重置！`, 'success');
+                    showToast(`教师【${displayName}】密码已重置`, 'success');
                     loadDbData(dbCurrentPage);
                 } else {
                     showToast(json.error || '重置失败', 'error');
@@ -2275,7 +2275,7 @@
                 if (json.success) {
                     dbSelectedIds.clear();
                     updateDbBatchDeleteBtn();
-                    showToast(`已成功批量清理 ${count} 条记录！`, 'success');
+                    showToast(`已批量清理 ${count} 条记录`, 'success');
                     loadDbData(dbCurrentPage);
                 } else {
                     showToast(json.error || '批量删除失败', 'error');
@@ -3057,7 +3057,7 @@
                 });
                 const json = await res.json();
                 if (json.success) {
-                    showToast(`助教账号【${astUsername}】已成功删除！`, 'success');
+                    showToast(`助教账号【${astUsername}】已删除`, 'success');
                     loadDbData(dbCurrentPage);
                     try {
                         const getRes = await fetch(`${API_BASE}?action=db_get&table=users&id=${teacherId}`);
@@ -3636,7 +3636,7 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
                 });
                 const json = await res.json();
                 if (json.success) {
-                    showToast(json.data?.message || '已成功回溯！', 'success', 3000);
+                    showToast(json.data?.message || '已成功回溯', 'success', 3000);
                     // 刷新数据源
                     if (typeof activeTab !== 'undefined' && activeTab === 'records') {
                         await loadRecordsData(recCurrentPage);

@@ -56,15 +56,15 @@
             const saveBtn = document.getElementById('btn-save-pwd');
 
             if (!oldPassword) {
-                showToast('请输入当前原密码！', 'warn');
+                showToast('请输入当前原密码', 'warn');
                 return;
             }
             if (!newPassword || newPassword.length < 6) {
-                showToast('新密码长度不能少于 6 位！', 'warn');
+                showToast('新密码长度不能少于 6 位', 'warn');
                 return;
             }
             if (newPassword !== confirmPassword) {
-                showToast('两次输入的新密码不一致！', 'warn');
+                showToast('两次输入的新密码不一致', 'warn');
                 return;
             }
 
@@ -81,7 +81,7 @@
                 const json = await res.json();
                 if (json.success) {
                     closeChangePwdModal();
-                    showToast('密码修改成功，请妥善保管！', 'success');
+                    showToast('密码修改成功，请妥善保管', 'success');
                 } else {
                     showToast(json.error || '修改密码失败', 'error');
                 }

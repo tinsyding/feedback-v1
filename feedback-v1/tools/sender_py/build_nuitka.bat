@@ -13,6 +13,10 @@ if errorlevel 1 (
     exit /b 1
 )
 
+:: 强制开启 Python UTF-8 模式，防止 SCons / MSVC 报 'mbcs' codec 异常
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
+
 python "%~dp0build_nuitka.py" %*
 if errorlevel 1 (
     echo.

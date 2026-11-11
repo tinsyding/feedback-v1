@@ -270,7 +270,7 @@
                 const res = await fetch(`${API_BASE}?action=db_delete&table=users&id=${id}`, { method: 'POST' });
                 const json = await res.json();
                 if (json.success) {
-                    showToast(`教师账号「${name}」已成功删除！`, 'success');
+                    showToast(`教师账号「${name}」已删除`, 'success');
                     teacherSelectedIds.delete(id);
                     loadTeachersData();
                     if (typeof loadDbTables === 'function') loadDbTables();
@@ -296,7 +296,7 @@
                 });
                 const json = await res.json();
                 if (json.success) {
-                    showToast(`已成功删除 ${json.data?.deleted || count} 位教师账号！`, 'success');
+                    showToast(`已删除 ${json.data?.deleted || count} 位教师账号`, 'success');
                     teacherSelectedIds.clear();
                     loadTeachersData();
                     if (typeof loadDbTables === 'function') loadDbTables();

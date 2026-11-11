@@ -517,19 +517,59 @@ window.getEffectiveComment = getEffectiveComment;
 window.parseCommentForPlus = parseCommentForPlus;
 
 
-// 全站唯一 toast：showToast(message, type?)，type ∈ success/error/warning，缺省无色；旧单参调用行为不变
-function showToast(message, type) {
-    const toast = document.getElementById('toast');
-    if (!toast) return;
-    toast.textContent = message;
-    toast.classList.remove('success', 'error', 'warning');
-    if (type === 'success' || type === 'error' || type === 'warning') {
-        toast.classList.add(type);
+// 全局统一轻提示：showToast(message, type?, duration?)
+// 规范：Unslop 纯净准则，石墨底色 + 3px 语义发丝微指示 + 18px 线性 SVG 图标
+// type: 'info' | 'success' | 'error' | 'warning' (或 'warn')，缺省为 'info'
+// duration: 毫秒，缺省 2800ms
+function showToast(message, type = 'info', duration = 2800) {
+    if (!message) return;
+    let container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        container.className = 'toast-container';
+        document.body.appendChild(container);
     }
-    toast.classList.add('show');
-    setTimeout(() => {
-        toast.classList.remove('show');
-    }, 2000);
+
+    // 限制最大堆叠数量（最多 4 条，避免遮挡界面）
+    while (container.children.length >= 4) {
+        container.firstElementChild.remove();
+    }
+
+    const normType = (type === 'warn' || type === 'warning') ? 'warning'
+        : (type === 'error' ? 'error'
+        : (type === 'success' ? 'success' : 'info'));
+
+    const icons = {
+        success: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>',
+        error: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>',
+        warning: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>',
+        info: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>'
+    };
+
+    const toastItem = document.createElement('div');
+    toastItem.className = `toast-item ${normType}`;
+    const safeText = typeof escapeHtml === 'function' ? escapeHtml(String(message)) : String(message);
+    toastItem.innerHTML = `${icons[normType] || icons.info}<div class="toast-content">${safeText}</div>`;
+
+    container.appendChild(toastItem);
+
+    requestAnimationFrame(() => {
+        toastItem.classList.add('show');
+    });
+
+    let dismissTimer = null;
+    const dismiss = () => {
+        if (!toastItem.parentNode) return;
+        if (dismissTimer) clearTimeout(dismissTimer);
+        toastItem.classList.remove('show');
+        setTimeout(() => {
+            if (toastItem.parentNode) toastItem.remove();
+        }, 200);
+    };
+
+    toastItem.addEventListener('click', dismiss);
+    dismissTimer = setTimeout(dismiss, duration);
 }
 
 function showCustomDialog(options = {}) {

@@ -58,7 +58,7 @@ def get_web_ui_html_path() -> str:
 class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
     """处理 WebUI 静态资源与 REST API 请求。"""
 
-    server_version = "JiFangFeedbackWeb/1.8.27"
+    server_version = "JiFangFeedbackWeb/2.0"
 
     def log_message(self, format, *args):
         # 静默常规 HTTP 请求，避免终端滚屏刷屏

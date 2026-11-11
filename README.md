@@ -36,9 +36,10 @@ feedback/
 
 线上生产环境配置如下：
 
-| 环境 | 服务器 IP / 端口 | 域名 | 分支 | 部署目录 | 数据库 | 说明 |
-| :--- | :--- | :--- | :---: | :--- | :--- | :--- |
-| **主站（生产）** | `43.142.104.218`（原 `106.14.62.196`）<br>SSH：`28964` | `feedback.wxjifang.cn`<br>`vip.wxjifang.cn` | `main` | `/www/wwwroot/JF/feedback-git` | `feedback` | 正式生产环境，push `main` 自动触发部署、数据库迁移与冒烟检查 |
+| 环境 | 服务器 IP / 端口 | 本地别名 | 域名 | 分支 | 部署目录 | 数据库 | 说明 |
+| :--- | :--- | :---: | :---: | :--- | :--- | :--- | :--- |
+| **主站（生产）** | `43.142.104.218`<br>SSH：`28964` | `jf` | `feedback.wxjifang.cn`<br>`vip.wxjifang.cn` | `main` | `/www/wwwroot/JF/feedback-git` | `feedback` | 正式生产环境，push `main` 自动触发部署、数据库迁移与冒烟检查 |
+| **备用（灾备）** | `106.14.62.196`<br>SSH：`28964` | `jf-backup` | - | - | - | - | 备用服务器（Debian 12），关闭密码仅密钥登录，历史全量数据已本地归档 |
 
 - **本地备份**：每天凌晨 03:00 由定时任务自动生成生产数据库物理快照至 `/www/backup/feedback_backup_snapshots/`（滚动保留 7 天）。
 - **异地灾备**：每天凌晨 03:30 由 GitHub Actions 将数据库全量快照、题库/教学 PDF 材料与核心脱敏凭据异地备份至 Google Drive（滚动保留 30 天）。

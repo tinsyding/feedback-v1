@@ -1214,36 +1214,63 @@
             color: var(--text-muted);
         }
 
-        /* ===== Toast Notification ===== */
-        .toast {
+        /* ===== Toast Notification (Unslop 规范) ===== */
+        .toast-container {
             position: fixed;
-            bottom: 30px;
-            left: 50%;
-            transform: translateX(-50%) translateY(20px);
-            background: #0f172a;
-            color: #ffffff;
-            padding: 10px 18px;
-            border-radius: 9999px;
-            font-size: 0.82rem;
-            font-weight: 600;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-            opacity: 0;
-            pointer-events: none;
-            transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-            z-index: 1000;
+            top: calc(16px + var(--safe-top, 0px));
+            left: 16px;
+            right: 16px;
+            z-index: var(--z-toast, 1200);
             display: flex;
-            align-items: center;
-            gap: 6px;
-            max-width: calc(100vw - 48px);
-            white-space: normal;
-            text-align: center;
-            line-height: 1.5;
+            flex-direction: column;
+            gap: 8px;
+            pointer-events: none;
+            align-items: stretch;
         }
 
-        .toast.show {
-            opacity: 1;
-            transform: translateX(-50%) translateY(0);
+        .toast,
+        .toast-item {
+            position: relative;
+            pointer-events: auto;
+            width: 100%;
+            max-width: 400px;
+            margin: 0 auto;
+            padding: 10px 14px;
+            border-radius: var(--radius-md);
+            background: var(--ui-toast-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--ui-toast-border);
+            font-size: var(--text-sm);
+            font-weight: var(--weight-medium);
+            box-shadow: var(--shadow-lg);
+            opacity: 0;
+            transform: translateY(-8px);
+            transition: opacity var(--dur-normal) var(--ease), transform var(--dur-normal) var(--ease);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            box-sizing: border-box;
+            white-space: normal;
+            line-height: 1.45;
         }
+
+        .toast.show,
+        .toast-item.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .toast.success,
+        .toast-item.success { border-left: 3px solid var(--positive); }
+
+        .toast.error,
+        .toast-item.error { border-left: 3px solid var(--negative); }
+
+        .toast.warning,
+        .toast-item.warning { border-left: 3px solid var(--warning); }
+
+        .toast.info,
+        .toast-item.info { border-left: 3px solid var(--brand-500); }
 
         /* ===== WeChat Guide Overlay & Mask ===== */
         .wechat-guide-overlay {

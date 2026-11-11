@@ -4,19 +4,21 @@
 
 ## 一、线上环境概览
 
-| 维度 | 主站（生产环境） |
-| :--- | :--- |
-| **服务器 IP** | `43.142.104.218`（4核4G，原 `106.14.62.196`） |
-| **SSH 端口** | `28964` |
-| **系统与环境** | 腾讯云 Ubuntu / 宝塔 Linux 面板 / Nginx / PHP 8.2 (FPM) / MySQL 8.0 |
-| **教师端域名** | `https://feedback.wxjifang.cn` |
-| **学生端错题本** | `https://vip.wxjifang.cn`（别名：`vip.jokerx.top`） |
-| **Git 分支** | `main` |
-| **服务器目录** | `/www/wwwroot/JF/feedback-git/feedback-v1` |
-| **数据库** | `feedback`（账户：`tinsy`） |
-| **发布方式** | GitHub Actions 监听 `main` 分支 push 自动部署、增量迁移并执行冒烟校验 |
-| **本地快照机制** | 每天凌晨 03:00 自动导出 `mysqldump` 压缩快照至本地，滚动保留 7 天 |
-| **异地灾备机制** | 每天凌晨 03:30 GitHub Actions 自动将数据库快照、PDF 材料与凭据异地备份至 Google Drive，保留 30 天 |
+| 维度 | 主站（生产环境） | 备用 / 灾备环境 |
+| :--- | :--- | :--- |
+| **服务器 IP** | `43.142.104.218`（4核4G） | `106.14.62.196`（原主站服务器） |
+| **本地 SSH 别名** | `jf` (`ssh jf`) | `jf-backup` (`ssh jf-backup`) |
+| **SSH 端口** | `28964` | `28964` |
+| **认证方式** | 仅 ED25519 密钥免密登录（禁用密码） | 仅 ED25519 密钥免密登录（禁用密码） |
+| **系统与环境** | 腾讯云 Ubuntu / 宝塔 Linux 面板 / Nginx / PHP 8.2 (FPM) / MySQL 8.0 | 阿里云 Debian 12 (bookworm) / 干净精简系统 |
+| **教师端域名** | `https://feedback.wxjifang.cn` | - |
+| **学生端错题本** | `https://vip.wxjifang.cn`（别名：`vip.jokerx.top`） | - |
+| **Git 分支** | `main` | - |
+| **服务器目录** | `/www/wwwroot/JF/feedback-git/feedback-v1` | - |
+| **数据库** | `feedback`（账户：`tinsy`） | 历史数据已全量归档至本地 `backups/` |
+| **发布方式** | GitHub Actions 监听 `main` 分支 push 自动部署、增量迁移并执行冒烟校验 | - |
+| **本地快照机制** | 每天凌晨 03:00 自动导出 `mysqldump` 压缩快照至本地，滚动保留 7 天 | - |
+| **异地灾备机制** | 每天凌晨 03:30 GitHub Actions 自动将数据库快照、PDF 材料与凭据异地备份至 Google Drive，保留 30 天 | 本地全量归档存档于 `backups/server_archive_final_jf_106.14.62.196_20261110/` |
 
 ---
 

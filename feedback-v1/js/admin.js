@@ -1,7 +1,7 @@
 /**
  * ============================================================================
  * 极方管理后台 (Admin Console) 前端运行脚本 - 生产环境合并包
- * 自动生成时间: 2026-11-11 06:38:49
+ * 自动生成时间: 2026-11-12 02:38:00
  * 源码模块目录: js/admin/
  * 请勿直接手动修改此文件，开发时请修改 js/admin/ 中的子模块并执行本打包脚本。
  * ============================================================================
@@ -80,37 +80,54 @@
         /* ========================================================
            Modern In-App Toast Notification System
            ======================================================== */
-        function showToast(message, type = 'info', duration = 3200) {
-            const container = document.getElementById('toast-container');
-            if (!container) return;
-
-            const toast = document.createElement('div');
-            toast.className = `toast-item ${type}`;
-
-            let iconSvg = '';
-            const svgStyle = 'width:20px;height:20px;min-width:20px;max-width:20px;flex-shrink:0;';
-            if (type === 'success') {
-                iconSvg = `<svg class="toast-icon" width="20" height="20" style="${svgStyle}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
-            } else if (type === 'error') {
-                iconSvg = `<svg class="toast-icon" width="20" height="20" style="${svgStyle}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>`;
-            } else if (type === 'warn' || type === 'warning') {
-                iconSvg = `<svg class="toast-icon" width="20" height="20" style="${svgStyle}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`;
-            } else {
-                iconSvg = `<svg class="toast-icon" width="20" height="20" style="${svgStyle}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`;
+        function showToast(message, type = 'info', duration = 2800) {
+            if (!message) return;
+            let container = document.getElementById('toast-container');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'toast-container';
+                container.className = 'toast-container';
+                document.body.appendChild(container);
             }
 
-            toast.innerHTML = `
-                ${iconSvg}
-                <div style="flex:1; line-height:1.4;">${escapeHtml(message)}</div>
-            `;
+            while (container.children.length >= 4) {
+                container.firstElementChild.remove();
+            }
+
+            const normType = (type === 'warn' || type === 'warning') ? 'warning'
+                : (type === 'error' ? 'error'
+                : (type === 'success' ? 'success' : 'info'));
+
+            const icons = {
+                success: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>',
+                error: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>',
+                warning: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>',
+                info: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>'
+            };
+
+            const toast = document.createElement('div');
+            toast.className = `toast-item ${normType}`;
+            const safeText = typeof escapeHtml === 'function' ? escapeHtml(String(message)) : String(message);
+            toast.innerHTML = `${icons[normType] || icons.info}<div class="toast-content">${safeText}</div>`;
 
             container.appendChild(toast);
 
-            setTimeout(() => {
-                toast.style.opacity = '0';
-                toast.style.transform = 'translateX(20px)';
-                setTimeout(() => toast.remove(), 250);
-            }, duration);
+            requestAnimationFrame(() => {
+                toast.classList.add('show');
+            });
+
+            let dismissTimer = null;
+            const dismiss = () => {
+                if (!toast.parentNode) return;
+                if (dismissTimer) clearTimeout(dismissTimer);
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    if (toast.parentNode) toast.remove();
+                }, 200);
+            };
+
+            toast.addEventListener('click', dismiss);
+            dismissTimer = setTimeout(dismiss, duration);
         }
 
         /* ========================================================
@@ -473,15 +490,15 @@
             const saveBtn = document.getElementById('btn-save-pwd');
 
             if (!oldPassword) {
-                showToast('请输入当前原密码！', 'warn');
+                showToast('请输入当前原密码', 'warn');
                 return;
             }
             if (!newPassword || newPassword.length < 6) {
-                showToast('新密码长度不能少于 6 位！', 'warn');
+                showToast('新密码长度不能少于 6 位', 'warn');
                 return;
             }
             if (newPassword !== confirmPassword) {
-                showToast('两次输入的新密码不一致！', 'warn');
+                showToast('两次输入的新密码不一致', 'warn');
                 return;
             }
 
@@ -498,7 +515,7 @@
                 const json = await res.json();
                 if (json.success) {
                     closeChangePwdModal();
-                    showToast('密码修改成功，请妥善保管！', 'success');
+                    showToast('密码修改成功，请妥善保管', 'success');
                 } else {
                     showToast(json.error || '修改密码失败', 'error');
                 }
@@ -1858,7 +1875,7 @@
                 const res = await fetch(`${API_BASE}?action=db_delete&table=users&id=${id}`, { method: 'POST' });
                 const json = await res.json();
                 if (json.success) {
-                    showToast(`教师账号「${name}」已成功删除！`, 'success');
+                    showToast(`教师账号「${name}」已删除`, 'success');
                     teacherSelectedIds.delete(id);
                     loadTeachersData();
                     if (typeof loadDbTables === 'function') loadDbTables();
@@ -1884,7 +1901,7 @@
                 });
                 const json = await res.json();
                 if (json.success) {
-                    showToast(`已成功删除 ${json.data?.deleted || count} 位教师账号！`, 'success');
+                    showToast(`已删除 ${json.data?.deleted || count} 位教师账号`, 'success');
                     teacherSelectedIds.clear();
                     loadTeachersData();
                     if (typeof loadDbTables === 'function') loadDbTables();
@@ -5199,7 +5216,7 @@
                 const retestToken = document.getElementById('field-retest_token')?.value.trim();
 
                 if (!studentId || !studentName) {
-                    showToast('学号与学员姓名为必填项目！', 'warn');
+                    showToast('学号与学员姓名为必填项', 'warn');
                     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存数据记录'; }
                     return;
                 }
@@ -5226,7 +5243,7 @@
                 data.class_name = document.getElementById('field-class_name')?.value.trim();
 
                 if (!data.class_name) {
-                    showToast('班级全称为必填项！', 'warn');
+                    showToast('班级全称为必填项', 'warn');
                     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存数据记录'; }
                     return;
                 }
@@ -5257,12 +5274,12 @@
                 data.answer_name = document.getElementById('field-answer_name')?.value.trim();
 
                 if (!data.topic) {
-                    showToast('考查知识点 (Topic) 为必填项！', 'warn');
+                    showToast('考查知识点 (Topic) 为必填项', 'warn');
                     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存数据记录'; }
                     return;
                 }
                 if (!data.exercise_pdf) {
-                    showToast('错题 / 题目 PDF 文件路径为必填项！', 'warn');
+                    showToast('题目 PDF 文件路径为必填项', 'warn');
                     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存数据记录'; }
                     return;
                 }
@@ -5274,12 +5291,12 @@
                 const status = document.getElementById('field-status')?.value;
 
                 if (!username) {
-                    showToast('登录用户名不能为空！', 'warn');
+                    showToast('登录用户名不能为空', 'warn');
                     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存数据记录'; }
                     return;
                 }
                 if (!isEdit && !password) {
-                    showToast('新增管理员必须设置初始登录密码！', 'warn');
+                    showToast('新增管理员必须设置初始登录密码', 'warn');
                     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存数据记录'; }
                     return;
                 }
@@ -5298,7 +5315,7 @@
                 const initialPassword = document.getElementById('field-initial_password')?.value.trim();
 
                 if (!username) {
-                    showToast('教师账号不能为空！', 'warn');
+                    showToast('教师账号不能为空', 'warn');
                     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存数据记录'; }
                     return;
                 }
@@ -5331,7 +5348,7 @@
                 const json = await res.json();
                 if (json.success) {
                     closeDbRecordModal();
-                    showToast(isEdit ? '记录更新成功！' : '新记录已成功入库！', 'success');
+                    showToast(isEdit ? '记录更新成功' : '新记录已入库', 'success');
                     if (activeTable === 'student_records') {
                         loadRecordsStats();
                         loadRecordsData(recCurrentPage);
@@ -5355,7 +5372,7 @@
 
         async function promptResetTeacherPwd(id, username, realName) {
             if (username === '0') {
-                showToast('测试账号（0）为系统公共体验账号，不支持重置密码！', 'warn');
+                showToast('测试账号（0）为系统公共体验账号，不支持重置密码', 'warn');
                 return;
             }
             const displayName = realName ? `${realName} (${username})` : username;
@@ -5363,7 +5380,7 @@
             if (newPwd === null) return;
             const trimmed = newPwd.trim();
             if (!trimmed || trimmed.length < 6) {
-                showToast('新密码长度不能少于 6 位！', 'warn');
+                showToast('新密码长度不能少于 6 位', 'warn');
                 return;
             }
 
@@ -5375,7 +5392,7 @@
                 });
                 const json = await res.json();
                 if (json.success) {
-                    showToast(`教师【${displayName}】密码已成功重置！`, 'success');
+                    showToast(`教师【${displayName}】密码已重置`, 'success');
                     loadDbData(dbCurrentPage);
                 } else {
                     showToast(json.error || '重置失败', 'error');
@@ -5441,7 +5458,7 @@
                 if (json.success) {
                     dbSelectedIds.clear();
                     updateDbBatchDeleteBtn();
-                    showToast(`已成功批量清理 ${count} 条记录！`, 'success');
+                    showToast(`已批量清理 ${count} 条记录`, 'success');
                     loadDbData(dbCurrentPage);
                 } else {
                     showToast(json.error || '批量删除失败', 'error');
@@ -6223,7 +6240,7 @@
                 });
                 const json = await res.json();
                 if (json.success) {
-                    showToast(`助教账号【${astUsername}】已成功删除！`, 'success');
+                    showToast(`助教账号【${astUsername}】已删除`, 'success');
                     loadDbData(dbCurrentPage);
                     try {
                         const getRes = await fetch(`${API_BASE}?action=db_get&table=users&id=${teacherId}`);
@@ -6802,7 +6819,7 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
                 });
                 const json = await res.json();
                 if (json.success) {
-                    showToast(json.data?.message || '已成功回溯！', 'success', 3000);
+                    showToast(json.data?.message || '已成功回溯', 'success', 3000);
                     // 刷新数据源
                     if (typeof activeTab !== 'undefined' && activeTab === 'records') {
                         await loadRecordsData(recCurrentPage);
@@ -6949,7 +6966,7 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
                 const active = document.getElementById('cl-active').checked;
 
                 if (!version || !title) {
-                    showToast('版本号与主标题为必填项！', 'warn');
+                    showToast('版本号与主标题为必填项', 'warn');
                     return;
                 }
 
@@ -6970,7 +6987,7 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
                 const json = await res.json();
                 if (json.success) {
                     closeChangelogModal();
-                    showToast('更新日志已成功保存！', 'success');
+                    showToast('更新日志已保存', 'success');
                     loadChangelogs();
                 } else {
                     showToast(json.error || '保存失败', 'error');

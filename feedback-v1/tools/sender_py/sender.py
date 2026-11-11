@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "1.8.27"
+APP_VERSION = "2.0"
 
 
 def asset_path(filename: str) -> str:

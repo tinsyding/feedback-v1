@@ -123,7 +123,7 @@
                 const active = document.getElementById('cl-active').checked;
 
                 if (!version || !title) {
-                    showToast('版本号与主标题为必填项！', 'warn');
+                    showToast('版本号与主标题为必填项', 'warn');
                     return;
                 }
 
@@ -144,7 +144,7 @@
                 const json = await res.json();
                 if (json.success) {
                     closeChangelogModal();
-                    showToast('更新日志已成功保存！', 'success');
+                    showToast('更新日志已保存', 'success');
                     loadChangelogs();
                 } else {
                     showToast(json.error || '保存失败', 'error');

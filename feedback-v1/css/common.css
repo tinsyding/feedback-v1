@@ -1777,44 +1777,117 @@ tr.masked-row.copied-row {
     color: var(--text-tertiary);
 }
 
-.toast {
+/* ============================================================================
+   统一 Toast 轻提示规范（Unslop 纯净准则）
+   - 布局：桌面端右上角悬浮卡片栈，移动端自适应
+   - 色彩：Graphite 石墨灰 raised surface，发丝边框，移除所有彩色发光投影
+   - 形状：阶梯圆角 var(--radius-md) (8px)，拒绝 9999px 药丸胶囊
+   - 动效：指定 opacity 与 transform 过渡，禁用 transition: all
+   ============================================================================ */
+
+.toast-container {
     position: fixed;
-    bottom: 30px;
-    left: 50%;
-    transform: translateX(-50%) translateY(100px);
-    padding: 14px var(--spacing-xl);
+    top: 24px;
+    right: 24px;
+    z-index: var(--z-toast, 1200);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+    max-width: calc(100vw - 48px);
+}
+
+.toast,
+.toast-item {
+    pointer-events: auto;
+    min-width: 240px;
+    max-width: 400px;
+    padding: 10px 14px;
+    border-radius: var(--radius-md);
     background: var(--ui-toast-bg);
-    color: #ffffff;
     border: 1px solid var(--ui-toast-border);
-    border-radius: var(--radius-full);
-    font-size: 0.85rem;
-    font-weight: 500;
     box-shadow: var(--shadow-lg);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    line-height: 1.45;
+    color: var(--text-primary);
     opacity: 0;
-    transition: var(--transition);
-    z-index: 99999 !important;
-    white-space: nowrap;
+    transform: translateY(-8px);
+    transition: opacity var(--dur-normal) var(--ease), transform var(--dur-normal) var(--ease);
+    box-sizing: border-box;
+    white-space: normal;
 }
 
-.toast.show {
+.toast.show,
+.toast-item.show {
     opacity: 1;
-    transform: translateX(-50%) translateY(0);
+    transform: translateY(0);
 }
 
-/* Toast 语义色（showToast(msg, type)，默认无色；调用方不传参行为不变） */
-.toast.success {
-    border-color: rgba(var(--success-rgb, 48, 209, 88), 0.45);
-    box-shadow: var(--shadow-lg), 0 0 24px rgba(var(--success-rgb, 48, 209, 88), 0.18);
+/* Toast 语义指示边框（发丝左侧强调，3px，无发光） */
+.toast.success,
+.toast-item.success {
+    border-left: 3px solid var(--positive);
 }
 
-.toast.error {
-    border-color: rgba(var(--error-rgb, 255, 69, 58), 0.45);
-    box-shadow: var(--shadow-lg), 0 0 24px rgba(var(--error-rgb, 255, 69, 58), 0.18);
+.toast.error,
+.toast-item.error {
+    border-left: 3px solid var(--negative);
 }
 
-.toast.warning {
-    border-color: rgba(var(--warning-rgb, 255, 159, 10), 0.45);
-    box-shadow: var(--shadow-lg), 0 0 24px rgba(var(--warning-rgb, 255, 159, 10), 0.18);
+.toast.warning,
+.toast-item.warning,
+.toast-item.warn {
+    border-left: 3px solid var(--warning);
+}
+
+.toast.info,
+.toast-item.info {
+    border-left: 3px solid var(--brand-500);
+}
+
+.toast-icon {
+    width: 18px;
+    height: 18px;
+    min-width: 18px;
+    max-width: 18px;
+    flex-shrink: 0;
+}
+
+.toast.success .toast-icon,
+.toast-item.success .toast-icon { color: var(--positive); }
+.toast.error .toast-icon,
+.toast-item.error .toast-icon { color: var(--negative); }
+.toast.warning .toast-icon,
+.toast-item.warning .toast-icon,
+.toast-item.warn .toast-icon { color: var(--warning); }
+.toast.info .toast-icon,
+.toast-item.info .toast-icon { color: var(--brand-500); }
+
+.toast-content {
+    flex: 1;
+    min-width: 0;
+    line-height: 1.45;
+    word-break: break-word;
+}
+
+@media (max-width: 640px) {
+    .toast-container {
+        top: calc(16px + var(--safe-top, 0px));
+        left: 16px;
+        right: 16px;
+        max-width: none;
+        align-items: stretch;
+    }
+    .toast,
+    .toast-item {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+    }
 }
 
 /* ============================================================

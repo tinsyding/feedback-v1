@@ -210,3 +210,127 @@ button, .btn, a, select, input, textarea, [role="button"], label {
     -webkit-tap-highlight-color: transparent;
 }
 
+/* ============================================================================
+   9. 全局 Toast 统一收敛规范（Unslop 纯净准则，覆盖存量各页样式）
+   ============================================================================ */
+.toast-container {
+    position: fixed;
+    top: 24px;
+    right: 24px;
+    z-index: var(--z-toast, 1200) !important;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+    max-width: calc(100vw - 48px);
+}
+
+.toast-item,
+.toast {
+    pointer-events: auto;
+    min-width: 240px;
+    max-width: 400px;
+    padding: 10px 14px;
+    border-radius: var(--radius-md) !important;
+    background: var(--ui-toast-bg) !important;
+    border: 1px solid var(--ui-toast-border) !important;
+    box-shadow: var(--shadow-lg) !important;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: var(--text-sm) !important;
+    font-weight: var(--weight-medium) !important;
+    line-height: 1.45;
+    color: var(--text-primary) !important;
+    opacity: 0;
+    transform: translateY(-8px);
+    transition: opacity var(--dur-normal) var(--ease), transform var(--dur-normal) var(--ease) !important;
+    box-sizing: border-box;
+    white-space: normal;
+    text-align: left;
+}
+
+.toast-item.show,
+.toast.show {
+    opacity: 1 !important;
+    transform: translateY(0) !important;
+}
+
+/* 语义微指示线（克制发丝左边条，3px 无发光） */
+.toast-item.toast-success,
+.toast-item.success,
+.toast.success {
+    border-left: 3px solid var(--positive) !important;
+}
+
+.toast-item.toast-error,
+.toast-item.error,
+.toast.error {
+    border-left: 3px solid var(--negative) !important;
+}
+
+.toast-item.toast-warning,
+.toast-item.warning,
+.toast-item.warn,
+.toast.warning {
+    border-left: 3px solid var(--warning) !important;
+}
+
+.toast-item.toast-info,
+.toast-item.info,
+.toast.info {
+    border-left: 3px solid var(--brand-500) !important;
+}
+
+/* 统一线性图标 */
+.toast-icon {
+    width: 18px !important;
+    height: 18px !important;
+    min-width: 18px !important;
+    min-height: 18px !important;
+    max-width: 18px !important;
+    max-height: 18px !important;
+    flex-shrink: 0 !important;
+    display: inline-block;
+}
+
+.toast-item.success .toast-icon,
+.toast-item.toast-success .toast-icon,
+.toast.success .toast-icon { color: var(--positive) !important; }
+
+.toast-item.error .toast-icon,
+.toast-item.toast-error .toast-icon,
+.toast.error .toast-icon { color: var(--negative) !important; }
+
+.toast-item.warning .toast-icon,
+.toast-item.warn .toast-icon,
+.toast-item.toast-warning .toast-icon,
+.toast.warning .toast-icon { color: var(--warning) !important; }
+
+.toast-item.info .toast-icon,
+.toast-item.toast-info .toast-icon,
+.toast.info .toast-icon { color: var(--brand-500) !important; }
+
+.toast-content {
+    flex: 1;
+    min-width: 0;
+    line-height: 1.45;
+    word-break: break-word;
+}
+
+@media (max-width: 640px) {
+    .toast-container {
+        top: calc(16px + var(--safe-top, 0px));
+        left: 16px;
+        right: 16px;
+        max-width: none;
+        align-items: stretch;
+    }
+    .toast-item,
+    .toast {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+    }
+}
+

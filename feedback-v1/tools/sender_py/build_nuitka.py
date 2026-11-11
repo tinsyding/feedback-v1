@@ -15,7 +15,12 @@ import sys
 import shutil
 import subprocess
 
-APP_VERSION = "1.8.27.0"
+# 强制开启 Python UTF-8 模式，彻底杜绝 Windows MSVC / SCons 报 'mbcs' codec can't decode bytes 错误
+os.environ["PYTHONUTF8"] = "1"
+os.environ["PYTHONIOENCODING"] = "utf-8"
+
+APP_VERSION = "2.0.0.0"
+APP_VERSION_SHORT = "2.0"
 
 WINRT_PROJECTION_PACKAGES = [
     "winrt",
@@ -133,6 +138,7 @@ def build_standalone(paths):
     cmd_web = [
         sys.executable, "-m", "nuitka",
         "--standalone",
+        "--mingw64",
         "--assume-yes-for-downloads",
         "--windows-console-mode=disable",
         f"--windows-icon-from-ico={paths['favicon']}",
@@ -140,7 +146,7 @@ def build_standalone(paths):
         "--windows-product-name=极方每周反馈程序(Web版)",
         "--windows-file-description=极方每周反馈程序 (Web版)",
         f"--windows-file-version={APP_VERSION}",
-        f"--windows-product-version={APP_VERSION}",
+        f"--windows-product-version={APP_VERSION_SHORT}",
         "--enable-plugin=tk-inter",
         "--include-package=sender_py",
         *get_winocr_nuitka_args(),
@@ -170,6 +176,8 @@ def build_standalone(paths):
     ])
     env = os.environ.copy()
     env["PYTHONPATH"] = f"{paths['tools_dir']};{paths['cur_dir']};{env.get('PYTHONPATH', '')}"
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     subprocess.run(cmd_web, check=True, env=env)
 
     web_dist_orig = os.path.join(paths["dist_nuitka_web"], "web_main.dist")
@@ -207,10 +215,13 @@ def build_onefile(paths):
     os.makedirs(paths["dist_nuitka_onefile"], exist_ok=True)
     env = os.environ.copy()
     env["PYTHONPATH"] = f"{paths['tools_dir']};{paths['cur_dir']};{env.get('PYTHONPATH', '')}"
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
 
     cmd_web = [
         sys.executable, "-m", "nuitka",
         "--onefile",
+        "--mingw64",
         "--assume-yes-for-downloads",
         "--windows-console-mode=disable",
         f"--windows-icon-from-ico={paths['favicon']}",
@@ -218,7 +229,7 @@ def build_onefile(paths):
         "--windows-product-name=极方每周反馈程序(Web版)",
         "--windows-file-description=极方每周反馈程序 (Web版)",
         f"--windows-file-version={APP_VERSION}",
-        f"--windows-product-version={APP_VERSION}",
+        f"--windows-product-version={APP_VERSION_SHORT}",
         "--enable-plugin=tk-inter",
         "--include-package=sender_py",
         *get_winocr_nuitka_args(),

@@ -66,7 +66,7 @@
 
 | Secret 键名 | 用途 | 适用工作流 | 示例/说明 |
 | :--- | :--- | :--- | :--- |
-| `DEPLOY_HOST` | 服务器公网 IP | `deploy.yml`, `apply-nginx-hardening.yml`, `backup-production-to-gdrive.yml` | `43.142.104.218`（原 `106.14.62.196`） |
+| `DEPLOY_HOST` | 服务器公网 IP | `deploy.yml`, `apply-nginx-hardening.yml`, `backup-production-to-gdrive.yml` | `43.142.104.218`（主站生产机，本地别名 `jf`；备机 `106.14.62.196` 别名 `jf-backup`） |
 | `DEPLOY_PORT` | SSH 端口 | 同上 | `28964`（须为纯数字） |
 | `DEPLOY_USER` | SSH 登录用户 | 同上 | `root` |
 | `DEPLOY_SSH_KEY` | 自动化部署私钥 | 同上 | `id_github_actions` 私钥完整文本（含 BEGIN/END 行） |
