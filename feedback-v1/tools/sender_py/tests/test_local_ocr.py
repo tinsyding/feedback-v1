@@ -135,6 +135,17 @@ class LocalOcrTest(unittest.TestCase):
             self.assertIn("winocr极速通过", res["reason"])
             mock_rapid.assert_not_called()
 
+    def test_ocr_via_winocr_logs_warning_on_exception(self):
+        from sender_py.local_ocr import _ocr_via_winocr
+        with patch.dict("sys.modules", {"winocr": None}), \
+             patch("sender_py.file_logger.write_log") as mock_write_log:
+            res = _ocr_via_winocr("dummy_img")
+            self.assertEqual(res, "")
+            mock_write_log.assert_called()
+            args, kwargs = mock_write_log.call_args
+            self.assertIn("winocr调用异常", args[0])
+            self.assertEqual(kwargs.get("level"), "WARNING")
+
 
 if __name__ == "__main__":
     unittest.main()

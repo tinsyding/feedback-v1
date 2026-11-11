@@ -43,7 +43,7 @@ def safe_print(*args, **kwargs):
 
 
 APP_NAME = "极方每周反馈程序 (Web版)"
-APP_VERSION = "1.8.25"
+APP_VERSION = "1.8.26"
 
 
 def find_free_port(start: int = 8765, max_attempts: int = 100) -> int:
@@ -85,6 +85,14 @@ def run_smoke_test() -> int:
         time.sleep(0.5)
         server.shutdown()
         server.server_close()
+
+        if sys.platform == "win32":
+            try:
+                import winocr
+                safe_print(f"[{APP_NAME}] winocr WinRT 模块可用")
+            except Exception as e:
+                safe_print(f"[{APP_NAME}] winocr 模块加载提示: {e}")
+
         safe_print("Smoke test passed successfully!")
         return 0
     except Exception as exc:

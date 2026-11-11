@@ -290,7 +290,15 @@ def _ocr_via_winocr(img, raise_exc: bool = False) -> str:
             return str(res["text"]).strip()
         if hasattr(res, "text") and res.text:
             return str(res.text).strip()
-    except Exception:
+    except Exception as e:
+        try:
+            try:
+                from sender_py.file_logger import write_log
+            except ModuleNotFoundError:
+                from file_logger import write_log
+            write_log(f"[本地OCR] winocr调用异常 (降级至RapidOCR): {e}", level="WARNING", exc_info=e)
+        except Exception:
+            pass
         if raise_exc:
             raise
     return ""

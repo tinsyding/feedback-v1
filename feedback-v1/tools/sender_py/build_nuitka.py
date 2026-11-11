@@ -15,7 +15,50 @@ import sys
 import shutil
 import subprocess
 
-APP_VERSION = "1.8.25.0"
+APP_VERSION = "1.8.26.0"
+
+WINRT_PROJECTION_PACKAGES = [
+    "winocr",
+    "winrt",
+    "winrt.system",
+    "winrt.runtime",
+    "winrt.windows.foundation",
+    "winrt.windows.foundation.collections",
+    "winrt.windows.globalization",
+    "winrt.windows.graphics.imaging",
+    "winrt.windows.media.ocr",
+    "winrt.windows.storage.streams",
+]
+
+
+def get_winocr_nuitka_args():
+    """生成用于完整打包 winocr 与 WinRT 投影体系的 Nuitka 参数。
+    
+    winocr 深度依赖 pywinrt 体系。各命名空间（如 winrt.windows.media.ocr）
+    包含一个独立的二进制投影表文件 _table.pywinrt，Nuitka 必须显式引入子包
+    并携带 package-data，否则在 load_projection 时将抛出 ImportError。
+    """
+    packages = set(WINRT_PROJECTION_PACKAGES)
+    try:
+        from importlib.metadata import distributions
+        for dist in distributions():
+            name = (dist.metadata.get("Name") or "").lower()
+            if name.startswith("winrt") or name == "winocr":
+                for f in dist.files or []:
+                    p = str(f).replace("\\", "/")
+                    if p.endswith("__init__.py"):
+                        mod = p[:-12].replace("/", ".")
+                        if mod:
+                            packages.add(mod)
+    except Exception:
+        pass
+
+    args = []
+    for pkg in sorted(packages):
+        args.append(f"--include-package={pkg}")
+        args.append(f"--include-package-data={pkg}")
+    return args
+
 
 def get_paths():
     cur_dir = os.path.dirname(os.path.abspath(__file__))
@@ -102,14 +145,12 @@ def build_standalone(paths):
         f"--windows-product-version={APP_VERSION}",
         "--enable-plugin=tk-inter",
         "--include-package=sender_py",
-        "--include-package=winocr",
-        "--include-package=winrt",
+        *get_winocr_nuitka_args(),
         # 排除测试模块与 unittest，避免 anti-bloat 告警并缩短编译时间
         "--nofollow-import-to=sender_py.tests",
         "--nofollow-import-to=unittest",
         "--nofollow-import-to=test",
         "--include-package-data=rapidocr_onnxruntime",
-        "--include-package-data=winrt",
         "--include-package-data=certifi",
         # 编译加速：多核并行编译 + 禁用 MSVC 耗时极长且提升微弱的全程序 LTO 链接优化
         "--jobs=4",
@@ -183,14 +224,12 @@ def build_onefile(paths):
         f"--windows-product-version={APP_VERSION}",
         "--enable-plugin=tk-inter",
         "--include-package=sender_py",
-        "--include-package=winocr",
-        "--include-package=winrt",
+        *get_winocr_nuitka_args(),
         # 排除测试模块与 unittest，避免 anti-bloat 告警并缩短编译时间
         "--nofollow-import-to=sender_py.tests",
         "--nofollow-import-to=unittest",
         "--nofollow-import-to=test",
         "--include-package-data=rapidocr_onnxruntime",
-        "--include-package-data=winrt",
         "--include-package-data=certifi",
         # 编译加速：多核并行编译 + 禁用 MSVC 耗时极长且提升微弱的全程序 LTO 链接优化
         "--jobs=4",

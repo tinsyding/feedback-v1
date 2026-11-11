@@ -30,7 +30,7 @@ _CONFIG_LOCK = threading.RLock()
 SYNC_LOG_PATH = "/api/logs.php?action=sender_sync"
 SYNC_SNAPSHOT_PATH = "/api/logs.php?action=sender_snapshot"
 DEFAULT_SERVER_URL = "https://feedback.wxjifang.cn"
-APP_VERSION_STR = "1.8.25"
+APP_VERSION_STR = "1.8.26"
 
 
 def get_logs_dir(base_dir: Optional[str] = None) -> str:
