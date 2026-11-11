@@ -1427,7 +1427,7 @@
         });
         const data = await res.json();
         if (data.success) {
-          showToast(`成功载入 ${data.count || 0} 位学员数据！`);
+          showToast(`已载入 ${data.count || 0} 位学员数据`);
           fetchState();
         } else {
           alert(`上传失败: ${data.message || '未知异常'}`);
@@ -1992,7 +1992,7 @@
     async function triggerStop() {
       try {
         await fetch("/api/stop", { method: "POST" });
-        showToast("⏹ 正在停止发送任务...");
+        showToast("正在停止发送任务...");
         fetchState();
       } catch (err) {}
     }
