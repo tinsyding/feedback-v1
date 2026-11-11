@@ -107,6 +107,104 @@ class TestFileLogger(unittest.TestCase):
         finally:
             file_logger.default_storage_base_dir = orig_fn
 
+    def test_teacher_note_and_client_identity(self):
+        self.assertEqual(file_logger.get_teacher_note(base_dir=self.test_dir), "")
+        saved = file_logger.set_teacher_note("  张老师-高一数学  ", base_dir=self.test_dir)
+        self.assertEqual(saved, "张老师-高一数学")
+        self.assertEqual(file_logger.get_teacher_note(base_dir=self.test_dir), "张老师-高一数学")
+
+        identity = file_logger.get_client_identity(base_dir=self.test_dir)
+        self.assertEqual(identity["teacher_note"], "张老师-高一数学")
+        self.assertIn("张老师-高一数学", identity["display_name"])
+        self.assertTrue(identity["client_slug"])
+
+    def test_classify_log_event(self):
+        self.assertEqual(
+            file_logger.classify_log_event("状态更新：已拦截（群聊拦截）", "WARNING"),
+            ("warn", "student_blocked"),
+        )
+        self.assertEqual(
+            file_logger.classify_log_event("状态更新：已发送", "INFO"),
+            ("action", "student_sent"),
+        )
+        self.assertEqual(
+            file_logger.classify_log_event("❌ 发送任务异常中止", "ERROR"),
+            ("error", "sender_error"),
+        )
+
+    def test_incremental_unsynced_log_files_catchup(self):
+        today = datetime.datetime.now().strftime("%Y-%m-%d")
+        logs_dir = file_logger.get_logs_dir(self.test_dir)
+        sender_log = os.path.join(logs_dir, f"sender_{today}.log")
+        with open(sender_log, "w", encoding="utf-8") as f:
+            f.write(f"[{today} 10:00:00] [INFO] 第一行离线日志\n")
+            f.write(f"[{today} 10:00:01] [ERROR] ❌ 第二行离线报错\n")
+
+        captured_payloads = []
+
+        def fake_post(server, path, payload, timeout=8.0):
+            captured_payloads.append(payload)
+            return {"success": True}
+
+        orig_post = file_logger._post_json_to_server
+        file_logger._post_json_to_server = fake_post
+        try:
+            synced1 = file_logger.sync_unsynced_log_files(base_dir=self.test_dir)
+            self.assertEqual(synced1, 1)
+            self.assertEqual(len(captured_payloads), 1)
+            self.assertEqual(captured_payloads[0]["sync_mode"], "chunk")
+            self.assertIn("第一行离线日志", captured_payloads[0]["content"])
+
+            # 再次执行无新增字节时不应重复上传
+            synced2 = file_logger.sync_unsynced_log_files(base_dir=self.test_dir)
+            self.assertEqual(synced2, 0)
+
+            # 追加新内容后只上传新增尾部字节
+            with open(sender_log, "a", encoding="utf-8") as f:
+                f.write(f"[{today} 10:05:00] [INFO] ✅ [赵六] 反馈已成功投递\n")
+
+            synced3 = file_logger.sync_unsynced_log_files(base_dir=self.test_dir)
+            self.assertEqual(synced3, 1)
+            self.assertEqual(len(captured_payloads), 2)
+            self.assertIn("赵六", captured_payloads[1]["content"])
+            self.assertNotIn("第一行离线日志", captured_payloads[1]["content"])
+        finally:
+            file_logger._post_json_to_server = orig_post
+
+    def test_sync_batch_summary_and_realtime_syncer(self):
+        captured = []
+
+        def fake_post(server, path, payload, timeout=8.0):
+            captured.append(payload)
+            return {"success": True}
+
+        orig_post = file_logger._post_json_to_server
+        file_logger._post_json_to_server = fake_post
+        try:
+            items = [
+                {"sid": "S001", "sname": "张三", "_status": "已发送", "_last_reason": "", "text": "很长的反馈正文不应上传"},
+                {"sid": "S002", "sname": "李四", "_status": "已拦截", "_last_reason": "群聊人数(35)", "text": "保密正文"},
+            ]
+            ok = file_logger.sync_batch_summary(
+                items,
+                input_paths=["/tmp/高二物理.xlsx"],
+                base_dir=self.test_dir,
+                immediate=True,
+            )
+            self.assertTrue(ok)
+            self.assertEqual(len(captured), 1)
+            summary = captured[0]["batch_summary"]
+            self.assertEqual(summary["counts"]["total"], 2)
+            self.assertEqual(summary["counts"]["sent"], 1)
+            self.assertEqual(summary["counts"]["blocked"], 1)
+            self.assertEqual(summary["files"], ["高二物理.xlsx"])
+            # 确认未上传长反馈正文 text
+            for st in summary["students"]:
+                self.assertNotIn("text", st)
+        finally:
+            file_logger._post_json_to_server = orig_post
+
 
 if __name__ == "__main__":
     unittest.main()
+

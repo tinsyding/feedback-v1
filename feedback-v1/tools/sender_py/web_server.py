@@ -58,7 +58,7 @@ def get_web_ui_html_path() -> str:
 class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
     """处理 WebUI 静态资源与 REST API 请求。"""
 
-    server_version = "JiFangFeedbackWeb/1.8.24"
+    server_version = "JiFangFeedbackWeb/1.8.25"
 
     def log_message(self, format, *args):
         # 静默常规 HTTP 请求，避免终端滚屏刷屏
@@ -525,8 +525,26 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({"success": False, "error": str(exc)})
             return
 
+        # 9.98 保存老师姓名/备注配置
+        if path == "/api/config/teacher_note":
+            try:
+                note = str(body.get("teacher_note") or "")
+                res = self.controller.update_teacher_note(note)
+                self._send_json(res)
+            except Exception as exc:
+                self._send_json({"success": False, "error": str(exc)}, 400)
+            return
+
         # 10. 退出后台程序
         if path == "/api/shutdown":
+            try:
+                try:
+                    from sender_py.file_logger import flush_cloud_logs
+                except ModuleNotFoundError:
+                    from file_logger import flush_cloud_logs
+                flush_cloud_logs(timeout=1.5)
+            except Exception:
+                pass
             self._send_json({"success": True, "message": "服务正在退出..."})
             def _exit_later():
                 time.sleep(0.5)

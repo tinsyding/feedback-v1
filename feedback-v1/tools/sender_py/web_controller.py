@@ -25,7 +25,12 @@ try:
     from sender_py.store import HistoryManager, SentFilesManager
     from sender_py.utils import parse_student_identifier
     from sender_py.window_utils import GlobalEscWatcher
-    from sender_py.file_logger import cleanup_old_logs, write_log, open_logs_dir, list_log_files, read_log_file
+    from sender_py.file_logger import (
+        cleanup_old_logs, write_log, open_logs_dir, list_log_files, read_log_file,
+        update_log_context, sync_batch_summary, flush_cloud_logs,
+        get_client_identity, get_teacher_note, set_teacher_note, get_cloud_sync_status,
+        _SYNCER,
+    )
 except ModuleNotFoundError:
     from pacing import (
         AFTER_SEND_GAP, BATCH_BREAK_EVERY, BATCH_BREAK_GAP,
@@ -44,19 +49,32 @@ except ModuleNotFoundError:
     except Exception:
         GlobalEscWatcher = None
     try:
-        from file_logger import cleanup_old_logs, write_log, open_logs_dir, list_log_files, read_log_file
+        from file_logger import (
+            cleanup_old_logs, write_log, open_logs_dir, list_log_files, read_log_file,
+            update_log_context, sync_batch_summary, flush_cloud_logs,
+            get_client_identity, get_teacher_note, set_teacher_note, get_cloud_sync_status,
+            _SYNCER,
+        )
     except ModuleNotFoundError:
         cleanup_old_logs = lambda max_days=30: None
         write_log = lambda msg, level=None, exc_info=None: ("", "")
         open_logs_dir = lambda: False
         list_log_files = lambda: []
         read_log_file = lambda filename, max_lines=2000: ""
+        update_log_context = lambda **kwargs: None
+        sync_batch_summary = lambda *args, **kwargs: None
+        flush_cloud_logs = lambda timeout=2.5: None
+        get_client_identity = lambda base_dir=None: {}
+        get_teacher_note = lambda base_dir=None: ""
+        set_teacher_note = lambda note, base_dir=None: str(note or "")
+        get_cloud_sync_status = lambda: {"enabled": False}
+        _SYNCER = None
 
 
 class WebController:
     """Web 端集中状态管理与执行控制器。"""
 
-    def __init__(self, server: str = "https://feedback.wxjifang.cn"):
+    def __init__(self, server: str = "https://feedback.wxjifang.cn", enable_cloud_sync: bool = None):
         self.server = server
         self.token = None
         self._load_token()
@@ -107,6 +125,22 @@ class WebController:
 
         try:
             cleanup_old_logs(max_days=30)
+        except Exception:
+            pass
+
+        # 初始化云端日志自动同步（单元测试环境未显式开启时不对外发网路请求）
+        if enable_cloud_sync is None:
+            enable_cloud_sync = ("unittest" not in sys.modules) and (os.environ.get("SENDER_DISABLE_CLOUD_LOG") != "1")
+        try:
+            update_log_context(
+                server=self.server,
+                token=self.token,
+                active_files=[],
+                teacher_note=get_teacher_note(),
+                enabled=bool(enable_cloud_sync),
+            )
+            if enable_cloud_sync and _SYNCER is not None:
+                _SYNCER.trigger_history_sync()
         except Exception:
             pass
 
@@ -238,6 +272,10 @@ class WebController:
                 it["_last_result"] = it.get("_last_result") or ""
             self.items = items
 
+        try:
+            update_log_context(active_files=target_paths)
+        except Exception:
+            pass
         self.emit(f"成功载入 {len(target_paths)} 个文件，共 {len(items)} 位学员（去重 {duplicates} 人）。")
         self._notify_state_change()
         return {"success": True, "count": len(items), "files": len(target_paths)}
@@ -275,6 +313,10 @@ class WebController:
             self.progress["total"] = 0
             self.progress["current_name"] = ""
             self.progress["step_text"] = "已清空"
+        try:
+            update_log_context(active_files=[])
+        except Exception:
+            pass
         self.emit("已清空文件池与学员列表。")
         self._notify_state_change()
         return {"success": True}
@@ -597,6 +639,11 @@ class WebController:
             f"跳过 {counts['已跳过']}"
         )
         self.emit(summary_msg)
+        try:
+            sync_batch_summary(self.items, input_paths=self.input_paths, stopped=stopped)
+            flush_cloud_logs(timeout=2.0)
+        except Exception:
+            pass
         self._notify_state_change()
 
     def _record_sent_files_summary(self):
@@ -713,10 +760,28 @@ class WebController:
             self.emit(f"✗ {err}")
             return {"success": False, "message": err}
 
+    def update_teacher_note(self, note: str) -> dict:
+        """保存老师姓名/备注并立即同步到日志上下文。"""
+        clean_note = set_teacher_note(note)
+        ident = get_client_identity()
+        if clean_note:
+            self.emit(f"已更新老师备注为：{clean_note}（设备标识：{ident.get('hostname', '')}）")
+        else:
+            self.emit(f"已清除老师备注，恢复默认设备标识：{ident.get('display_name', '')}")
+        self._notify_state_change()
+        return {"success": True, "teacher_note": clean_note, "client": ident}
+
     # ================= 状态序列化 =================
 
     def get_state(self) -> dict:
         """获取当前完整状态供前端渲染。"""
+        ident = {}
+        sync_status = {}
+        try:
+            ident = get_client_identity()
+            sync_status = get_cloud_sync_status()
+        except Exception:
+            pass
         with self._lock:
             counts = summarize_status_counts(it.get("_status", "") for it in self.items)
             selected_count = sum(1 for it in self.items if it.get("_selected", True))
@@ -761,6 +826,9 @@ class WebController:
                 "students": students_list,
                 "reply_notes_count": len(actionable(self.reply_notes)),
                 "logs_count": len(self.logs),
+                "teacher_note": ident.get("teacher_note", ""),
+                "client_identity": ident,
+                "cloud_sync": sync_status,
             }
 
     def _notify_state_change(self):

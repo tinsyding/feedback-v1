@@ -20,7 +20,121 @@ if (!is_dir($logDir)) {
     @mkdir($logDir, 0755, true);
 }
 
+$senderLogDir = __DIR__ . '/../data/sender_logs';
+if (!is_dir($senderLogDir)) {
+    @mkdir($senderLogDir, 0755, true);
+}
+
 const LOG_RETENTION_DAYS = 30;
+const DEFAULT_SENDER_LOG_TOKEN = 'jf_feedback_sender_internal_token_2026';
+
+/**
+ * 校验 Python 发送器访问令牌（与 api/identify.php 鉴权策略保持一致）
+ */
+function verifySenderApiToken(string $given = ''): bool {
+    $serverToken = getenv('SENDER_API_TOKEN') ?: '';
+    if ($serverToken === '') {
+        $localFile = __DIR__ . '/secret_key.local.php';
+        if (is_file($localFile)) {
+            $local = require $localFile;
+            if (is_array($local) && !empty($local['senderApiToken'])) {
+                $serverToken = (string)$local['senderApiToken'];
+            }
+        }
+    }
+    if ($given === '') {
+        $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+        if (stripos($authHeader, 'bearer ') === 0) {
+            $given = trim(substr($authHeader, 7));
+        }
+    }
+    if ($serverToken !== '') {
+        return $given !== '' && hash_equals($serverToken, $given);
+    }
+    return $given !== '' && hash_equals(DEFAULT_SENDER_LOG_TOKEN, $given);
+}
+
+function sanitizeSenderSlug(string $slug): string {
+    $clean = preg_replace('/[^a-zA-Z0-9_-]/', '_', trim($slug));
+    $clean = trim((string)$clean, '_');
+    return $clean !== '' ? substr($clean, 0, 64) : 'unknown_pc';
+}
+
+function sanitizeSenderDate(string $date): string {
+    $d = trim($date);
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) {
+        return $d;
+    }
+    if (preg_match('/^(\d{4})(\d{2})(\d{2})/', $d, $m)) {
+        return "{$m[1]}-{$m[2]}-{$m[3]}";
+    }
+    return date('Y-m-d');
+}
+
+function updateSenderClientMeta(string $clientDir, array $clientInfo, array $activeFiles, string $ip): array {
+    $metaFile = $clientDir . '/meta.json';
+    $existing = [];
+    if (is_file($metaFile)) {
+        $decoded = @json_decode(@file_get_contents($metaFile), true);
+        if (is_array($decoded)) {
+            $existing = $decoded;
+        }
+    }
+    $hostname = trim((string)($clientInfo['hostname'] ?? ($existing['hostname'] ?? 'UnknownPC')));
+    $osUser = trim((string)($clientInfo['os_user'] ?? ($existing['os_user'] ?? 'user')));
+    $teacherNote = array_key_exists('teacher_note', $clientInfo)
+        ? trim((string)$clientInfo['teacher_note'])
+        : trim((string)($existing['teacher_note'] ?? ''));
+    $displayName = $teacherNote !== '' ? "{$teacherNote} ({$hostname}/{$osUser})" : "{$hostname} ({$osUser})";
+    $operator = $teacherNote !== '' ? "{$teacherNote}@{$hostname}" : "{$hostname}({$osUser})";
+
+    $mergedFiles = $existing['active_files'] ?? [];
+    if (!empty($activeFiles)) {
+        $mergedFiles = array_values(array_unique(array_merge($mergedFiles, array_map('strval', $activeFiles))));
+        $mergedFiles = array_slice($mergedFiles, -20);
+    }
+
+    $meta = array_merge($existing, [
+        'client_id' => (string)($clientInfo['client_id'] ?? ($existing['client_id'] ?? '')),
+        'client_slug' => basename($clientDir),
+        'hostname' => $hostname,
+        'os_user' => $osUser,
+        'teacher_note' => $teacherNote,
+        'display_name' => $displayName,
+        'operator' => substr($operator, 0, 60),
+        'platform' => (string)($clientInfo['platform'] ?? ($existing['platform'] ?? '')),
+        'app_version' => (string)($clientInfo['app_version'] ?? ($existing['app_version'] ?? '')),
+        'ip' => $ip,
+        'active_files' => $mergedFiles,
+        'last_sync_at' => date('Y-m-d H:i:s'),
+        'last_sync_ts' => time(),
+    ]);
+    @file_put_contents($metaFile, json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+    return $meta;
+}
+
+function cleanupOldSenderLogs(string $senderLogDir, int $days = 30): void {
+    try {
+        $cutoffDate = date('Y-m-d', time() - $days * 86400);
+        foreach (glob($senderLogDir . '/????-??-??', GLOB_ONLYDIR) ?: [] as $dateDir) {
+            $baseDate = basename($dateDir);
+            if ($baseDate < $cutoffDate) {
+                $it = new RecursiveDirectoryIterator($dateDir, RecursiveDirectoryIterator::SKIP_DOTS);
+                $files = new RecursiveIteratorIterator($it, RecursiveIteratorIterator::CHILD_FIRST);
+                foreach ($files as $file) {
+                    if ($file->isDir()) {
+                        @rmdir($file->getRealPath());
+                    } else {
+                        @unlink($file->getRealPath());
+                    }
+                }
+                @rmdir($dateDir);
+            }
+        }
+    } catch (Throwable $e) {
+        // 静默忽略
+    }
+}
 
 /**
  * 服务端统一日志写入辅助函数（供其他 PHP 脚本直接调用）
@@ -332,6 +446,322 @@ try {
                 }
 
                 sendResponse(true, ['count' => $savedCount, 'message' => '日志记录成功']);
+
+            } elseif ($action === 'sender_sync') {
+                $rawInput = file_get_contents('php://input');
+                if (strlen($rawInput) > 524288) {
+                    sendResponse(false, null, '请求载荷超出限制', 413);
+                }
+                $input = json_decode($rawInput, true);
+                if (!$input || !is_array($input)) {
+                    sendResponse(false, null, '无效的请求数据', 400);
+                }
+
+                $token = (string)($input['token'] ?? '');
+                if (!verifySenderApiToken($token)) {
+                    sendResponse(false, null, '发送器鉴权失败', 200);
+                }
+
+                $serverIP = getClientIP();
+                $clientInfo = is_array($input['client'] ?? null) ? $input['client'] : [];
+                $clientSlug = sanitizeSenderSlug((string)($clientInfo['client_slug'] ?? ($clientInfo['hostname'] ?? 'unknown_pc')));
+                $activeFiles = is_array($input['active_files'] ?? null) ? $input['active_files'] : [];
+                $syncMode = (string)($input['sync_mode'] ?? 'realtime');
+
+                if (mt_rand(1, 30) === 1) {
+                    cleanupOldSenderLogs($senderLogDir, LOG_RETENTION_DAYS);
+                }
+
+                if ($syncMode === 'chunk') {
+                    $dateStr = sanitizeSenderDate((string)($input['date_str'] ?? date('Y-m-d')));
+                    $logType = (($input['log_type'] ?? 'sender') === 'error') ? 'error' : 'sender';
+                    $offset = max(0, (int)($input['offset'] ?? 0));
+                    $content = (string)($input['content'] ?? '');
+
+                    $clientDir = $senderLogDir . '/' . $dateStr . '/' . $clientSlug;
+                    if (!is_dir($clientDir)) {
+                        @mkdir($clientDir, 0755, true);
+                    }
+                    $meta = updateSenderClientMeta($clientDir, $clientInfo, $activeFiles, $serverIP);
+
+                    $targetFile = $clientDir . '/' . $logType . '_' . $dateStr . '.log';
+                    if ($content !== '') {
+                        if (!is_file($targetFile) || $offset === 0) {
+                            $curSize = is_file($targetFile) ? (int)@filesize($targetFile) : 0;
+                            if ($curSize === 0) {
+                                @file_put_contents($targetFile, $content, LOCK_EX);
+                            } elseif ($curSize < strlen($content)) {
+                                // 已有部分实时日志，仅补齐缺失尾部
+                                $tail = substr($content, $curSize);
+                                if ($tail !== false && $tail !== '') {
+                                    @file_put_contents($targetFile, $tail, FILE_APPEND | LOCK_EX);
+                                }
+                            }
+                        } else {
+                            $curSize = (int)@filesize($targetFile);
+                            if ($curSize === $offset) {
+                                @file_put_contents($targetFile, $content, FILE_APPEND | LOCK_EX);
+                            } elseif ($curSize < $offset + strlen($content) && $curSize >= $offset) {
+                                $skip = $curSize - $offset;
+                                $tail = substr($content, $skip);
+                                if ($tail !== false && $tail !== '') {
+                                    @file_put_contents($targetFile, $tail, FILE_APPEND | LOCK_EX);
+                                }
+                            } elseif ($curSize < $offset) {
+                                @file_put_contents($targetFile, $content, FILE_APPEND | LOCK_EX);
+                            }
+                        }
+                    }
+
+                    sendResponse(true, [
+                        'mode' => 'chunk',
+                        'date' => $dateStr,
+                        'client_slug' => $clientSlug,
+                        'size' => is_file($targetFile) ? (int)@filesize($targetFile) : 0,
+                    ]);
+
+                } elseif ($syncMode === 'batch_summary') {
+                    $summary = is_array($input['batch_summary'] ?? null) ? $input['batch_summary'] : [];
+                    $dateStr = sanitizeSenderDate((string)($summary['date_str'] ?? date('Y-m-d')));
+                    $clientDir = $senderLogDir . '/' . $dateStr . '/' . $clientSlug;
+                    if (!is_dir($clientDir)) {
+                        @mkdir($clientDir, 0755, true);
+                    }
+                    $meta = updateSenderClientMeta($clientDir, $clientInfo, $summary['files'] ?? $activeFiles, $serverIP);
+
+                    $batchesFile = $clientDir . '/batches.jsonl';
+                    @file_put_contents($batchesFile, json_encode($summary, JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND | LOCK_EX);
+
+                    $counts = $summary['counts'] ?? [];
+                    $hasIssue = ((int)($counts['failed'] ?? 0) > 0) || ((int)($counts['blocked'] ?? 0) > 0) || ((int)($counts['unmatched'] ?? 0) > 0);
+                    $sysLevel = $hasIssue ? 'warn' : 'action';
+                    recordServerLog($sysLevel, 'sender_py', 'batch_summary', [
+                        'message' => sprintf(
+                            '[%s] 批次发送完成：共 %d 人（成功 %d / 失败 %d / 拦截 %d / 未匹配 %d / 跳过 %d）',
+                            $meta['display_name'],
+                            (int)($counts['total'] ?? 0),
+                            (int)($counts['sent'] ?? 0),
+                            (int)($counts['failed'] ?? 0),
+                            (int)($counts['blocked'] ?? 0),
+                            (int)($counts['unmatched'] ?? 0),
+                            (int)($counts['skipped'] ?? 0)
+                        ),
+                        'counts' => $counts,
+                        'files' => $summary['files'] ?? [],
+                        'stopped' => !empty($summary['stopped']),
+                        'client_slug' => $clientSlug,
+                        'client_display' => $meta['display_name'],
+                        'students' => array_slice($summary['students'] ?? [], 0, 150),
+                    ], [
+                        'operator' => $meta['operator'],
+                        'source' => 'sender_py',
+                        'client_slug' => $clientSlug,
+                        'hostname' => $meta['hostname'],
+                        'teacher_note' => $meta['teacher_note'],
+                    ]);
+
+                    sendResponse(true, ['mode' => 'batch_summary', 'client_slug' => $clientSlug]);
+
+                } else {
+                    // realtime 模式：同时追加 .log 原文件 + 写入 system_logs 审计表
+                    $entries = is_array($input['entries'] ?? null) ? array_slice($input['entries'], 0, 100) : [];
+                    $db = DB::getConnection();
+                    $insertStmt = null;
+                    if ($db) {
+                        try {
+                            $insertStmt = $db->prepare("INSERT INTO system_logs 
+                                (log_id, timestamp, level, module, event, operator, details, context, client_ip, client_info, created_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                            $db->beginTransaction();
+                        } catch (Throwable $e) {
+                            $insertStmt = null;
+                        }
+                    }
+
+                    $byDateRaw = [];
+                    $byDateErr = [];
+                    $jsonlByDate = [];
+                    $metaCache = [];
+                    $savedCount = 0;
+
+                    foreach ($entries as $entry) {
+                        if (!is_array($entry)) continue;
+                        $dateStr = sanitizeSenderDate((string)($entry['date_str'] ?? date('Y-m-d')));
+                        if (!isset($metaCache[$dateStr])) {
+                            $cDir = $senderLogDir . '/' . $dateStr . '/' . $clientSlug;
+                            if (!is_dir($cDir)) {
+                                @mkdir($cDir, 0755, true);
+                            }
+                            $metaCache[$dateStr] = [
+                                'dir' => $cDir,
+                                'meta' => updateSenderClientMeta($cDir, $clientInfo, $activeFiles, $serverIP),
+                            ];
+                        }
+                        $curMeta = $metaCache[$dateStr]['meta'];
+
+                        $rawLine = (string)($entry['raw_line'] ?? '');
+                        if ($rawLine !== '') {
+                            if (substr($rawLine, -1) !== "\n") {
+                                $rawLine .= "\n";
+                            }
+                            $byDateRaw[$dateStr] = ($byDateRaw[$dateStr] ?? '') . $rawLine;
+                            if (!empty($entry['is_error'])) {
+                                $byDateErr[$dateStr] = ($byDateErr[$dateStr] ?? '') . $rawLine;
+                            }
+                        }
+
+                        $ts = (float)($entry['timestamp'] ?? round(microtime(true) * 1000));
+                        $logId = uniqid('snd_') . '_' . substr(md5((string)microtime(true) . $savedCount), 0, 6);
+                        $sysLevel = in_array($entry['sys_level'] ?? '', ['error', 'warn', 'action', 'info'], true)
+                            ? $entry['sys_level'] : 'info';
+                        $event = substr(trim((string)($entry['event'] ?? 'sender_log')), 0, 60) ?: 'sender_log';
+                        $operator = $curMeta['operator'];
+                        $msg = (string)($entry['message'] ?? '');
+                        $tb = (string)($entry['traceback'] ?? '');
+
+                        $details = [
+                            'message' => $msg,
+                            'client' => $curMeta['display_name'],
+                            'raw_level' => (string)($entry['level'] ?? 'INFO'),
+                        ];
+                        if (!empty($activeFiles)) {
+                            $details['files'] = $activeFiles;
+                        }
+                        if ($tb !== '') {
+                            $details['traceback'] = $tb;
+                        }
+                        $context = [
+                            'operator' => $operator,
+                            'source' => 'sender_py',
+                            'client_slug' => $clientSlug,
+                            'hostname' => $curMeta['hostname'],
+                            'os_user' => $curMeta['os_user'],
+                            'teacher_note' => $curMeta['teacher_note'],
+                            'files' => $activeFiles,
+                        ];
+                        $clientRecord = array_merge($curMeta, ['ip' => $serverIP, 'source' => 'sender_py']);
+                        $createdAt = date('Y-m-d H:i:s', (int)ceil($ts / 1000));
+
+                        if ($insertStmt) {
+                            try {
+                                $insertStmt->execute([
+                                    $logId,
+                                    $ts,
+                                    $sysLevel,
+                                    'sender_py',
+                                    $event,
+                                    $operator,
+                                    json_encode($details, JSON_UNESCAPED_UNICODE),
+                                    json_encode($context, JSON_UNESCAPED_UNICODE),
+                                    $serverIP,
+                                    json_encode($clientRecord, JSON_UNESCAPED_UNICODE),
+                                    $createdAt,
+                                ]);
+                            } catch (Throwable $e) {
+                                // 降级忽略
+                            }
+                        }
+
+                        $jsonlByDate[$dateStr] = ($jsonlByDate[$dateStr] ?? '') . json_encode([
+                            'id' => $logId,
+                            'timestamp' => $ts,
+                            'level' => $sysLevel,
+                            'module' => 'sender_py',
+                            'event' => $event,
+                            'operator' => $operator,
+                            'details' => $details,
+                            'context' => $context,
+                            'client' => $clientRecord,
+                        ], JSON_UNESCAPED_UNICODE) . "\n";
+
+                        $savedCount++;
+                    }
+
+                    if ($insertStmt && $db && $db->inTransaction()) {
+                        $db->commit();
+                    }
+
+                    foreach ($byDateRaw as $dStr => $buf) {
+                        $cDir = $metaCache[$dStr]['dir'];
+                        @file_put_contents($cDir . '/sender_' . $dStr . '.log', $buf, FILE_APPEND | LOCK_EX);
+                    }
+                    foreach ($byDateErr as $dStr => $buf) {
+                        $cDir = $metaCache[$dStr]['dir'];
+                        @file_put_contents($cDir . '/error_' . $dStr . '.log', $buf, FILE_APPEND | LOCK_EX);
+                    }
+                    foreach ($jsonlByDate as $dStr => $buf) {
+                        @file_put_contents($logDir . '/' . $dStr . '.jsonl', $buf, FILE_APPEND | LOCK_EX);
+                    }
+
+                    sendResponse(true, ['count' => $savedCount, 'client_slug' => $clientSlug]);
+                }
+
+            } elseif ($action === 'sender_snapshot') {
+                $token = (string)($_POST['token'] ?? '');
+                if (!verifySenderApiToken($token)) {
+                    sendResponse(false, null, '发送器鉴权失败', 200);
+                }
+
+                $serverIP = getClientIP();
+                $clientInfo = json_decode((string)($_POST['client_json'] ?? '{}'), true);
+                if (!is_array($clientInfo)) $clientInfo = [];
+                $metaIn = json_decode((string)($_POST['meta_json'] ?? '{}'), true);
+                if (!is_array($metaIn)) $metaIn = [];
+
+                $rawPrefix = (string)($_POST['prefix'] ?? ($metaIn['timestamp'] ?? date('Ymd_His')));
+                $safePrefix = preg_replace('/[^a-zA-Z0-9_\-\x{4e00}-\x{9fa5}]/u', '_', basename($rawPrefix));
+                $safePrefix = trim((string)$safePrefix, '_') ?: date('Ymd_His');
+
+                $tsStr = (string)($metaIn['timestamp'] ?? $safePrefix);
+                $dateStr = sanitizeSenderDate($tsStr);
+                $clientSlug = sanitizeSenderSlug((string)($clientInfo['client_slug'] ?? ($clientInfo['hostname'] ?? 'unknown_pc')));
+
+                $clientDir = $senderLogDir . '/' . $dateStr . '/' . $clientSlug;
+                $snapDir = $clientDir . '/snapshots/' . $safePrefix;
+                if (!is_dir($snapDir)) {
+                    @mkdir($snapDir, 0755, true);
+                }
+                $clientMeta = updateSenderClientMeta($clientDir, $clientInfo, [], $serverIP);
+
+                foreach (['image_title' => 'title.png', 'image_annotated' => 'annotated.png'] as $field => $destName) {
+                    if (isset($_FILES[$field]) && ($_FILES[$field]['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
+                        if (($_FILES[$field]['size'] ?? 0) <= 5 * 1024 * 1024) {
+                            $info = @getimagesize($_FILES[$field]['tmp_name']);
+                            if ($info !== false && in_array($info[2], [IMAGETYPE_PNG, IMAGETYPE_JPEG], true)) {
+                                @move_uploaded_file($_FILES[$field]['tmp_name'], $snapDir . '/' . $destName);
+                            }
+                        }
+                    }
+                }
+
+                $metaIn['saved_at'] = date('Y-m-d H:i:s');
+                $metaIn['client_slug'] = $clientSlug;
+                $metaIn['client_display'] = $clientMeta['display_name'];
+                @file_put_contents($snapDir . '/meta.json', json_encode($metaIn, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+
+                $judgment = $metaIn['diag_info']['judgment'] ?? [];
+                $reason = (string)($judgment['reason'] ?? ($metaIn['diag_info']['reason'] ?? '核验未通过'));
+                $targetId = (string)($metaIn['target_id'] ?? '');
+                $targetName = (string)($metaIn['target_name'] ?? '');
+                $cand = (int)($metaIn['candidate'] ?? 1);
+
+                recordServerLog('warn', 'sender_py', 'verify_snapshot', [
+                    'message' => sprintf('[%s] 核验现场快照：%s%s (候选%d) - %s', $clientMeta['display_name'], $targetId, $targetName, $cand, $reason),
+                    'target_id' => $targetId,
+                    'target_name' => $targetName,
+                    'candidate' => $cand,
+                    'reason' => $reason,
+                    'date' => $dateStr,
+                    'client_slug' => $clientSlug,
+                    'prefix' => $safePrefix,
+                ], [
+                    'operator' => $clientMeta['operator'],
+                    'source' => 'sender_py',
+                    'client_slug' => $clientSlug,
+                ]);
+
+                sendResponse(true, ['prefix' => $safePrefix, 'date' => $dateStr, 'client_slug' => $clientSlug]);
+
             } else {
                 sendResponse(false, null, '未知操作', 400);
             }
@@ -377,7 +807,8 @@ try {
                         $params[] = "%$ip%";
                     }
                     if ($search) {
-                        $where[] = "(event LIKE ? OR module LIKE ? OR details LIKE ? OR client_ip LIKE ?)";
+                        $where[] = "(event LIKE ? OR module LIKE ? OR details LIKE ? OR client_ip LIKE ? OR operator LIKE ?)";
+                        $params[] = "%$search%";
                         $params[] = "%$search%";
                         $params[] = "%$search%";
                         $params[] = "%$search%";
@@ -430,6 +861,7 @@ try {
                             'level' => $r['level'],
                             'module' => $r['module'],
                             'event' => $r['event'],
+                            'operator' => $r['operator'] ?? '',
                             'details' => $r['details'] ? json_decode($r['details'], true) : [],
                             'context' => $r['context'] ? json_decode($r['context'], true) : [],
                             'client' => $r['client_info'] ? json_decode($r['client_info'], true) : ['ip' => $r['client_ip']]
@@ -470,6 +902,9 @@ try {
                 $db = DB::getConnection();
                 if ($db) {
                     $modules = $db->query("SELECT DISTINCT module FROM system_logs WHERE module IS NOT NULL AND module != '' ORDER BY module")->fetchAll(PDO::FETCH_COLUMN);
+                    if (!in_array('sender_py', $modules, true)) {
+                        $modules[] = 'sender_py';
+                    }
                     $events = $db->query("SELECT DISTINCT event FROM system_logs WHERE event IS NOT NULL AND event != '' ORDER BY event LIMIT 50")->fetchAll(PDO::FETCH_COLUMN);
                     $ips = $db->query("SELECT DISTINCT client_ip FROM system_logs WHERE client_ip IS NOT NULL AND client_ip != '' ORDER BY client_ip LIMIT 50")->fetchAll(PDO::FETCH_COLUMN);
                     $levels = ['error', 'warn', 'action', 'info'];
@@ -487,12 +922,176 @@ try {
                 }
 
                 sendResponse(true, [
-                    'modules' => ['viewer', 'upload', 'qbank', 'admin'],
+                    'modules' => ['viewer', 'upload', 'qbank', 'admin', 'sender_py'],
                     'events' => [],
                     'ips' => [],
                     'levels' => ['error', 'warn', 'action', 'info'],
                     'dates' => getAvailableDatesFromDisk($logDir)
                 ]);
+
+            } elseif ($action === 'sender_clients') {
+                requireAdmin();
+
+                $reqDate = trim($_GET['date'] ?? '');
+                $dateDirs = glob($senderLogDir . '/????-??-??', GLOB_ONLYDIR) ?: [];
+                $availableDates = array_map('basename', $dateDirs);
+                rsort($availableDates);
+
+                $targetDates = [];
+                if ($reqDate !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $reqDate)) {
+                    $targetDates = [$reqDate];
+                } else {
+                    $targetDates = array_slice($availableDates, 0, 7);
+                }
+
+                $clientsList = [];
+                foreach ($targetDates as $dStr) {
+                    $dPath = $senderLogDir . '/' . $dStr;
+                    if (!is_dir($dPath)) continue;
+                    foreach (glob($dPath . '/*', GLOB_ONLYDIR) ?: [] as $cDir) {
+                        $cSlug = basename($cDir);
+                        $metaFile = $cDir . '/meta.json';
+                        $meta = is_file($metaFile) ? (@json_decode(@file_get_contents($metaFile), true) ?: []) : [];
+
+                        $senderLogPath = $cDir . '/sender_' . $dStr . '.log';
+                        $errorLogPath = $cDir . '/error_' . $dStr . '.log';
+                        $senderSize = is_file($senderLogPath) ? (int)@filesize($senderLogPath) : 0;
+                        $errorSize = is_file($errorLogPath) ? (int)@filesize($errorLogPath) : 0;
+
+                        // 读取批次汇总记录
+                        $batches = [];
+                        $batchesFile = $cDir . '/batches.jsonl';
+                        if (is_file($batchesFile)) {
+                            $bLines = @file($batchesFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
+                            foreach (array_reverse($bLines) as $bl) {
+                                $bObj = @json_decode($bl, true);
+                                if (is_array($bObj)) {
+                                    $batches[] = $bObj;
+                                }
+                            }
+                        }
+
+                        // 读取核验失败/拦截现场快照
+                        $snapshots = [];
+                        $snapsRoot = $cDir . '/snapshots';
+                        if (is_dir($snapsRoot)) {
+                            $sDirs = glob($snapsRoot . '/*', GLOB_ONLYDIR) ?: [];
+                            usort($sDirs, fn($a, $b) => (@filemtime($b) ?: 0) <=> (@filemtime($a) ?: 0));
+                            foreach (array_slice($sDirs, 0, 50) as $sDir) {
+                                $sPrefix = basename($sDir);
+                                $sMetaFile = $sDir . '/meta.json';
+                                $sMeta = is_file($sMetaFile) ? (@json_decode(@file_get_contents($sMetaFile), true) ?: []) : [];
+                                $judgment = $sMeta['diag_info']['judgment'] ?? [];
+                                $snapshots[] = [
+                                    'prefix' => $sPrefix,
+                                    'timestamp' => $sMeta['timestamp'] ?? $sPrefix,
+                                    'saved_at' => $sMeta['saved_at'] ?? '',
+                                    'target_id' => $sMeta['target_id'] ?? '',
+                                    'target_name' => $sMeta['target_name'] ?? '',
+                                    'candidate' => $sMeta['candidate'] ?? 1,
+                                    'matched' => $judgment['matched'] ?? false,
+                                    'is_group' => $judgment['is_group'] ?? false,
+                                    'detected_title' => $judgment['detected_title'] ?? '',
+                                    'reason' => $judgment['reason'] ?? ($sMeta['diag_info']['reason'] ?? ''),
+                                    'has_title' => is_file($sDir . '/title.png'),
+                                    'has_annotated' => is_file($sDir . '/annotated.png'),
+                                ];
+                            }
+                        }
+
+                        $clientsList[] = [
+                            'date' => $dStr,
+                            'client_slug' => $cSlug,
+                            'display_name' => $meta['display_name'] ?? $cSlug,
+                            'teacher_note' => $meta['teacher_note'] ?? '',
+                            'hostname' => $meta['hostname'] ?? $cSlug,
+                            'os_user' => $meta['os_user'] ?? '',
+                            'ip' => $meta['ip'] ?? '',
+                            'app_version' => $meta['app_version'] ?? '',
+                            'active_files' => $meta['active_files'] ?? [],
+                            'last_sync_at' => $meta['last_sync_at'] ?? '',
+                            'last_sync_ts' => (int)($meta['last_sync_ts'] ?? (@filemtime($cDir) ?: 0)),
+                            'has_sender_log' => $senderSize > 0,
+                            'sender_log_size_kb' => round($senderSize / 1024, 2),
+                            'has_error_log' => $errorSize > 0,
+                            'error_log_size_kb' => round($errorSize / 1024, 2),
+                            'batches' => $batches,
+                            'snapshots' => $snapshots,
+                        ];
+                    }
+                }
+
+                usort($clientsList, fn($a, $b) => ($b['last_sync_ts'] <=> $a['last_sync_ts']));
+
+                sendResponse(true, [
+                    'dates' => $availableDates,
+                    'clients' => $clientsList,
+                ]);
+
+            } elseif ($action === 'sender_log_file') {
+                requireAdmin();
+
+                $dateStr = sanitizeSenderDate((string)($_GET['date'] ?? date('Y-m-d')));
+                $clientSlug = sanitizeSenderSlug((string)($_GET['client'] ?? ''));
+                $logType = (($_GET['type'] ?? 'sender') === 'error') ? 'error' : 'sender';
+                $maxLines = min(10000, max(50, intval($_GET['lines'] ?? 2000)));
+                $isDownload = !empty($_GET['download']);
+
+                $filePath = $senderLogDir . '/' . $dateStr . '/' . $clientSlug . '/' . $logType . '_' . $dateStr . '.log';
+                if (!is_file($filePath)) {
+                    if ($isDownload) {
+                        header('HTTP/1.1 404 Not Found');
+                        echo "日志文件不存在";
+                        exit;
+                    }
+                    sendResponse(false, null, '指定的日志文件不存在', 404);
+                }
+
+                if ($isDownload) {
+                    $dlName = $clientSlug . '_' . $logType . '_' . $dateStr . '.log';
+                    header('Content-Type: text/plain; charset=utf-8');
+                    header('Content-Disposition: attachment; filename="' . $dlName . '"');
+                    header('Content-Length: ' . filesize($filePath));
+                    readfile($filePath);
+                    exit;
+                }
+
+                $allLines = @file($filePath, FILE_IGNORE_NEW_LINES) ?: [];
+                $totalLines = count($allLines);
+                if ($totalLines > $maxLines) {
+                    $allLines = array_slice($allLines, -$maxLines);
+                }
+                sendResponse(true, [
+                    'date' => $dateStr,
+                    'client_slug' => $clientSlug,
+                    'type' => $logType,
+                    'filename' => $logType . '_' . $dateStr . '.log',
+                    'total_lines' => $totalLines,
+                    'size_kb' => round(filesize($filePath) / 1024, 2),
+                    'content' => implode("\n", $allLines),
+                ]);
+
+            } elseif ($action === 'sender_snapshot_img') {
+                requireAdmin();
+
+                $dateStr = sanitizeSenderDate((string)($_GET['date'] ?? ''));
+                $clientSlug = sanitizeSenderSlug((string)($_GET['client'] ?? ''));
+                $rawPrefix = (string)($_GET['prefix'] ?? '');
+                $safePrefix = preg_replace('/[^a-zA-Z0-9_\-\x{4e00}-\x{9fa5}]/u', '_', basename($rawPrefix));
+                $imgType = (($_GET['img'] ?? 'title') === 'annotated') ? 'annotated.png' : 'title.png';
+
+                $imgPath = $senderLogDir . '/' . $dateStr . '/' . $clientSlug . '/snapshots/' . $safePrefix . '/' . $imgType;
+                if (!is_file($imgPath)) {
+                    header('HTTP/1.1 404 Not Found');
+                    exit;
+                }
+                $info = @getimagesize($imgPath);
+                $mime = ($info && !empty($info['mime'])) ? $info['mime'] : 'image/png';
+                header('Content-Type: ' . $mime);
+                header('Content-Length: ' . filesize($imgPath));
+                header('Cache-Control: private, max-age=3600');
+                readfile($imgPath);
+                exit;
 
             } elseif ($action === 'export') {
                 requireAdmin();
@@ -517,7 +1116,8 @@ try {
                 if ($date && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) { $where[] = "DATE(created_at) = ?"; $params[] = $date; }
                 if ($ip) { $where[] = "client_ip LIKE ?"; $params[] = "%$ip%"; }
                 if ($search) {
-                    $where[] = "(event LIKE ? OR module LIKE ? OR details LIKE ? OR client_ip LIKE ?)";
+                    $where[] = "(event LIKE ? OR module LIKE ? OR details LIKE ? OR client_ip LIKE ? OR operator LIKE ?)";
+                    $params[] = "%$search%";
                     $params[] = "%$search%";
                     $params[] = "%$search%";
                     $params[] = "%$search%";
@@ -533,7 +1133,7 @@ try {
 
                 $output = fopen('php://output', 'w');
                 fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
-                fputcsv($output, ['时间', '级别', '模块', '事件', '详情', '页面', '学科', 'Session', 'IP 地址', '用户代理']);
+                fputcsv($output, ['时间', '级别', '模块', '事件', '操作人/设备', '详情', '页面', '学科', 'Session', 'IP 地址', '用户代理']);
 
                 $stmt = $db->prepare("SELECT * FROM system_logs $whereSql ORDER BY timestamp DESC LIMIT 5000");
                 $stmt->execute($params);
@@ -543,6 +1143,7 @@ try {
                     $lvl = getLevelLabel($r['level']);
                     $mod = $r['module'];
                     $ev = $r['event'];
+                    $op = $r['operator'] ?: '-';
                     $detailsObj = $r['details'] ? json_decode($r['details'], true) : [];
                     $detailsStr = formatDetailsForExport(['details' => $detailsObj]);
                     $contextObj = $r['context'] ? json_decode($r['context'], true) : [];
@@ -554,7 +1155,7 @@ try {
                     $ua = $clientObj['userAgent'] ?? '-';
 
                     $csvRow = array_map('sanitizeCsvCell', [
-                        $timestamp, $lvl, $mod, $ev, $detailsStr, $page, $subject, $sessionId, $clientIp, $ua
+                        $timestamp, $lvl, $mod, $ev, $op, $detailsStr, $page, $subject, $sessionId, $clientIp, $ua
                     ]);
                     fputcsv($output, $csvRow);
                 }

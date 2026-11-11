@@ -140,10 +140,113 @@ def save_candidate_snapshot(full_img, roi: dict, title_img, target_id: str,
             json.dump(meta, f, ensure_ascii=False, indent=2)
 
         _cleanup_old_snapshots(debug_dir)
+
+        # 4. 当核验未通过（matched != True）或触发群聊拦截（is_group == True）时，异步同步现场快照至服务端
+        try:
+            judgment = (diag_info or {}).get("judgment") if isinstance(diag_info, dict) else None
+            is_failed_or_blocked = False
+            if isinstance(judgment, dict):
+                if judgment.get("matched") is not True or judgment.get("is_group") is True:
+                    is_failed_or_blocked = True
+            if is_failed_or_blocked:
+                _trigger_async_snapshot_upload(
+                    prefix=prefix,
+                    meta=meta,
+                    title_path=saved_info.get("title_path"),
+                    annotated_path=saved_info.get("annotated_path"),
+                )
+        except Exception:
+            pass
     except Exception as exc:
         saved_info["error"] = str(exc)
 
     return saved_info
+
+
+def upload_snapshot_to_server(
+    prefix: str,
+    meta: dict,
+    title_path: str = None,
+    annotated_path: str = None,
+    server: str = None,
+    token: str = None,
+) -> bool:
+    """将核验失败/拦截现场快照（meta JSON + title.png + annotated.png）同步至服务端。"""
+    try:
+        try:
+            from sender_py.file_logger import _SYNCER, SYNC_SNAPSHOT_PATH, get_client_identity, _resolve_token
+        except ModuleNotFoundError:
+            from file_logger import _SYNCER, SYNC_SNAPSHOT_PATH, get_client_identity, _resolve_token
+        import requests
+    except Exception:
+        return False
+
+    eff_server = (server or _SYNCER.server or "").strip().rstrip("/")
+    if not eff_server.startswith(("http://", "https://")):
+        return False
+    eff_token = _resolve_token(token or _SYNCER.token)
+    ident = get_client_identity(_SYNCER.base_dir)
+
+    files = {}
+    opened_files = []
+    try:
+        if title_path and os.path.isfile(title_path):
+            f_title = open(title_path, "rb")
+            opened_files.append(f_title)
+            files["image_title"] = ("title.png", f_title, "image/png")
+        if annotated_path and os.path.isfile(annotated_path):
+            f_ann = open(annotated_path, "rb")
+            opened_files.append(f_ann)
+            files["image_annotated"] = ("annotated.png", f_ann, "image/png")
+
+        data = {
+            "token": eff_token,
+            "prefix": prefix,
+            "client_json": json.dumps(ident, ensure_ascii=False),
+            "meta_json": json.dumps(meta or {}, ensure_ascii=False),
+        }
+        resp = requests.post(
+            eff_server + SYNC_SNAPSHOT_PATH,
+            data=data,
+            files=files if files else None,
+            timeout=12,
+        )
+        if resp.status_code == 200:
+            res_json = resp.json()
+            return bool(isinstance(res_json, dict) and res_json.get("success"))
+    except Exception:
+        return False
+    finally:
+        for fh in opened_files:
+            try:
+                fh.close()
+            except Exception:
+                pass
+    return False
+
+
+def _trigger_async_snapshot_upload(prefix: str, meta: dict, title_path: str = None, annotated_path: str = None):
+    try:
+        try:
+            from sender_py.file_logger import _SYNCER
+        except ModuleNotFoundError:
+            from file_logger import _SYNCER
+        if not _SYNCER.enabled:
+            return
+        import threading
+        t = threading.Thread(
+            target=upload_snapshot_to_server,
+            kwargs={
+                "prefix": prefix,
+                "meta": meta,
+                "title_path": title_path,
+                "annotated_path": annotated_path,
+            },
+            daemon=True,
+        )
+        t.start()
+    except Exception:
+        pass
 
 
 def list_debug_snapshots(limit: int = 50) -> list:

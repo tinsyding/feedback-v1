@@ -790,139 +790,203 @@
 
                 <!-- TAB 2: OPERATION LOGS -->
                 <div id="logs-tab" class="tab-content">
-                    <!-- KPI Metric Cards Bar -->
-                    <div class="metrics-pill-bar">
-                        <div class="metric-pill-card">
-                            <div class="metric-icon-bubble total">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-                            </div>
-                            <div class="metric-data-col">
-                                <span class="metric-data-num" id="stat-total">0</span>
-                                <span class="metric-data-title">全部日志</span>
-                            </div>
-                        </div>
-                        <div class="metric-pill-card">
-                            <div class="metric-icon-bubble error">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
-                            </div>
-                            <div class="metric-data-col">
-                                <span class="metric-data-num stat-error" id="stat-error">0</span>
-                                <span class="metric-data-title">错误 (Error)</span>
-                            </div>
-                        </div>
-                        <div class="metric-pill-card">
-                            <div class="metric-icon-bubble warn">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
-                            </div>
-                            <div class="metric-data-col">
-                                <span class="metric-data-num stat-warn" id="stat-warn">0</span>
-                                <span class="metric-data-title">警示 (Warn)</span>
-                            </div>
-                        </div>
-                        <div class="metric-pill-card">
-                            <div class="metric-icon-bubble action">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-                            </div>
-                            <div class="metric-data-col">
-                                <span class="metric-data-num stat-action" id="stat-action">0</span>
-                                <span class="metric-data-title">业务操作 (Action)</span>
-                            </div>
-                        </div>
-                        <div class="metric-pill-card">
-                            <div class="metric-icon-bubble info">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-                            </div>
-                            <div class="metric-data-col">
-                                <span class="metric-data-num stat-info" id="stat-info">0</span>
-                                <span class="metric-data-title">常规信息 (Info)</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Filter Toolbar -->
-                    <div class="pro-toolbar">
-                        <div class="toolbar-filter-group">
-                            <div class="search-input-wrap">
-                                <svg class="search-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <circle cx="11" cy="11" r="8"></circle>
-                                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                                </svg>
-                                <input type="text" id="log-search-filter" placeholder="搜索详情、主题或报错关键字..." oninput="debounceLoadLogs()">
-                            </div>
-
-                            <select id="log-date-filter" class="custom-select" onchange="loadLogs()">
-                                <option value="">近 7 天</option>
-                            </select>
-
-                            <select id="log-level-filter" class="custom-select" onchange="loadLogs()">
-                                <option value="">全部级别</option>
-                                <option value="error">Error (系统错误)</option>
-                                <option value="warn">Warn (操作警告)</option>
-                                <option value="action">Action (业务操作)</option>
-                                <option value="info">Info (常规信息)</option>
-                            </select>
-
-                            <select id="log-module-filter" class="custom-select" onchange="loadLogs()">
-                                <option value="">全部模块</option>
-                            </select>
-
-                            <select id="log-event-filter" class="custom-select" onchange="loadLogs()">
-                                <option value="">全部事件</option>
-                            </select>
-
-                            <input type="text" id="log-ip-filter" class="custom-input" style="width: 130px;" placeholder="筛选 IP..." oninput="debounceLoadLogs()">
-                            <input type="text" id="log-fingerprint-filter" class="custom-input" style="width: 140px;" placeholder="筛选指纹..." oninput="debounceLoadLogs()">
-                        </div>
-
-                        <div class="toolbar-actions-group">
-                            <button class="btn secondary" onclick="exportLogs()">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path>
-                                    <polyline points="7 10 12 15 17 10"></polyline>
-                                    <line x1="12" y1="15" x2="12" y2="3"></line>
-                                </svg>
-                                <span>导出 CSV</span>
+                    <!-- Sub-view Switcher: Audit Stream vs Python Sender Raw Logs & Snapshots -->
+                    <div class="db-tabs-bar" id="logs-subview-bar" style="margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <button type="button" class="btn primary" id="btn-log-subview-audit" onclick="switchLogsSubview('audit')" style="padding: 7px 14px; font-size: 0.86rem;">
+                                <span>综合审计日志流 (含发送器实时事件)</span>
                             </button>
-                            <button class="btn secondary" onclick="loadLogs()">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M23 4v6h-6"></path>
-                                    <path d="M1 20v-6h6"></path>
-                                    <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"></path>
-                                </svg>
-                                <span>刷新</span>
+                            <button type="button" class="btn secondary" id="btn-log-subview-sender" onclick="switchLogsSubview('sender')" style="padding: 7px 14px; font-size: 0.86rem;">
+                                <span>发送器客户端日志 (.log 原文件 / 批次汇总 / 核验截图)</span>
+                                <span id="sender-clients-count-badge" style="margin-left: 6px; background: rgba(37,99,235,0.15); color: var(--primary); padding: 1px 7px; border-radius: 999px; font-size: 0.76rem; font-weight: 700;">自动同步</span>
+                            </button>
+                        </div>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <button type="button" class="btn secondary" id="btn-quick-filter-sender" onclick="quickFilterSenderModule()" style="padding: 6px 12px; font-size: 0.82rem;" title="在审计日志流中一键筛选 Python 自动反馈程序上报的日志">
+                                <span>仅看发送器 (sender_py)</span>
                             </button>
                         </div>
                     </div>
 
-                    <!-- Logs Pro Table -->
-                    <div class="table-card">
-                        <div class="table-wrapper">
-                            <table class="data-table">
-                                <thead>
-                                    <tr>
-                                        <th style="width: 15%;">记录时间</th>
-                                        <th style="width: 9%;">事件级别</th>
-                                        <th style="width: 11%;">所属模块</th>
-                                        <th style="width: 16%;">事件类型</th>
-                                        <th>事件详情 / 诊断报文</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="logs-tbody">
-                                    <tr>
-                                        <td colspan="5" class="table-empty">
-                                            <div class="empty-state">
-                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"></path>
-                                                    <polyline points="14 2 14 8 20 8"></polyline>
-                                                </svg>
-                                                <span>正在加载日志...</span>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
+                    <div id="logs-audit-subview">
+                        <!-- KPI Metric Cards Bar -->
+                        <div class="metrics-pill-bar">
+                            <div class="metric-pill-card">
+                                <div class="metric-icon-bubble total">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                                </div>
+                                <div class="metric-data-col">
+                                    <span class="metric-data-num" id="stat-total">0</span>
+                                    <span class="metric-data-title">全部日志</span>
+                                </div>
+                            </div>
+                            <div class="metric-pill-card">
+                                <div class="metric-icon-bubble error">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+                                </div>
+                                <div class="metric-data-col">
+                                    <span class="metric-data-num stat-error" id="stat-error">0</span>
+                                    <span class="metric-data-title">错误 (Error)</span>
+                                </div>
+                            </div>
+                            <div class="metric-pill-card">
+                                <div class="metric-icon-bubble warn">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                                </div>
+                                <div class="metric-data-col">
+                                    <span class="metric-data-num stat-warn" id="stat-warn">0</span>
+                                    <span class="metric-data-title">警示 (Warn)</span>
+                                </div>
+                            </div>
+                            <div class="metric-pill-card">
+                                <div class="metric-icon-bubble action">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                                </div>
+                                <div class="metric-data-col">
+                                    <span class="metric-data-num stat-action" id="stat-action">0</span>
+                                    <span class="metric-data-title">业务操作 (Action)</span>
+                                </div>
+                            </div>
+                            <div class="metric-pill-card">
+                                <div class="metric-icon-bubble info">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                                </div>
+                                <div class="metric-data-col">
+                                    <span class="metric-data-num stat-info" id="stat-info">0</span>
+                                    <span class="metric-data-title">常规信息 (Info)</span>
+                                </div>
+                            </div>
                         </div>
-                        <div class="table-pagination" id="logs-pagination"></div>
+
+                        <!-- Filter Toolbar -->
+                        <div class="pro-toolbar">
+                            <div class="toolbar-filter-group">
+                                <div class="search-input-wrap">
+                                    <svg class="search-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <circle cx="11" cy="11" r="8"></circle>
+                                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                    </svg>
+                                    <input type="text" id="log-search-filter" placeholder="搜索详情、老师/机器名或报错关键字..." oninput="debounceLoadLogs()">
+                                </div>
+
+                                <select id="log-date-filter" class="custom-select" onchange="loadLogs()">
+                                    <option value="">近 7 天</option>
+                                </select>
+
+                                <select id="log-level-filter" class="custom-select" onchange="loadLogs()">
+                                    <option value="">全部级别</option>
+                                    <option value="error">Error (系统错误)</option>
+                                    <option value="warn">Warn (操作警告)</option>
+                                    <option value="action">Action (业务操作)</option>
+                                    <option value="info">Info (常规信息)</option>
+                                </select>
+
+                                <select id="log-module-filter" class="custom-select" onchange="loadLogs()">
+                                    <option value="">全部模块</option>
+                                </select>
+
+                                <select id="log-event-filter" class="custom-select" onchange="loadLogs()">
+                                    <option value="">全部事件</option>
+                                </select>
+
+                                <input type="text" id="log-ip-filter" class="custom-input" style="width: 130px;" placeholder="筛选 IP..." oninput="debounceLoadLogs()">
+                                <input type="text" id="log-fingerprint-filter" class="custom-input" style="width: 140px;" placeholder="筛选指纹..." oninput="debounceLoadLogs()">
+                            </div>
+
+                            <div class="toolbar-actions-group">
+                                <button class="btn secondary" onclick="exportLogs()">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path>
+                                        <polyline points="7 10 12 15 17 10"></polyline>
+                                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                                    </svg>
+                                    <span>导出 CSV</span>
+                                </button>
+                                <button class="btn secondary" onclick="loadLogs()">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M23 4v6h-6"></path>
+                                        <path d="M1 20v-6h6"></path>
+                                        <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"></path>
+                                    </svg>
+                                    <span>刷新</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Logs Pro Table -->
+                        <div class="table-card">
+                            <div class="table-wrapper">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 15%;">记录时间</th>
+                                            <th style="width: 9%;">事件级别</th>
+                                            <th style="width: 11%;">所属模块</th>
+                                            <th style="width: 16%;">事件类型</th>
+                                            <th>事件详情 / 诊断报文</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="logs-tbody">
+                                        <tr>
+                                            <td colspan="5" class="table-empty">
+                                                <div class="empty-state">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"></path>
+                                                        <polyline points="14 2 14 8 20 8"></polyline>
+                                                    </svg>
+                                                    <span>正在加载日志...</span>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="table-pagination" id="logs-pagination"></div>
+                        </div>
+                    </div>
+
+                    <!-- Sub-view 2: Python Sender Client Raw Logs, Batches & Snapshots -->
+                    <div id="logs-sender-subview" style="display: none;">
+                        <div class="pro-toolbar" style="margin-bottom: 14px;">
+                            <div class="toolbar-filter-group">
+                                <select id="sender-date-filter" class="custom-select" onchange="loadSenderClients()">
+                                    <option value="">最近 7 天归档</option>
+                                </select>
+                                <div class="search-input-wrap" style="width: 260px;">
+                                    <svg class="search-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <circle cx="11" cy="11" r="8"></circle>
+                                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                    </svg>
+                                    <input type="text" id="sender-client-search" placeholder="筛选老师姓名、主机名、文件名..." oninput="renderSenderClientsList()">
+                                </div>
+                            </div>
+                            <div class="toolbar-actions-group">
+                                <button class="btn secondary" onclick="loadSenderClients()">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M23 4v6h-6"></path>
+                                        <path d="M1 20v-6h6"></path>
+                                        <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"></path>
+                                    </svg>
+                                    <span>刷新归档</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start;">
+                            <!-- Left: Client Machine Cards -->
+                            <div class="table-card" style="padding: 12px; max-height: 700px; overflow-y: auto;" id="sender-clients-list">
+                                <div class="empty-state" style="padding: 40px 16px;">
+                                    <span>正在加载发送器客户端归档...</span>
+                                </div>
+                            </div>
+
+                            <!-- Right: Selected Client Log Viewer / Batches / Snapshots -->
+                            <div class="table-card" style="padding: 16px;" id="sender-client-detail-panel">
+                                <div class="empty-state" style="padding: 60px 20px;">
+                                    <span>请在左侧选择一台老师电脑查看原始 .log 日志、批次发送汇总与核验现场截图</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -1240,7 +1304,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261105-1';
+            const v = '20261110-1';
             document.write(`<script src="js/admin.js?v=${v}"><\/script>`);
         })();
     </script>

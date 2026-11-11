@@ -584,9 +584,16 @@
     <div class="brand" onclick="onBrandBadgeClick()" style="cursor:pointer;" title="极方每周反馈程序">
       <img src="/favicon.ico" class="logo-badge" alt="极方每周反馈" style="object-fit:contain; background:transparent; box-shadow:none;" onerror="this.outerHTML='<div class=\'logo-badge\'>极</div>'">
       <div class="brand-title">极方每周反馈程序</div>
-      <div class="brand-badge">Web版 v1.8.24</div>
+      <div class="brand-badge">Web版 v1.8.25</div>
     </div>
     <div class="nav-actions">
+      <div style="display:inline-flex; align-items:center; gap:5px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; padding:3px 8px;" title="可选：填写您的姓名备注，方便管理员在云端日志中识别您的电脑（失焦或回车自动保存）">
+        <span style="font-size:12px; color:#64748b; user-select:none;">老师:</span>
+        <input type="text" id="teacherNoteInput" placeholder="可选备注姓名" maxlength="30"
+          style="border:none; background:transparent; font-size:12px; color:#1e293b; width:88px; outline:none; font-weight:500;"
+          onchange="saveTeacherNote(this.value)"
+          onkeydown="if(event.key==='Enter'){this.blur();}">
+      </div>
       <button class="btn btn-sm" id="calibNavBtn" onclick="triggerCalibrate()">校准视野</button>
       <button class="btn btn-sm" onclick="centerWeComWindow()" title="将企微窗口恢复为向下还原状态、缩至最小尺寸并居中于当前屏幕">居中企微</button>
       <button class="btn btn-sm" onclick="openDebugModal()" title="查看最近一次向企微搜索核验时的现场截图与比对诊断">核验现场</button>
@@ -755,12 +762,13 @@
   <div class="modal-overlay" id="logModal">
     <div class="modal-card" style="max-width:960px;">
       <div class="modal-header">
-        <div style="display:flex; align-items:center; gap:10px;">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
           <h3 style="margin:0;">运行日志</h3>
           <select id="logFileSelect" onchange="onLogFileSelectChanged()" style="font-size:12px; padding:4px 8px; border-radius:4px; border:1px solid #cbd5e1; background:#fff; outline:none; max-width:320px;" title="切换查看实时终端或本地历史日志文件">
             <option value="">-- 实时运行终端 --</option>
           </select>
           <button class="btn btn-sm" onclick="refreshLogFiles()" title="刷新本地日志文件列表" style="padding:2px 8px; font-size:12px;">刷新</button>
+          <span id="cloudSyncBadge" style="font-size:11px; background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; padding:2px 8px; border-radius:12px; font-weight:600;">云端日志自动同步已开启</span>
         </div>
         <div style="display:flex; align-items:center; gap:12px;">
           <label style="font-size:12px; color:#64748b; cursor:pointer;"><input type="checkbox" id="autoScrollLog" checked> 自动滚屏</label>
@@ -1529,11 +1537,43 @@
         replyBadge.style.display = "none";
       }
 
+      // 2.5 老师备注与云端同步状态
+      const noteInput = document.getElementById("teacherNoteInput");
+      if (noteInput && document.activeElement !== noteInput) {
+        noteInput.value = appState.teacher_note || "";
+        const ident = appState.client_identity || {};
+        if (ident.hostname) {
+          noteInput.placeholder = ident.hostname;
+        }
+      }
+      const syncBadge = document.getElementById("cloudSyncBadge");
+      if (syncBadge && appState.client_identity) {
+        const disp = appState.client_identity.display_name || appState.client_identity.hostname || "";
+        const cs = appState.cloud_sync || {};
+        const lastTime = cs.last_sync_time ? ` · 最近同步 ${cs.last_sync_time}` : "";
+        syncBadge.innerText = `云端自动同步中 (${disp}${lastTime})`;
+      }
+
       // 3. 表格渲染
       renderTable();
 
       // 4. 底部控制器
       renderBottomBar();
+    }
+
+    async function saveTeacherNote(val) {
+      try {
+        const res = await fetch("/api/config/teacher_note", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ teacher_note: (val || "").trim() })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.teacher_note ? `已保存老师备注：${data.teacher_note}` : "已恢复默认电脑名称标识");
+          fetchState();
+        }
+      } catch (err) {}
     }
 
     let lastCheckedIndex = null;

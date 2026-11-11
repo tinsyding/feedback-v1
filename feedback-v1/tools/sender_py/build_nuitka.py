@@ -15,7 +15,7 @@ import sys
 import shutil
 import subprocess
 
-APP_VERSION = "1.8.24.0"
+APP_VERSION = "1.8.25.0"
 
 def get_paths():
     cur_dir = os.path.dirname(os.path.abspath(__file__))
