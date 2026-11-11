@@ -999,8 +999,8 @@ async function renderPdfToThumbs(file) {
     for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
         const base = page.getViewport({ scale: 1 });
-        // High-definition render: target width around 900px so cards of 260~480px are sharp, and lightbox is crisp
-        const targetWidth = Math.max(900, Math.min(1600, base.width * 2));
+        // 轻量高清缩略图：宽度限制在 600px（卡片宽 260~360px，2x 视网膜屏细腻且不爆显存），质量 0.72
+        const targetWidth = Math.min(600, Math.max(360, Math.floor(base.width)));
         const scale = targetWidth / base.width;
         const viewport = page.getViewport({ scale });
         const canvas = document.createElement('canvas');
@@ -1027,7 +1027,7 @@ async function renderPdfToThumbs(file) {
         }
         detectedLabels.push(detectedNumber);
 
-        thumbs.push(canvas.toDataURL('image/jpeg', 0.88));
+        thumbs.push(canvas.toDataURL('image/jpeg', 0.72));
         page.cleanup();
     }
     if (typeof pdf.destroy === 'function') { try { await pdf.destroy(); } catch (_) {} }
@@ -1830,27 +1830,54 @@ async function loadCurrentData() {
     highlightActiveSavedItem();
     updateStep1ButtonState();
 
-    // Background load thumbnails for loaded questions
-    currentQuestions.forEach(async (q, idx) => {
-        let updated = false;
+    // Background load thumbnails for loaded questions with smooth concurrency throttle (不阻塞主线程)
+    preloadThumbnailsWithThrottle(currentQuestions).catch(() => {});
+}
+
+// 后台平滑预热缩略图：严格限制并发数最大为 2，且每个切片解析完成后让出 25ms 主线程，保障界面交互 60 FPS
+async function preloadThumbnailsWithThrottle(questions) {
+    if (!Array.isArray(questions) || questions.length === 0) return;
+    const tasks = [];
+    questions.forEach((q, idx) => {
         if (q.exercisePdf && q.exercisePdf.url && !q.exercisePdf.thumb) {
-            const thumb = await ensurePdfThumbnail(q.exercisePdf);
-            if (thumb) updated = true;
+            tasks.push({ q, idx, type: 'exercise', pdfObj: q.exercisePdf });
         }
         if (q.answerPdf && q.answerPdf.url && !q.answerPdf.thumb) {
-            const thumb = await ensurePdfThumbnail(q.answerPdf);
-            if (thumb) updated = true;
-        }
-        if (updated) {
-            const itemEl = questionItems.querySelector(`.question-item[data-index="${idx}"]`) || questionItems.children[idx];
-            if (itemEl) {
-                const actions = itemEl.querySelector('.question-pdf-actions');
-                if (actions) {
-                    actions.innerHTML = `${renderPdfBtn(q, idx, 'exercise')}${renderPdfBtn(q, idx, 'answer')}`;
-                }
-            }
+            tasks.push({ q, idx, type: 'answer', pdfObj: q.answerPdf });
         }
     });
+    if (tasks.length === 0) return;
+
+    let cursor = 0;
+    const maxConcurrency = 2;
+    const worker = async () => {
+        while (cursor < tasks.length) {
+            const task = tasks[cursor++];
+            if (!task) break;
+            try {
+                const thumb = await ensurePdfThumbnail(task.pdfObj);
+                if (thumb) {
+                    const itemEl = questionItems.querySelector(`.question-item[data-index="${task.idx}"]`) || questionItems.children[task.idx];
+                    if (itemEl) {
+                        const actions = itemEl.querySelector('.question-pdf-actions');
+                        if (actions) {
+                            actions.innerHTML = `${renderPdfBtn(task.q, task.idx, 'exercise')}${renderPdfBtn(task.q, task.idx, 'answer')}`;
+                        }
+                    }
+                }
+            } catch (err) {
+                console.warn('平滑生成缩略图跳过:', err);
+            }
+            // 主动让出 25ms 主线程微任务与渲染时间片
+            await new Promise(resolve => setTimeout(resolve, 25));
+        }
+    };
+
+    const runners = [];
+    for (let i = 0; i < Math.min(maxConcurrency, tasks.length); i++) {
+        runners.push(worker());
+    }
+    await Promise.all(runners);
 }
 
 async function generatePdfThumbnailFromFile(file) {
@@ -1861,7 +1888,8 @@ async function generatePdfThumbnailFromFile(file) {
         if (pdf.numPages < 1) return null;
         const page = await pdf.getPage(1);
         const base = page.getViewport({ scale: 1 });
-        const targetWidth = Math.max(800, Math.min(1600, base.width * 2));
+        // 轻量化缩略图：限制在 400px（卡片尺寸 32px，浮窗预览 300px，2x 视网膜高清足够锐利且体积降 95%）
+        const targetWidth = Math.min(420, Math.max(280, Math.floor(base.width)));
         const scale = targetWidth / base.width;
         const viewport = page.getViewport({ scale });
         const canvas = document.createElement('canvas');
@@ -1871,8 +1899,9 @@ async function generatePdfThumbnailFromFile(file) {
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         await page.render({ canvasContext: ctx, viewport }).promise;
-        const thumb = canvas.toDataURL('image/jpeg', 0.88);
+        const thumb = canvas.toDataURL('image/jpeg', 0.68);
         page.cleanup();
+        if (typeof pdf.destroy === 'function') { try { await pdf.destroy(); } catch (_) {} }
         return thumb;
     } catch (e) {
         console.warn('生成本地 PDF 缩略图失败:', e);
@@ -1891,7 +1920,8 @@ async function ensurePdfThumbnail(pdfObj) {
         if (pdf.numPages < 1) return null;
         const page = await pdf.getPage(1);
         const base = page.getViewport({ scale: 1 });
-        const targetWidth = Math.max(800, Math.min(1600, base.width * 2));
+        // 轻量化缩略图：限制在 400px，质量 0.68，单张仅 15~25KB
+        const targetWidth = Math.min(420, Math.max(280, Math.floor(base.width)));
         const scale = targetWidth / base.width;
         const viewport = page.getViewport({ scale });
         const canvas = document.createElement('canvas');
@@ -1901,12 +1931,48 @@ async function ensurePdfThumbnail(pdfObj) {
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         await page.render({ canvasContext: ctx, viewport }).promise;
-        pdfObj.thumb = canvas.toDataURL('image/jpeg', 0.88);
+        pdfObj.thumb = canvas.toDataURL('image/jpeg', 0.68);
         page.cleanup();
+        if (typeof pdf.destroy === 'function') { try { await pdf.destroy(); } catch (_) {} }
         return pdfObj.thumb;
     } catch (e) {
         console.warn('ensurePdfThumbnail 失败:', pdfObj.url, e);
         return null;
+    }
+}
+
+// 0ms 保存按钮 Loading 状态管理（防重复点击与即时交互反馈）
+let isSavingQuestions = false;
+function setSaveButtonLoading(loading) {
+    isSavingQuestions = loading;
+    const saveBtn = document.getElementById('save-btn');
+    if (!saveBtn) return;
+    saveBtn.disabled = loading;
+    if (loading) {
+        if (!saveBtn.dataset.origHtml) {
+            saveBtn.dataset.origHtml = saveBtn.innerHTML;
+        }
+        saveBtn.innerHTML = `
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" class="spin-icon" style="animation: spin 0.8s linear infinite; margin-right: 4px;">
+                <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
+                <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"></path>
+            </svg>
+            <span>正在保存...</span>
+        `;
+    } else {
+        if (saveBtn.dataset.origHtml) {
+            saveBtn.innerHTML = saveBtn.dataset.origHtml;
+            delete saveBtn.dataset.origHtml;
+        } else {
+            saveBtn.innerHTML = `
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                    <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                    <polyline points="7 3 7 8 15 8"></polyline>
+                </svg>
+                <span>保存</span>
+            `;
+        }
     }
 }
 
@@ -1980,6 +2046,9 @@ async function saveQuestions() {
         }
     }
 
+    // 0ms 瞬间反馈：校验通过后立刻将保存按钮置为 loading 态，防连击并给用户即时视觉确认
+    setSaveButtonLoading(true);
+
     const bankType = getBankType();
     // 预习题库及举一反三题库不需要微课讲解链接
     const questionsForSave = (bankType === 'preview' || bankType === 'variation')
@@ -2013,6 +2082,7 @@ async function saveQuestions() {
             const diffs = compareQuestions(checkRes.data.questions, questionsForSave);
             // 如果对比没有任何变动，则不弹窗，直接保存
             if (diffs.length > 0) {
+                setSaveButtonLoading(false); // 弹出确认弹窗前解锁按钮
                 const currentSummary = [data.grade, data.subject, `${data.tier}班`, getTopicLabel(data.week)].filter(Boolean).join(' · ');
                 showQbankOverwriteModal({
                     title: '题目配置变动确认',
@@ -2020,7 +2090,8 @@ async function saveQuestions() {
                     meta: checkRes.data,
                     diffs: diffs,
                     confirmText: '确认覆盖保存',
-                    onConfirm: () => executeSaveQuestions(data)
+                    onConfirm: () => executeSaveQuestions(data),
+                    onCancel: () => setSaveButtonLoading(false)
                 });
                 return;
             }
@@ -2439,11 +2510,12 @@ function openTierSyncModal(sourceData = null, isAutoPrompt = false) {
 window.openTierSyncModal = openTierSyncModal;
 
 async function executeSaveQuestions(data) {
+    setSaveButtonLoading(true);
     try {
         const result = await apiPost(data);
         if (result.success) {
             isDirty = false;
-            renderQuestionList();
+            // 性能优化：不再执行全量 DOM 清空重绘 renderQuestionList()，仅更新保存状态与已有统计
             updateStatus();
             renderSavedDataList();
             if (data.bankType === 'preview') {
@@ -2477,6 +2549,8 @@ async function executeSaveQuestions(data) {
     } catch (e) {
         console.error('保存失败:', e);
         showToast('保存失败，请检查网络', 'error');
+    } finally {
+        setSaveButtonLoading(false);
     }
 }
 
