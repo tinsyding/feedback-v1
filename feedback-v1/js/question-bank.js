@@ -534,6 +534,10 @@ function goToStep(n) {
     }
 
     if (n === 4) {
+        const step4BackBtn = document.getElementById('qb-step4-prev-btn');
+        if (step4BackBtn) {
+            step4BackBtn.style.display = batchImported ? 'inline-flex' : 'none';
+        }
         requestAnimationFrame(() => {
             if (typeof resizeAllTopicTextareas === 'function') resizeAllTopicTextareas();
         });
@@ -550,11 +554,66 @@ function goBack() {
     if (currentStep <= 1) return;
     // Existing-data path (no upload/mapping): back from edit goes to selector
     if (currentStep === 4 && !batchImported) {
-        goToStep(1);
+        goToConfigStep();
+        return;
+    }
+    // Step 4 回退到 Step 3 前检查是否有未保存修改
+    if (currentStep === 4 && isDirty) {
+        showCustomDialog({
+            title: '未保存的更改',
+            body: '当前题目与知识点配置尚未保存，确定要返回上一步（标注题号）吗？',
+            confirmText: '返回上一步',
+            danger: true,
+            onConfirm: () => {
+                isDirty = false;
+                goToStep(currentStep - 1);
+            }
+        });
         return;
     }
     goToStep(currentStep - 1);
 }
+
+// 回到错题本配置页面（第1步学科与专题选择）
+async function goToConfigStep() {
+    if (isDirty) {
+        showCustomDialog({
+            title: '未保存的更改',
+            body: '当前题目与知识点配置尚未保存，确定要放弃更改并回到错题本配置页面吗？',
+            confirmText: '确定放弃并返回',
+            danger: true,
+            onConfirm: async () => {
+                isDirty = false;
+                batchImported = false;
+                await loadCurrentData();
+                goToStep(1);
+            }
+        });
+        return;
+    }
+    batchImported = false;
+    goToStep(1);
+}
+window.goToConfigStep = goToConfigStep;
+
+// 回到系统主页 (upload.html)
+function goToHome() {
+    if (isDirty) {
+        showCustomDialog({
+            title: '未保存的更改',
+            body: '当前题目与知识点配置尚未保存，确定要放弃更改并回到系统主页吗？',
+            confirmText: '确定放弃并回到主页',
+            danger: true,
+            onConfirm: () => {
+                isDirty = false;
+                window.location.href = 'upload.html';
+            }
+        });
+        return;
+    }
+    window.location.href = 'upload.html';
+}
+window.goToHome = goToHome;
 
 async function handleStepIndicatorClick(n) {
     if (n === currentStep) return;
@@ -2387,10 +2446,6 @@ async function executeSaveQuestions(data) {
             renderQuestionList();
             updateStatus();
             renderSavedDataList();
-
-            const candidateTiers = getCandidateTiers(data.tier);
-            const hasCandidates = candidateTiers && candidateTiers.length > 0;
-
             if (data.bankType === 'preview') {
                 const filledCount = currentQuestions.filter(q => q.topic && q.topic.trim()).length;
                 if (filledCount === 0) {
@@ -2403,7 +2458,7 @@ async function executeSaveQuestions(data) {
             } else {
                 showToast(`已保存 ${currentQuestions.length} 道题目`, 'success');
             }
-            
+
             if (window.Logger) {
                 Logger.action('save_question_bank', {
                     bankType: data.bankType,
@@ -2415,13 +2470,6 @@ async function executeSaveQuestions(data) {
                     week: data.week,
                     questionCount: currentQuestions.length
                 });
-            }
-
-            // 保存完成后若有其他候选班层，弹出班层互通提示（默认不勾选，精简直达）
-            if (hasCandidates) {
-                setTimeout(() => {
-                    openTierSyncModal(data, true);
-                }, 300);
             }
         } else {
             showToast('保存失败: ' + (result.error || '未知错误'), 'error');
