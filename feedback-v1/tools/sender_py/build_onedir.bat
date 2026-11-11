@@ -61,8 +61,8 @@ python -m PyInstaller --noconfirm --clean --noupx --windowed --onedir ^
     --exclude-module unittest ^
     --exclude-module test ^
     --hidden-import sender_py.sender_token ^
+    --hidden-import winocr ^
     --collect-all rapidocr_onnxruntime ^
-    --collect-all winocr ^
     --collect-all winrt ^
     "%WEB_MAIN_PY%"
 

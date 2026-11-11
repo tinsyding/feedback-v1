@@ -190,8 +190,8 @@ jobs:
             --exclude-module unittest \
             --exclude-module test \
             --hidden-import sender_py.sender_token \
+            --hidden-import winocr \
             --collect-all rapidocr_onnxruntime \
-            --collect-all winocr \
             --collect-all winrt \
             feedback-v1/tools/sender_py/web_main.py
           mv dist_dir/JiFangFeedbackWeb/JiFangFeedbackWeb.exe "dist_dir/JiFangFeedbackWeb/极方每周反馈程序-Web版.exe"

@@ -15,10 +15,9 @@ import sys
 import shutil
 import subprocess
 
-APP_VERSION = "1.8.26.0"
+APP_VERSION = "1.8.27.0"
 
 WINRT_PROJECTION_PACKAGES = [
-    "winocr",
     "winrt",
     "winrt.system",
     "winrt.runtime",
@@ -34,16 +33,15 @@ WINRT_PROJECTION_PACKAGES = [
 def get_winocr_nuitka_args():
     """生成用于完整打包 winocr 与 WinRT 投影体系的 Nuitka 参数。
     
-    winocr 深度依赖 pywinrt 体系。各命名空间（如 winrt.windows.media.ocr）
-    包含一个独立的二进制投影表文件 _table.pywinrt，Nuitka 必须显式引入子包
-    并携带 package-data，否则在 load_projection 时将抛出 ImportError。
+    winocr 为单文件 Python 模块 (winocr.py)，使用 --include-module 引入；
+    而 winrt 各命名空间子包包含二进制投影表 _table.pywinrt，必须作为 package 引入并携带 package-data。
     """
     packages = set(WINRT_PROJECTION_PACKAGES)
     try:
         from importlib.metadata import distributions
         for dist in distributions():
             name = (dist.metadata.get("Name") or "").lower()
-            if name.startswith("winrt") or name == "winocr":
+            if name.startswith("winrt"):
                 for f in dist.files or []:
                     p = str(f).replace("\\", "/")
                     if p.endswith("__init__.py"):
@@ -53,7 +51,7 @@ def get_winocr_nuitka_args():
     except Exception:
         pass
 
-    args = []
+    args = ["--include-module=winocr"]
     for pkg in sorted(packages):
         args.append(f"--include-package={pkg}")
         args.append(f"--include-package-data={pkg}")
@@ -151,7 +149,6 @@ def build_standalone(paths):
         "--nofollow-import-to=unittest",
         "--nofollow-import-to=test",
         "--include-package-data=rapidocr_onnxruntime",
-        "--include-package-data=certifi",
         # 编译加速：多核并行编译 + 禁用 MSVC 耗时极长且提升微弱的全程序 LTO 链接优化
         "--jobs=4",
         "--lto=no",
@@ -230,7 +227,6 @@ def build_onefile(paths):
         "--nofollow-import-to=unittest",
         "--nofollow-import-to=test",
         "--include-package-data=rapidocr_onnxruntime",
-        "--include-package-data=certifi",
         # 编译加速：多核并行编译 + 禁用 MSVC 耗时极长且提升微弱的全程序 LTO 链接优化
         "--jobs=4",
         "--lto=no",
