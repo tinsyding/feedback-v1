@@ -576,7 +576,7 @@ async function handleStepIndicatorClick(n) {
         if (getBankType() === 'variation') {
             await loadHomeworkQuestionsForVariation();
             if (!homeworkQuestionsForVariation || homeworkQuestionsForVariation.length === 0) {
-                showToast('该专题尚未录入【课后巩固】题库，无法录入举一反三！请先录入课后巩固题目。', 'warn');
+                showToast('该专题尚未录入【课后巩固】题库，无法录入举一反三，请先录入课后巩固题目', 'warn');
                 return;
             }
         }
@@ -589,7 +589,7 @@ async function handleStepIndicatorClick(n) {
         if (getBankType() === 'variation') {
             await loadHomeworkQuestionsForVariation();
             if (!homeworkQuestionsForVariation || homeworkQuestionsForVariation.length === 0) {
-                showToast('该专题尚未录入【课后巩固】题库，无法录入举一反三！请先录入课后巩固题目。', 'warn');
+                showToast('该专题尚未录入【课后巩固】题库，无法录入举一反三，请先录入课后巩固题目', 'warn');
                 return;
             }
         }
@@ -897,7 +897,7 @@ async function goNextFromStep2() {
     if (getBankType() === "variation") {
         await loadHomeworkQuestionsForVariation();
         if (!homeworkQuestionsForVariation || homeworkQuestionsForVariation.length === 0) {
-            showToast("该专题尚未录入【课后巩固】题库，无法录入举一反三！请先录入课后巩固题目。", "warn");
+            showToast("该专题尚未录入【课后巩固】题库，无法录入举一反三，请先录入课后巩固题目", "warn");
             return;
         }
     }
@@ -1853,7 +1853,7 @@ async function ensurePdfThumbnail(pdfObj) {
 
 async function saveQuestions() {
     if (window.currentUser && window.currentUser.role === 'assistant') {
-        showToast('助教账号仅拥有查看权限，无法保存题库修改！', 'warn');
+        showToast('助教账号仅拥有查看权限，无法保存题库修改', 'warn');
         return;
     }
     // 自动清洗知识点末尾的标点符号（逗号、句号、分号、点、顿号等），避免与系统自带顿号重合
@@ -1864,7 +1864,7 @@ async function saveQuestions() {
     });
 
     if (!currentQuestions || currentQuestions.length === 0) {
-        showToast('题目列表为空，请先添加或导入题目！', 'warn');
+        showToast('题目列表为空，请先添加或导入题目', 'warn');
         return;
     }
 
@@ -1889,9 +1889,9 @@ async function saveQuestions() {
 
         if (!topic && !isPreview) {
             if (isVar) {
-                showToast(`第 ${qNum} 题关联的原题缺少知识点，请在课后巩固中完善！`, 'warn');
+                showToast(`第 ${qNum} 题关联的原题缺少知识点，请在课后巩固中完善`, 'warn');
             } else {
-                showToast(`第 ${qNum} 题【知识点】为必填项，请填写完整！`, 'warn');
+                showToast(`第 ${qNum} 题【知识点】为必填项，请填写完整`, 'warn');
             }
             const itemEls = questionItems.querySelectorAll('.question-item');
             if (itemEls[i]) {
@@ -1907,7 +1907,7 @@ async function saveQuestions() {
         }
 
         if (!hasExercise) {
-            showToast(`第 ${qNum} 题【错题文件】（题目PDF）为必传项，请上传！`, 'warn');
+            showToast(`第 ${qNum} 题【错题文件】（题目PDF）为必传项，请上传`, 'warn');
             const itemEls = questionItems.querySelectorAll('.question-item');
             if (itemEls[i]) {
                 itemEls[i].scrollIntoView({ behavior: 'smooth', block: 'center' });
