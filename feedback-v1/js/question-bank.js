@@ -705,33 +705,55 @@ async function goNextFromStep1() {
         showToast('请选择题库类型、学科、年级、班层和专题');
         return;
     }
-    await loadCurrentData();
-    batchImported = false;
-    if (currentQuestions.length > 0) {
-        goToStep(4);
-    } else {
-        if (isAssistant) {
-            showToast('该专题暂未录入题目，请在下方列表选择已有专题查看', 'warn');
-            return;
-        }
-        if (getBankType() === 'variation') {
-            await loadHomeworkQuestionsForVariation();
-            if (!homeworkQuestionsForVariation || homeworkQuestionsForVariation.length === 0) {
-                showCustomDialog({
-                    title: '未录入课后巩固题库',
-                    body: `「${subjectSelect.value} · ${gradeSelect.value} · ${tierSelect.value} · ${getTopicLabel(weekSelect.value)}」尚未录入【课后巩固】题库！<br><br>举一反三必须依赖对应课后巩固的原题和考点。请先切换题库类型录入课后巩固题目后再录入举一反三。`,
-                    confirmText: '去录入课后巩固',
-                    cancelText: '知道了',
-                    onConfirm: () => {
-                        if (bankTypeSelect) bankTypeSelect.value = 'homework';
-                        updateBankTypeUi();
-                        loadCurrentData();
-                    }
-                });
+    const step1NextBtn = document.querySelector('button[onclick="goNextFromStep1()"]');
+    const origHtml = step1NextBtn ? step1NextBtn.innerHTML : '';
+    if (step1NextBtn) {
+        if (step1NextBtn.disabled && step1NextBtn.dataset.loading === '1') return;
+        step1NextBtn.disabled = true;
+        step1NextBtn.dataset.loading = '1';
+        step1NextBtn.innerHTML = `
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" class="spin-icon" style="animation: spin 0.8s linear infinite; margin-right: 4px;">
+                <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
+                <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"></path>
+            </svg>
+            <span>正在加载...</span>
+        `;
+    }
+    try {
+        await loadCurrentData();
+        batchImported = false;
+        if (currentQuestions.length > 0) {
+            goToStep(4);
+        } else {
+            if (isAssistant) {
+                showToast('该专题暂未录入题目，请在下方列表选择已有专题查看', 'warn');
                 return;
             }
+            if (getBankType() === 'variation') {
+                await loadHomeworkQuestionsForVariation();
+                if (!homeworkQuestionsForVariation || homeworkQuestionsForVariation.length === 0) {
+                    showCustomDialog({
+                        title: '未录入课后巩固题库',
+                        body: `「${subjectSelect.value} · ${gradeSelect.value} · ${tierSelect.value} · ${getTopicLabel(weekSelect.value)}」尚未录入【课后巩固】题库！<br><br>举一反三必须依赖对应课后巩固的原题和考点。请先切换题库类型录入课后巩固题目后再录入举一反三。`,
+                        confirmText: '去录入课后巩固',
+                        cancelText: '知道了',
+                        onConfirm: () => {
+                            if (bankTypeSelect) bankTypeSelect.value = 'homework';
+                            updateBankTypeUi();
+                            loadCurrentData();
+                        }
+                    });
+                    return;
+                }
+            }
+            goToStep(2);
         }
-        goToStep(2);
+    } finally {
+        if (step1NextBtn) {
+            step1NextBtn.disabled = false;
+            delete step1NextBtn.dataset.loading;
+            step1NextBtn.innerHTML = origHtml || '录入新错题本 / 下一步';
+        }
     }
 }
 
@@ -961,7 +983,19 @@ async function goNextFromStep2() {
         }
     }
     const nextBtn = document.getElementById("step2-next-btn");
-    if (nextBtn) nextBtn.disabled = true;
+    const origNextHtml = nextBtn ? nextBtn.innerHTML : '';
+    if (nextBtn) {
+        if (nextBtn.disabled && nextBtn.dataset.loading === '1') return;
+        nextBtn.disabled = true;
+        nextBtn.dataset.loading = '1';
+        nextBtn.innerHTML = `
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" class="spin-icon" style="animation: spin 0.8s linear infinite; margin-right: 4px;">
+                <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
+                <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"></path>
+            </svg>
+            <span>正在解析PDF页面...</span>
+        `;
+    }
     try {
         const ok = await loadBatchPreviews();
         if (!ok) return;
@@ -971,7 +1005,11 @@ async function goNextFromStep2() {
         updateAnnotationStatus();
         goToStep(3);
     } finally {
-        if (nextBtn) nextBtn.disabled = false;
+        if (nextBtn) {
+            nextBtn.disabled = false;
+            delete nextBtn.dataset.loading;
+            nextBtn.innerHTML = origNextHtml || '下一步';
+        }
     }
 }
 
@@ -1711,12 +1749,28 @@ async function goNextFromMapping() {
     }
 
     const btn = document.getElementById('mapping-next-btn');
-    if (btn) btn.disabled = true;
+    const origBtnHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        if (btn.disabled && btn.dataset.loading === '1') return;
+        btn.disabled = true;
+        btn.dataset.loading = '1';
+        btn.innerHTML = `
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" class="spin-icon" style="animation: spin 0.8s linear infinite; margin-right: 4px;">
+                <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
+                <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"></path>
+            </svg>
+            <span>正在建立题目切片...</span>
+        `;
+    }
     try {
         const ok = await importWithLabels(batchExerciseFile, batchAnswerFile);
         batchImported = ok && currentQuestions.length > 0;
     } finally {
-        if (btn) btn.disabled = false;
+        if (btn) {
+            btn.disabled = false;
+            delete btn.dataset.loading;
+            btn.innerHTML = origBtnHtml || '完成标注并导入';
+        }
     }
 }
 
@@ -2266,46 +2320,71 @@ function getTierSavedMeta(bankType, year, season, subject, grade, tier, week) {
     ) || null;
 }
 
+let isSyncingTiers = false;
 async function doBatchSyncTiers(data, targetTiers, currentTier, isAutoPrompt = false) {
     if (!targetTiers || targetTiers.length === 0) return;
-    const tierLabels = targetTiers.map(t => `${t}班`).join('、');
-    showToast(`正在同步至 ${tierLabels}...`);
-    let successCount = 0;
-    const errors = [];
-    for (const targetTier of targetTiers) {
-        try {
-            const syncData = {
-                ...data,
-                tier: targetTier,
-                questions: JSON.parse(JSON.stringify(currentQuestions))
-            };
-            const syncRes = await apiPost(syncData);
-            if (syncRes && syncRes.success) {
-                successCount++;
-                if (window.Logger) {
-                    Logger.action('sync_question_bank_tier', {
-                        fromTier: currentTier,
-                        toTier: targetTier,
-                        grade: data.grade,
-                        subject: data.subject,
-                        week: data.week
-                    });
-                }
-            } else {
-                errors.push(`${targetTier}班: ${syncRes?.error || '保存失败'}`);
-            }
-        } catch (err) {
-            console.error(`同步至 ${targetTier}班 失败:`, err);
-            errors.push(`${targetTier}班: 网络异常`);
-        }
+    if (isSyncingTiers) return;
+    isSyncingTiers = true;
+
+    const tierSyncBtn = document.getElementById('tier-sync-btn');
+    const origSyncHtml = tierSyncBtn ? tierSyncBtn.innerHTML : '';
+    if (tierSyncBtn) {
+        tierSyncBtn.disabled = true;
+        tierSyncBtn.innerHTML = `
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" class="spin-icon" style="animation: spin 0.8s linear infinite; margin-right: 4px;">
+                <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
+                <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"></path>
+            </svg>
+            <span>正在同步...</span>
+        `;
     }
-    renderSavedDataList();
-    if (errors.length === 0) {
-        showToast(isAutoPrompt ? `保存成功！已同步至 ${tierLabels}` : `已成功同步至 ${tierLabels}！`, 'success');
-    } else if (successCount > 0) {
-        showToast(`部分同步成功 (${successCount}/${targetTiers.length})，失败: ${errors.join('; ')}`, 'warn');
-    } else {
-        showToast(`同步失败: ${errors.join('; ')}`, 'warn');
+
+    try {
+        const tierLabels = targetTiers.map(t => `${t}班`).join('、');
+        showToast(`正在同步至 ${tierLabels}...`);
+        let successCount = 0;
+        const errors = [];
+        for (const targetTier of targetTiers) {
+            try {
+                const syncData = {
+                    ...data,
+                    tier: targetTier,
+                    questions: JSON.parse(JSON.stringify(currentQuestions))
+                };
+                const syncRes = await apiPost(syncData);
+                if (syncRes && syncRes.success) {
+                    successCount++;
+                    if (window.Logger) {
+                        Logger.action('sync_question_bank_tier', {
+                            fromTier: currentTier,
+                            toTier: targetTier,
+                            grade: data.grade,
+                            subject: data.subject,
+                            week: data.week
+                        });
+                    }
+                } else {
+                    errors.push(`${targetTier}班: ${syncRes?.error || '保存失败'}`);
+                }
+            } catch (err) {
+                console.error(`同步至 ${targetTier}班 失败:`, err);
+                errors.push(`${targetTier}班: 网络异常`);
+            }
+        }
+        renderSavedDataList();
+        if (errors.length === 0) {
+            showToast(isAutoPrompt ? `保存成功！已同步至 ${tierLabels}` : `已成功同步至 ${tierLabels}！`, 'success');
+        } else if (successCount > 0) {
+            showToast(`部分同步成功 (${successCount}/${targetTiers.length})，失败: ${errors.join('; ')}`, 'warn');
+        } else {
+            showToast(`同步失败: ${errors.join('; ')}`, 'warn');
+        }
+    } finally {
+        isSyncingTiers = false;
+        if (tierSyncBtn) {
+            tierSyncBtn.disabled = false;
+            tierSyncBtn.innerHTML = origSyncHtml;
+        }
     }
 }
 
@@ -3684,45 +3763,54 @@ function applySavedDataFilter() {
     });
 }
 
+let isEnteringSavedItem = false;
 async function editSavedItem(subject, grade, tier, week, year, season, bankType) {
-    if (year && yearSelect) yearSelect.value = String(year);
-    if (season && seasonSelect) seasonSelect.value = season;
-    if (bankType && bankTypeSelect) {
-        bankTypeSelect.value = (bankType === 'preview' || bankType === 'variation') ? bankType : 'homework';
-        updateBankTypeUi();
-    }
-    if (subjectSelect) subjectSelect.value = subject;
+    if (isEnteringSavedItem) return;
+    isEnteringSavedItem = true;
+    showToast('正在载入专题题目数据...', 'info');
 
-    if (gradeSelect) {
-        let gradeOptionExists = Array.from(gradeSelect.options).some(o => o.value === grade);
-        if (!gradeOptionExists) {
-            if (grade === '未指定年级') {
-                gradeSelect.value = '七年级';
+    try {
+        if (year && yearSelect) yearSelect.value = String(year);
+        if (season && seasonSelect) seasonSelect.value = season;
+        if (bankType && bankTypeSelect) {
+            bankTypeSelect.value = (bankType === 'preview' || bankType === 'variation') ? bankType : 'homework';
+            updateBankTypeUi();
+        }
+        if (subjectSelect) subjectSelect.value = subject;
+
+        if (gradeSelect) {
+            let gradeOptionExists = Array.from(gradeSelect.options).some(o => o.value === grade);
+            if (!gradeOptionExists) {
+                if (grade === '未指定年级') {
+                    gradeSelect.value = '七年级';
+                } else {
+                    const opt = document.createElement('option');
+                    opt.value = grade;
+                    opt.textContent = grade;
+                    gradeSelect.appendChild(opt);
+                    gradeSelect.value = grade;
+                }
             } else {
-                const opt = document.createElement('option');
-                opt.value = grade;
-                opt.textContent = grade;
-                gradeSelect.appendChild(opt);
                 gradeSelect.value = grade;
             }
-        } else {
-            gradeSelect.value = grade;
         }
+
+        if (tierSelect) tierSelect.value = tier;
+        if (weekSelect) weekSelect.value = week;
+
+        isDirty = false;
+        batchImported = false; // Mark as direct edit mode so "返回学科选择" returns to Step 1
+
+        await loadCurrentData();
+        goToStep(4);
+        const isAssistant = window.currentUser && window.currentUser.role === 'assistant';
+        const typeLabel = getBankTypeLabel(bankType);
+        showToast(isAssistant 
+            ? `已载入「${typeLabel} · ${subject} · ${grade} · ${tier} · ${getTopicLabel(week)}」，当前为助教只读浏览模式`
+            : `已载入「${typeLabel} · ${subject} · ${grade} · ${tier} · ${getTopicLabel(week)}」，可直接修改`);
+    } finally {
+        isEnteringSavedItem = false;
     }
-
-    if (tierSelect) tierSelect.value = tier;
-    if (weekSelect) weekSelect.value = week;
-
-    isDirty = false;
-    batchImported = false; // Mark as direct edit mode so "返回学科选择" returns to Step 1
-
-    await loadCurrentData();
-    goToStep(4);
-    const isAssistant = window.currentUser && window.currentUser.role === 'assistant';
-    const typeLabel = getBankTypeLabel(bankType);
-    showToast(isAssistant 
-        ? `已载入「${typeLabel} · ${subject} · ${grade} · ${tier} · ${getTopicLabel(week)}」，当前为助教只读浏览模式`
-        : `已载入「${typeLabel} · ${subject} · ${grade} · ${tier} · ${getTopicLabel(week)}」，可直接修改`);
 }
 
 function loadSavedItem(subject, grade, tier, week, year, season, bankType) {
@@ -3956,6 +4044,18 @@ async function uploadPdfBlob(file) {
     throw new Error(json.error || '未知错误');
 }
 
+function updateQuestionPdfActionsOnly(index) {
+    const q = currentQuestions[index];
+    if (!q) return;
+    const itemEl = questionItems.querySelector(`.question-item[data-index="${index}"]`) || questionItems.children[index];
+    if (itemEl) {
+        const actions = itemEl.querySelector('.question-pdf-actions');
+        if (actions) {
+            actions.innerHTML = `${renderPdfBtn(q, index, 'exercise')}${renderPdfBtn(q, index, 'answer')}`;
+        }
+    }
+}
+
 async function doUploadPdf(file, index, type) {
     if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
         showToast('仅支持 PDF 文件');
@@ -3969,7 +4069,8 @@ async function doUploadPdf(file, index, type) {
     if (!currentQuestions[index]) return;
     const targetKey = type === 'exercise' ? 'exercisePdf' : 'answerPdf';
     currentQuestions[index][targetKey] = { status: 'uploading', name: file.name };
-    renderQuestionList();
+    // 局部精准更新该题卡片，避免全量 renderQuestionList 销毁重绘导致焦点丢失与掉帧
+    updateQuestionPdfActionsOnly(index);
     
     try {
         const [result, thumb] = await Promise.all([
@@ -3993,8 +4094,9 @@ async function doUploadPdf(file, index, type) {
         console.error('Upload failed', e);
         currentQuestions[index][targetKey] = null;
         showToast('上传失败: ' + (e.message || '网络错误或服务器异常'));
+    } finally {
+        updateQuestionPdfActionsOnly(index);
     }
-    renderQuestionList();
 }
 
 function removePdf(index, type) {
@@ -4003,7 +4105,7 @@ function removePdf(index, type) {
         currentQuestions[index][targetKey] = null;
         isDirty = true;
         updateStatus();
-        renderQuestionList();
+        updateQuestionPdfActionsOnly(index);
         showToast('已删除 PDF 附件');
     }
 }
