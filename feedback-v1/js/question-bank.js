@@ -734,7 +734,7 @@ async function goNextFromStep1() {
                 if (!homeworkQuestionsForVariation || homeworkQuestionsForVariation.length === 0) {
                     showCustomDialog({
                         title: '未录入课后巩固题库',
-                        body: `「${subjectSelect.value} · ${gradeSelect.value} · ${tierSelect.value} · ${getTopicLabel(weekSelect.value)}」尚未录入【课后巩固】题库！<br><br>举一反三必须依赖对应课后巩固的原题和考点。请先切换题库类型录入课后巩固题目后再录入举一反三。`,
+                        body: `「${subjectSelect.value} · ${gradeSelect.value} · ${tierSelect.value} · ${getTopicLabel(weekSelect.value)}」尚未录入【课后巩固】题库。<br><br>举一反三必须依赖对应课后巩固的原题和考点，请先切换题库类型录入课后巩固题目后再录入举一反三。`,
                         confirmText: '去录入课后巩固',
                         cancelText: '知道了',
                         onConfirm: () => {
@@ -2140,7 +2140,7 @@ async function saveQuestions() {
                 const currentSummary = [data.grade, data.subject, `${data.tier}班`, getTopicLabel(data.week)].filter(Boolean).join(' · ');
                 showQbankOverwriteModal({
                     title: '题目配置变动确认',
-                    summary: `检测到【<strong>${escapeHtml(currentSummary)}</strong>】已有配置与本次拟保存内容存在变动。保存将<strong>覆盖原有配置</strong>！`,
+                    summary: `检测到【<strong>${escapeHtml(currentSummary)}</strong>】已有配置与本次拟保存内容存在变动，保存将<strong>覆盖原有配置</strong>`,
                     meta: checkRes.data,
                     diffs: diffs,
                     confirmText: '确认覆盖保存',
@@ -2229,7 +2229,7 @@ function showQbankOverwriteModal(options) {
         <div style="font-size:0.9rem; line-height:1.6; text-align:left;">
             <div style="background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.3); border-radius:8px; padding:10px 12px; margin-bottom:12px; color:#fca5a5; display:flex; align-items:flex-start; gap:8px;">
                 <svg style="flex-shrink:0; width:18px; height:18px; color:#ef4444; margin-top:2px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                <div style="flex:1;">${summary || '检测到该专题配置存在变动，本次操作将<strong>覆盖原有配置</strong>！'}</div>
+                <div style="flex:1;">${summary || '检测到该专题配置存在变动，本次操作将<strong>覆盖原有配置</strong>'}</div>
             </div>
 
             <div style="display:flex; justify-content:space-between; gap:8px; margin-bottom:12px; font-size:0.8rem; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); padding:8px 12px; border-radius:8px;">
@@ -2372,7 +2372,7 @@ async function doBatchSyncTiers(data, targetTiers, currentTier, isAutoPrompt = f
         }
         renderSavedDataList();
         if (errors.length === 0) {
-            showToast(isAutoPrompt ? `保存成功！已同步至 ${tierLabels}` : `已成功同步至 ${tierLabels}！`, 'success');
+            showToast(isAutoPrompt ? `保存成功，已同步至 ${tierLabels}` : `已同步至 ${tierLabels}`, 'success');
         } else if (successCount > 0) {
             showToast(`部分同步成功 (${successCount}/${targetTiers.length})，失败: ${errors.join('; ')}`, 'warn');
         } else {
@@ -2384,7 +2384,6 @@ async function doBatchSyncTiers(data, targetTiers, currentTier, isAutoPrompt = f
             tierSyncBtn.disabled = false;
             tierSyncBtn.innerHTML = origSyncHtml;
         }
-    }
     }
 }
 
@@ -2441,7 +2440,7 @@ async function handleTierSyncConfirm(data, targetTiers, isAutoPrompt = false) {
         const bodyHtml = `
             <div style="font-size:0.9rem; line-height:1.5; text-align:left;">
                 <div style="background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.3); border-radius:8px; padding:10px 12px; margin-bottom:12px; color:#fca5a5;">
-                    检测到 <strong>${diffTiers.length}</strong> 个目标班层已有题目变动，同步将<strong>完全覆盖</strong>原有题目！
+                    检测到 <strong>${diffTiers.length}</strong> 个目标班层已有题目变动，同步将<strong>完全覆盖</strong>原有题目
                 </div>
                 <div style="max-height:220px; overflow-y:auto; margin-bottom:8px;" class="custom-scrollbar">
                     ${diffsHtml}

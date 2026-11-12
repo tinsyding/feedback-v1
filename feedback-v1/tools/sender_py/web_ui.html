@@ -1406,7 +1406,7 @@
       if (validFiles.length > 0) {
         uploadFileList(validFiles);
       } else {
-        alert("所选文件夹内未找到 .json 或 .html 反馈文件。");
+        alert("所选文件夹内未找到 .json 或 .html 反馈文件");
       }
       event.target.value = "";
     }
@@ -1924,11 +1924,11 @@
       if (!appState.students) return;
       const failed = appState.students.filter(st => ["发送失败", "未匹配", "已拦截"].includes(st.status));
       if (failed.length === 0) {
-        showToast("当前暂无发送失败或未匹配的学员。");
+        showToast("当前暂无发送失败或未匹配的学员");
         return;
       }
       const text = failed.map(st => `${st.sid} ${st.sname} (${st.status}: ${st.last_reason || '未知'})`).join("\n");
-      copyText(text, `已复制 ${failed.length} 位失败学员名单！`);
+      copyText(text, `已复制 ${failed.length} 位失败学员名单`);
     }
 
     // 发送与停止控制
@@ -2141,16 +2141,16 @@
     function copyAllStudentInfo() {
       if (!appState.students || appState.students.length === 0) return;
       const text = appState.students.map(st => `${st.sid} ${st.sname}`).join("\n");
-      copyText(text, "已复制全部学员学号姓名！");
+      copyText(text, "已复制全部学员学号姓名");
     }
 
     function copyAllMessages() {
       if (!appState.students || appState.students.length === 0) return;
       const text = appState.students.map(st => `【${st.studentName}】\n${st.message}\n`).join("\n");
-      copyText(text, "已复制全部学员反馈话术！");
+      copyText(text, "已复制全部学员反馈话术");
     }
 
-    function copyText(text, successMsg = "已复制到剪贴板！") {
+    function copyText(text, successMsg = "已复制到剪贴板") {
       if (!text) return;
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(() => showToast(successMsg)).catch(() => fallbackCopy(text, successMsg));
@@ -2280,10 +2280,10 @@
         }
       });
       if (lines.length === 0) {
-        showToast("暂无可复制的待回学员记录。");
+        showToast("暂无可复制的待回学员记录");
         return;
       }
-      copyText(lines.join("\n"), `已复制全部 ${lines.length} 位待回学员名单（学号姓名）！`);
+      copyText(lines.join("\n"), `已复制全部 ${lines.length} 位待回学员名单（学号姓名）`);
     }
 
     // 弹窗：已发文件

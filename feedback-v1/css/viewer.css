@@ -1979,6 +1979,7 @@ body.viewer-page {
     .header-controls,
     .feedback-toolbar,
     .toast,
+    .toast-container,
     .dialog-overlay,
     .empty-state .empty-action-btn {
         display: none !important;

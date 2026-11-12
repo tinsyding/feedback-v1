@@ -2083,7 +2083,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 console.warn('Page number render skipped', fontErr);
             }
 
-            modalTitle.textContent = '合成完毕！';
+            modalTitle.textContent = '合成完毕';
             modalDesc.textContent = isWeChat ? '正在准备微信高速下载...' : '正在调起下载，请在弹出窗口中确认保存...';
 
             const pdfBytesFinal = await mergedPdf.save();
