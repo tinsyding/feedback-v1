@@ -1033,12 +1033,13 @@ function showChangelogContentModal(logData, onCloseParams = null) {
             { bg: 'rgba(168,85,247,0.1)', text: '#a855f7' }
         ];
         const color = colors[index % colors.length];
+        const hasDesc = !!(item.desc && String(item.desc).trim());
         return `
-        <div style="display: flex; gap: 12px;">
+        <div style="display: flex; gap: 12px; align-items: ${hasDesc ? 'flex-start' : 'center'};">
             <span style="display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: ${color.bg}; color: ${color.text}; flex-shrink: 0; font-size: 0.85rem; font-weight: 600;">${index + 1}</span>
             <div>
-                <div style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary, #111827); margin-bottom: 4px;">${escapeHtml(item.title ?? '')}</div>
-                <div style="font-size: 0.85rem; color: var(--text-secondary, #4b5563); line-height: 1.5; white-space: pre-wrap;">${escapeHtml(item.desc ?? '')}</div>
+                <div style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary, #111827); margin-bottom: ${hasDesc ? '4px' : '0'};">${escapeHtml(item.title ?? '')}</div>
+                ${hasDesc ? `<div style="font-size: 0.85rem; color: var(--text-secondary, #4b5563); line-height: 1.5; white-space: pre-wrap;">${escapeHtml(item.desc ?? '')}</div>` : ''}
             </div>
         </div>`;
     }).join('');
@@ -1102,12 +1103,14 @@ window.showAllChangelogsModal = async function() {
         if (!json.success || !json.data || !json.data.length) return;
 
         let logsHtml = json.data.map(log => {
-            let itemsHtml = (log.items || []).map(item => `
+            let itemsHtml = (log.items || []).map(item => {
+                const hasDesc = !!(item.desc && String(item.desc).trim());
+                return `
                 <div style="margin-bottom: 8px;">
                     <div style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary);">• ${escapeHtml(item.title ?? '')}</div>
-                    <div style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.4; padding-left: 12px; margin-top:2px; white-space: pre-wrap;">${escapeHtml(item.desc ?? '')}</div>
-                </div>
-            `).join('');
+                    ${hasDesc ? `<div style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.4; padding-left: 12px; margin-top:2px; white-space: pre-wrap;">${escapeHtml(item.desc ?? '')}</div>` : ''}
+                </div>`;
+            }).join('');
             
             return `
             <div style="margin-bottom: 24px; border-bottom: 1px dashed var(--border-color, #e5e7eb); padding-bottom: 16px;">

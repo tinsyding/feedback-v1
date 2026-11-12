@@ -111,6 +111,4 @@ files-examples/
 # 编辑器与本地 IDE 插件配置
 .commandcode/
 
-# 本地手动更新日志缓存（线上由数据库/后台统一维护）
-feedback-v1/data/changelog.json
 
