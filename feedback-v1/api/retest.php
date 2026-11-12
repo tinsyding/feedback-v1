@@ -675,6 +675,292 @@ if ($action === 'check_existing_batch') {
     }
 }
 
+// ── Action: 首页单人错题录入辅助查询（获取班级历史学生名册 & 单人单周存档回显） ──
+if ($action === 'get_student_week_record') {
+    requireAuth();
+
+    $rawInput = file_get_contents('php://input');
+    $input = json_decode($rawInput, true) ?: [];
+
+    $subject = trim($input['subject'] ?? $_REQUEST['subject'] ?? '');
+    $grade = trim($input['grade'] ?? $_REQUEST['grade'] ?? '');
+    $tier = trim($input['tier'] ?? $_REQUEST['tier'] ?? '');
+    $week = intval($input['week'] ?? $_REQUEST['week'] ?? 0);
+    $previewWeek = intval($input['preview_week'] ?? $_REQUEST['preview_week'] ?? ($input['previewWeek'] ?? $_REQUEST['previewWeek'] ?? 0));
+    $year = intval($input['year'] ?? $_REQUEST['year'] ?? 2026);
+    $season = trim($input['season'] ?? $_REQUEST['season'] ?? '秋');
+    $studentId = trim((string)($input['student_id'] ?? $_REQUEST['student_id'] ?? ($input['studentId'] ?? $_REQUEST['studentId'] ?? '')));
+    $studentName = trim((string)($input['student_name'] ?? $_REQUEST['student_name'] ?? ($input['studentName'] ?? $_REQUEST['studentName'] ?? '')));
+
+    $seasonZhMap = [
+        'spring' => '春', '春季' => '春', '春' => '春',
+        'summer' => '暑', '暑假' => '暑', '暑' => '暑',
+        'autumn' => '秋', '秋季' => '秋', '秋' => '秋',
+        'winter' => '寒', '寒假' => '寒', '寒' => '寒'
+    ];
+    $normalizedSeason = $seasonZhMap[strtolower($season)] ?? $season;
+
+    if ($subject === '' || $grade === '') {
+        echo json_encode(['success' => true, 'students' => [], 'record' => null], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $studentsRoster = [];
+    $recordData = null;
+
+    try {
+        $db = Database::getInstance();
+
+        // 1. 当未传入具体学生姓名，或显式请求名册时，返回该学科+年级下的历史学生列表（优先当前学期与当前班层）
+        if ($studentName === '' || !empty($input['with_roster']) || !empty($_REQUEST['with_roster'])) {
+            $rosterRows = $db->fetchAll(
+                "SELECT sr.student_id, sr.student_name, sr.student_key, cb.tier,
+                        MAX(sr.updated_at) AS last_seen,
+                        MAX(CASE WHEN cb.year = ? AND (cb.season = ? OR cb.season = ?) THEN 1 ELSE 0 END) AS is_current_term,
+                        MAX(CASE WHEN cb.tier = ? THEN 1 ELSE 0 END) AS is_current_tier
+                 FROM `student_records` sr
+                 INNER JOIN `class_batches` cb ON sr.batch_id = cb.id
+                 WHERE cb.subject = ? AND cb.grade = ?
+                 GROUP BY sr.student_id, sr.student_name, sr.student_key, cb.tier
+                 ORDER BY is_current_term DESC, is_current_tier DESC, last_seen DESC
+                 LIMIT 600",
+                [$year, $normalizedSeason, $season, $tier, $subject, $grade]
+            );
+
+            $seenMap = [];
+            foreach ($rosterRows as $r) {
+                $sName = trim((string)($r['student_name'] ?? ''));
+                if ($sName === '') continue;
+                $sId = trim((string)($r['student_id'] ?? ''));
+                $dedupKey = $sId !== '' ? "{$sId}_{$sName}" : $sName;
+                $rTier = trim((string)($r['tier'] ?? ''));
+                if (!isset($seenMap[$dedupKey])) {
+                    $seenMap[$dedupKey] = [
+                        'id' => $sId,
+                        'name' => $sName,
+                        'key' => build_student_key($sId, $sName, $grade, $subject),
+                        'tier' => $rTier,
+                        'tiers' => $rTier !== '' ? [$rTier] : []
+                    ];
+                } else {
+                    if ($rTier !== '' && !in_array($rTier, $seenMap[$dedupKey]['tiers'], true)) {
+                        $seenMap[$dedupKey]['tiers'][] = $rTier;
+                    }
+                    if ($rTier === $tier && $seenMap[$dedupKey]['tier'] !== $tier) {
+                        $seenMap[$dedupKey]['tier'] = $rTier;
+                    }
+                }
+            }
+
+            // 文件历史兜底补充
+            $historyFile = $historyDir . '/' . rawurlencode($subject) . '_' . rawurlencode($grade) . '.json';
+            if (is_file($historyFile)) {
+                $histJson = json_decode((string)@file_get_contents($historyFile), true);
+                if (is_array($histJson)) {
+                    foreach (array_keys($histJson) as $rawKey) {
+                        $rawKey = trim((string)$rawKey);
+                        if ($rawKey === '') continue;
+                        $suffix = "_{$grade}_{$subject}";
+                        $coreKey = str_ends_with($rawKey, $suffix)
+                            ? substr($rawKey, 0, -strlen($suffix))
+                            : $rawKey;
+                        $sId = '';
+                        $sName = $coreKey;
+                        if (preg_match('/^(\d+)_(.+)$/u', $coreKey, $m)) {
+                            $sId = trim($m[1]);
+                            $sName = trim($m[2]);
+                        }
+                        if ($sName === '') continue;
+                        $dedupKey = $sId !== '' ? "{$sId}_{$sName}" : $sName;
+                        if (!isset($seenMap[$dedupKey])) {
+                            $seenMap[$dedupKey] = [
+                                'id' => $sId,
+                                'name' => $sName,
+                                'key' => build_student_key($sId, $sName, $grade, $subject),
+                                'tier' => '',
+                                'tiers' => []
+                            ];
+                        }
+                    }
+                }
+            }
+
+            $studentsRoster = array_values($seenMap);
+        }
+
+        // 2. 当传入了具体学生姓名时，查询该生在指定巩固周次 / 预习周次的已有错题记录
+        if ($studentName !== '') {
+            // 若未传学号，尝试在同科目同年级下自动补全唯一学号
+            if ($studentId === '') {
+                $idRows = $db->fetchAll(
+                    "SELECT DISTINCT sr.student_id
+                     FROM `student_records` sr
+                     INNER JOIN `class_batches` cb ON sr.batch_id = cb.id
+                     WHERE cb.subject = ? AND cb.grade = ? AND sr.student_name = ? AND sr.student_id != ''
+                     ORDER BY (cb.tier = ?) DESC, sr.updated_at DESC
+                     LIMIT 2",
+                    [$subject, $grade, $studentName, $tier]
+                );
+                if (count($idRows) === 1 && !empty($idRows[0]['student_id'])) {
+                    $studentId = trim((string)$idRows[0]['student_id']);
+                }
+            }
+
+            $candidateKeys = student_key_candidates($studentId, $studentName, $grade, $subject);
+            $keyPlaceholders = implode(',', array_fill(0, count($candidateKeys), '?'));
+            $whereStudent = "sr.student_key IN ({$keyPlaceholders})";
+            $studentParams = $candidateKeys;
+            if ($studentId === '') {
+                $whereStudent = "({$whereStudent} OR ((sr.student_key IS NULL OR sr.student_key = '' OR sr.student_key = sr.student_name) AND sr.student_name = ?))";
+                $studentParams[] = $studentName;
+            }
+
+            $hwErrors = [];
+            $hasHwRecord = false;
+            $hwUpdatedAt = '';
+            $retestToken = '';
+
+            if ($week > 0) {
+                $hwParams = array_merge([$subject, $grade, $week], $studentParams, [$tier]);
+                $hwRows = $db->fetchAll(
+                    "SELECT sr.error_questions, sr.error_count, sr.homework_score, sr.teacher_comment, sr.retest_token, sr.updated_at, cb.tier
+                     FROM `student_records` sr
+                     INNER JOIN `class_batches` cb ON sr.batch_id = cb.id
+                     WHERE cb.subject = ? AND cb.grade = ? AND sr.week_num = ? AND {$whereStudent}
+                     ORDER BY (cb.tier = ?) DESC, sr.updated_at DESC, sr.id DESC",
+                    $hwParams
+                );
+                foreach ($hwRows as $hr) {
+                    if ($retestToken === '' && !empty($hr['retest_token'])) {
+                        $retestToken = trim((string)$hr['retest_token']);
+                    }
+                    $eq = json_decode($hr['error_questions'] ?? '[]', true);
+                    $errs = is_array($eq) ? array_values(array_unique(array_filter(array_map('intval', $eq)))) : [];
+                    sort($errs, SORT_NUMERIC);
+                    $hasHw = !empty($errs)
+                        || ($hr['homework_score'] !== null)
+                        || trim((string)($hr['teacher_comment'] ?? '')) !== ''
+                        || ((int)($hr['error_count'] ?? 0) > 0);
+                    if ($hasHw || !$hasHwRecord) {
+                        $hwErrors = $errs;
+                        $hasHwRecord = $hasHw;
+                        $hwUpdatedAt = !empty($hr['updated_at']) ? date('m-d H:i', strtotime($hr['updated_at'])) : '';
+                        if ($hasHw) break;
+                    }
+                }
+
+                // JSON 档案兜底
+                if (!$hasHwRecord) {
+                    $historyFile = $historyDir . '/' . rawurlencode($subject) . '_' . rawurlencode($grade) . '.json';
+                    if (is_file($historyFile)) {
+                        $histJson = json_decode((string)@file_get_contents($historyFile), true);
+                        if (is_array($histJson)) {
+                            $merged = merge_history_for_keys($histJson, $candidateKeys);
+                            if (array_key_exists((string)$week, $merged) && is_array($merged[(string)$week])) {
+                                $hwErrors = array_values(array_unique(array_filter(array_map('intval', $merged[(string)$week]))));
+                                sort($hwErrors, SORT_NUMERIC);
+                                $hasHwRecord = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            $pvErrors = [];
+            $hasPvRecord = false;
+            $pvUpdatedAt = '';
+            $targetPvWeek = $previewWeek > 0 ? $previewWeek : $week;
+
+            if ($targetPvWeek > 0) {
+                $pvParams = array_merge([$subject, $grade, $targetPvWeek, $targetPvWeek], $studentParams, [$tier]);
+                $pvRows = $db->fetchAll(
+                    "SELECT sr.preview_error_questions, sr.preview_week_num, sr.retest_token, sr.updated_at, cb.tier
+                     FROM `student_records` sr
+                     INNER JOIN `class_batches` cb ON sr.batch_id = cb.id
+                     WHERE cb.subject = ? AND cb.grade = ?
+                       AND (sr.preview_week_num = ? OR (sr.preview_week_num IS NULL AND sr.week_num = ?))
+                       AND {$whereStudent}
+                     ORDER BY (sr.preview_error_questions IS NOT NULL) DESC, (cb.tier = ?) DESC, sr.updated_at DESC, sr.id DESC",
+                    $pvParams
+                );
+                foreach ($pvRows as $pr) {
+                    if ($retestToken === '' && !empty($pr['retest_token'])) {
+                        $retestToken = trim((string)$pr['retest_token']);
+                    }
+                    if ($pr['preview_error_questions'] !== null) {
+                        $peq = json_decode($pr['preview_error_questions'], true);
+                        $pvErrors = is_array($peq) ? array_values(array_unique(array_filter(array_map('intval', $peq)))) : [];
+                        sort($pvErrors, SORT_NUMERIC);
+                        $hasPvRecord = true;
+                        $pvUpdatedAt = !empty($pr['updated_at']) ? date('m-d H:i', strtotime($pr['updated_at'])) : '';
+                        break;
+                    }
+                }
+
+                // 预习 JSON 档案兜底
+                if (!$hasPvRecord) {
+                    $previewHistoryFile = $historyDir . '/' . rawurlencode($subject) . '_' . rawurlencode($grade) . '_preview.json';
+                    if (is_file($previewHistoryFile)) {
+                        $pvHistJson = json_decode((string)@file_get_contents($previewHistoryFile), true);
+                        if (is_array($pvHistJson)) {
+                            foreach ($candidateKeys as $ck) {
+                                if (empty($pvHistJson[$ck]) || !is_array($pvHistJson[$ck])) continue;
+                                foreach ($pvHistJson[$ck] as $wkKey => $pvEntry) {
+                                    $entryPvWeek = is_array($pvEntry) && isset($pvEntry['previewWeek'])
+                                        ? intval($pvEntry['previewWeek'])
+                                        : intval($wkKey);
+                                    if ($entryPvWeek === $targetPvWeek) {
+                                        $rawPvErrs = (is_array($pvEntry) && array_key_exists('errors', $pvEntry))
+                                            ? $pvEntry['errors']
+                                            : (is_array($pvEntry) ? $pvEntry : []);
+                                        $pvErrors = array_values(array_unique(array_filter(array_map('intval', $rawPvErrs))));
+                                        sort($pvErrors, SORT_NUMERIC);
+                                        $hasPvRecord = true;
+                                        break 2;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            $stdKey = build_student_key($studentId, $studentName, $grade, $subject);
+            if ($retestToken === '') {
+                $rawHash = hash_hmac('sha256', "{$subject}_{$grade}_{$stdKey}", $secretKey, true);
+                $retestToken = substr(str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($rawHash)), 0, 10);
+            }
+
+            $recordData = [
+                'studentId' => $studentId,
+                'studentName' => $studentName,
+                'studentKey' => $stdKey,
+                'week' => $week,
+                'previewWeek' => $targetPvWeek,
+                'hasHomeworkRecord' => $hasHwRecord,
+                'homeworkErrors' => $hwErrors,
+                'homeworkUpdatedAt' => $hwUpdatedAt,
+                'hasPreviewRecord' => $hasPvRecord,
+                'previewErrors' => $pvErrors,
+                'previewUpdatedAt' => $pvUpdatedAt,
+                'retestToken' => $retestToken
+            ];
+        }
+
+        echo json_encode([
+            'success' => true,
+            'students' => $studentsRoster,
+            'record' => $recordData
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    } catch (Throwable $e) {
+        error_log("get_student_week_record error: " . $e->getMessage());
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => '查询学员错题记录失败'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+}
+
 if ($action === 'encrypt_batch') {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         http_response_code(405);
@@ -701,6 +987,8 @@ if ($action === 'encrypt_batch') {
     $hasPreviewData = !empty($input['has_preview_data']) || !empty($input['hasPreviewData']);
     // 兼容旧客户端：未显式声明时按“有课后数据”处理，保持原有覆盖行为
     $hasHomeworkData = !array_key_exists('has_homework_data', $input) || !empty($input['has_homework_data']);
+    // 单人错题录入模式：仅更新错题题号，保留数据库已有的得分与评语
+    $isErrorsOnly = !empty($input['errors_only']) || !empty($input['errorsOnly']);
     $year = intval($input['year'] ?? 2026);
     $season = trim($input['season'] ?? '秋');
 
@@ -851,13 +1139,14 @@ if ($action === 'encrypt_batch') {
                 if (!empty($existingRows)) {
                     $prevBatchCode = $prevGen['batch_code'] ?? '';
                     $prevCreator = $prevGen['created_by'] ?? '';
+                    $archiveOpType = $isErrorsOnly ? 'manual_edit' : 'batch_overwrite';
 
                     $histStmt = "INSERT INTO `student_record_history`
                         (`record_id`, `batch_id`, `batch_code`, `student_id`, `student_name`, `student_key`, `week_num`,
                          `preview_week_num`, `homework_score`, `preview_score`, `total_score`, `error_count`, `error_questions`,
                          `preview_error_questions`, `teacher_comment`, `preview_comment`,
                          `source_files`, `retest_token`, `created_by`, `operator`, `operation_type`, `record_created_at`, `record_updated_at`, `archived_at`)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'batch_overwrite', ?, ?, NOW())";
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
                     foreach ($existingRows as $ex) {
                         $db->execute($histStmt, [
                             $ex['id'],
@@ -880,6 +1169,7 @@ if ($action === 'encrypt_batch') {
                             $ex['retest_token'] ?? null,
                             $prevCreator,
                             $currentTeacher,
+                            $archiveOpType,
                             $ex['created_at'],
                             $ex['updated_at']
                         ]);
@@ -1046,7 +1336,9 @@ if ($action === 'encrypt_batch') {
             'id' => $studentId, // 学号
             'year' => $year,
             'season' => $season,
-            'u' => time()
+            'u' => time(),
+            '_has_pv' => $studentHasPreview,
+            '_has_hw' => $hasHomeworkData
         ];
 
         // 同步写入或更新 MySQL student_records 表（即使 0 错题也同步更新最新成绩、评语和 0 错题，避免残留旧批改数据！）
@@ -1058,7 +1350,7 @@ if ($action === 'encrypt_batch') {
                 // 未携带预习数据时写 NULL，配合 COALESCE 保留数据库里已有的预习错题与评语
                 $previewErrJson = $studentHasPreview ? json_encode($previewErrors, JSON_UNESCAPED_UNICODE) : null;
                 $previewWeekForDb = $studentHasPreview ? $previewWeekValue : null;
-                $previewCommentForDb = $studentHasPreview ? $previewComment : null;
+                $previewCommentForDb = ($studentHasPreview && (!$isErrorsOnly || $previewComment !== '')) ? $previewComment : null;
                 // 迁移过渡期自愈：若该生本周还是旧格式 Key 的旧行，先原地升级 Key，
                 // 再走 ON DUPLICATE KEY UPDATE，避免同一学生同一周出现新旧两行。
                 if ($legacyKey !== $studentKey) {
@@ -1069,7 +1361,7 @@ if ($action === 'encrypt_batch') {
                     );
                 }
                 $updateParts = [
-                    "`student_id` = VALUES(`student_id`)",
+                    "`student_id` = IF(VALUES(`student_id`) != '', VALUES(`student_id`), `student_id`)",
                     "`student_name` = VALUES(`student_name`)",
                     "`preview_week_num` = COALESCE(VALUES(`preview_week_num`), `preview_week_num`)",
                     "`preview_score` = COALESCE(VALUES(`preview_score`), `preview_score`)",
@@ -1080,15 +1372,27 @@ if ($action === 'encrypt_batch') {
                     "`updated_at` = CURRENT_TIMESTAMP"
                 ];
                 if ($hasHomeworkData) {
-                    array_unshift($updateParts,
-                        "`batch_code` = VALUES(`batch_code`)",
-                        "`source_files` = VALUES(`source_files`)",
-                        "`homework_score` = VALUES(`homework_score`)",
-                        "`total_score` = VALUES(`total_score`)",
-                        "`error_count` = VALUES(`error_count`)",
-                        "`error_questions` = VALUES(`error_questions`)",
-                        "`teacher_comment` = VALUES(`teacher_comment`)"
-                    );
+                    if ($isErrorsOnly) {
+                        array_unshift($updateParts,
+                            "`batch_code` = VALUES(`batch_code`)",
+                            "`source_files` = COALESCE(VALUES(`source_files`), `source_files`)",
+                            "`homework_score` = COALESCE(VALUES(`homework_score`), `homework_score`)",
+                            "`total_score` = COALESCE(VALUES(`total_score`), `total_score`)",
+                            "`error_count` = VALUES(`error_count`)",
+                            "`error_questions` = VALUES(`error_questions`)",
+                            "`teacher_comment` = IF(VALUES(`teacher_comment`) != '', VALUES(`teacher_comment`), `teacher_comment`)"
+                        );
+                    } else {
+                        array_unshift($updateParts,
+                            "`batch_code` = VALUES(`batch_code`)",
+                            "`source_files` = VALUES(`source_files`)",
+                            "`homework_score` = VALUES(`homework_score`)",
+                            "`total_score` = VALUES(`total_score`)",
+                            "`error_count` = VALUES(`error_count`)",
+                            "`error_questions` = VALUES(`error_questions`)",
+                            "`teacher_comment` = VALUES(`teacher_comment`)"
+                        );
+                    }
                 }
                 $updateClause = implode(",\n                            ", $updateParts);
                 $db->execute(
@@ -1118,6 +1422,15 @@ if ($action === 'encrypt_batch') {
                         $currentTeacher
                     ]
                 );
+                // 若本次更新了预习错题，同步更新该生在同一批次下其它关联了相同 preview_week_num 的行，确保预习按专题归档时数据一致
+                if ($studentHasPreview && $previewWeekValue > 0) {
+                    $db->execute(
+                        "UPDATE `student_records`
+                         SET `preview_error_questions` = ?, `updated_at` = CURRENT_TIMESTAMP
+                         WHERE `batch_id` = ? AND `student_key` = ? AND `preview_week_num` = ? AND `week_num` != ?",
+                        [$previewErrJson, $batchId, $studentKey, $previewWeekValue, $week]
+                    );
+                }
                 $validStudentCount++;
                 if ($errCount > 0 || $previewErrCount > 0) {
                     $errorStudentCount++;
@@ -1235,15 +1548,27 @@ if ($action === 'encrypt_batch') {
                     }
                     foreach ($weekUpdates as $wk => $previewEntry) {
                         $previewErrs = $previewEntry['errors'] ?? [];
+                        $targetPvWeek = intval($previewEntry['previewWeek'] ?? $week);
                         if (empty($previewErrs)) {
                             unset($existingPreviewHistory[$stKey][(string)$wk]);
+                            // 同时清理该生名下指向同一 previewWeek 的其它周次槽位，确保全对清零生效
+                            if ($targetPvWeek > 0 && is_array($existingPreviewHistory[$stKey])) {
+                                foreach ($existingPreviewHistory[$stKey] as $existWk => $existEntry) {
+                                    $epw = is_array($existEntry) && isset($existEntry['previewWeek'])
+                                        ? intval($existEntry['previewWeek'])
+                                        : intval($existWk);
+                                    if ($epw === $targetPvWeek) {
+                                        unset($existingPreviewHistory[$stKey][$existWk]);
+                                    }
+                                }
+                            }
                             if (empty($existingPreviewHistory[$stKey])) {
                                 unset($existingPreviewHistory[$stKey]);
                             }
                         } else {
                             $existingPreviewHistory[$stKey][(string)$wk] = [
                                 'errors' => $previewErrs,
-                                'previewWeek' => intval($previewEntry['previewWeek'] ?? $week)
+                                'previewWeek' => $targetPvWeek
                             ];
                         }
                     }
@@ -1270,6 +1595,21 @@ if ($action === 'encrypt_batch') {
                 }
                 $existingTokenMap = json_decode($content, true) ?: [];
                 foreach ($batchTokenMapEntries as $tok => $entry) {
+                    $hasPvEntry = !empty($entry['_has_pv']);
+                    $hasHwEntry = !empty($entry['_has_hw']);
+                    unset($entry['_has_pv'], $entry['_has_hw']);
+                    if (isset($existingTokenMap[$tok]) && is_array($existingTokenMap[$tok])) {
+                        $oldEntry = $existingTokenMap[$tok];
+                        if (!$hasPvEntry) {
+                            if (isset($oldEntry['pw'])) $entry['pw'] = $oldEntry['pw'];
+                            if (isset($oldEntry['pq'])) $entry['pq'] = $oldEntry['pq'];
+                        }
+                        if (!$hasHwEntry) {
+                            if (isset($oldEntry['w']) && intval($oldEntry['w']) > 0) {
+                                $entry['w'] = $oldEntry['w'];
+                            }
+                        }
+                    }
                     $existingTokenMap[$tok] = $entry;
                 }
                 $tokenMapOutput = !empty($existingTokenMap) ? $existingTokenMap : (object)[];

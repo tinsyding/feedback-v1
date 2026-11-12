@@ -52,6 +52,17 @@ function escapeHtml(str) {
 }
 window.escapeHtml = escapeHtml;
 
+function escapeAttr(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+window.escapeAttr = escapeAttr;
+
 const storagePrefix = 'jf-autofeedback:';
 
 function getPreferredTheme() {
