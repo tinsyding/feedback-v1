@@ -13,6 +13,7 @@ feedback/
 - [生产环境与运维说明](./docs/environments.md)
 - [GitHub 配置与 CI/CD 工具链说明](./docs/github.md)
 - [后端 API 接口文档](./docs/api.md)
+- [更新日志 (CHANGELOG)](./CHANGELOG.md)
 - [桌面端企业微信反馈发送器说明](./feedback-v1/tools/sender_py/README.md)
 
 ## 目录说明
