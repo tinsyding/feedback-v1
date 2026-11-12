@@ -5320,6 +5320,11 @@ const seeState = {
     pvQuestions: [],
     hwSelected: new Set(),
     pvSelected: new Set(),
+    hasUserEdited: { homework: false, preview: false },
+    recordStatus: {
+        hw: { hasRecord: false, isUnsubmitted: false, isFullScore: false },
+        pv: { hasRecord: false, isUnsubmitted: false, isFullScore: false }
+    },
     lookupTimer: null,
     syncingInput: false,
     lastResultUrl: '',
@@ -5584,6 +5589,9 @@ function toggleSeeQuestionChip(bankType, qNum) {
     } else {
         selectedSet.add(num);
     }
+    if (seeState.hasUserEdited) {
+        seeState.hasUserEdited[bankType] = true;
+    }
     hideSeeResultPanel();
     syncSeeErrorUI(bankType, false);
 }
@@ -5591,6 +5599,9 @@ function toggleSeeQuestionChip(bankType, qNum) {
 function clearSeeErrors(bankType) {
     const selectedSet = bankType === 'preview' ? seeState.pvSelected : seeState.hwSelected;
     selectedSet.clear();
+    if (seeState.hasUserEdited) {
+        seeState.hasUserEdited[bankType] = true;
+    }
     hideSeeResultPanel();
     syncSeeErrorUI(bankType, false);
 }
@@ -5642,6 +5653,9 @@ function onSeeErrorTextInput(bankType, rawVal) {
     } else {
         seeState.hwSelected = new Set(nums);
     }
+    if (seeState.hasUserEdited) {
+        seeState.hasUserEdited[bankType] = true;
+    }
     hideSeeResultPanel();
     syncSeeErrorUI(bankType, true);
 }
@@ -5663,12 +5677,27 @@ function syncSeeErrorUI(bankType, skipInputSync) {
     // 2. 更新计数徽章
     const badgeEl = document.getElementById(isPreview ? 'see-pv-count-badge' : 'see-hw-count-badge');
     if (badgeEl) {
+        badgeEl.classList.remove('has-err', 'is-unsub', 'is-nodata');
         if (sorted.length > 0) {
             badgeEl.textContent = `错 ${sorted.length} 题（第 ${sorted.join('、')} 题）`;
             badgeEl.classList.add('has-err');
         } else {
-            badgeEl.textContent = '全对（0 题）';
-            badgeEl.classList.remove('has-err');
+            const statusObj = isPreview ? seeState.recordStatus?.pv : seeState.recordStatus?.hw;
+            const isUserEdited = seeState.hasUserEdited?.[bankType];
+
+            if (isUserEdited) {
+                badgeEl.textContent = '设为无错题（0 题）';
+            } else if (statusObj?.isUnsubmitted) {
+                badgeEl.textContent = '未交（0 题）';
+                badgeEl.classList.add('is-unsub');
+            } else if (!statusObj?.hasRecord) {
+                badgeEl.textContent = '未建档（0 题）';
+                badgeEl.classList.add('is-nodata');
+            } else if (statusObj?.isFullScore) {
+                badgeEl.textContent = '全对（0 题）';
+            } else {
+                badgeEl.textContent = '0 题';
+            }
         }
     }
 
@@ -5969,6 +5998,21 @@ async function fetchSeeStudentRecord() {
             studentIdInput.value = rec.studentId;
         }
 
+        // 记录该生在两项上的历史存档状态
+        seeState.recordStatus = {
+            hw: {
+                hasRecord: !!rec.hasHomeworkRecord,
+                isUnsubmitted: !!rec.isHomeworkUnsubmitted,
+                isFullScore: !!rec.isHomeworkFullScore
+            },
+            pv: {
+                hasRecord: !!rec.hasPreviewRecord,
+                isUnsubmitted: !!rec.isPreviewUnsubmitted,
+                isFullScore: !!rec.isPreviewFullScore
+            }
+        };
+        seeState.hasUserEdited = { homework: false, preview: false };
+
         // 回显已有错题
         if (rec.hasHomeworkRecord && Array.isArray(rec.homeworkErrors)) {
             seeState.hwSelected = new Set(rec.homeworkErrors.map(n => parseInt(n, 10)).filter(n => n > 0));
@@ -5984,31 +6028,46 @@ async function fetchSeeStudentRecord() {
         }
         syncSeeErrorUI('preview', false);
 
-        // 状态提示条文案
+        // 状态提示条文案（准确区分未交、全对、未建档与有错题）
         if (statusBox && statusText && statusDot) {
             const parts = [];
+            let hasWarning = false;
+
             if (seeState.mode === 'homework' || seeState.mode === 'both') {
-                if (rec.hasHomeworkRecord) {
-                    const hwStr = rec.homeworkErrors.length > 0 ? `错第 ${rec.homeworkErrors.join('、')} 题` : '全对';
-                    parts.push(`巩固${numToChinese_upload(hwWeek)}已存档（${hwStr}）`);
+                if (rec.isHomeworkUnsubmitted) {
+                    hasWarning = true;
+                    parts.push(`巩固${numToChinese_upload(hwWeek)}：未交作业（点击上方题号补录错题，保存后自动建档）`);
+                } else if (!rec.hasHomeworkRecord) {
+                    parts.push(`巩固${numToChinese_upload(hwWeek)}：当周未建档`);
+                } else if (rec.homeworkErrors.length > 0) {
+                    parts.push(`巩固${numToChinese_upload(hwWeek)}已存档（错第 ${rec.homeworkErrors.join('、')} 题）`);
+                } else if (rec.isHomeworkFullScore) {
+                    parts.push(`巩固${numToChinese_upload(hwWeek)}已存档（全对）`);
                 } else {
-                    parts.push(`巩固${numToChinese_upload(hwWeek)}未建档`);
+                    parts.push(`巩固${numToChinese_upload(hwWeek)}已存档（无错题）`);
                 }
             }
+
             if (seeState.mode === 'preview' || seeState.mode === 'both') {
-                if (rec.hasPreviewRecord) {
-                    const pvStr = rec.previewErrors.length > 0 ? `错第 ${rec.previewErrors.join('、')} 题` : '全对';
-                    parts.push(`预习${numToChinese_upload(pvWeek)}已存档（${pvStr}）`);
+                if (rec.isPreviewUnsubmitted) {
+                    hasWarning = true;
+                    parts.push(`预习${numToChinese_upload(pvWeek)}：未交预习（点击上方题号补录错题）`);
+                } else if (!rec.hasPreviewRecord) {
+                    parts.push(`预习${numToChinese_upload(pvWeek)}：当周未建档`);
+                } else if (rec.previewErrors.length > 0) {
+                    parts.push(`预习${numToChinese_upload(pvWeek)}已存档（错第 ${rec.previewErrors.join('、')} 题）`);
+                } else if (rec.isPreviewFullScore) {
+                    parts.push(`预习${numToChinese_upload(pvWeek)}已存档（全对）`);
                 } else {
-                    parts.push(`预习${numToChinese_upload(pvWeek)}未建档`);
+                    parts.push(`预习${numToChinese_upload(pvWeek)}已存档（无错题）`);
                 }
             }
 
             const hasExisting = ((seeState.mode === 'homework' || seeState.mode === 'both') && rec.hasHomeworkRecord)
                 || ((seeState.mode === 'preview' || seeState.mode === 'both') && rec.hasPreviewRecord);
 
-            statusDot.className = 'see-status-dot ' + (hasExisting ? 'brand' : '');
-            statusText.textContent = `${parts.join(' · ')}，保存后仅更新当前所选模块`;
+            statusDot.className = 'see-status-dot ' + (hasWarning ? 'warning' : (hasExisting ? 'brand' : ''));
+            statusText.textContent = parts.join(' · ');
             statusBox.style.display = 'flex';
         }
     } catch (e) {
@@ -6166,6 +6225,16 @@ async function submitSingleErrorEntry(triggerBtn) {
     const btn = triggerBtn || document.getElementById('see-save-btn');
     await withButtonLoading(btn, '正在保存...', async () => {
         try {
+            // 若原本处于未交状态，补录错题后自动生成已补交评语，彻底自愈清除“未交”标记
+            const hwWasUnsub = !!seeState.recordStatus?.hw?.isUnsubmitted;
+            const pvWasUnsub = !!seeState.recordStatus?.pv?.isUnsubmitted;
+            const hwCommentPayload = hwWasUnsub
+                ? (hwErrors.length > 0 ? `作业已补交，错题题号：${hwErrors.join('、')}` : '作业已补交订正，全部正确')
+                : '';
+            const pvCommentPayload = pvWasUnsub
+                ? (pvErrors.length > 0 ? `预习已补交，错题题号：${pvErrors.join('、')}` : '预习已补交，全部正确')
+                : '';
+
             const payload = {
                 year: window.semesterYear || 2026,
                 season: window.defaultSeason || 'autumn',
@@ -6192,8 +6261,8 @@ async function submitSingleErrorEntry(triggerBtn) {
                         homeworkScore: null,
                         previewScore: null,
                         totalScore: null,
-                        comment: '',
-                        previewComment: ''
+                        comment: hwCommentPayload,
+                        previewComment: pvCommentPayload
                     }
                 ]
             };

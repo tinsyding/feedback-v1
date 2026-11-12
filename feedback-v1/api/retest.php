@@ -818,6 +818,10 @@ if ($action === 'get_student_week_record') {
             $hwErrors = [];
             $hasHwRecord = false;
             $hwUpdatedAt = '';
+            $hwScore = null;
+            $hwComment = '';
+            $isHwUnsubmitted = false;
+            $isHwFullScore = false;
             $retestToken = '';
 
             if ($week > 0) {
@@ -837,14 +841,35 @@ if ($action === 'get_student_week_record') {
                     $eq = json_decode($hr['error_questions'] ?? '[]', true);
                     $errs = is_array($eq) ? array_values(array_unique(array_filter(array_map('intval', $eq)))) : [];
                     sort($errs, SORT_NUMERIC);
+                    $cComment = trim((string)($hr['teacher_comment'] ?? ''));
+                    $cScore = ($hr['homework_score'] !== null && $hr['homework_score'] !== '') ? floatval($hr['homework_score']) : null;
                     $hasHw = !empty($errs)
-                        || ($hr['homework_score'] !== null)
-                        || trim((string)($hr['teacher_comment'] ?? '')) !== ''
+                        || ($cScore !== null)
+                        || $cComment !== ''
                         || ((int)($hr['error_count'] ?? 0) > 0);
                     if ($hasHw || !$hasHwRecord) {
                         $hwErrors = $errs;
                         $hasHwRecord = $hasHw;
+                        $hwScore = $cScore;
+                        $hwComment = $cComment;
                         $hwUpdatedAt = !empty($hr['updated_at']) ? date('m-d H:i', strtotime($hr['updated_at'])) : '';
+
+                        // 准确判定是否属于未交作业
+                        $unsubMatch = preg_match('/(?:未交|未提交|缺交|未查阅|缺勤)/u', $cComment);
+                        if ($unsubMatch) {
+                            $isHwUnsubmitted = true;
+                        } elseif (empty($errs) && ($cScore === null || $cScore <= 0) && ($cComment === '' || $unsubMatch)) {
+                            $isHwUnsubmitted = true;
+                        } else {
+                            $isHwUnsubmitted = false;
+                        }
+
+                        // 准确判定是否真正满分全对
+                        if (!$isHwUnsubmitted && empty($errs)) {
+                            if (($cScore !== null && $cScore > 0) || preg_match('/(?:全对|全部正确|零失误|无错题|免除加练)/u', $cComment)) {
+                                $isHwFullScore = true;
+                            }
+                        }
                         if ($hasHw) break;
                     }
                 }
@@ -860,6 +885,8 @@ if ($action === 'get_student_week_record') {
                                 $hwErrors = array_values(array_unique(array_filter(array_map('intval', $merged[(string)$week]))));
                                 sort($hwErrors, SORT_NUMERIC);
                                 $hasHwRecord = true;
+                                $isHwUnsubmitted = false;
+                                $isHwFullScore = empty($hwErrors);
                             }
                         }
                     }
@@ -869,12 +896,16 @@ if ($action === 'get_student_week_record') {
             $pvErrors = [];
             $hasPvRecord = false;
             $pvUpdatedAt = '';
+            $pvScore = null;
+            $pvComment = '';
+            $isPvUnsubmitted = false;
+            $isPvFullScore = false;
             $targetPvWeek = $previewWeek > 0 ? $previewWeek : $week;
 
             if ($targetPvWeek > 0) {
                 $pvParams = array_merge([$subject, $grade, $targetPvWeek, $targetPvWeek], $studentParams, [$tier]);
                 $pvRows = $db->fetchAll(
-                    "SELECT sr.preview_error_questions, sr.preview_week_num, sr.retest_token, sr.updated_at, cb.tier
+                    "SELECT sr.preview_error_questions, sr.preview_score, sr.preview_comment, sr.preview_week_num, sr.retest_token, sr.updated_at, cb.tier
                      FROM `student_records` sr
                      INNER JOIN `class_batches` cb ON sr.batch_id = cb.id
                      WHERE cb.subject = ? AND cb.grade = ?
@@ -887,12 +918,31 @@ if ($action === 'get_student_week_record') {
                     if ($retestToken === '' && !empty($pr['retest_token'])) {
                         $retestToken = trim((string)$pr['retest_token']);
                     }
-                    if ($pr['preview_error_questions'] !== null) {
-                        $peq = json_decode($pr['preview_error_questions'], true);
+                    $cScore = ($pr['preview_score'] !== null && $pr['preview_score'] !== '') ? floatval($pr['preview_score']) : null;
+                    $cComment = trim((string)($pr['preview_comment'] ?? ''));
+                    if ($pr['preview_error_questions'] !== null || $cScore !== null || $cComment !== '') {
+                        $peq = json_decode($pr['preview_error_questions'] ?? '[]', true);
                         $pvErrors = is_array($peq) ? array_values(array_unique(array_filter(array_map('intval', $peq)))) : [];
                         sort($pvErrors, SORT_NUMERIC);
                         $hasPvRecord = true;
+                        $pvScore = $cScore;
+                        $pvComment = $cComment;
                         $pvUpdatedAt = !empty($pr['updated_at']) ? date('m-d H:i', strtotime($pr['updated_at'])) : '';
+
+                        $unsubMatch = preg_match('/(?:未交|未提交|缺交|未查阅|缺勤)/u', $cComment);
+                        if ($unsubMatch) {
+                            $isPvUnsubmitted = true;
+                        } elseif (empty($pvErrors) && ($cScore === null || $cScore <= 0) && ($cComment === '' || $unsubMatch)) {
+                            $isPvUnsubmitted = true;
+                        } else {
+                            $isPvUnsubmitted = false;
+                        }
+
+                        if (!$isPvUnsubmitted && empty($pvErrors)) {
+                            if (($cScore !== null && $cScore > 0) || preg_match('/(?:全对|全部正确|零失误|无错题|免除加练)/u', $cComment)) {
+                                $isPvFullScore = true;
+                            }
+                        }
                         break;
                     }
                 }
@@ -916,6 +966,8 @@ if ($action === 'get_student_week_record') {
                                         $pvErrors = array_values(array_unique(array_filter(array_map('intval', $rawPvErrs))));
                                         sort($pvErrors, SORT_NUMERIC);
                                         $hasPvRecord = true;
+                                        $isPvUnsubmitted = false;
+                                        $isPvFullScore = empty($pvErrors);
                                         break 2;
                                     }
                                 }
@@ -939,9 +991,17 @@ if ($action === 'get_student_week_record') {
                 'previewWeek' => $targetPvWeek,
                 'hasHomeworkRecord' => $hasHwRecord,
                 'homeworkErrors' => $hwErrors,
+                'homeworkScore' => $hwScore,
+                'homeworkComment' => $hwComment,
+                'isHomeworkUnsubmitted' => $isHwUnsubmitted,
+                'isHomeworkFullScore' => $isHwFullScore,
                 'homeworkUpdatedAt' => $hwUpdatedAt,
                 'hasPreviewRecord' => $hasPvRecord,
                 'previewErrors' => $pvErrors,
+                'previewScore' => $pvScore,
+                'previewComment' => $pvComment,
+                'isPreviewUnsubmitted' => $isPvUnsubmitted,
+                'isPreviewFullScore' => $isPvFullScore,
                 'previewUpdatedAt' => $pvUpdatedAt,
                 'retestToken' => $retestToken
             ];

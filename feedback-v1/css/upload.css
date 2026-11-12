@@ -2633,6 +2633,22 @@ select.modern-input option {
     color: var(--accent-ink, #6b9bff);
 }
 
+.see-count-badge.is-unsub {
+    color: #d97706;
+    background: rgba(217, 119, 6, 0.1);
+    padding: 2px 7px;
+    border-radius: var(--radius-sm, 6px);
+    border: 1px solid rgba(217, 119, 6, 0.25);
+}
+
+.see-count-badge.is-nodata {
+    color: var(--text-tertiary);
+}
+
+.see-status-dot.warning {
+    background: #d97706;
+}
+
 .see-clear-btn {
     height: 28px;
     padding: 0 10px;
