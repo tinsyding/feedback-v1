@@ -18,17 +18,6 @@ if (!file_exists($dataFile)) {
                     "desc" => "无需上传整班文件，在首页即可直接为单个学员录入或补录预习与课后错题，并即时生成专属错题本链接与薄弱考点家校反馈。"
                 ]
             ]
-        ],
-        [
-            "id" => "update_2026_03_21",
-            "version" => "v1.1.0",
-            "date" => "2026-03-21",
-            "title" => "系统更新提示",
-            "active" => false,
-            "items" => [
-                ["title" => "复姓反馈显示优化", "desc" => "全面优化了带有复姓（如：诸葛、欧阳）的学生的反馈系统显示与逻辑。"],
-                ["title" => "全新接入退课识别（可选）", "desc" => "新增通过 jf-alpha.com 网站的实施名单来排除已退课的学生，避免生成冗余反馈。此功能为可选使用。"]
-            ]
         ]
     ];
     file_put_contents($dataFile, json_encode($initialData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
