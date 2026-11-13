@@ -110,17 +110,49 @@ function saveRevokedTokens(array $map) {
 /**
  * 获取指定周次题目的 PDF 列表 (优先从 MySQL qbank_questions 查询，回退到 JSON 文件)
  */
+function parseRetestQuestionMeta($rawMeta, $qNum) {
+    if (empty($rawMeta)) return ['groupNums' => [], 'box' => null];
+    if (is_string($rawMeta)) {
+        $rawMeta = @json_decode($rawMeta, true);
+    }
+    if (!is_array($rawMeta)) return ['groupNums' => [], 'box' => null];
+
+    $groupNums = [];
+    if (!empty($rawMeta['groupNums']) && is_array($rawMeta['groupNums'])) {
+        $groupNums = array_values(array_unique(array_filter(array_map('intval', $rawMeta['groupNums']), function($n) {
+            return $n > 0;
+        })));
+        sort($groupNums);
+    }
+
+    $box = null;
+    if (!empty($rawMeta['box']) && is_array($rawMeta['box'])) {
+        $b = $rawMeta['box'];
+        if (isset($b['x'], $b['y'], $b['w'], $b['h'])) {
+            $box = [
+                'num' => intval($qNum),
+                'pageOffset' => isset($b['pageOffset']) ? max(0, intval($b['pageOffset'])) : 0,
+                'x' => max(0.0, min(1.0, round(floatval($b['x']), 4))),
+                'y' => max(0.0, min(1.0, round(floatval($b['y']), 4))),
+                'w' => max(0.005, min(1.0, round(floatval($b['w']), 4))),
+                'h' => max(0.005, min(1.0, round(floatval($b['h']), 4)))
+            ];
+        }
+    }
+    return ['groupNums' => $groupNums, 'box' => $box];
+}
+
 function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $year = null, $season = null, $bankType = 'homework') {
     $bankType = $bankType === 'preview' ? 'preview' : 'homework';
     $pdfList = [];
-    $uniquePdfs = []; // 防止 3,4,5 题共享同一 PDF 时重复添加
+    $uniquePdfs = []; // 映射 exerciseUrl => $pdfList 索引，支持同篇大题多错题聚合与去重
 
     // 1. 优先从 MySQL qbank_questions 查询
     try {
         $db = Database::getInstance();
         if ($db && !empty($errorNums)) {
             $inNums = implode(',', array_map('intval', $errorNums));
-            $whereParts = ["`bank_type` = ?", "`subject` = ?", "`grade` = ?", "`tier` = ?", "`week` = ?", "`question_num` IN ({$inNums})"];
+            $whereParts = ["`bank_type` = ?", "`subject` = ?", "`grade` = ?", "`tier` = ?", "`week` = ?"];
             $params = [$bankType, $subject, $grade, $tier, intval($weekNum)];
 
             if ($year) {
@@ -134,11 +166,34 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                 $params[] = $seasonMap[$season] ?? $season;
             }
 
-            $sql = "SELECT `question_num`, `topic`, `video_url`, `exercise_pdf`, `answer_pdf`
+            $sql = "SELECT `question_num`, `topic`, `video_url`, `question_meta`, `exercise_pdf`, `answer_pdf`
                     FROM `qbank_questions`
                     WHERE " . implode(' AND ', $whereParts) . "
                     ORDER BY `question_num` ASC";
-            $rows = $db->fetchAll($sql, $params);
+            $allWeekRows = $db->fetchAll($sql, $params);
+            if (DB::getLastError() !== null) {
+                $fallbackSql = "SELECT `question_num`, `topic`, `video_url`, `exercise_pdf`, `answer_pdf`
+                                FROM `qbank_questions`
+                                WHERE " . implode(' AND ', $whereParts) . "
+                                ORDER BY `question_num` ASC";
+                $allWeekRows = $db->fetchAll($fallbackSql, $params);
+            }
+
+            // 按 exercise_pdf 统计同篇大题包含的全部题号（兼容未显式写 groupNums 的共享 PDF 题目）
+            $pdfSharedNumsMap = [];
+            $errNumSet = array_flip(array_map('intval', $errorNums));
+            $rows = [];
+            foreach ($allWeekRows as $wr) {
+                $qn = intval($wr['question_num']);
+                $exU = trim($wr['exercise_pdf'] ?? '');
+                if ($exU !== '' && $qn > 0) {
+                    if (!isset($pdfSharedNumsMap[$exU])) $pdfSharedNumsMap[$exU] = [];
+                    $pdfSharedNumsMap[$exU][] = $qn;
+                }
+                if (isset($errNumSet[$qn])) {
+                    $rows[] = $wr;
+                }
+            }
 
             // 若为课后巩固题，查询是否有对应的举一反三变式题
             $varMap = [];
@@ -224,20 +279,65 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                 }
                 foreach ($errorNums as $errNum) {
                     $qNum = intval($errNum);
-                    // 1. 先加入课后巩固原题
+                    // 1. 先加入或归并课后巩固/预习原题
                     if (isset($rowMap[$qNum])) {
                         $r = $rowMap[$qNum];
                         $exerciseUrl = $r['exercise_pdf'] ?: null;
+                        $metaParsed = parseRetestQuestionMeta($r['question_meta'] ?? null, $qNum);
+                        $inferredGroup = !empty($metaParsed['groupNums'])
+                            ? $metaParsed['groupNums']
+                            : ($exerciseUrl && !empty($pdfSharedNumsMap[$exerciseUrl]) ? $pdfSharedNumsMap[$exerciseUrl] : [$qNum]);
+                        sort($inferredGroup);
+                        $curTopic = trim($r['topic'] ?? '');
+
                         if ($exerciseUrl && !isset($uniquePdfs[$exerciseUrl])) {
+                            $newIdx = count($pdfList);
                             $pdfList[] = [
-                                'errorNum' => $errNum,
-                                'topic' => $r['topic'] ?? '',
+                                'errorNum' => $qNum,
+                                'errorNums' => [$qNum],
+                                'groupNums' => $inferredGroup,
+                                'errorBoxes' => $metaParsed['box'] ? [$metaParsed['box']] : [],
+                                'subTopics' => $curTopic !== '' ? [$qNum => $curTopic] : [],
+                                'topic' => $curTopic,
                                 'videoUrl' => $r['video_url'] ?: null,
                                 'exercisePdf' => $exerciseUrl,
                                 'answerPdf' => $r['answer_pdf'] ?: null,
                                 'sourceType' => $bankType
                             ];
-                            $uniquePdfs[$exerciseUrl] = true;
+                            $uniquePdfs[$exerciseUrl] = $newIdx;
+                        } elseif ($exerciseUrl && isset($uniquePdfs[$exerciseUrl]) && is_int($uniquePdfs[$exerciseUrl])) {
+                            $existIdx = $uniquePdfs[$exerciseUrl];
+                            if (isset($pdfList[$existIdx]) && empty($pdfList[$existIdx]['isVariation'])) {
+                                if (!in_array($qNum, $pdfList[$existIdx]['errorNums'], true)) {
+                                    $pdfList[$existIdx]['errorNums'][] = $qNum;
+                                    sort($pdfList[$existIdx]['errorNums']);
+                                }
+                                $mergedGroup = array_values(array_unique(array_merge($pdfList[$existIdx]['groupNums'] ?? [], $inferredGroup)));
+                                sort($mergedGroup);
+                                $pdfList[$existIdx]['groupNums'] = $mergedGroup;
+                                if ($metaParsed['box']) {
+                                    $pdfList[$existIdx]['errorBoxes'][] = $metaParsed['box'];
+                                }
+                                if ($curTopic !== '') {
+                                    $pdfList[$existIdx]['subTopics'][$qNum] = $curTopic;
+                                    $uniqueTopics = array_values(array_unique(array_values($pdfList[$existIdx]['subTopics'])));
+                                    if (count($uniqueTopics) === 1) {
+                                        $pdfList[$existIdx]['topic'] = $uniqueTopics[0];
+                                    } else {
+                                        $topicParts = [];
+                                        foreach ($pdfList[$existIdx]['subTopics'] as $sNum => $sTpc) {
+                                            $topicParts[] = "[{$sNum}] {$sTpc}";
+                                        }
+                                        $pdfList[$existIdx]['topic'] = implode(' · ', $topicParts);
+                                    }
+                                }
+                                if (empty($pdfList[$existIdx]['videoUrl']) && !empty($r['video_url'])) {
+                                    $pdfList[$existIdx]['videoUrl'] = $r['video_url'];
+                                }
+                                if (empty($pdfList[$existIdx]['answerPdf']) && !empty($r['answer_pdf'])) {
+                                    $pdfList[$existIdx]['answerPdf'] = $r['answer_pdf'];
+                                }
+                            }
                         }
                     }
                     // 2. 紧接着排入该题对应的举一反三题目
@@ -311,21 +411,69 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
     }
 
     if ($foundEntry && isset($foundEntry['questions'])) {
+        $jsonSharedMap = [];
+        foreach ($foundEntry['questions'] as $jq) {
+            $jExUrl = $jq['exercisePdf']['url'] ?? '';
+            $jIds = array_filter(array_map('intval', explode(',', str_replace(['，', '、'], ',', (string)($jq['id'] ?? '')))));
+            if ($jExUrl !== '' && !empty($jIds)) {
+                if (!isset($jsonSharedMap[$jExUrl])) $jsonSharedMap[$jExUrl] = [];
+                $jsonSharedMap[$jExUrl] = array_values(array_unique(array_merge($jsonSharedMap[$jExUrl], $jIds)));
+                sort($jsonSharedMap[$jExUrl]);
+            }
+        }
         foreach ($errorNums as $errNum) {
+            $qNum = intval($errNum);
             foreach ($foundEntry['questions'] as $q) {
                 $ids = array_map('trim', explode(',', str_replace(['，', '、'], ',', (string)$q['id'])));
                 if (in_array((string)$errNum, $ids)) {
                     $exerciseUrl = $q['exercisePdf']['url'] ?? null;
+                    $metaParsed = parseRetestQuestionMeta($q['questionMeta'] ?? ($q['question_meta'] ?? null), $qNum);
+                    $inferredGroup = !empty($metaParsed['groupNums'])
+                        ? $metaParsed['groupNums']
+                        : ($exerciseUrl && !empty($jsonSharedMap[$exerciseUrl]) ? $jsonSharedMap[$exerciseUrl] : array_map('intval', $ids));
+                    sort($inferredGroup);
+                    $curTopic = trim($q['topic'] ?? '');
+
                     if ($exerciseUrl && !isset($uniquePdfs[$exerciseUrl])) {
+                        $newIdx = count($pdfList);
                         $pdfList[] = [
-                            'errorNum' => $errNum,
-                            'topic' => $q['topic'] ?? '',
+                            'errorNum' => $qNum,
+                            'errorNums' => [$qNum],
+                            'groupNums' => $inferredGroup,
+                            'errorBoxes' => $metaParsed['box'] ? [$metaParsed['box']] : [],
+                            'subTopics' => $curTopic !== '' ? [$qNum => $curTopic] : [],
+                            'topic' => $curTopic,
                             'videoUrl' => $q['videoUrl'] ?? ($q['video_url'] ?? null),
                             'exercisePdf' => $exerciseUrl,
                             'answerPdf' => $q['answerPdf']['url'] ?? null,
                             'sourceType' => $bankType
                         ];
-                        $uniquePdfs[$exerciseUrl] = true;
+                        $uniquePdfs[$exerciseUrl] = $newIdx;
+                    } elseif ($exerciseUrl && isset($uniquePdfs[$exerciseUrl]) && is_int($uniquePdfs[$exerciseUrl])) {
+                        $existIdx = $uniquePdfs[$exerciseUrl];
+                        if (!in_array($qNum, $pdfList[$existIdx]['errorNums'], true)) {
+                            $pdfList[$existIdx]['errorNums'][] = $qNum;
+                            sort($pdfList[$existIdx]['errorNums']);
+                        }
+                        $mergedGroup = array_values(array_unique(array_merge($pdfList[$existIdx]['groupNums'] ?? [], $inferredGroup)));
+                        sort($mergedGroup);
+                        $pdfList[$existIdx]['groupNums'] = $mergedGroup;
+                        if ($metaParsed['box']) {
+                            $pdfList[$existIdx]['errorBoxes'][] = $metaParsed['box'];
+                        }
+                        if ($curTopic !== '') {
+                            $pdfList[$existIdx]['subTopics'][$qNum] = $curTopic;
+                            $uniqueTopics = array_values(array_unique(array_values($pdfList[$existIdx]['subTopics'])));
+                            if (count($uniqueTopics) === 1) {
+                                $pdfList[$existIdx]['topic'] = $uniqueTopics[0];
+                            } else {
+                                $topicParts = [];
+                                foreach ($pdfList[$existIdx]['subTopics'] as $sNum => $sTpc) {
+                                    $topicParts[] = "[{$sNum}] {$sTpc}";
+                                }
+                                $pdfList[$existIdx]['topic'] = implode(' · ', $topicParts);
+                            }
+                        }
                     }
                     break;
                 }

@@ -12,7 +12,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261112-1';
+            const v = '20261113-1';
             document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/question-bank.css?v=${v}">`);
@@ -643,7 +643,7 @@
                 <div class="page-lightbox-title-wrap">
                     <h3 class="dialog-title" id="lightbox-title">页面高清预览</h3>
                     <div class="lightbox-label-editor" id="lightbox-label-editor-standard">
-                        <label for="lightbox-page-label">对应题号</label>
+                        <label for="lightbox-page-label" id="lightbox-page-label-text">起始题号</label>
                         <div class="lightbox-stepper-controls">
                             <button type="button" class="stepper-btn sm" onclick="stepLightboxLabel(-1, event)" title="题号减 1">
                                 <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
@@ -653,7 +653,15 @@
                                 <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                             </button>
                         </div>
+                        <span class="lightbox-group-range-pill" id="lightbox-group-range-pill" style="display: none;"></span>
                     </div>
+                    <button type="button" class="lightbox-bigq-toggle-btn" id="lightbox-bigq-toggle-btn" onclick="toggleLightboxBoxMode()" title="将本页设为大题，按顺序拉框标出各小问位置与题号">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                            <path d="M9 3v18M3 9h6M3 15h6"></path>
+                        </svg>
+                        <span id="lightbox-bigq-toggle-text">设为大题（框选小问）</span>
+                    </button>
                 </div>
                 <div class="page-lightbox-controls">
                     <button type="button" class="lightbox-btn" onclick="zoomLightboxImage(-0.25)" title="缩小 (-)">
@@ -671,12 +679,40 @@
                     </button>
                 </div>
             </div>
+            <div class="lightbox-boxmode-bar" id="lightbox-boxmode-bar" style="display: none;">
+                <div class="lightbox-boxmode-info">
+                    <span class="lightbox-boxmode-dot"></span>
+                    <span class="lightbox-boxmode-guide" id="lightbox-boxmode-guide">按住鼠标在卷面上依次拖拽拉框，每个框自动对应一问</span>
+                    <span class="lightbox-boxmode-summary" id="lightbox-boxmode-summary">尚未框选小问</span>
+                </div>
+                <div class="lightbox-boxmode-actions">
+                    <button type="button" class="btn sm secondary" id="lightbox-box-undo-btn" onclick="undoLastPageBox()" disabled title="撤销本页最后一个选框">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"></path><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path></svg>
+                        <span>撤销上一框</span>
+                    </button>
+                    <button type="button" class="btn sm secondary" id="lightbox-box-clear-btn" onclick="clearCurrentPageBoxes()" disabled title="清空本页全部小问选框">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path></svg>
+                        <span>清空本页</span>
+                    </button>
+                    <button type="button" class="btn sm secondary" id="lightbox-box-extend-btn" onclick="extendBigQuestionToNextPage()" title="若本篇大题跨到下一页，点击将下一页并入本大题并继续拉框">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5l7 7-7 7"></path></svg>
+                        <span>下一页续框同大题</span>
+                    </button>
+                    <button type="button" class="btn sm primary" onclick="finishLightboxBoxMode()">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                        <span>完成框选</span>
+                    </button>
+                </div>
+            </div>
             <div class="page-lightbox-body" id="lightbox-body">
                 <button type="button" class="lightbox-nav-btn prev" id="lightbox-prev-btn" onclick="navigateLightbox(-1)" title="上一页 (←)">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg>
                 </button>
                 <div class="page-lightbox-viewport" id="lightbox-viewport">
-                    <img id="lightbox-img" src="" alt="页面高清大图">
+                    <div class="lightbox-stage" id="lightbox-stage">
+                        <img id="lightbox-img" src="" alt="页面高清大图" draggable="false">
+                        <div class="lightbox-box-layer" id="lightbox-box-layer"></div>
+                    </div>
                 </div>
                 <button type="button" class="lightbox-nav-btn next" id="lightbox-next-btn" onclick="navigateLightbox(1)" title="下一页 (→)">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"></polyline></svg>
@@ -684,7 +720,7 @@
             </div>
             <div class="page-lightbox-footer">
                 <span class="lightbox-nav-info" id="lightbox-nav-info">第 1 / 1 页</span>
-                <span class="lightbox-hint">快捷键：← 上一页 | → 下一页 | ESC 退出</span>
+                <span class="lightbox-hint" id="lightbox-footer-hint">快捷键：← 上一页 | → 下一页 | ESC 退出</span>
             </div>
         </div>
     </div>
@@ -700,7 +736,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261112-1';
+            const v = '20261113-1';
             document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
             document.write(`<script src="js/common.js?v=${v}"><\/script>`);
             document.write(`<script src="js/auth.js?v=${v}"><\/script>`);

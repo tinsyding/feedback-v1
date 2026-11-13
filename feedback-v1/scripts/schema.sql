@@ -187,6 +187,7 @@ CREATE TABLE IF NOT EXISTS `qbank_questions` (
   `sub_num` int(11) NOT NULL DEFAULT '1' COMMENT '变式题序号 (1, 2...)',
   `topic` text COLLATE utf8mb4_unicode_ci,
   `video_url` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+  `question_meta` text COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '大题分组及小问框选坐标JSON(groupNums/box)',
   `exercise_pdf` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT '' COMMENT '题目PDF路径',
   `exercise_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT '' COMMENT '题目文件原名',
   `exercise_thumb` mediumtext COLLATE utf8mb4_unicode_ci COMMENT '题目缩略图Base64',

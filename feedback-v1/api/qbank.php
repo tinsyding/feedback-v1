@@ -57,11 +57,53 @@ function normalizeSeason($season, $fallback = '秋') {
 $defaultSeasonZh = normalizeSeason($defaultSeasonCode, '春');
 
 /**
- * 自动检测并补齐 qbank_questions 表结构 (004_shared_topic_variation: parent_question_nums)
+ * 清洗并规范化大题小问元数据 (groupNums, box)
+ */
+function sanitizeQuestionMeta($rawMeta) {
+    if (empty($rawMeta)) return null;
+    if (is_string($rawMeta)) {
+        $rawMeta = @json_decode($rawMeta, true);
+    }
+    if (!is_array($rawMeta)) return null;
+
+    $clean = [];
+    if (!empty($rawMeta['groupNums']) && is_array($rawMeta['groupNums'])) {
+        $gNums = array_values(array_unique(array_filter(array_map('intval', $rawMeta['groupNums']), function($n) {
+            return $n > 0 && $n <= 500;
+        })));
+        sort($gNums);
+        if (count($gNums) >= 1) {
+            $clean['groupNums'] = $gNums;
+        }
+    }
+
+    if (!empty($rawMeta['box']) && is_array($rawMeta['box'])) {
+        $b = $rawMeta['box'];
+        $x = isset($b['x']) ? max(0.0, min(1.0, round(floatval($b['x']), 4))) : null;
+        $y = isset($b['y']) ? max(0.0, min(1.0, round(floatval($b['y']), 4))) : null;
+        $w = isset($b['w']) ? max(0.005, min(1.0, round(floatval($b['w']), 4))) : null;
+        $h = isset($b['h']) ? max(0.005, min(1.0, round(floatval($b['h']), 4))) : null;
+        $pageOffset = isset($b['pageOffset']) ? max(0, intval($b['pageOffset'])) : 0;
+        if ($x !== null && $y !== null && $w !== null && $h !== null) {
+            $clean['box'] = [
+                'pageOffset' => $pageOffset,
+                'x' => $x,
+                'y' => $y,
+                'w' => $w,
+                'h' => $h
+            ];
+        }
+    }
+
+    return !empty($clean) ? $clean : null;
+}
+
+/**
+ * 自动检测并补齐 qbank_questions 表结构 (004_shared_topic_variation & 005_big_question_meta)
  * 若此前因缺少字段导致 MySQL 事务回滚而仅写入了 JSON 灾备文件，自动将近期 JSON 灾备恢复回数据库。
  */
 function ensureQbankSchema($dataDir, $defaultYear, $defaultSeason) {
-    $flagFile = $dataDir . '/.schema_v4_migrated';
+    $flagFile = $dataDir . '/.schema_v5_migrated';
     if (file_exists($flagFile)) {
         return;
     }
@@ -76,6 +118,14 @@ function ensureQbankSchema($dataDir, $defaultYear, $defaultSeason) {
         }
         try {
             $db->exec("INSERT IGNORE INTO `schema_migrations` (`version`) VALUES ('004_shared_topic_variation')");
+        } catch (Throwable $ignore) {}
+
+        $colMeta = DB::fetchOne("SHOW COLUMNS FROM `qbank_questions` LIKE 'question_meta'");
+        if (!$colMeta) {
+            $db->exec("ALTER TABLE `qbank_questions` ADD COLUMN `question_meta` TEXT NULL DEFAULT NULL COMMENT '大题分组及小问框选坐标JSON(groupNums/box)' AFTER `video_url`");
+        }
+        try {
+            $db->exec("INSERT IGNORE INTO `schema_migrations` (`version`) VALUES ('005_big_question_meta')");
         } catch (Throwable $ignore) {}
 
         // 扫描最近 48 小时内写入的 JSON 灾备文件，恢复因字段缺失回滚而未入库的专题数据
@@ -443,7 +493,7 @@ try {
                     if ($qbank) {
                         $qRows = DB::fetchAll(
                             "SELECT `question_num` AS `id`, `parent_question_num` AS `parentQuestionNum`, `parent_question_nums` AS `parentQuestionNums`, `sub_num` AS `subNum`,
-                                    `topic`, `video_url`, `exercise_pdf`, `exercise_name`, `exercise_thumb`,
+                                    `topic`, `video_url`, `question_meta`, `exercise_pdf`, `exercise_name`, `exercise_thumb`,
                                     `answer_pdf`, `answer_name`, `answer_thumb`
                              FROM `qbank_questions`
                              WHERE `qbank_id` = ?
@@ -473,8 +523,9 @@ try {
                                 $parsedParentNums = [intval($qr['parentQuestionNum'])];
                             }
                             $primaryParentNum = $qr['parentQuestionNum'] !== null ? intval($qr['parentQuestionNum']) : (!empty($parsedParentNums) ? $parsedParentNums[0] : null);
+                            $qMeta = sanitizeQuestionMeta($qr['question_meta'] ?? null);
 
-                            $questions[] = [
+                            $qObj = [
                                 'id' => intval($qr['id']),
                                 'parentQuestionNum' => $primaryParentNum,
                                 'parentQuestionNums' => $parsedParentNums,
@@ -494,6 +545,10 @@ try {
                                     'thumb' => $qr['answer_thumb'] ?? ''
                                 ]
                             ];
+                            if ($qMeta) {
+                                $qObj['questionMeta'] = $qMeta;
+                            }
+                            $questions[] = $qObj;
                         }
 
                         $operator = !empty($qbank['updated_by']) ? $qbank['updated_by'] : ($qbank['created_by'] ?? '');
@@ -646,16 +701,17 @@ try {
                         $keepQnums = [];
                         $stmtQuestion = $db->prepare("
                             INSERT INTO `qbank_questions`
-                                (`qbank_id`, `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week`, `question_num`, `parent_question_num`, `parent_question_nums`, `sub_num`, `topic`, `video_url`,
+                                (`qbank_id`, `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week`, `question_num`, `parent_question_num`, `parent_question_nums`, `sub_num`, `topic`, `video_url`, `question_meta`,
                                  `exercise_pdf`, `exercise_name`, `exercise_thumb`,
                                  `answer_pdf`, `answer_name`, `answer_thumb`, `created_by`, `updated_by`, `updated_at`)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                             ON DUPLICATE KEY UPDATE
                                 `parent_question_num` = VALUES(`parent_question_num`),
                                 `parent_question_nums` = VALUES(`parent_question_nums`),
                                 `sub_num` = VALUES(`sub_num`),
                                 `topic` = VALUES(`topic`),
                                 `video_url` = VALUES(`video_url`),
+                                `question_meta` = VALUES(`question_meta`),
                                 `exercise_pdf` = VALUES(`exercise_pdf`),
                                 `exercise_name` = VALUES(`exercise_name`),
                                 `exercise_thumb` = VALUES(`exercise_thumb`),
@@ -701,6 +757,8 @@ try {
                                 $topic = mb_substr($topic, 0, 60000, 'UTF-8');
                             }
                             $videoUrl = trim($q['videoUrl'] ?? ($q['video_url'] ?? ''));
+                            $cleanMeta = sanitizeQuestionMeta($q['questionMeta'] ?? ($q['question_meta'] ?? null));
+                            $metaJsonStr = $cleanMeta ? json_encode($cleanMeta, JSON_UNESCAPED_UNICODE) : null;
                             $exUrl = $q['exercisePdf']['url'] ?? '';
                             $exName = $q['exercisePdf']['name'] ?? '';
                             $exThumb = $q['exercisePdf']['thumb'] ?? '';
@@ -710,7 +768,7 @@ try {
 
                             $stmtQuestion->execute([
                                 $qbankId, $bankType, $year, $season, $subject, $grade, $tier, $week,
-                                $qNum, $parentQNum, $parentNumsStr, $subNum, $topic, $videoUrl, $exUrl, $exName, $exThumb, $ansUrl, $ansName, $ansThumb,
+                                $qNum, $parentQNum, $parentNumsStr, $subNum, $topic, $videoUrl, $metaJsonStr, $exUrl, $exName, $exThumb, $ansUrl, $ansName, $ansThumb,
                                 $currentTeacher, $currentTeacher
                             ]);
                         }

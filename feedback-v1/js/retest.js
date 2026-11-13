@@ -858,6 +858,23 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         const isPreview = !isVariation && item.sourceType === 'preview';
         const isGroupMerged = Boolean(item.isGroupMerged);
 
+        const groupNums = Array.isArray(item.groupNums) ? item.groupNums.map(n => parseInt(n, 10)).filter(n => n > 0) : [];
+        const errorNums = Array.isArray(item.errorNums) ? item.errorNums.map(n => parseInt(n, 10)).filter(n => n > 0) : (parentNum ? [parentNum] : []);
+        const isBigQuestion = !isVariation && (groupNums.length > 1 || errorNums.length > 1);
+
+        let rangeLabel = parentNum ? ('第' + parentNum + '题') : '';
+        let errorCalloutText = '';
+        if (isBigQuestion) {
+            if (groupNums.length > 1) {
+                rangeLabel = '第' + groupNums[0] + '~' + groupNums[groupNums.length - 1] + '题';
+            } else if (errorNums.length > 1) {
+                rangeLabel = '第' + errorNums.join('、') + '题';
+            }
+            if (errorNums.length > 0) {
+                errorCalloutText = '本篇错题：第 ' + errorNums.join('、') + ' 题';
+            }
+        }
+
         const weekNum = parseInt(week, 10);
         const weekPart = weekNum > 0 ? ('专题' + numToChinese(weekNum)) : '';
         const topicText = String(topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
@@ -882,20 +899,22 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             } else if (parentLabel) {
                 contentParts.push('对应' + parentLabel);
             }
-            return { tagText, contentText: contentParts.join(' · '), theme: 'variation' };
+            return { tagText, contentText: contentParts.join(' · '), errorCalloutText: '', theme: 'variation' };
         }
 
         if (isPreview) {
             if (isGroupMerged) {
                 return {
-                    tagText: parentNum ? ('第' + parentNum + '题·预习') : '预习',
+                    tagText: rangeLabel ? (rangeLabel + '·预习') : '预习',
                     contentText: '预习错题重练',
+                    errorCalloutText,
                     theme: 'preview'
                 };
             }
             return {
-                tagText: parentNum ? ('第' + parentNum + '题·预习') : '预习',
+                tagText: rangeLabel ? (rangeLabel + '·预习') : '预习',
                 contentText: subjectPart || '预习',
+                errorCalloutText,
                 theme: 'preview'
             };
         }
@@ -905,8 +924,9 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             const contentParts = [];
             contentParts.push(variationCount > 0 ? ('错题重练 · 含 ' + variationCount + ' 道同类变式') : '错题重练');
             return {
-                tagText: parentNum ? ('第' + parentNum + '题·原题') : '原题',
+                tagText: rangeLabel ? (rangeLabel + '·原题') : '原题',
                 contentText: contentParts.join(' · '),
+                errorCalloutText,
                 theme: 'original'
             };
         }
@@ -915,15 +935,17 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         if (subjectPart) contentParts.push(subjectPart);
         if (variationCount > 0) contentParts.push('含 ' + variationCount + ' 道同类变式');
         return {
-            tagText: parentNum ? ('第' + parentNum + '题·原题') : '原题',
+            tagText: rangeLabel ? (rangeLabel + '·原题') : '原题',
             contentText: contentParts.join(' · ') || '原题',
+            errorCalloutText,
             theme: 'original'
         };
     }
 
     /**
      * 把专题/知识点文字渲染成精致“胶囊考点卡” PNG DataURL（pdf-lib 内置字体无中文，走 canvas）。
-     * 左侧为专属分类胶囊药丸（巩固为极方深宝蓝，预习为活力琥珀橙，举一反三为清新翡翠绿），右侧为核心考点正文。
+     * 左侧为专属分类胶囊药丸（巩固为极方深宝蓝，预习为活力琥珀橙，举一反三为清新翡翠绿），
+     * 若为大题合并模式，紧随其后绘制高对比度黑白打印友好的“本篇错题：第 X、Y 题”醒目框，右侧为核心考点正文。
      * 支持超长考点智能换行（单行 25pt，多行自适应撑高），返回 { dataUrl, heightPt, blockPt, widthPt, lineCount }。
      */
     function generateQuestionTopicBadge(labelOrSpec, widthPt) {
@@ -932,6 +954,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             spec = {
                 tagText: String(labelOrSpec.tagText || '').trim().slice(0, 60),
                 contentText: String(labelOrSpec.contentText || '').trim().slice(0, 300),
+                errorCalloutText: String(labelOrSpec.errorCalloutText || '').trim().slice(0, 80),
                 theme: labelOrSpec.theme === 'variation'
                     ? 'variation'
                     : (labelOrSpec.theme === 'preview' ? 'preview' : 'original'),
@@ -962,6 +985,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             spec = {
                 tagText: tagText || '考点',
                 contentText: contentText,
+                errorCalloutText: '',
                 theme: tagText.includes('举一反三') ? 'variation' : (tagText.includes('预习') ? 'preview' : 'original'),
                 prefixContent: true
             };
@@ -969,7 +993,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
         if (!spec.tagText && !spec.contentText) return null;
         if (!spec.tagText) spec.tagText = '考点';
-        const label = spec.tagText + '：' + spec.contentText;
+        const label = spec.tagText + '｜' + (spec.errorCalloutText || '') + '：' + spec.contentText;
         const wPt = Math.max(120, Math.min(540, Number(widthPt) || 540));
         const cacheKey = spec.theme + '___' + wPt.toFixed(1) + '___' + label;
         if (questionTopicBadgeCache[cacheKey]) {
@@ -988,6 +1012,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
             // 胶囊字体（粗体紧凑）
             const fontPill = '700 ' + Math.round(10.5 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+            const fontCallout = '700 ' + Math.round(10.5 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
             // 考点内容字体（清晰典雅）
             const fontContent = '600 ' + Math.round(11 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
 
@@ -998,6 +1023,14 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             const pillHeight = Math.round(17 * K);
             const pillRadius = Math.round(pillHeight / 2);
 
+            let calloutWidth = 0;
+            const calloutGap = 6 * K;
+            if (spec.errorCalloutText) {
+                testCtx.font = fontCallout;
+                const calloutTextW = testCtx.measureText(spec.errorCalloutText).width;
+                calloutWidth = Math.round(calloutTextW + 16 * K);
+            }
+
             // 题头正文准备：新结构化调用直接展示完整说明，旧字符串调用保持“考点：”前缀
             let displayContent = spec.contentText;
             if (spec.prefixContent && displayContent && !displayContent.startsWith('考点') && !displayContent.startsWith('知识点')) {
@@ -1007,7 +1040,8 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             const cardPadL = 6 * K;
             const pillToTextGap = 8 * K;
             const cardPadR = 10 * K;
-            const maxContentW = wpx - cardPadL - pillWidth - pillToTextGap - cardPadR;
+            const totalLeftPillsW = pillWidth + (calloutWidth > 0 ? (calloutGap + calloutWidth) : 0);
+            const maxContentW = Math.max(80 * K, wpx - cardPadL - totalLeftPillsW - pillToTextGap - cardPadR);
 
             testCtx.font = fontContent;
             let lines = [];
@@ -1094,6 +1128,23 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             ctx.textBaseline = 'middle';
             ctx.fillText(spec.tagText, pillX + pillWidth / 2, pillY + pillHeight / 2 + 0.5 * K);
 
+            // 2b. 若为大题合并模式，紧随其后绘制高对比度黑白打印友好的“本篇错题：第 X、Y 题”实线白底黑字标牌
+            if (calloutWidth > 0 && spec.errorCalloutText) {
+                const calloutX = pillX + pillWidth + calloutGap;
+                questionTopicBadgeRoundRect(ctx, calloutX, pillY, calloutWidth, pillHeight, 4 * K);
+                ctx.fillStyle = '#ffffff';
+                ctx.fill();
+                ctx.lineWidth = 1.6 * K;
+                ctx.strokeStyle = '#0f172a';
+                ctx.stroke();
+
+                ctx.font = fontCallout;
+                ctx.fillStyle = '#0f172a';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(spec.errorCalloutText, calloutX + calloutWidth / 2, pillY + pillHeight / 2 + 0.5 * K);
+            }
+
             // 3. 右侧考点正文 (Right Topic Text)
             if (lines.length > 0) {
                 ctx.font = fontContent;
@@ -1101,7 +1152,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 ctx.textAlign = 'left';
                 ctx.textBaseline = 'middle';
 
-                const textStartX = pillX + pillWidth + pillToTextGap;
+                const textStartX = pillX + totalLeftPillsW + pillToTextGap;
                 if (isSingleLine) {
                     ctx.fillText(lines[0], textStartX, hpx / 2 + 0.5 * K);
                 } else {
@@ -1126,6 +1177,55 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             return result;
         } catch (err) {
             console.warn('generateQuestionTopicBadge failed:', err);
+            return null;
+        }
+    }
+
+    // 大题小问页内错题角标缓存（高对比黑底白字「错题 X」，专为黑白激光打印优化）
+    const errorBoxTagCache = {};
+    function generateErrorBoxTagPng(qNum) {
+        const text = '错题 ' + qNum;
+        if (errorBoxTagCache[text]) return errorBoxTagCache[text];
+        try {
+            const K = 2;
+            const testCanvas = document.createElement('canvas');
+            const testCtx = testCanvas.getContext('2d');
+            const font = '700 ' + Math.round(8.5 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+            testCtx.font = font;
+            const tw = testCtx.measureText(text).width;
+            const wPt = Math.max(28, Math.ceil((tw / K) + 10));
+            const hPt = 13;
+            const wpx = Math.round(wPt * K);
+            const hpx = Math.round(hPt * K);
+
+            const canvas = document.createElement('canvas');
+            canvas.width = wpx;
+            canvas.height = hpx;
+            const ctx = canvas.getContext('2d');
+
+            // 白色外描边光晕（防止压在原卷黑色边框线上看不清）+ 纯深黑实心底色
+            questionTopicBadgeRoundRect(ctx, 0.5 * K, 0.5 * K, wpx - 1 * K, hpx - 1 * K, 2.5 * K);
+            ctx.fillStyle = '#0f172a';
+            ctx.fill();
+            ctx.lineWidth = 1 * K;
+            ctx.strokeStyle = '#ffffff';
+            ctx.stroke();
+
+            ctx.font = font;
+            ctx.fillStyle = '#ffffff';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, wpx / 2, hpx / 2 + 0.5 * K);
+
+            const res = {
+                dataUrl: canvas.toDataURL('image/png'),
+                widthPt: wPt,
+                heightPt: hPt
+            };
+            errorBoxTagCache[text] = res;
+            return res;
+        } catch (e) {
+            console.warn('generateErrorBoxTagPng failed:', e);
             return null;
         }
     }
@@ -1341,9 +1441,21 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             pNums = [pNum];
                         }
 
+                        const errorNums = Array.isArray(p.errorNums) && p.errorNums.length > 0
+                            ? p.errorNums.map(parseQNum).filter(n => n > 0)
+                            : (parseQNum(p.errorNum) > 0 ? [parseQNum(p.errorNum)] : []);
+                        const groupNums = Array.isArray(p.groupNums) && p.groupNums.length > 0
+                            ? p.groupNums.map(parseQNum).filter(n => n > 0)
+                            : [];
+                        const errorBoxes = Array.isArray(p.errorBoxes) ? p.errorBoxes : [];
+
                         validItems.push({
                             url: url,
                             errorNum: parseQNum(p.errorNum),
+                            errorNums: errorNums,
+                            groupNums: groupNums,
+                            errorBoxes: errorBoxes,
+                            subTopics: p.subTopics || null,
                             parentNum: pNum,
                             parentNums: pNums,
                             matchedParentNums: pNums,
@@ -1369,11 +1481,18 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
                 const cleanTopic = t => String(t || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
 
-                // 1. 建立 parentNum -> 原题 topic 映射表（供变式题继承考点归属）
+                // 1. 建立 parentNum -> 原题 topic 映射表（供变式题继承考点归属，兼容大题组内任意小问）
                 const parentTopicMap = new Map();
                 validItems.forEach(item => {
                     if (!item.isVariation && cleanTopic(item.topic)) {
-                        parentTopicMap.set(item.parentNum, cleanTopic(item.topic));
+                        const tClean = cleanTopic(item.topic);
+                        parentTopicMap.set(item.parentNum, tClean);
+                        if (Array.isArray(item.errorNums)) {
+                            item.errorNums.forEach(n => parentTopicMap.set(n, tClean));
+                        }
+                        if (Array.isArray(item.groupNums)) {
+                            item.groupNums.forEach(n => parentTopicMap.set(n, tClean));
+                        }
                     }
                 });
 
@@ -1404,6 +1523,9 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                     }
 
                     group.parentNumsSet.add(parentNum);
+                    if (!item.isVariation && Array.isArray(item.errorNums)) {
+                        item.errorNums.forEach(n => group.parentNumsSet.add(n));
+                    }
                     if (parentNum < group.firstOrder) {
                         group.firstOrder = parentNum;
                     }
@@ -1813,7 +1935,22 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
                         // 智能测量有效范围（顶部页眉/横线裁剪与底部留白）
                         const bounds = await detectPdfContentBounds(pdfBytes, pIdx + 1, origW, origH);
-                        const { topCropPt, bottomCutPt, effectiveHeightPt, isFullPage } = bounds;
+                        let { topCropPt, bottomCutPt, effectiveHeightPt, isFullPage } = bounds;
+
+                        // 提取属于当前页的大题错题框选坐标，并保护其不被上下裁剪切除
+                        const pageErrorBoxes = (type === 'exercise' && typeof qItem === 'object' && Array.isArray(qItem.errorBoxes))
+                            ? qItem.errorBoxes.filter(b => b && (parseInt(b.pageOffset, 10) || 0) === pIdx && typeof b.x === 'number' && typeof b.y === 'number')
+                            : [];
+                        if (pageErrorBoxes.length > 0) {
+                            pageErrorBoxes.forEach(b => {
+                                const boxTopInPt = b.y * origH;
+                                const boxBottomInPt = (b.y + b.h) * origH;
+                                topCropPt = Math.min(topCropPt, Math.max(0, boxTopInPt - 8));
+                                bottomCutPt = Math.max(bottomCutPt, Math.min(origH, boxBottomInPt + 8));
+                            });
+                            effectiveHeightPt = Math.max(70, bottomCutPt - topCropPt);
+                            isFullPage = (effectiveHeightPt > (origH - 54) * 0.65);
+                        }
 
                         // 题头/续页抬头：首切片用完整题头，后续切片用紧凑“（续）”
                         const isFirstPageOfQuestion = (pIdx === 0);
@@ -1829,6 +1966,13 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                         let headerGap = 0;
                         let currentBannerBlock = 0;
 
+                        const itemGroupNums = (typeof qItem === 'object' && Array.isArray(qItem.groupNums)) ? qItem.groupNums : [];
+                        const itemErrorNums = (typeof qItem === 'object' && Array.isArray(qItem.errorNums)) ? qItem.errorNums : [];
+                        const isBigQItem = !qIsVariation && (itemGroupNums.length > 1 || itemErrorNums.length > 1);
+                        const bigRangeTitle = itemGroupNums.length > 1
+                            ? ('第' + itemGroupNums[0] + '~' + itemGroupNums[itemGroupNums.length - 1] + '题')
+                            : (itemErrorNums.length > 1 ? ('第' + itemErrorNums.join('、') + '题') : ('第' + qParentNum + '题'));
+
                         if (isFirstPageOfQuestion) {
                             headerInfo = generateQuestionTopicBadge(qBadgeSpec, bannerW);
                             headerGap = QUESTION_TOPIC_BANNER_GAP;
@@ -1839,11 +1983,14 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             const parentStr = matchedParents.length > 1
                                 ? ('第' + matchedParents.join('、') + '题')
                                 : (matchedParents.length === 1 ? ('第' + matchedParents[0] + '题') : ('第' + qParentNum + '题'));
+                            const bigErrNote = (isBigQItem && itemErrorNums.length > 0)
+                                ? ('（本篇错题：第 ' + itemErrorNums.join('、') + ' 题）')
+                                : '';
                             const runningLabel = qIsVariation
                                 ? (parentStr + ' · 变式' + qSubNum + (qVariationTotal > 0 ? ('/' + qVariationTotal) : '') + '（续）')
                                 : (qSourceType === 'preview'
-                                    ? ('第' + qParentNum + '题 · 预习（续）')
-                                    : ('第' + qParentNum + '题 · 原题（续）'));
+                                    ? (bigRangeTitle + bigErrNote + ' · 预习（续）')
+                                    : (bigRangeTitle + bigErrNote + ' · 原题（续）'));
                             headerInfo = generateQuestionRunningHeader(runningLabel, bannerW, qBadgeSpec.theme);
                             headerGap = RUNNING_HEADER_GAP;
                         }
@@ -1972,12 +2119,74 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             width: drawW,
                             height: drawH
                         });
+
+                        // 2b. 若当前页包含大题错题小问框选坐标，精准绘制黑白打印友好的醒目粗实线方框与反白角标「错题 X」
+                        if (pageErrorBoxes.length > 0) {
+                            const sliceTopY = questionBottomY + drawH;
+                            for (const eb of pageErrorBoxes) {
+                                try {
+                                    const ebX = realDrawX + (eb.x * origW) * scale;
+                                    const ebW = Math.max(14, (eb.w * origW) * scale);
+                                    const ebH = Math.max(12, (eb.h * origH) * scale);
+                                    const ebTopY = sliceTopY - ((eb.y * origH - topCropPt) * scale);
+                                    const ebBottomY = ebTopY - ebH;
+
+                                    // 白色外衬底描边（防止与原卷表格线或文字粘连）
+                                    currentPage.drawRectangle({
+                                        x: ebX - 0.8,
+                                        y: ebBottomY - 0.8,
+                                        width: ebW + 1.6,
+                                        height: ebH + 1.6,
+                                        borderColor: PDFLib.rgb(1, 1, 1),
+                                        borderWidth: 2.6,
+                                        borderOpacity: 0.9
+                                    });
+
+                                    // 高对比深墨色实线框（黑白激光打印依然 100% 锐利醒目）
+                                    currentPage.drawRectangle({
+                                        x: ebX,
+                                        y: ebBottomY,
+                                        width: ebW,
+                                        height: ebH,
+                                        borderColor: PDFLib.rgb(0.06, 0.09, 0.16),
+                                        borderWidth: 1.6
+                                    });
+
+                                    // 左上角反白高对比「错题 X」胶囊角标
+                                    if (eb.qNum) {
+                                        const tagSpec = generateErrorBoxTagPng(eb.qNum);
+                                        if (tagSpec && tagSpec.dataUrl) {
+                                            const tagImg = await mergedPdf.embedPng(tagSpec.dataUrl);
+                                            const tagX = Math.max(boxX + 4, ebX - 1);
+                                            // 优先置于框线左上沿外侧，若靠近切片顶端则贴合框内左上角
+                                            const preferAboveY = ebTopY + 0.5;
+                                            const tagY = (preferAboveY + tagSpec.heightPt <= sliceTopY + 3)
+                                                ? preferAboveY
+                                                : Math.max(ebBottomY, ebTopY - tagSpec.heightPt + 1);
+                                            currentPage.drawImage(tagImg, {
+                                                x: tagX,
+                                                y: tagY,
+                                                width: tagSpec.widthPt,
+                                                height: tagSpec.heightPt
+                                            });
+                                        }
+                                    }
+                                } catch (ebErr) {
+                                    console.warn('Draw error box failed:', ebErr);
+                                }
+                            }
+                        }
+
                         boxContentY = questionBottomY;
 
                         // 3. 在每道题右下角/作答区内添加视频讲解二维码与说明文字
                         if (window.retestQrCodeEnabled !== false && videoUrl && isLastPageOfQuestion) {
                             try {
-                                const qrQuestionNum = qIsVariation ? (qParentNum + '-' + qSubNum) : qParentNum;
+                                const qrQuestionNum = qIsVariation
+                                    ? (qParentNum + '-' + qSubNum)
+                                    : (isBigQItem && itemGroupNums.length > 1
+                                        ? (itemGroupNums[0] + '~' + itemGroupNums[itemGroupNums.length - 1])
+                                        : qParentNum);
                                 const qrDataUrl = await generateQuestionQrBadge(videoUrl, qrQuestionNum);
                                 if (qrDataUrl) {
                                     const qrImage = await mergedPdf.embedPng(qrDataUrl);
