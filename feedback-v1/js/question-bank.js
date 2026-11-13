@@ -1707,6 +1707,7 @@ function renderLightboxBoxesOverlay() {
     const summaryEl = document.getElementById('lightbox-boxmode-summary');
     const undoBtn = document.getElementById('lightbox-box-undo-btn');
     const clearBtn = document.getElementById('lightbox-box-clear-btn');
+    const alignBtn = document.getElementById('lightbox-box-align-btn');
     const extendBtn = document.getElementById('lightbox-box-extend-btn');
 
     if (rangePill) {
@@ -1724,6 +1725,7 @@ function renderLightboxBoxesOverlay() {
             : `起始第 ${summary.startNum} 题 · 请拖拽框选第 1 ${isAnswerMode ? '题答案' : '问'}`;
     }
     const pageRawBoxes = getActiveLightboxBoxesForCurrentPage();
+    if (alignBtn) alignBtn.disabled = pageRawBoxes.length < 2;
     if (undoBtn) undoBtn.disabled = pageRawBoxes.length === 0;
     if (clearBtn) clearBtn.disabled = pageRawBoxes.length === 0;
     if (extendBtn) {
@@ -1766,6 +1768,170 @@ function undoLastPageBox() {
     }
 }
 window.undoLastPageBox = undoLastPageBox;
+
+/**
+ * 安全对齐同页框选坐标：
+ * 1. 绝不缩小任何框（防止漏掉原题文字）
+ * 2. 绝不侵占相邻框（水平或垂直冲突时自动保守退避，留足安全间隙）
+ */
+function normalizePageBoxesSafely(boxes) {
+    if (!Array.isArray(boxes) || boxes.length < 2) {
+        return Array.isArray(boxes) ? boxes.map(b => ({ ...b })) : [];
+    }
+    const out = boxes.map(b => ({ ...b }));
+    const COL_TOL = 0.022;
+    const SAFE_GAP = 0.004;
+
+    const overlapsOther = (cand, idx) => {
+        for (let j = 0; j < out.length; j++) {
+            if (j === idx) continue;
+            const o = out[j];
+            const orig = boxes[j];
+            const hOverlap = cand.x < Math.max(o.x + o.w, orig.x + orig.w) + SAFE_GAP && (cand.x + cand.w) > Math.min(o.x, orig.x) - SAFE_GAP;
+            const vOverlap = cand.y < Math.max(o.y + o.h, orig.y + orig.h) + SAFE_GAP && (cand.y + cand.h) > Math.min(o.y, orig.y) - SAFE_GAP;
+            // 若原本未重叠，则不允许调整后发生重叠
+            const origSelf = boxes[idx];
+            const wasOverlapping = origSelf.x < (orig.x + orig.w) && (origSelf.x + origSelf.w) > orig.x && origSelf.y < (orig.y + orig.h) && (origSelf.y + origSelf.h) > orig.y;
+            if (!wasOverlapping && hOverlap && vOverlap) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // 1. 左边缘按列聚簇并向外对齐（只向左扩，绝不向右缩）
+    const leftClusters = [];
+    out.forEach((b, idx) => {
+        const match = leftClusters.find(c => Math.abs(c.anchor - b.x) <= COL_TOL);
+        if (match) {
+            match.indices.push(idx);
+            match.minX = Math.min(match.minX, b.x);
+        } else {
+            leftClusters.push({ anchor: b.x, minX: b.x, indices: [idx] });
+        }
+    });
+    leftClusters.forEach(c => {
+        if (c.indices.length < 2) return;
+        c.indices.forEach(idx => {
+            const cur = out[idx];
+            if (c.minX < cur.x) {
+                const cand = { ...cur, x: c.minX, w: (cur.x + cur.w) - c.minX };
+                if (!overlapsOther(cand, idx)) {
+                    out[idx] = cand;
+                }
+            }
+        });
+    });
+
+    // 2. 右边缘按列聚簇并向外对齐（只向右扩，绝不向左缩）
+    const rightClusters = [];
+    out.forEach((b, idx) => {
+        const r = b.x + b.w;
+        const match = rightClusters.find(c => Math.abs(c.anchor - r) <= COL_TOL);
+        if (match) {
+            match.indices.push(idx);
+            match.maxR = Math.max(match.maxR, r);
+        } else {
+            rightClusters.push({ anchor: r, maxR: r, indices: [idx] });
+        }
+    });
+    rightClusters.forEach(c => {
+        if (c.indices.length < 2) return;
+        c.indices.forEach(idx => {
+            const cur = out[idx];
+            const curR = cur.x + cur.w;
+            if (c.maxR > curR) {
+                const cand = { ...cur, w: Math.min(1.0 - cur.x, c.maxR - cur.x) };
+                if (!overlapsOther(cand, idx)) {
+                    out[idx] = cand;
+                }
+            }
+        });
+    });
+
+    // 3. 相近规格高度微调统一（仅扩展到安全间隙内，绝不缩小且绝不侵占上下题）
+    const sortedByY = out.map((b, idx) => ({ idx, b })).sort((a, b) => a.b.y - b.b.y);
+    const heightGroups = [];
+    sortedByY.forEach(entry => {
+        if (entry.b.h > 0.14) return;
+        const g = heightGroups.find(grp => {
+            const ratio = Math.abs(entry.b.h - grp.anchorH) / Math.max(0.01, grp.anchorH);
+            return ratio <= 0.22;
+        });
+        if (g) {
+            g.entries.push(entry);
+            g.maxH = Math.max(g.maxH, entry.b.h);
+        } else {
+            heightGroups.push({ anchorH: entry.b.h, maxH: entry.b.h, entries: [entry] });
+        }
+    });
+
+    heightGroups.forEach(g => {
+        if (g.entries.length < 2) return;
+        g.entries.forEach(({ idx }) => {
+            const cur = out[idx];
+            const need = g.maxH - cur.h;
+            if (need <= 0.001) return;
+
+            // 计算同水平投影列上紧邻上下框的安全间隙
+            let maxAbove = cur.y;
+            let maxBelow = 1.0 - (cur.y + cur.h);
+            out.forEach((other, j) => {
+                if (j === idx) return;
+                const hOverlap = cur.x < (other.x + other.w) && (cur.x + cur.w) > other.x;
+                if (!hOverlap) return;
+                if (other.y + other.h <= cur.y + 0.002) {
+                    maxAbove = Math.min(maxAbove, Math.max(0, cur.y - (other.y + other.h) - SAFE_GAP));
+                }
+                if (other.y >= (cur.y + cur.h) - 0.002) {
+                    maxBelow = Math.min(maxBelow, Math.max(0, other.y - (cur.y + cur.h) - SAFE_GAP));
+                }
+            });
+
+            const allowUp = Math.min(need * 0.5, maxAbove * 0.42);
+            const allowDown = Math.min(need - allowUp, maxBelow * 0.42);
+            const finalUp = Math.min(need - allowDown, maxAbove * 0.42);
+            const addUp = Math.max(0, finalUp);
+            const addDown = Math.max(0, allowDown);
+            if (addUp + addDown > 0.001) {
+                const cand = {
+                    ...cur,
+                    y: Math.max(0, cur.y - addUp),
+                    h: Math.min(1.0 - Math.max(0, cur.y - addUp), cur.h + addUp + addDown)
+                };
+                if (!overlapsOther(cand, idx)) {
+                    out[idx] = cand;
+                }
+            }
+        });
+    });
+
+    return out.map(b => ({
+        ...b,
+        x: Number(b.x.toFixed(4)),
+        y: Number(b.y.toFixed(4)),
+        w: Number(b.w.toFixed(4)),
+        h: Number(b.h.toFixed(4))
+    }));
+}
+
+function alignCurrentPageBoxes() {
+    const arr = getActiveLightboxBoxesForCurrentPage();
+    if (!Array.isArray(arr) || arr.length < 2) {
+        showToast('本页至少需要 2 个选框才可对齐规整');
+        return;
+    }
+    const aligned = normalizePageBoxesSafely(arr);
+    for (let i = 0; i < arr.length; i++) {
+        arr[i].x = aligned[i].x;
+        arr[i].y = aligned[i].y;
+        arr[i].w = aligned[i].w;
+        arr[i].h = aligned[i].h;
+    }
+    onBoxesMutated();
+    showToast('已按同列边缘与安全间隙完成对齐规整', 'success');
+}
+window.alignCurrentPageBoxes = alignCurrentPageBoxes;
 
 function clearCurrentPageBoxes() {
     const arr = getActiveLightboxBoxesForCurrentPage();

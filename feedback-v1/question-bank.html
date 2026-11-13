@@ -12,7 +12,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261113-4';
+            const v = '20261113-5';
             document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/question-bank.css?v=${v}">`);
@@ -686,6 +686,10 @@
                     <span class="lightbox-boxmode-summary" id="lightbox-boxmode-summary">尚未框选小问</span>
                 </div>
                 <div class="lightbox-boxmode-actions">
+                    <button type="button" class="btn sm secondary" id="lightbox-box-align-btn" onclick="alignCurrentPageBoxes()" disabled title="安全对齐同列框选边缘并统一相近行高（不会缩小原框或侵占相邻题）">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="14" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>
+                        <span>对齐规整</span>
+                    </button>
                     <button type="button" class="btn sm secondary" id="lightbox-box-undo-btn" onclick="undoLastPageBox()" disabled title="撤销本页最后一个选框">
                         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"></path><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path></svg>
                         <span>撤销上一框</span>
@@ -736,7 +740,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261113-4';
+            const v = '20261113-5';
             document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
             document.write(`<script src="js/common.js?v=${v}"><\/script>`);
             document.write(`<script src="js/auth.js?v=${v}"><\/script>`);

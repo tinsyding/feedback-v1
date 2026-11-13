@@ -1181,6 +1181,129 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         }
     }
 
+    /**
+     * 安全对齐同页错题框坐标（导出 PDF 自动美化）：
+     * 1. 绝不缩小任何框（防止漏掉原题文字）
+     * 2. 绝不侵占相邻框（水平或垂直冲突时自动退避，留足安全间隙）
+     */
+    function normalizePageBoxesSafely(boxes) {
+        if (!Array.isArray(boxes) || boxes.length < 2) {
+            return Array.isArray(boxes) ? boxes.map(b => ({ ...b })) : [];
+        }
+        const out = boxes.map(b => ({ ...b }));
+        const COL_TOL = 0.022;
+        const SAFE_GAP = 0.004;
+
+        const overlapsOther = (cand, idx) => {
+            for (let j = 0; j < out.length; j++) {
+                if (j === idx) continue;
+                const o = out[j];
+                const orig = boxes[j];
+                const hOverlap = cand.x < Math.max(o.x + o.w, orig.x + orig.w) + SAFE_GAP && (cand.x + cand.w) > Math.min(o.x, orig.x) - SAFE_GAP;
+                const vOverlap = cand.y < Math.max(o.y + o.h, orig.y + orig.h) + SAFE_GAP && (cand.y + cand.h) > Math.min(o.y, orig.y) - SAFE_GAP;
+                const origSelf = boxes[idx];
+                const wasOverlapping = origSelf.x < (orig.x + orig.w) && (origSelf.x + origSelf.w) > orig.x && origSelf.y < (orig.y + orig.h) && (origSelf.y + origSelf.h) > orig.y;
+                if (!wasOverlapping && hOverlap && vOverlap) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        const leftClusters = [];
+        out.forEach((b, idx) => {
+            const match = leftClusters.find(c => Math.abs(c.anchor - b.x) <= COL_TOL);
+            if (match) {
+                match.indices.push(idx);
+                match.minX = Math.min(match.minX, b.x);
+            } else {
+                leftClusters.push({ anchor: b.x, minX: b.x, indices: [idx] });
+            }
+        });
+        leftClusters.forEach(c => {
+            if (c.indices.length < 2) return;
+            c.indices.forEach(idx => {
+                const cur = out[idx];
+                if (c.minX < cur.x) {
+                    const cand = { ...cur, x: c.minX, w: (cur.x + cur.w) - c.minX };
+                    if (!overlapsOther(cand, idx)) out[idx] = cand;
+                }
+            });
+        });
+
+        const rightClusters = [];
+        out.forEach((b, idx) => {
+            const r = b.x + b.w;
+            const match = rightClusters.find(c => Math.abs(c.anchor - r) <= COL_TOL);
+            if (match) {
+                match.indices.push(idx);
+                match.maxR = Math.max(match.maxR, r);
+            } else {
+                rightClusters.push({ anchor: r, maxR: r, indices: [idx] });
+            }
+        });
+        rightClusters.forEach(c => {
+            if (c.indices.length < 2) return;
+            c.indices.forEach(idx => {
+                const cur = out[idx];
+                const curR = cur.x + cur.w;
+                if (c.maxR > curR) {
+                    const cand = { ...cur, w: Math.min(1.0 - cur.x, c.maxR - cur.x) };
+                    if (!overlapsOther(cand, idx)) out[idx] = cand;
+                }
+            });
+        });
+
+        const sortedByY = out.map((b, idx) => ({ idx, b })).sort((a, b) => a.b.y - b.b.y);
+        const heightGroups = [];
+        sortedByY.forEach(entry => {
+            if (entry.b.h > 0.14) return;
+            const g = heightGroups.find(grp => (Math.abs(entry.b.h - grp.anchorH) / Math.max(0.01, grp.anchorH)) <= 0.22);
+            if (g) {
+                g.entries.push(entry);
+                g.maxH = Math.max(g.maxH, entry.b.h);
+            } else {
+                heightGroups.push({ anchorH: entry.b.h, maxH: entry.b.h, entries: [entry] });
+            }
+        });
+
+        heightGroups.forEach(g => {
+            if (g.entries.length < 2) return;
+            g.entries.forEach(({ idx }) => {
+                const cur = out[idx];
+                const need = g.maxH - cur.h;
+                if (need <= 0.001) return;
+                let maxAbove = cur.y;
+                let maxBelow = 1.0 - (cur.y + cur.h);
+                out.forEach((other, j) => {
+                    if (j === idx) return;
+                    const hOverlap = cur.x < (other.x + other.w) && (cur.x + cur.w) > other.x;
+                    if (!hOverlap) return;
+                    if (other.y + other.h <= cur.y + 0.002) {
+                        maxAbove = Math.min(maxAbove, Math.max(0, cur.y - (other.y + other.h) - SAFE_GAP));
+                    }
+                    if (other.y >= (cur.y + cur.h) - 0.002) {
+                        maxBelow = Math.min(maxBelow, Math.max(0, other.y - (cur.y + cur.h) - SAFE_GAP));
+                    }
+                });
+                const allowUp = Math.min(need * 0.5, maxAbove * 0.42);
+                const allowDown = Math.min(need - allowUp, maxBelow * 0.42);
+                const addUp = Math.max(0, Math.min(need - allowDown, maxAbove * 0.42));
+                const addDown = Math.max(0, allowDown);
+                if (addUp + addDown > 0.001) {
+                    const cand = {
+                        ...cur,
+                        y: Math.max(0, cur.y - addUp),
+                        h: Math.min(1.0 - Math.max(0, cur.y - addUp), cur.h + addUp + addDown)
+                    };
+                    if (!overlapsOther(cand, idx)) out[idx] = cand;
+                }
+            });
+        });
+
+        return out;
+    }
+
     // 大题小问页内错题角标缓存（高对比黑底白字「错题 X」或紧凑纯数字「X」，专为黑白激光打印优化）
     const errorBoxTagCache = {};
     function generateErrorBoxTagPng(qNum, compact = false) {
@@ -1943,11 +2066,12 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                         const bounds = await detectPdfContentBounds(pdfBytes, pIdx + 1, origW, origH);
                         let { topCropPt, bottomCutPt, effectiveHeightPt, isFullPage } = bounds;
 
-                        // 提取属于当前页的大题错题框选坐标（题目取 errorBoxes，答案取 answerErrorBoxes），并保护其不被上下裁剪切除
+                        // 提取属于当前页的大题错题框选坐标（题目取 errorBoxes，答案取 answerErrorBoxes），安全对齐并保护其不被上下裁剪切除
                         const activeBoxesSource = (type === 'exercise') ? qItem.errorBoxes : qItem.answerErrorBoxes;
-                        const pageErrorBoxes = (typeof qItem === 'object' && Array.isArray(activeBoxesSource))
+                        const rawPageErrorBoxes = (typeof qItem === 'object' && Array.isArray(activeBoxesSource))
                             ? activeBoxesSource.filter(b => b && (parseInt(b.pageOffset, 10) || 0) === pIdx && typeof b.x === 'number' && typeof b.y === 'number')
                             : [];
+                        const pageErrorBoxes = normalizePageBoxesSafely(rawPageErrorBoxes);
                         if (pageErrorBoxes.length > 0) {
                             pageErrorBoxes.forEach(b => {
                                 const boxTopInPt = b.y * origH;
