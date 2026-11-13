@@ -918,6 +918,14 @@
         const it = tabState.items.find(x => x.id === itemId);
         if (!it) return;
         it.label = String(val || '').trim();
+        if (it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
+            const base = parseInt(it.label, 10);
+            if (!isNaN(base) && base > 0) {
+                it.subqBoxes.forEach((sb, idx) => {
+                    sb.num = base + idx;
+                });
+            }
+        }
         renderBoxOverlay();
         syncStageUi();
     };
@@ -1059,7 +1067,10 @@
         const bankType = getCurrentBankTypeSafe();
 
         if (bankType === 'preview') {
-            const missing = exItems.find(it => !String(it.label || '').trim());
+            const missing = exItems.find(it =>
+                !(it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0)
+                && !String(it.label || '').trim()
+            );
             if (missing) {
                 showToast('预习模式请为每道框选题目手动输入题号', 'warn');
                 rgSelectItem(missing.id);
@@ -1072,6 +1083,59 @@
                 showToast('举一反三模式请为每道题勾选对应的原题', 'warn');
                 rgSelectItem(missing.id);
                 return;
+            }
+        }
+
+        // 按题号建立独立答案查找表（不与题目排版强绑定），上传 PDF 前先校验匹配
+        const ansByNum = new Map();
+        const ansSubByNum = new Map();
+        rgState.answer.items.forEach(aIt => {
+            const lbl = String(aIt.label || '').trim();
+            if (lbl) ansByNum.set(lbl, aIt);
+            if (aIt.isBig && Array.isArray(aIt.subqBoxes)) {
+                aIt.subqBoxes.forEach(sb => {
+                    const sn = String(sb.num || '').trim();
+                    if (sn) {
+                        ansByNum.set(sn, aIt);
+                        ansSubByNum.set(sn, sb);
+                    }
+                });
+            }
+        });
+
+        const findMatchedAns = (it, qKey, primaryP) => {
+            if (bankType === 'variation') {
+                return rgState.answer.items.find(a => a.targetExId === it.id)
+                    || ansByNum.get(String(primaryP))
+                    || ansByNum.get(String(it.label || '').trim())
+                    || null;
+            }
+            if (qKey && ansByNum.has(qKey)) return ansByNum.get(qKey);
+            const fallbackLbl = String(it.label || '').trim();
+            return (fallbackLbl && ansByNum.get(fallbackLbl)) || null;
+        };
+
+        for (const it of exItems) {
+            if (bankType === 'variation') {
+                const pNums = [...it.parentNums].sort((a, b) => a - b);
+                if (!findMatchedAns(it, '', pNums[0])) {
+                    showToast(`对应原题第 ${pNums.join(',')} 题的变式尚未匹配到答案框，请在“答案原卷”补充或绑定答案框后再导入`, 'warn');
+                    return;
+                }
+            } else if (it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
+                for (const sb of it.subqBoxes) {
+                    const qKey = String(sb.num || '').trim();
+                    if (!qKey || !findMatchedAns(it, qKey, null)) {
+                        showToast(`第 ${qKey || '?'} 题尚未匹配到答案框，请在“答案原卷”补充对应题号答案框后再导入`, 'warn');
+                        return;
+                    }
+                }
+            } else {
+                const qKey = String(it.label || '').trim();
+                if (!findMatchedAns(it, qKey, null)) {
+                    showToast(`第 ${qKey || '?'} 题尚未匹配到答案框，请在“答案原卷”补充对应题号答案框后再导入`, 'warn');
+                    return;
+                }
             }
         }
 
@@ -1107,23 +1171,6 @@
                 };
             }
 
-            // 按题号建立独立答案查找表（不与题目排版强绑定）
-            const ansByNum = new Map();
-            const ansSubByNum = new Map();
-            rgState.answer.items.forEach(aIt => {
-                const lbl = String(aIt.label || '').trim();
-                if (lbl) ansByNum.set(lbl, aIt);
-                if (aIt.isBig && Array.isArray(aIt.subqBoxes)) {
-                    aIt.subqBoxes.forEach(sb => {
-                        const sn = String(sb.num || '').trim();
-                        if (sn) {
-                            ansByNum.set(sn, aIt);
-                            ansSubByNum.set(sn, sb);
-                        }
-                    });
-                }
-            });
-
             const exPageCache = new Map();
             const ansPageCache = new Map();
 
@@ -1138,10 +1185,7 @@
                     const primaryP = pNums[0];
                     const nextSub = (varSubCounter.get(primaryP) || 0) + 1;
                     varSubCounter.set(primaryP, nextSub);
-                    const matchedAns = rgState.answer.items.find(a => a.targetExId === it.id)
-                        || ansByNum.get(String(primaryP))
-                        || ansByNum.get(String(it.label || '').trim())
-                        || null;
+                    const matchedAns = findMatchedAns(it, '', primaryP);
                     const hwQ = (Array.isArray(homeworkQuestionsForVariation) ? homeworkQuestionsForVariation : [])
                         .find(item => Number(item.id) === Number(primaryP));
                     const inheritedTopic = (hwQ && hwQ.topic) ? String(hwQ.topic).trim() : '';
@@ -1172,7 +1216,7 @@
                     const groupNums = it.subqBoxes.map(sb => parseInt(sb.num, 10)).filter(n => !isNaN(n)).sort((a, b) => a - b);
                     for (const sb of it.subqBoxes) {
                         const qKey = String(sb.num).trim();
-                        const matchedAns = ansByNum.get(qKey) || ansByNum.get(String(it.label || '').trim()) || null;
+                        const matchedAns = findMatchedAns(it, qKey, null);
                         const matchedAnsSub = ansSubByNum.get(qKey) || null;
                         const subExThumb = (await generateRegionCropThumb(rgState.exercise.pdfDoc, sb, exPageCache)) || itemExThumb;
                         const subAnsRegion = matchedAnsSub || (matchedAns && matchedAns.regions ? matchedAns.regions[0] : null);
@@ -1200,7 +1244,7 @@
                 }
 
                 const qKey = String(it.label || '').trim();
-                const matchedAns = ansByNum.get(qKey) || null;
+                const matchedAns = findMatchedAns(it, qKey, null);
                 const itemAnsThumb = matchedAns && ansPdfObj
                     ? ((await generateRegionCropThumb(rgState.answer.pdfDoc, matchedAns.regions[0], ansPageCache)) || ansPdfObj.thumb)
                     : null;
@@ -1220,12 +1264,6 @@
 
             if (bankType === 'variation' && typeof recalcVariationSubNums === 'function') {
                 recalcVariationSubNums(imported);
-            }
-
-            const missingAns = imported.find(q => !q.answerPdf);
-            if (missingAns) {
-                showToast(`第 ${missingAns.id} 题尚未匹配到答案框，请在“答案原卷”补充对应题号答案框后再导入`, 'warn');
-                return;
             }
 
             currentQuestions = imported;

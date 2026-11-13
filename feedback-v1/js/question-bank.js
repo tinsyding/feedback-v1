@@ -4278,9 +4278,17 @@ function ungroupBigQuestion(firstIndex) {
                     q.questionMeta.groupNums = q.questionMeta.groupNums.map(n => Math.max(1, parseInt(n, 10) + delta));
                 }
             }
-            // Keep first question, clear its questionMeta, remove the rest of the group
+            // Keep first question, preserve region_crop regions if any, remove the rest of the group
             firstQ.id = startNum;
-            delete firstQ.questionMeta;
+            if (firstQ.questionMeta && firstQ.questionMeta.mode === 'region_crop') {
+                firstQ.questionMeta = {
+                    mode: 'region_crop',
+                    regions: Array.isArray(firstQ.questionMeta.regions) ? firstQ.questionMeta.regions : [],
+                    answerRegions: Array.isArray(firstQ.questionMeta.answerRegions) ? firstQ.questionMeta.answerRegions : []
+                };
+            } else {
+                delete firstQ.questionMeta;
+            }
             for (let k = indices.length - 1; k >= 1; k--) {
                 currentQuestions.splice(indices[k], 1);
             }
@@ -4443,7 +4451,15 @@ function applyStep4BigQuestionBoxes() {
             ...baseQ,
             id: startNum
         };
-        delete singleQ.questionMeta;
+        if (baseQ.questionMeta && baseQ.questionMeta.mode === 'region_crop') {
+            singleQ.questionMeta = {
+                mode: 'region_crop',
+                regions: Array.isArray(baseQ.questionMeta.regions) ? baseQ.questionMeta.regions : [],
+                answerRegions: Array.isArray(baseQ.questionMeta.answerRegions) ? baseQ.questionMeta.answerRegions : []
+            };
+        } else {
+            delete singleQ.questionMeta;
+        }
         currentQuestions.splice(firstIdx, oldCount, singleQ);
         isDirty = true;
         renderQuestionList();
@@ -4456,6 +4472,11 @@ function applyStep4BigQuestionBoxes() {
     const newGroupQuestions = flatBoxes.map((item, k) => {
         const prevMember = sortedOldIndices[k] !== undefined ? currentQuestions[sortedOldIndices[k]] : null;
         const qMeta = {
+            ...(baseQ.questionMeta && baseQ.questionMeta.mode === 'region_crop' ? {
+                mode: 'region_crop',
+                regions: Array.isArray(baseQ.questionMeta.regions) ? baseQ.questionMeta.regions : [],
+                answerRegions: Array.isArray(baseQ.questionMeta.answerRegions) ? baseQ.questionMeta.answerRegions : []
+            } : {}),
             groupNums: [...groupNums],
             box: {
                 pageOffset: item.pageOffset,

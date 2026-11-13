@@ -2261,7 +2261,8 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                                         }
                                     } catch (qrErr) {}
                                 }
-                                currentY -= (SEPARATOR_HEIGHT + BOX_PAD_BOTTOM + BOX_GAP);
+                                const compactGapAfter = (typeof qItem === 'object' && qItem.isGroupEnd === false) ? BOX_GAP_ITEM : BOX_GAP_CLUSTER;
+                                currentY -= (SEPARATOR_HEIGHT + BOX_PAD_BOTTOM + compactGapAfter);
                             }
 
                             isFirstCompactBlock = false;
