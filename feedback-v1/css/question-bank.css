@@ -3757,6 +3757,9 @@ input[type=number] {
 
 .big-question-body-grid .question-actions {
     flex-shrink: 0;
+    min-width: 60px;
+    display: flex;
+    justify-content: flex-end;
 }
 
 @media (max-width: 768px) {
@@ -4234,7 +4237,7 @@ input[type=number] {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
 }
 
 .rg-card-num-wrap {
@@ -4243,10 +4246,12 @@ input[type=number] {
     gap: 6px;
     font-size: 0.84rem;
     font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .rg-num-input {
-    width: 68px;
+    width: 64px;
     padding: 3px 6px;
     border-radius: 6px;
     border: 1px solid var(--border-subtle);
@@ -4259,6 +4264,16 @@ input[type=number] {
 .rg-card-meta {
     font-size: 0.76rem;
     color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.rg-card-submeta {
+    font-size: 0.75rem;
+    color: #93c5fd;
+    background: rgba(59, 130, 246, 0.12);
+    border-radius: 5px;
+    padding: 2px 7px;
+    align-self: flex-start;
 }
 
 .rg-var-parents {

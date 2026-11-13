@@ -502,8 +502,8 @@
         listEl.innerHTML = tabState.items.map((it) => {
             const pages = Array.from(new Set(it.regions.map(r => 'P' + (r.pageOffset + 1)))).join(', ');
             const isActive = rgState.selectedId === it.id;
-            const bigSummary = it.isBig
-                ? ` · 大题（原文${(it.stemBoxes || []).length} / 小问${(it.subqBoxes || []).length}）`
+            const bigSubmetaHtml = it.isBig
+                ? `<div class="rg-card-submeta">大题 · 原文 ${(it.stemBoxes || []).length} / 小问 ${(it.subqBoxes || []).length}</div>`
                 : '';
 
             let headerEditorHtml = '';
@@ -518,6 +518,7 @@
                 headerEditorHtml = `
                     <div class="rg-card-top">
                         <span class="rg-card-num-wrap">${escapeHtmlRg(formatItemTitle(it, tab))}</span>
+                        <span class="rg-card-meta">${escapeHtmlRg(pages)}</span>
                     </div>
                     <div class="rg-var-parents">${chipsHtml}</div>
                 `;
@@ -530,15 +531,15 @@
                             <input type="text" class="rg-num-input" value="${escapeHtmlRg(it.label)}" placeholder="${placeholder}"
                                 oninput="rgUpdateItemLabel('${it.id}', this.value)" onchange="rgUpdateItemLabel('${it.id}', this.value)" onclick="event.stopPropagation()">
                         </div>
-                        <span class="rg-card-meta">${escapeHtmlRg(pages)}${escapeHtmlRg(bigSummary)}</span>
+                        <span class="rg-card-meta">${escapeHtmlRg(pages)}</span>
                     </div>
+                    ${bigSubmetaHtml}
                 `;
             }
 
             return `
                 <div class="rg-card ${isActive ? 'active' : ''}" data-id="${it.id}" onclick="rgSelectItem('${it.id}')">
                     ${headerEditorHtml}
-                    ${(bankType === 'variation' && tab === 'exercise') ? `<div class="rg-card-meta">${escapeHtmlRg(pages)}${escapeHtmlRg(bigSummary)}</div>` : ''}
                     <div class="rg-card-actions" onclick="event.stopPropagation()">
                         <button type="button" class="btn sm secondary" onclick="rgStartContinue('${it.id}')">+ 跨页续框</button>
                         ${bankType === 'variation' ? '' : `<button type="button" class="btn sm secondary" onclick="rgEnterSubMode('${it.id}')">${it.isBig ? '继续细分大题' : '设为大题'}</button>`}
