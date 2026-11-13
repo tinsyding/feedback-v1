@@ -6,11 +6,16 @@
     const FULL_WIDTH_X = 0.03;
     const FULL_WIDTH_W = 0.94;
 
+    const isCoarsePointer = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+
     const rgState = {
         initialized: false,
         contextKey: '',
         activeTab: 'exercise',
         fullWidth: true,
+        interactMode: 'draw', // 'draw' | 'pan'
+        twoTapMode: isCoarsePointer,
+        twoTapStart: null, // { pageOffset, x, y }
         scale: 1.0,
         continueTargetId: null,
         selectedId: null,
@@ -99,9 +104,29 @@
         return '待输入题号';
     }
 
+    function syncInteractModeUi() {
+        const stage = document.getElementById('rg-stage');
+        const modeBtn = document.getElementById('rg-interact-mode-btn');
+        const twoTapBtn = document.getElementById('rg-twotap-btn');
+        const isDraw = rgState.interactMode === 'draw';
+        if (stage) {
+            stage.classList.toggle('draw-mode', isDraw);
+            stage.classList.toggle('pan-mode', !isDraw);
+        }
+        if (modeBtn) {
+            modeBtn.classList.toggle('active', isDraw);
+            modeBtn.textContent = isDraw ? '模式: 拉框' : '模式: 浏览滚动';
+        }
+        if (twoTapBtn) {
+            twoTapBtn.classList.toggle('active', Boolean(rgState.twoTapMode));
+            twoTapBtn.textContent = rgState.twoTapMode ? '两点定框: 开' : '两点定框: 关';
+        }
+    }
+
     function bindCanvasEventsOnce() {
         if (rgState.initialized) return;
         rgState.initialized = true;
+        syncInteractModeUi();
 
         const stage = document.getElementById('rg-stage');
         const layer = document.getElementById('rg-box-layer');
@@ -114,20 +139,33 @@
             return { x, y };
         };
 
-        stage.addEventListener('mousedown', (e) => {
-            if (e.button !== 0) return;
+        const cleanupDraft = () => {
+            if (!rgState.drag) return null;
+            const d = rgState.drag;
+            rgState.drag = null;
+            if (d.draftEl && d.draftEl.parentNode) {
+                d.draftEl.parentNode.removeChild(d.draftEl);
+            }
+            return d;
+        };
+
+        stage.addEventListener('pointerdown', (e) => {
+            if (rgState.interactMode !== 'draw') return;
+            if (e.isPrimary === false) return;
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
             const tabState = getTabState();
             if (!tabState.pdfDoc) return;
             e.preventDefault();
+            try { stage.setPointerCapture(e.pointerId); } catch (_) {}
             const pt = getNormPoint(e);
             const draftEl = document.createElement('div');
             draftEl.className = 'rg-box draft';
             layer.appendChild(draftEl);
-            rgState.drag = { startX: pt.x, startY: pt.y, curX: pt.x, curY: pt.y, draftEl };
+            rgState.drag = { pointerId: e.pointerId, startX: pt.x, startY: pt.y, curX: pt.x, curY: pt.y, draftEl };
         });
 
-        window.addEventListener('mousemove', (e) => {
-            if (!rgState.drag) return;
+        stage.addEventListener('pointermove', (e) => {
+            if (!rgState.drag || rgState.drag.pointerId !== e.pointerId) return;
             const pt = getNormPoint(e);
             rgState.drag.curX = pt.x;
             rgState.drag.curY = pt.y;
@@ -146,18 +184,48 @@
             el.style.height = (h * 100) + '%';
         });
 
-        window.addEventListener('mouseup', () => {
-            if (!rgState.drag) return;
-            const d = rgState.drag;
-            rgState.drag = null;
-            if (d.draftEl && d.draftEl.parentNode) {
-                d.draftEl.parentNode.removeChild(d.draftEl);
+        const finishPointer = (e) => {
+            if (!rgState.drag || rgState.drag.pointerId !== e.pointerId) return;
+            const d = cleanupDraft();
+            if (!d) return;
+
+            const tab = rgState.activeTab;
+            const tabState = getTabState(tab);
+            const pageOffset = tabState.pageNum - 1;
+            const dx = Math.abs(d.curX - d.startX);
+            const dy = Math.abs(d.curY - d.startY);
+
+            // 手机端两点定框：点一次上边界，再点一次下边界成框
+            if (rgState.twoTapMode && dy < 0.015 && (rgState.fullWidth || dx < 0.015)) {
+                if (!rgState.twoTapStart || rgState.twoTapStart.pageOffset !== pageOffset) {
+                    rgState.twoTapStart = { pageOffset, x: d.curX, y: d.curY };
+                    renderBoxOverlay();
+                    return;
+                }
+                const start = rgState.twoTapStart;
+                rgState.twoTapStart = null;
+                const y = Math.min(start.y, d.curY);
+                const h = Math.abs(d.curY - start.y);
+                if (h < 0.01) {
+                    renderBoxOverlay();
+                    return;
+                }
+                const x = rgState.fullWidth ? FULL_WIDTH_X : Math.min(start.x, d.curX);
+                const w = rgState.fullWidth ? FULL_WIDTH_W : Math.max(0.05, Math.abs(d.curX - start.x));
+                onBoxDrawn(tab, {
+                    pageOffset,
+                    x: Number(x.toFixed(4)),
+                    y: Number(y.toFixed(4)),
+                    w: Number(w.toFixed(4)),
+                    h: Number(h.toFixed(4))
+                });
+                return;
             }
 
             let x = Math.min(d.startX, d.curX);
-            let w = Math.abs(d.curX - d.startX);
+            let w = dx;
             const y = Math.min(d.startY, d.curY);
-            const h = Math.abs(d.curY - d.startY);
+            const h = dy;
 
             if (h < 0.015 || (!rgState.fullWidth && w < 0.015)) {
                 return;
@@ -167,19 +235,18 @@
                 w = FULL_WIDTH_W;
             }
 
-            const tab = rgState.activeTab;
-            const tabState = getTabState(tab);
-            const pageOffset = tabState.pageNum - 1;
-            const rectObj = {
+            rgState.twoTapStart = null;
+            onBoxDrawn(tab, {
                 pageOffset,
                 x: Number(x.toFixed(4)),
                 y: Number(y.toFixed(4)),
                 w: Number(w.toFixed(4)),
                 h: Number(h.toFixed(4))
-            };
+            });
+        };
 
-            onBoxDrawn(tab, rectObj);
-        });
+        stage.addEventListener('pointerup', finishPointer);
+        stage.addEventListener('pointercancel', () => cleanupDraft());
     }
 
     function onBoxDrawn(tab, rectObj) {
@@ -301,6 +368,17 @@
         const tabState = getTabState(tab);
         const pageOffset = tabState.pageNum - 1;
         layer.innerHTML = '';
+
+        if (rgState.twoTapStart && rgState.twoTapStart.pageOffset === pageOffset) {
+            const line = document.createElement('div');
+            line.className = 'rg-anchor-line';
+            line.style.top = (rgState.twoTapStart.y * 100) + '%';
+            const lbl = document.createElement('span');
+            lbl.className = 'rg-anchor-label';
+            lbl.textContent = '上边界已定，请点下边界';
+            line.appendChild(lbl);
+            layer.appendChild(line);
+        }
 
         tabState.items.forEach(it => {
             it.regions.forEach((rg, rIdx) => {
@@ -599,12 +677,30 @@
         rgState.fullWidth = Boolean(checked);
     };
 
+    window.rgToggleInteractMode = function () {
+        rgState.interactMode = rgState.interactMode === 'draw' ? 'pan' : 'draw';
+        rgState.twoTapStart = null;
+        syncInteractModeUi();
+        renderBoxOverlay();
+    };
+
+    window.rgToggleTwoTapMode = function () {
+        rgState.twoTapMode = !rgState.twoTapMode;
+        rgState.twoTapStart = null;
+        if (rgState.twoTapMode && rgState.interactMode !== 'draw') {
+            rgState.interactMode = 'draw';
+        }
+        syncInteractModeUi();
+        renderBoxOverlay();
+    };
+
     window.rgChangePage = async function (delta) {
         const tabState = getTabState();
         if (!tabState.pdfDoc) return;
         const next = Math.max(1, Math.min(tabState.totalPages, tabState.pageNum + delta));
         if (next === tabState.pageNum) return;
         tabState.pageNum = next;
+        rgState.twoTapStart = null;
         await renderPdfPage();
     };
 

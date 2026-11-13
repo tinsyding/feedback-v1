@@ -12,7 +12,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261113-8';
+            const v = '20261113-9';
             document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/question-bank.css?v=${v}">`);
@@ -663,6 +663,8 @@
                                     <button type="button" class="btn sm secondary" id="rg-next-page" onclick="rgChangePage(1)">下一页</button>
                                 </div>
                                 <div class="rg-zoom-controls">
+                                    <button type="button" class="btn sm secondary rg-mode-btn active" id="rg-interact-mode-btn" onclick="rgToggleInteractMode()" title="在手机上可切换：拉框模式（单指框题） / 浏览滚动（单指滑动页面）">模式: 拉框</button>
+                                    <button type="button" class="btn sm secondary rg-mode-btn" id="rg-twotap-btn" onclick="rgToggleTwoTapMode()" title="开启后只需点击两次（上边界 + 下边界）即可快速成框，适合手机端单栏操作">两点定框: 关</button>
                                     <button type="button" class="btn sm secondary" onclick="rgZoom(-0.15)">-</button>
                                     <span class="rg-zoom-val" id="rg-zoom-val">100%</span>
                                     <button type="button" class="btn sm secondary" onclick="rgZoom(0.15)">+</button>
@@ -854,7 +856,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261113-8';
+            const v = '20261113-9';
             document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
             document.write(`<script src="js/common.js?v=${v}"><\/script>`);
             document.write(`<script src="js/auth.js?v=${v}"><\/script>`);
