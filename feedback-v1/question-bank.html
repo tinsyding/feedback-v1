@@ -12,7 +12,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261113-12';
+            const v = '20261113-13';
             document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/question-bank.css?v=${v}">`);
@@ -610,31 +610,44 @@
                             </div>
                         </div>
                         <div class="rg-studio-top-actions">
-                            <div class="rg-tab-switch" role="tablist">
-                                <button type="button" class="rg-tab-btn active" id="rg-tab-exercise" onclick="rgSwitchTab('exercise')">题目原卷</button>
-                                <button type="button" class="rg-tab-btn" id="rg-tab-answer" onclick="rgSwitchTab('answer')">答案原卷</button>
+                            <div class="rg-flow-steps" aria-label="框题步骤">
+                                <span class="rg-flow-step active" id="rg-step-pill-upload">1. 上传原卷</span>
+                                <span class="rg-flow-sep">→</span>
+                                <span class="rg-flow-step" id="rg-step-pill-exercise">2. 框选题目</span>
+                                <span class="rg-flow-sep">→</span>
+                                <span class="rg-flow-step" id="rg-step-pill-answer">3. 框选答案</span>
                             </div>
-                            <button type="button" class="btn primary" id="rg-finish-btn" onclick="rgFinishAndImport()" disabled>
+                            <button type="button" class="btn secondary" id="rg-prev-stage-btn" onclick="rgGoPrevStage()" style="display: none;">← 上一步</button>
+                            <button type="button" class="btn primary" id="rg-next-stage-btn" onclick="rgGoNextStage()" disabled>开始框选题目 PDF →</button>
+                            <button type="button" class="btn primary" id="rg-finish-btn" onclick="rgFinishAndImport()" style="display: none;">
                                 完成框选并导入第 4 步 →
                             </button>
                         </div>
                     </div>
 
-                    <div class="rg-upload-strip" id="rg-upload-strip">
-                        <label class="rg-upload-chip" for="rg-exercise-file">
-                            <span class="rg-upload-dot exercise"></span>
-                            <span id="rg-exercise-file-label">上传题目原卷 PDF（单栏）</span>
-                            <input type="file" id="rg-exercise-file" accept=".pdf,application/pdf" hidden onchange="rgHandlePdfUpload('exercise', this)">
-                        </label>
-                        <label class="rg-upload-chip" for="rg-answer-file">
-                            <span class="rg-upload-dot answer"></span>
-                            <span id="rg-answer-file-label">上传答案原卷 PDF（必传，独立框选）</span>
-                            <input type="file" id="rg-answer-file" accept=".pdf,application/pdf" hidden onchange="rgHandlePdfUpload('answer', this)">
-                        </label>
-                        <label class="rg-snap-toggle">
-                            <input type="checkbox" id="rg-fullwidth-toggle" checked onchange="rgToggleFullWidth(this.checked)">
-                            <span>横向自动打满（单栏）</span>
-                        </label>
+                    <!-- 第 1 步：上传题目 PDF 与答案 PDF -->
+                    <div class="rg-upload-gate" id="rg-upload-gate">
+                        <div class="rg-upload-gate-grid">
+                            <label class="rg-upload-box" id="rg-exercise-upload-box" for="rg-exercise-file">
+                                <span class="rg-upload-dot exercise"></span>
+                                <div class="rg-upload-box-title">1. 上传题目原卷 PDF（必传）</div>
+                                <div class="rg-upload-box-sub" id="rg-exercise-file-label">点击选择单栏题目原卷 PDF</div>
+                                <input type="file" id="rg-exercise-file" accept=".pdf,application/pdf" hidden onchange="rgHandlePdfUpload('exercise', this)">
+                            </label>
+                            <label class="rg-upload-box" id="rg-answer-upload-box" for="rg-answer-file">
+                                <span class="rg-upload-dot answer"></span>
+                                <div class="rg-upload-box-title">2. 上传答案原卷 PDF（必传）</div>
+                                <div class="rg-upload-box-sub" id="rg-answer-file-label">点击选择答案原卷 PDF</div>
+                                <input type="file" id="rg-answer-file" accept=".pdf,application/pdf" hidden onchange="rgHandlePdfUpload('answer', this)">
+                            </label>
+                        </div>
+                        <div class="rg-upload-gate-footer">
+                            <label class="rg-snap-toggle">
+                                <input type="checkbox" id="rg-fullwidth-toggle" checked onchange="rgToggleFullWidth(this.checked)">
+                                <span>横向自动打满（单栏）</span>
+                            </label>
+                            <span class="rg-upload-gate-tip">两份 PDF 上传完成后，先逐题框选题目，再逐题框选答案</span>
+                        </div>
                     </div>
 
                     <!-- 大题内部细分工具栏（点击某框的“设为大题”后激活） -->
@@ -653,7 +666,7 @@
                         </div>
                     </div>
 
-                    <div class="rg-workspace">
+                    <div class="rg-workspace" id="rg-workspace" style="display: none;">
                         <!-- 左侧：PDF 整卷画布 -->
                         <div class="rg-canvas-col">
                             <div class="rg-canvas-toolbar">
@@ -856,7 +869,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261113-12';
+            const v = '20261113-13';
             document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
             document.write(`<script src="js/common.js?v=${v}"><\/script>`);
             document.write(`<script src="js/auth.js?v=${v}"><\/script>`);

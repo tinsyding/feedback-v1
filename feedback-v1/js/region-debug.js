@@ -11,6 +11,7 @@
     const rgState = {
         initialized: false,
         contextKey: '',
+        stage: 'upload', // 'upload' | 'exercise' | 'answer'
         activeTab: 'exercise',
         fullWidth: true,
         interactMode: 'draw', // 'draw' | 'pan'
@@ -569,7 +570,71 @@
         }
     }
 
+    function syncStageUi() {
+        const st = rgState.stage;
+        const gate = document.getElementById('rg-upload-gate');
+        const ws = document.getElementById('rg-workspace');
+        const pillUp = document.getElementById('rg-step-pill-upload');
+        const pillEx = document.getElementById('rg-step-pill-exercise');
+        const pillAn = document.getElementById('rg-step-pill-answer');
+        const prevBtn = document.getElementById('rg-prev-stage-btn');
+        const nextBtn = document.getElementById('rg-next-stage-btn');
+        const finishBtn = document.getElementById('rg-finish-btn');
+        const exBox = document.getElementById('rg-exercise-upload-box');
+        const ansBox = document.getElementById('rg-answer-upload-box');
+
+        if (exBox) exBox.classList.toggle('uploaded', Boolean(rgState.exercise.pdfDoc));
+        if (ansBox) ansBox.classList.toggle('uploaded', Boolean(rgState.answer.pdfDoc));
+
+        if (gate) gate.style.display = st === 'upload' ? 'block' : 'none';
+        if (ws) ws.style.display = st === 'upload' ? 'none' : 'grid';
+
+        if (pillUp) {
+            pillUp.classList.toggle('active', st === 'upload');
+            pillUp.classList.toggle('done', st !== 'upload');
+        }
+        if (pillEx) {
+            pillEx.classList.toggle('active', st === 'exercise');
+            pillEx.classList.toggle('done', st === 'answer');
+        }
+        if (pillAn) {
+            pillAn.classList.toggle('active', st === 'answer');
+        }
+
+        if (prevBtn) {
+            if (st === 'upload') {
+                prevBtn.style.display = 'none';
+            } else if (st === 'exercise') {
+                prevBtn.style.display = 'inline-flex';
+                prevBtn.textContent = '← 重新上传 PDF';
+            } else {
+                prevBtn.style.display = 'inline-flex';
+                prevBtn.textContent = '← 返回修改题目框选';
+            }
+        }
+
+        if (nextBtn) {
+            if (st === 'upload') {
+                nextBtn.style.display = 'inline-flex';
+                nextBtn.textContent = '开始框选题目 PDF →';
+                nextBtn.disabled = !(rgState.exercise.pdfDoc && rgState.answer.pdfDoc);
+            } else if (st === 'exercise') {
+                nextBtn.style.display = 'inline-flex';
+                nextBtn.textContent = '题目已框完，下一步：框选答案 PDF →';
+                nextBtn.disabled = rgState.exercise.items.length === 0;
+            } else {
+                nextBtn.style.display = 'none';
+            }
+        }
+
+        if (finishBtn) {
+            finishBtn.style.display = st === 'answer' ? 'inline-flex' : 'none';
+            finishBtn.disabled = rgState.answer.items.length === 0;
+        }
+    }
+
     function renderAllRg() {
+        syncStageUi();
         renderSubModeBar();
         renderSidebar();
         renderBoxOverlay();
@@ -605,13 +670,13 @@
             rgState.selectedId = null;
             rgState.continueTargetId = null;
             rgState.subMode = null;
+            rgState.twoTapStart = null;
+            rgState.stage = 'upload';
             rgState.activeTab = 'exercise';
             const exLbl = document.getElementById('rg-exercise-file-label');
             const ansLbl = document.getElementById('rg-answer-file-label');
-            if (exLbl) exLbl.textContent = '上传题目原卷 PDF（单栏）';
-            if (ansLbl) ansLbl.textContent = '上传答案原卷 PDF（必传，独立框选）';
-            document.getElementById('rg-tab-exercise')?.classList.add('active');
-            document.getElementById('rg-tab-answer')?.classList.remove('active');
+            if (exLbl) exLbl.textContent = '点击选择单栏题目原卷 PDF';
+            if (ansLbl) ansLbl.textContent = '点击选择答案原卷 PDF';
         }
         rgState.contextKey = newContextKey;
 
@@ -634,15 +699,69 @@
         goToStep(1);
     };
 
-    window.rgSwitchTab = async function (tab) {
-        if (tab !== 'exercise' && tab !== 'answer') return;
-        rgState.activeTab = tab;
+    window.rgGoNextStage = async function () {
+        if (rgState.stage === 'upload') {
+            if (!rgState.exercise.pdfDoc || !rgState.answer.pdfDoc) {
+                showToast('请先上传题目 PDF 和答案 PDF', 'warn');
+                return;
+            }
+            rgState.stage = 'exercise';
+            rgState.activeTab = 'exercise';
+            rgState.continueTargetId = null;
+            rgState.subMode = null;
+            rgState.twoTapStart = null;
+            renderAllRg();
+            await renderPdfPage();
+            return;
+        }
+        if (rgState.stage === 'exercise') {
+            const exItems = rgState.exercise.items;
+            if (exItems.length === 0) {
+                showToast('请先框选至少一道题目', 'warn');
+                return;
+            }
+            const bankType = getCurrentBankTypeSafe();
+            if (bankType === 'preview') {
+                const missing = exItems.find(it => !String(it.label || '').trim());
+                if (missing) {
+                    showToast('预习模式请先为每道框选题目输入题号', 'warn');
+                    rgSelectItem(missing.id);
+                    return;
+                }
+            }
+            if (bankType === 'variation') {
+                const missing = exItems.find(it => !Array.isArray(it.parentNums) || it.parentNums.length === 0);
+                if (missing) {
+                    showToast('举一反三模式请先为每道题勾选对应的原题', 'warn');
+                    rgSelectItem(missing.id);
+                    return;
+                }
+            }
+            rgState.stage = 'answer';
+            rgState.activeTab = 'answer';
+            rgState.continueTargetId = null;
+            rgState.subMode = null;
+            rgState.twoTapStart = null;
+            renderAllRg();
+            await renderPdfPage();
+        }
+    };
+
+    window.rgGoPrevStage = async function () {
         rgState.continueTargetId = null;
-        document.getElementById('rg-tab-exercise')?.classList.toggle('active', tab === 'exercise');
-        document.getElementById('rg-tab-answer')?.classList.toggle('active', tab === 'answer');
-        renderSubModeBar();
-        renderSidebar();
-        await renderPdfPage();
+        rgState.subMode = null;
+        rgState.twoTapStart = null;
+        if (rgState.stage === 'answer') {
+            rgState.stage = 'exercise';
+            rgState.activeTab = 'exercise';
+            renderAllRg();
+            await renderPdfPage();
+            return;
+        }
+        if (rgState.stage === 'exercise') {
+            rgState.stage = 'upload';
+            renderAllRg();
+        }
     };
 
     window.rgHandlePdfUpload = async function (tab, inputEl) {
@@ -659,11 +778,16 @@
             tabState.items = [];
             rgState.continueTargetId = null;
             rgState.subMode = null;
+            rgState.twoTapStart = null;
 
             const lbl = document.getElementById(tab === 'answer' ? 'rg-answer-file-label' : 'rg-exercise-file-label');
             if (lbl) lbl.textContent = `${file.name} (${pdfDoc.numPages} 页)`;
 
-            await rgSwitchTab(tab);
+            syncStageUi();
+            if (rgState.stage !== 'upload' && rgState.activeTab === tab) {
+                renderAllRg();
+                await renderPdfPage();
+            }
             showToast(`已加载${tab === 'answer' ? '答案' : '题目'} PDF（${pdfDoc.numPages} 页）`);
         } catch (err) {
             console.error('Debug PDF load error:', err);
