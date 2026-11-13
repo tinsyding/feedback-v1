@@ -12,7 +12,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261113-10';
+            const v = '20261113-11';
             document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/question-bank.css?v=${v}">`);
@@ -628,7 +628,7 @@
                         </label>
                         <label class="rg-upload-chip" for="rg-answer-file">
                             <span class="rg-upload-dot answer"></span>
-                            <span id="rg-answer-file-label">上传答案原卷 PDF（可选，独立框选）</span>
+                            <span id="rg-answer-file-label">上传答案原卷 PDF（必传，独立框选）</span>
                             <input type="file" id="rg-answer-file" accept=".pdf,application/pdf" hidden onchange="rgHandlePdfUpload('answer', this)">
                         </label>
                         <label class="rg-snap-toggle">
@@ -856,7 +856,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261113-10';
+            const v = '20261113-11';
             document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
             document.write(`<script src="js/common.js?v=${v}"><\/script>`);
             document.write(`<script src="js/auth.js?v=${v}"><\/script>`);

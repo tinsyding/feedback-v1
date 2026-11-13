@@ -960,7 +960,8 @@ async function onHoverHomeworkPreview(event, parentNum) {
     if (hwQ.exercisePdf.thumb) {
         showHoverPopover(event, hwQ.exercisePdf.thumb, title);
     } else if (hwQ.exercisePdf.url) {
-        const thumb = await ensurePdfThumbnail(hwQ.exercisePdf);
+        const cropBox = getRegionCropThumbBox(hwQ, 'exercise');
+        const thumb = await ensurePdfThumbnail(hwQ.exercisePdf, cropBox);
         if (thumb) showHoverPopover(event, thumb, title);
     }
 }
@@ -2877,10 +2878,11 @@ async function preloadThumbnailsWithThrottle(questions) {
             const task = tasks[cursor++];
             if (!task) break;
             try {
-                let thumb = seenUrls.get(task.pdfObj.url);
+                const cropBox = getRegionCropThumbBox(task.q, task.type);
+                let thumb = cropBox ? null : seenUrls.get(task.pdfObj.url);
                 if (!thumb) {
-                    thumb = await ensurePdfThumbnail(task.pdfObj);
-                    if (thumb && task.pdfObj.url) {
+                    thumb = await ensurePdfThumbnail(task.pdfObj, cropBox);
+                    if (thumb && task.pdfObj.url && !cropBox) {
                         seenUrls.set(task.pdfObj.url, thumb);
                     }
                 } else {
@@ -2942,19 +2944,43 @@ async function generatePdfThumbnailFromFile(file) {
     }
 }
 
-async function ensurePdfThumbnail(pdfObj) {
+function getRegionCropThumbBox(q, type) {
+    if (!q || !q.questionMeta || q.questionMeta.mode !== 'region_crop') return null;
+    if (type === 'answer') {
+        if (q.questionMeta.answerBox) return q.questionMeta.answerBox;
+        if (Array.isArray(q.questionMeta.answerRegions) && q.questionMeta.answerRegions.length > 0) {
+            return q.questionMeta.answerRegions[0];
+        }
+        return null;
+    }
+    if (q.questionMeta.box) return q.questionMeta.box;
+    if (Array.isArray(q.questionMeta.regions) && q.questionMeta.regions.length > 0) {
+        return q.questionMeta.regions[0];
+    }
+    return null;
+}
+
+async function ensurePdfThumbnail(pdfObj, cropRegion = null) {
     if (!pdfObj || !pdfObj.url || pdfObj.thumb) return pdfObj ? pdfObj.thumb : null;
     try {
         if (!window.pdfjsLib) return null;
-        const resp = await fetch(pdfObj.url);
-        if (!resp.ok) return null;
-        const data = await resp.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data }).promise;
+        let data = regionPreviewBytesCache.get(pdfObj.url);
+        if (!data) {
+            const resp = await fetch(pdfObj.url);
+            if (!resp.ok) return null;
+            data = await resp.arrayBuffer();
+            regionPreviewBytesCache.set(pdfObj.url, data);
+        }
+        const pdf = await pdfjsLib.getDocument({ data: data.slice(0) }).promise;
         if (pdf.numPages < 1) return null;
-        const page = await pdf.getPage(1);
+        const pageNum = cropRegion
+            ? Math.min(pdf.numPages, Math.max(1, (parseInt(cropRegion.pageOffset, 10) || 0) + 1))
+            : 1;
+        const page = await pdf.getPage(pageNum);
         const base = page.getViewport({ scale: 1 });
-        // 轻量化缩略图：限制在 400px，质量 0.68，单张仅 15~25KB
-        const targetWidth = Math.min(420, Math.max(280, Math.floor(base.width)));
+        const targetWidth = cropRegion
+            ? Math.min(900, Math.max(560, Math.floor(base.width)))
+            : Math.min(420, Math.max(280, Math.floor(base.width)));
         const scale = targetWidth / base.width;
         const viewport = page.getViewport({ scale });
         const canvas = document.createElement('canvas');
@@ -2964,7 +2990,26 @@ async function ensurePdfThumbnail(pdfObj) {
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         await page.render({ canvasContext: ctx, viewport }).promise;
-        pdfObj.thumb = canvas.toDataURL('image/jpeg', 0.68);
+
+        if (cropRegion) {
+            const sx = Math.max(0, Math.floor((cropRegion.x ?? 0) * canvas.width));
+            const sy = Math.max(0, Math.floor((cropRegion.y ?? 0) * canvas.height));
+            const sw = Math.max(12, Math.min(canvas.width - sx, Math.ceil((cropRegion.w ?? 1) * canvas.width)));
+            const sh = Math.max(12, Math.min(canvas.height - sy, Math.ceil((cropRegion.h ?? 1) * canvas.height)));
+            const out = document.createElement('canvas');
+            const outW = Math.min(480, sw);
+            const outScale = outW / sw;
+            out.width = outW;
+            out.height = Math.max(12, Math.round(sh * outScale));
+            const octx = out.getContext('2d', { alpha: false });
+            octx.fillStyle = '#ffffff';
+            octx.fillRect(0, 0, out.width, out.height);
+            octx.drawImage(canvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
+            pdfObj.thumb = out.toDataURL('image/jpeg', 0.8);
+        } else {
+            pdfObj.thumb = canvas.toDataURL('image/jpeg', 0.68);
+        }
+
         page.cleanup();
         if (typeof pdf.destroy === 'function') { try { await pdf.destroy(); } catch (_) {} }
         return pdfObj.thumb;
@@ -3073,6 +3118,22 @@ async function saveQuestions() {
                 if (exBtn) {
                     exBtn.classList.add('pulse-active');
                     setTimeout(() => exBtn.classList.remove('pulse-active'), 2500);
+                }
+            }
+            return;
+        }
+
+        const hasAnswer = Boolean(q.answerPdf && q.answerPdf.url);
+        if (!hasAnswer) {
+            showToast(`第 ${qNum} 题【答案解析】（答案PDF）为必传项，请上传`, 'warn');
+            const targetCard = findQuestionCardDomByIndex(i);
+            if (targetCard) {
+                targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                const emptyBtns = targetCard.querySelectorAll('.q-pdf-thumb-card.empty, .q-pdf-btn.empty');
+                const ansBtn = emptyBtns[emptyBtns.length - 1];
+                if (ansBtn) {
+                    ansBtn.classList.add('pulse-active');
+                    setTimeout(() => ansBtn.classList.remove('pulse-active'), 2500);
                 }
             }
             return;
@@ -5385,10 +5446,10 @@ function renderPdfBtn(q, index, type) {
     const iconUploading = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" class="spin-icon"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></svg>`;
 
     if (!data || (!data.url && data.status !== 'uploading')) {
-        const requiredCls = type === 'exercise' ? ' required-empty' : '';
-        const statusText = type === 'exercise' ? '未上传 (必传)' : '未上传 (选传)';
+        const requiredCls = ' required-empty';
+        const statusText = '未上传 (必传)';
         return `
-            <div class="q-pdf-thumb-card empty${requiredCls}" onclick="triggerPdfUpload(${index}, '${type}')" title="点击上传${label} PDF${type === 'exercise' ? ' (必传)' : ''}">
+            <div class="q-pdf-thumb-card empty${requiredCls}" onclick="triggerPdfUpload(${index}, '${type}')" title="点击上传${label} PDF (必传)">
                 <div class="q-pdf-mini-thumb empty-thumb-wrap">
                     ${iconEmpty}
                 </div>

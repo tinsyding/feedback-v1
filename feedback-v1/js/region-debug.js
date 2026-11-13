@@ -609,7 +609,7 @@
             const exLbl = document.getElementById('rg-exercise-file-label');
             const ansLbl = document.getElementById('rg-answer-file-label');
             if (exLbl) exLbl.textContent = '上传题目原卷 PDF（单栏）';
-            if (ansLbl) ansLbl.textContent = '上传答案原卷 PDF（可选，独立框选）';
+            if (ansLbl) ansLbl.textContent = '上传答案原卷 PDF（必传，独立框选）';
             document.getElementById('rg-tab-exercise')?.classList.add('active');
             document.getElementById('rg-tab-answer')?.classList.remove('active');
         }
@@ -874,6 +874,10 @@
             showToast('请先上传题目原卷并框选至少一道题', 'warn');
             return;
         }
+        if (!rgState.answer.file || rgState.answer.items.length === 0) {
+            showToast('答案原卷为必传项，请上传答案原卷并框选各题答案', 'warn');
+            return;
+        }
         const bankType = getCurrentBankTypeSafe();
 
         if (bankType === 'preview') {
@@ -1032,6 +1036,12 @@
 
             if (bankType === 'variation' && typeof recalcVariationSubNums === 'function') {
                 recalcVariationSubNums(imported);
+            }
+
+            const missingAns = imported.find(q => !q.answerPdf);
+            if (missingAns) {
+                showToast(`第 ${missingAns.id} 题尚未匹配到答案框，请在“答案原卷”补充对应题号答案框后再导入`, 'warn');
+                return;
             }
 
             currentQuestions = imported;
