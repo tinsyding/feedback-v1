@@ -79,16 +79,32 @@ switch ($action) {
 
     case 'check':
         $requireCaptcha = !empty($_SESSION['front_login_fail_count']) && $_SESSION['front_login_fail_count'] > 0;
+        $hasAdminSession = function_exists('isAdminLoggedIn') ? isAdminLoggedIn() : !empty($_SESSION['admin_logged_in']);
         if (!empty($_SESSION['user_logged_in']) && $_SESSION['user_logged_in'] === true) {
+            $uRole = $_SESSION['user_role'] ?? 'teacher';
             sendAuthResponse(true, [
                 'loggedIn'        => true,
                 'require_captcha' => $requireCaptcha,
                 'user'            => [
-                    'id'        => $_SESSION['user_id'] ?? null,
-                    'username'  => $_SESSION['username'] ?? '',
-                    'real_name' => $_SESSION['real_name'] ?? '',
-                    'role'      => $_SESSION['user_role'] ?? 'teacher',
-                    'created_by'=> $_SESSION['user_created_by'] ?? ''
+                    'id'         => $_SESSION['user_id'] ?? null,
+                    'username'   => $_SESSION['username'] ?? '',
+                    'real_name'  => $_SESSION['real_name'] ?? '',
+                    'role'       => $uRole,
+                    'is_admin'   => $hasAdminSession || in_array($uRole, ['admin', 'super_admin'], true),
+                    'created_by' => $_SESSION['user_created_by'] ?? ''
+                ]
+            ]);
+        } elseif ($hasAdminSession) {
+            sendAuthResponse(true, [
+                'loggedIn'        => true,
+                'require_captcha' => $requireCaptcha,
+                'user'            => [
+                    'id'         => null,
+                    'username'   => $_SESSION['admin_username'] ?? 'admin',
+                    'real_name'  => $_SESSION['admin_realname'] ?? '超级管理员',
+                    'role'       => $_SESSION['admin_role'] ?? 'super_admin',
+                    'is_admin'   => true,
+                    'created_by' => ''
                 ]
             ]);
         } else {
@@ -204,10 +220,13 @@ switch ($action) {
             'message'   => "用户登录成功: {$user['username']}"
         ]);
 
+        $uRole = $user['role'] ?: 'teacher';
+        $hasAdminSession = function_exists('isAdminLoggedIn') ? isAdminLoggedIn() : !empty($_SESSION['admin_logged_in']);
         sendAuthResponse(true, [
             'username'   => $user['username'],
             'real_name'  => $user['real_name'],
-            'role'       => $user['role'] ?: 'teacher',
+            'role'       => $uRole,
+            'is_admin'   => $hasAdminSession || in_array($uRole, ['admin', 'super_admin'], true),
             'created_by' => $user['created_by'] ?? '',
             'message'    => '登录成功'
         ]);

@@ -1,10 +1,13 @@
-// ========== Whole-Paper Region-Crop Studio (Debug) ==========
-// 免切题分页：直接上传整卷原卷 PDF（单栏），逐题拉框标注，支持大题（先原文后小问）、
-// 跨页续框、预习跳题手动输题号、举一反三归属原题选择、以及答案独立拉框。
+// ========== Whole-Paper Region-Crop Studio ==========
+// 免切题分页：直接上传整卷原卷 PDF（单栏/双栏），逐题拉框标注，支持大题（先原文后小问）、
+// 跨页续框、预习跳题手动输题号、举一反三归属原题选择、答案独立拉框、边框拖拽微调、
+// 快捷键、高分屏渲染、IndexedDB 本地草稿自动恢复以及已保存题库反加载调整。
 
 (function () {
     const FULL_WIDTH_X = 0.03;
     const FULL_WIDTH_W = 0.94;
+    const DRAFT_DB_NAME = 'qbank_region_drafts';
+    const DRAFT_STORE_NAME = 'drafts';
 
     const isCoarsePointer = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
 
@@ -21,8 +24,14 @@
         continueTargetId: null,
         selectedId: null,
         subMode: null, // { tab, itemId, target: 'stem' | 'subq' }
+        presetNextLabel: null,
+        presetNextTargetExId: null,
         drag: null,
+        resize: null,
         nextSeq: 1,
+        renderTask: null,
+        renderSeq: 0,
+        draftTimer: null,
         exercise: {
             file: null,
             pdfDoc: null,
@@ -53,6 +62,14 @@
 
     function getCurrentBankTypeSafe() {
         return typeof getBankType === 'function' ? getBankType() : 'homework';
+    }
+
+    function clamp01(val) {
+        return Math.max(0, Math.min(1, Number(val) || 0));
+    }
+
+    function round4(val) {
+        return Number(clamp01(val).toFixed(4));
     }
 
     function getNextAutoNumber(tab) {
@@ -122,6 +139,240 @@
         return '待输入题号';
     }
 
+    // ========== IndexedDB 本地草稿持久化 ==========
+    function openDraftDb() {
+        return new Promise((resolve, reject) => {
+            if (typeof indexedDB === 'undefined') {
+                resolve(null);
+                return;
+            }
+            const req = indexedDB.open(DRAFT_DB_NAME, 1);
+            req.onupgradeneeded = () => {
+                const db = req.result;
+                if (!db.objectStoreNames.contains(DRAFT_STORE_NAME)) {
+                    db.createObjectStore(DRAFT_STORE_NAME, { keyPath: 'contextKey' });
+                }
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+    }
+
+    function cloneItemsForDraft(items) {
+        return (items || []).map(it => ({
+            id: it.id,
+            label: it.label || '',
+            targetExId: it.targetExId || null,
+            parentNums: Array.isArray(it.parentNums) ? [...it.parentNums] : [],
+            isBig: Boolean(it.isBig),
+            regions: (it.regions || []).map(r => ({ ...r })),
+            stemBoxes: (it.stemBoxes || []).map(sb => ({ ...sb })),
+            subqBoxes: (it.subqBoxes || []).map(qb => ({ ...qb }))
+        }));
+    }
+
+    async function saveDraftNow() {
+        const key = rgState.contextKey;
+        if (!key) return;
+        const hasData = Boolean(
+            rgState.exercise.file ||
+            rgState.answer.file ||
+            rgState.exercise.items.length > 0 ||
+            rgState.answer.items.length > 0
+        );
+        if (!hasData) return;
+        try {
+            const db = await openDraftDb();
+            if (!db) return;
+            const record = {
+                contextKey: key,
+                stage: rgState.stage,
+                activeTab: rgState.activeTab,
+                fullWidth: rgState.fullWidth,
+                scale: rgState.scale,
+                nextSeq: rgState.nextSeq,
+                exerciseFile: rgState.exercise.file || null,
+                exerciseName: rgState.exercise.file ? rgState.exercise.file.name : '',
+                exercisePageNum: rgState.exercise.pageNum || 1,
+                exerciseItems: cloneItemsForDraft(rgState.exercise.items),
+                answerFile: rgState.answer.file || null,
+                answerName: rgState.answer.file ? rgState.answer.file.name : '',
+                answerPageNum: rgState.answer.pageNum || 1,
+                answerItems: cloneItemsForDraft(rgState.answer.items),
+                updatedAt: Date.now()
+            };
+            await new Promise((resolve, reject) => {
+                const tx = db.transaction(DRAFT_STORE_NAME, 'readwrite');
+                tx.objectStore(DRAFT_STORE_NAME).put(record);
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error);
+            });
+            db.close();
+        } catch (err) {
+            console.warn('Save region draft failed:', err);
+        }
+    }
+
+    function scheduleDraftSave() {
+        if (rgState.draftTimer) clearTimeout(rgState.draftTimer);
+        rgState.draftTimer = setTimeout(() => {
+            rgState.draftTimer = null;
+            saveDraftNow();
+        }, 400);
+    }
+
+    async function loadDraftFromIdb(contextKey) {
+        if (!contextKey) return null;
+        try {
+            const db = await openDraftDb();
+            if (!db) return null;
+            const record = await new Promise((resolve, reject) => {
+                const tx = db.transaction(DRAFT_STORE_NAME, 'readonly');
+                const req = tx.objectStore(DRAFT_STORE_NAME).get(contextKey);
+                req.onsuccess = () => resolve(req.result || null);
+                req.onerror = () => reject(req.error);
+            });
+            db.close();
+            return record;
+        } catch (err) {
+            return null;
+        }
+    }
+
+    async function clearDraftInIdb(contextKey) {
+        if (!contextKey) return;
+        try {
+            const db = await openDraftDb();
+            if (!db) return;
+            await new Promise((resolve, reject) => {
+                const tx = db.transaction(DRAFT_STORE_NAME, 'readwrite');
+                tx.objectStore(DRAFT_STORE_NAME).delete(contextKey);
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error);
+            });
+            db.close();
+        } catch (err) {
+            console.warn('Clear region draft failed:', err);
+        }
+    }
+
+    window.rgClearSavedDraft = async function (contextKey) {
+        const key = contextKey || rgState.contextKey;
+        if (rgState.draftTimer) {
+            clearTimeout(rgState.draftTimer);
+            rgState.draftTimer = null;
+        }
+        await clearDraftInIdb(key);
+    };
+
+    function buildContextKeyFromSelectors() {
+        return [
+            getCurrentBankTypeSafe(),
+            typeof getSelectedYear === 'function' ? getSelectedYear() : '',
+            typeof getSelectedSeason === 'function' ? getSelectedSeason() : '',
+            subjectSelect ? subjectSelect.value : '',
+            gradeSelect ? gradeSelect.value : '',
+            tierSelect ? tierSelect.value : '',
+            weekSelect ? weekSelect.value : ''
+        ].join('|');
+    }
+
+    function resetStudioMemoryState() {
+        rgState.exercise = { file: null, pdfDoc: null, pageNum: 1, totalPages: 0, items: [] };
+        rgState.answer = { file: null, pdfDoc: null, pageNum: 1, totalPages: 0, items: [] };
+        rgState.selectedId = null;
+        rgState.continueTargetId = null;
+        rgState.subMode = null;
+        rgState.twoTapStart = null;
+        rgState.presetNextLabel = null;
+        rgState.presetNextTargetExId = null;
+        rgState.stage = 'upload';
+        rgState.activeTab = 'exercise';
+        rgState.nextSeq = 1;
+        const exLbl = document.getElementById('rg-exercise-file-label');
+        const ansLbl = document.getElementById('rg-answer-file-label');
+        if (exLbl) exLbl.textContent = '必传 · 点击选择单栏题目原卷 PDF';
+        if (ansLbl) ansLbl.textContent = '必传 · 点击选择答案原卷 PDF';
+    }
+
+    async function restoreDraftRecord(record) {
+        if (!record) return false;
+        const loadPdfDoc = async (fileObj) => {
+            if (!fileObj || typeof fileObj.arrayBuffer !== 'function') return null;
+            const buf = await fileObj.arrayBuffer();
+            return await pdfjsLib.getDocument({ data: buf }).promise;
+        };
+
+        let restoredAny = false;
+        if (record.exerciseFile) {
+            try {
+                const exDoc = await loadPdfDoc(record.exerciseFile);
+                if (exDoc) {
+                    const exName = record.exerciseName || record.exerciseFile.name || '题目原卷.pdf';
+                    rgState.exercise.file = record.exerciseFile instanceof File
+                        ? record.exerciseFile
+                        : new File([record.exerciseFile], exName, { type: 'application/pdf' });
+                    rgState.exercise.pdfDoc = exDoc;
+                    rgState.exercise.totalPages = exDoc.numPages;
+                    rgState.exercise.pageNum = Math.min(exDoc.numPages, Math.max(1, record.exercisePageNum || 1));
+                    rgState.exercise.items = cloneItemsForDraft(record.exerciseItems);
+                    const exLbl = document.getElementById('rg-exercise-file-label');
+                    if (exLbl) exLbl.textContent = `${exName} (${exDoc.numPages} 页)`;
+                    restoredAny = true;
+                }
+            } catch (e) {
+                console.warn('Restore exercise PDF failed:', e);
+            }
+        }
+        if (record.answerFile) {
+            try {
+                const ansDoc = await loadPdfDoc(record.answerFile);
+                if (ansDoc) {
+                    const ansName = record.answerName || record.answerFile.name || '答案原卷.pdf';
+                    rgState.answer.file = record.answerFile instanceof File
+                        ? record.answerFile
+                        : new File([record.answerFile], ansName, { type: 'application/pdf' });
+                    rgState.answer.pdfDoc = ansDoc;
+                    rgState.answer.totalPages = ansDoc.numPages;
+                    rgState.answer.pageNum = Math.min(ansDoc.numPages, Math.max(1, record.answerPageNum || 1));
+                    rgState.answer.items = cloneItemsForDraft(record.answerItems);
+                    const ansLbl = document.getElementById('rg-answer-file-label');
+                    if (ansLbl) ansLbl.textContent = `${ansName} (${ansDoc.numPages} 页)`;
+                    restoredAny = true;
+                }
+            } catch (e) {
+                console.warn('Restore answer PDF failed:', e);
+            }
+        }
+        if (!restoredAny) return false;
+
+        rgState.fullWidth = typeof record.fullWidth === 'boolean' ? record.fullWidth : true;
+        rgState.scale = typeof record.scale === 'number' ? record.scale : 1.0;
+        rgState.nextSeq = Math.max(1, parseInt(record.nextSeq, 10) || 1);
+        if (record.stage === 'answer' && rgState.answer.pdfDoc && rgState.exercise.items.length > 0) {
+            rgState.stage = 'answer';
+            rgState.activeTab = 'answer';
+        } else if (record.stage !== 'upload' && rgState.exercise.pdfDoc && rgState.answer.pdfDoc) {
+            rgState.stage = 'exercise';
+            rgState.activeTab = 'exercise';
+        } else {
+            rgState.stage = 'upload';
+            rgState.activeTab = 'exercise';
+        }
+        syncFullWidthUi();
+        return true;
+    }
+
+    function syncFullWidthUi() {
+        const chk = document.getElementById('rg-fullwidth-toggle');
+        const toolBtn = document.getElementById('rg-fullwidth-toolbar-btn');
+        if (chk) chk.checked = Boolean(rgState.fullWidth);
+        if (toolBtn) {
+            toolBtn.classList.toggle('active', Boolean(rgState.fullWidth));
+            toolBtn.textContent = rgState.fullWidth ? '全宽: 开' : '全宽: 关';
+        }
+    }
+
     function syncInteractModeUi() {
         const stage = document.getElementById('rg-stage');
         const modeBtn = document.getElementById('rg-interact-mode-btn');
@@ -139,6 +390,33 @@
             twoTapBtn.classList.toggle('active', Boolean(rgState.twoTapMode));
             twoTapBtn.textContent = rgState.twoTapMode ? '两点定框: 开' : '两点定框: 关';
         }
+        syncFullWidthUi();
+    }
+
+    function startBoxResize(e, kind, itemId, boxRef, edge, boxEl) {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const stage = document.getElementById('rg-stage');
+        if (!stage) return;
+        const rect = stage.getBoundingClientRect();
+        rgState.selectedId = itemId;
+        rgState.resize = {
+            pointerId: e.pointerId,
+            kind,
+            itemId,
+            boxRef,
+            edge,
+            boxEl,
+            stageRect: rect,
+            startClientX: e.clientX,
+            startClientY: e.clientY,
+            origX: Number(boxRef.x) || 0,
+            origY: Number(boxRef.y) || 0,
+            origW: Number(boxRef.w) || 0.1,
+            origH: Number(boxRef.h) || 0.05
+        };
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
     }
 
     function bindCanvasEventsOnce() {
@@ -148,12 +426,13 @@
 
         const stage = document.getElementById('rg-stage');
         const layer = document.getElementById('rg-box-layer');
+        const viewportEl = document.getElementById('rg-viewport');
         if (!stage || !layer) return;
 
         const getNormPoint = (e) => {
             const rect = stage.getBoundingClientRect();
-            const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / Math.max(1, rect.width)));
-            const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / Math.max(1, rect.height)));
+            const x = clamp01((e.clientX - rect.left) / Math.max(1, rect.width));
+            const y = clamp01((e.clientY - rect.top) / Math.max(1, rect.height));
             return { x, y };
         };
 
@@ -168,12 +447,19 @@
         };
 
         stage.addEventListener('pointerdown', (e) => {
+            if (rgState.resize) return;
             if (rgState.interactMode !== 'draw') return;
             if (e.isPrimary === false) return;
             if (e.pointerType === 'mouse' && e.button !== 0) return;
+            if (e.target && e.target.closest && (e.target.closest('.rg-handle') || e.target.closest('.rg-box-del'))) {
+                return;
+            }
             const tabState = getTabState();
             if (!tabState.pdfDoc) return;
-            if (document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('rg-num-input')) {
+            if (document.activeElement && document.activeElement.classList && (
+                document.activeElement.classList.contains('rg-num-input') ||
+                document.activeElement.classList.contains('rg-subq-num-input')
+            )) {
                 document.activeElement.blur();
             }
             e.preventDefault();
@@ -185,7 +471,44 @@
             rgState.drag = { pointerId: e.pointerId, startX: pt.x, startY: pt.y, curX: pt.x, curY: pt.y, draftEl };
         });
 
-        stage.addEventListener('pointermove', (e) => {
+        window.addEventListener('pointermove', (e) => {
+            if (rgState.resize && rgState.resize.pointerId === e.pointerId) {
+                const rz = rgState.resize;
+                const dx = (e.clientX - rz.startClientX) / Math.max(1, rz.stageRect.width);
+                const dy = (e.clientY - rz.startClientY) / Math.max(1, rz.stageRect.height);
+                const minSize = 0.012;
+                let nx = rz.origX;
+                let ny = rz.origY;
+                let nw = rz.origW;
+                let nh = rz.origH;
+
+                if (rz.edge === 'n') {
+                    const maxTop = rz.origY + rz.origH - minSize;
+                    ny = Math.max(0, Math.min(maxTop, rz.origY + dy));
+                    nh = rz.origY + rz.origH - ny;
+                } else if (rz.edge === 's') {
+                    nh = Math.max(minSize, Math.min(1 - rz.origY, rz.origH + dy));
+                } else if (rz.edge === 'w') {
+                    const maxLeft = rz.origX + rz.origW - minSize;
+                    nx = Math.max(0, Math.min(maxLeft, rz.origX + dx));
+                    nw = rz.origX + rz.origW - nx;
+                } else if (rz.edge === 'e') {
+                    nw = Math.max(minSize, Math.min(1 - rz.origX, rz.origW + dx));
+                }
+
+                rz.boxRef.x = round4(nx);
+                rz.boxRef.y = round4(ny);
+                rz.boxRef.w = round4(nw);
+                rz.boxRef.h = round4(nh);
+                if (rz.boxEl) {
+                    rz.boxEl.style.left = (rz.boxRef.x * 100) + '%';
+                    rz.boxEl.style.top = (rz.boxRef.y * 100) + '%';
+                    rz.boxEl.style.width = (rz.boxRef.w * 100) + '%';
+                    rz.boxEl.style.height = (rz.boxRef.h * 100) + '%';
+                }
+                return;
+            }
+
             if (!rgState.drag || rgState.drag.pointerId !== e.pointerId) return;
             const pt = getNormPoint(e);
             rgState.drag.curX = pt.x;
@@ -206,6 +529,13 @@
         });
 
         const finishPointer = (e) => {
+            if (rgState.resize && rgState.resize.pointerId === e.pointerId) {
+                rgState.resize = null;
+                renderAllRg();
+                scheduleDraftSave();
+                return;
+            }
+
             if (!rgState.drag || rgState.drag.pointerId !== e.pointerId) return;
             const d = cleanupDraft();
             if (!d) return;
@@ -235,10 +565,10 @@
                 const w = rgState.fullWidth ? FULL_WIDTH_W : Math.max(0.05, Math.abs(d.curX - start.x));
                 onBoxDrawn(tab, {
                     pageOffset,
-                    x: Number(x.toFixed(4)),
-                    y: Number(y.toFixed(4)),
-                    w: Number(w.toFixed(4)),
-                    h: Number(h.toFixed(4))
+                    x: round4(x),
+                    y: round4(y),
+                    w: round4(w),
+                    h: round4(h)
                 });
                 return;
             }
@@ -259,15 +589,82 @@
             rgState.twoTapStart = null;
             onBoxDrawn(tab, {
                 pageOffset,
-                x: Number(x.toFixed(4)),
-                y: Number(y.toFixed(4)),
-                w: Number(w.toFixed(4)),
-                h: Number(h.toFixed(4))
+                x: round4(x),
+                y: round4(y),
+                w: round4(w),
+                h: round4(h)
             });
         };
 
-        stage.addEventListener('pointerup', finishPointer);
-        stage.addEventListener('pointercancel', () => cleanupDraft());
+        window.addEventListener('pointerup', finishPointer);
+        window.addEventListener('pointercancel', (e) => {
+            if (rgState.resize && rgState.resize.pointerId === e.pointerId) {
+                rgState.resize = null;
+                renderAllRg();
+            }
+            cleanupDraft();
+        });
+
+        // 快捷键与 Ctrl+滚轮缩放
+        document.addEventListener('keydown', (e) => {
+            const panel = document.getElementById('step-debug');
+            if (!panel || !panel.classList.contains('active') || rgState.stage === 'upload') return;
+            const tag = document.activeElement ? document.activeElement.tagName : '';
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+                if (e.key === 'Escape') document.activeElement.blur();
+                return;
+            }
+
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+                e.preventDefault();
+                rgUndoLastRegion();
+                return;
+            }
+            if (e.key === 'Delete' || e.key === 'Backspace') {
+                if (rgState.selectedId) {
+                    e.preventDefault();
+                    rgDeleteItem(rgState.selectedId);
+                }
+                return;
+            }
+            if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+                e.preventDefault();
+                rgChangePage(-1);
+                return;
+            }
+            if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+                e.preventDefault();
+                rgChangePage(1);
+                return;
+            }
+            if (rgState.subMode && (e.key === '1' || e.key === '2')) {
+                e.preventDefault();
+                rgSetSubDrawTarget(e.key === '1' ? 'stem' : 'subq');
+                return;
+            }
+            if (e.key === 'Escape') {
+                if (rgState.twoTapStart) {
+                    rgState.twoTapStart = null;
+                    renderBoxOverlay();
+                } else if (rgState.continueTargetId) {
+                    rgCancelContinue();
+                } else if (rgState.subMode) {
+                    rgExitSubMode();
+                }
+            }
+        });
+
+        if (viewportEl) {
+            let wheelZoomAt = 0;
+            viewportEl.addEventListener('wheel', (e) => {
+                if (!e.ctrlKey && !e.metaKey) return;
+                e.preventDefault();
+                const now = Date.now();
+                if (now - wheelZoomAt < 80) return;
+                wheelZoomAt = now;
+                rgZoom(e.deltaY < 0 ? 0.15 : -0.15);
+            }, { passive: false });
+        }
     }
 
     function onBoxDrawn(tab, rectObj) {
@@ -290,9 +687,10 @@
                 const nextSubNum = parentItem.subqBoxes.length === 0
                     ? baseNum
                     : (Math.max(...parentItem.subqBoxes.map(b => parseInt(b.num, 10) || baseNum)) + 1);
-                parentItem.subqBoxes.push({ ...rectObj, num: nextSubNum });
+                parentItem.subqBoxes.push({ ...rectObj, num: nextSubNum, customNum: false });
             }
             renderAllRg();
+            scheduleDraftSave();
             return;
         }
 
@@ -304,6 +702,7 @@
                 targetItem.regions.push(rectObj);
                 rgState.selectedId = targetItem.id;
                 renderAllRg();
+                scheduleDraftSave();
                 return;
             }
         }
@@ -312,18 +711,26 @@
         const bankType = getCurrentBankTypeSafe();
         let label = '';
         let targetExId = null;
-        if (bankType === 'homework') {
+        if (tab === 'answer' && rgState.presetNextLabel) {
+            label = rgState.presetNextLabel;
+            rgState.presetNextLabel = null;
+        } else if (bankType === 'homework') {
             label = getNextAutoNumber(tab);
         } else if (bankType === 'variation') {
             if (tab === 'answer') {
-                const boundIds = new Set(tabState.items.map(x => x.targetExId).filter(Boolean));
-                const nextUnboundEx = rgState.exercise.items.find(ex => !boundIds.has(ex.id))
-                    || rgState.exercise.items[tabState.items.length]
-                    || null;
-                targetExId = nextUnboundEx ? nextUnboundEx.id : null;
+                if (rgState.presetNextTargetExId) {
+                    targetExId = rgState.presetNextTargetExId;
+                    rgState.presetNextTargetExId = null;
+                } else {
+                    const boundIds = new Set(tabState.items.map(x => x.targetExId).filter(Boolean));
+                    const nextUnboundEx = rgState.exercise.items.find(ex => !boundIds.has(ex.id))
+                        || rgState.exercise.items[tabState.items.length]
+                        || null;
+                    targetExId = nextUnboundEx ? nextUnboundEx.id : null;
+                }
             }
         } else {
-            // preview：不自动标号，手动输入跳题题号
+            // preview：不自动标号，手动输入跳题题号（除非点了缺失答案胶囊预设）
             label = '';
         }
 
@@ -340,8 +747,9 @@
         tabState.items.push(newItem);
         rgState.selectedId = newItem.id;
         renderAllRg();
+        scheduleDraftSave();
 
-        if (bankType === 'preview' || (bankType === 'variation' && tab === 'answer')) {
+        if ((bankType === 'preview' && !label) || (bankType === 'variation' && tab === 'answer')) {
             requestAnimationFrame(() => {
                 const input = document.querySelector(`.rg-card[data-id="${newItem.id}"] .rg-num-input`);
                 if (input) {
@@ -376,18 +784,55 @@
         if (emptyEl) emptyEl.style.display = 'none';
         if (stageEl) stageEl.style.display = 'inline-block';
 
+        const mySeq = ++rgState.renderSeq;
+        if (rgState.renderTask && typeof rgState.renderTask.cancel === 'function') {
+            try { rgState.renderTask.cancel(); } catch (_) {}
+            rgState.renderTask = null;
+        }
+
         const page = await tabState.pdfDoc.getPage(tabState.pageNum);
-        const viewport = page.getViewport({ scale: 1.35 * rgState.scale });
-        const ctx = canvas.getContext('2d');
-        canvas.width = Math.round(viewport.width);
-        canvas.height = Math.round(viewport.height);
-        await page.render({ canvasContext: ctx, viewport }).promise;
+        if (mySeq !== rgState.renderSeq) return;
+
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const logicalViewport = page.getViewport({ scale: 1.35 * rgState.scale });
+        const renderViewport = page.getViewport({ scale: 1.35 * rgState.scale * dpr });
+
+        canvas.width = Math.round(renderViewport.width);
+        canvas.height = Math.round(renderViewport.height);
+        canvas.style.width = Math.round(logicalViewport.width) + 'px';
+        canvas.style.height = Math.round(logicalViewport.height) + 'px';
+
+        const ctx = canvas.getContext('2d', { alpha: false });
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const task = page.render({ canvasContext: ctx, viewport: renderViewport });
+        rgState.renderTask = task;
+        try {
+            await task.promise;
+        } catch (err) {
+            if (err && err.name === 'RenderingCancelledException') return;
+            throw err;
+        } finally {
+            if (rgState.renderTask === task) rgState.renderTask = null;
+        }
+        if (mySeq !== rgState.renderSeq) return;
 
         if (pageInfo) pageInfo.textContent = `${tabState.pageNum} / ${tabState.totalPages} 页`;
         if (prevBtn) prevBtn.disabled = tabState.pageNum <= 1;
         if (nextBtn) nextBtn.disabled = tabState.pageNum >= tabState.totalPages;
 
         renderBoxOverlay();
+    }
+
+    function appendResizeHandles(div, kind, itemId, boxRef) {
+        const edges = rgState.fullWidth ? ['n', 's'] : ['n', 's', 'w', 'e'];
+        edges.forEach(edge => {
+            const h = document.createElement('div');
+            h.className = `rg-handle rg-handle-${edge}`;
+            h.addEventListener('pointerdown', (e) => startBoxResize(e, kind, itemId, boxRef, edge, div));
+            div.appendChild(h);
+        });
     }
 
     function renderBoxOverlay() {
@@ -397,6 +842,24 @@
         const tabState = getTabState(tab);
         const pageOffset = tabState.pageNum - 1;
         layer.innerHTML = '';
+
+        // 连续框题参考引导线：提示当前页上一框下边界位置
+        if (rgState.interactMode === 'draw' && rgState.fullWidth && !rgState.subMode) {
+            let maxBottom = 0;
+            tabState.items.forEach(it => {
+                (it.regions || []).forEach(rg => {
+                    if (rg.pageOffset === pageOffset) {
+                        maxBottom = Math.max(maxBottom, (rg.y || 0) + (rg.h || 0));
+                    }
+                });
+            });
+            if (maxBottom > 0.02 && maxBottom < 0.98) {
+                const guide = document.createElement('div');
+                guide.className = 'rg-guide-line';
+                guide.style.top = (maxBottom * 100) + '%';
+                layer.appendChild(guide);
+            }
+        }
 
         if (rgState.twoTapStart && rgState.twoTapStart.pageOffset === pageOffset) {
             const line = document.createElement('div');
@@ -426,7 +889,24 @@
                 tag.textContent = formatItemTitle(it, tab) + suffix;
                 div.appendChild(tag);
 
-                div.addEventListener('mousedown', (e) => e.stopPropagation());
+                appendResizeHandles(div, 'region', it.id, rg);
+
+                const delBtn = document.createElement('button');
+                delBtn.type = 'button';
+                delBtn.className = 'rg-box-del';
+                delBtn.title = it.regions.length > 1 ? '删除此跨页片段' : '删除此框';
+                delBtn.textContent = '×';
+                delBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+                delBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    rgDeleteRegionSlice(it.id, rIdx);
+                });
+                div.appendChild(delBtn);
+
+                div.addEventListener('pointerdown', (e) => {
+                    if (e.target.closest('.rg-handle') || e.target.closest('.rg-box-del')) return;
+                    e.stopPropagation();
+                });
                 div.addEventListener('click', (e) => {
                     e.stopPropagation();
                     rgState.selectedId = it.id;
@@ -439,33 +919,150 @@
                 (it.stemBoxes || []).forEach((sb, sIdx) => {
                     if (sb.pageOffset !== pageOffset) return;
                     const div = document.createElement('div');
-                    div.className = 'rg-box stem';
+                    div.className = `rg-box stem ${rgState.selectedId === it.id ? 'active' : ''}`;
                     div.style.left = (sb.x * 100) + '%';
                     div.style.top = (sb.y * 100) + '%';
                     div.style.width = (sb.w * 100) + '%';
                     div.style.height = (sb.h * 100) + '%';
+
                     const tag = document.createElement('span');
                     tag.className = 'rg-box-tag';
                     tag.textContent = `原文${sIdx + 1}`;
                     div.appendChild(tag);
+
+                    appendResizeHandles(div, 'stem', it.id, sb);
+
+                    const delBtn = document.createElement('button');
+                    delBtn.type = 'button';
+                    delBtn.className = 'rg-box-del';
+                    delBtn.title = '删除此原文框';
+                    delBtn.textContent = '×';
+                    delBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+                    delBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        rgDeleteSubBox(it.id, 'stem', sIdx);
+                    });
+                    div.appendChild(delBtn);
+
+                    div.addEventListener('pointerdown', (e) => e.stopPropagation());
+                    div.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        rgState.selectedId = it.id;
+                        renderAllRg();
+                    });
                     layer.appendChild(div);
                 });
-                (it.subqBoxes || []).forEach((qb) => {
+                (it.subqBoxes || []).forEach((qb, qIdx) => {
                     if (qb.pageOffset !== pageOffset) return;
                     const div = document.createElement('div');
-                    div.className = 'rg-box subq';
+                    div.className = `rg-box subq ${rgState.selectedId === it.id ? 'active' : ''}`;
                     div.style.left = (qb.x * 100) + '%';
                     div.style.top = (qb.y * 100) + '%';
                     div.style.width = (qb.w * 100) + '%';
                     div.style.height = (qb.h * 100) + '%';
+
                     const tag = document.createElement('span');
                     tag.className = 'rg-box-tag';
                     tag.textContent = `${qb.num}`;
                     div.appendChild(tag);
+
+                    appendResizeHandles(div, 'subq', it.id, qb);
+
+                    const delBtn = document.createElement('button');
+                    delBtn.type = 'button';
+                    delBtn.className = 'rg-box-del';
+                    delBtn.title = '删除此小问框';
+                    delBtn.textContent = '×';
+                    delBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+                    delBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        rgDeleteSubBox(it.id, 'subq', qIdx);
+                    });
+                    div.appendChild(delBtn);
+
+                    div.addEventListener('pointerdown', (e) => e.stopPropagation());
+                    div.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        rgState.selectedId = it.id;
+                        renderAllRg();
+                    });
                     layer.appendChild(div);
                 });
             }
         });
+    }
+
+    function collectAnswerNumSets() {
+        const ansNums = new Set();
+        rgState.answer.items.forEach(aIt => {
+            const lbl = String(aIt.label || '').trim();
+            if (lbl) ansNums.add(lbl);
+            if (aIt.isBig && Array.isArray(aIt.subqBoxes)) {
+                aIt.subqBoxes.forEach(sb => {
+                    const sn = String(sb.num || '').trim();
+                    if (sn) ansNums.add(sn);
+                });
+            }
+        });
+        return ansNums;
+    }
+
+    function renderMissingAnswerBar() {
+        const bar = document.getElementById('rg-missing-bar');
+        if (!bar) return;
+        if (rgState.stage !== 'answer' || rgState.activeTab !== 'answer') {
+            bar.style.display = 'none';
+            return;
+        }
+        const bankType = getCurrentBankTypeSafe();
+        bar.style.display = 'flex';
+
+        if (bankType === 'variation') {
+            const boundIds = new Set(rgState.answer.items.map(a => a.targetExId).filter(Boolean));
+            const missingEx = rgState.exercise.items.filter(ex => !boundIds.has(ex.id));
+            if (missingEx.length === 0) {
+                bar.innerHTML = `<span class="rg-missing-done">所有变式题（共 ${rgState.exercise.items.length} 道）均已绑定答案框</span>`;
+                return;
+            }
+            const pills = missingEx.map((ex, idx) => {
+                const compact = typeof formatCompactNumList === 'function'
+                    ? formatCompactNumList(ex.parentNums)
+                    : (ex.parentNums || []).join('、');
+                const isActive = rgState.presetNextTargetExId === ex.id;
+                return `<button type="button" class="rg-missing-pill ${isActive ? 'active' : ''}" onclick="rgPresetNextAnswerTarget('${ex.id}')" title="点击后，下一框自动绑定到原题${escapeHtmlRg(compact)}">原题${escapeHtmlRg(compact || (idx + 1))}</button>`;
+            }).join('');
+            bar.innerHTML = `<div class="rg-missing-label">待配对答案（${missingEx.length}）· 点击可指定下一框归属：</div><div class="rg-missing-pills">${pills}</div>`;
+            return;
+        }
+
+        const expectedNums = [];
+        rgState.exercise.items.forEach(it => {
+            if (it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
+                it.subqBoxes.forEach(sb => {
+                    const sn = String(sb.num || '').trim();
+                    if (sn && !expectedNums.includes(sn)) expectedNums.push(sn);
+                });
+            } else {
+                const lbl = String(it.label || '').trim();
+                if (lbl && !expectedNums.includes(lbl)) expectedNums.push(lbl);
+            }
+        });
+        const ansNums = collectAnswerNumSets();
+        const missingNums = expectedNums.filter(n => !ansNums.has(n));
+
+        if (expectedNums.length === 0) {
+            bar.style.display = 'none';
+            return;
+        }
+        if (missingNums.length === 0) {
+            bar.innerHTML = `<span class="rg-missing-done">全部 ${expectedNums.length} 题均已匹配到答案框</span>`;
+            return;
+        }
+        const pills = missingNums.map(num => {
+            const isActive = rgState.presetNextLabel === num;
+            return `<button type="button" class="rg-missing-pill ${isActive ? 'active' : ''}" onclick="rgPresetNextAnswerNum('${escapeHtmlRg(num)}')" title="点击后，下一个画出的答案框自动标为第 ${escapeHtmlRg(num)} 题">第 ${escapeHtmlRg(num)} 题</button>`;
+        }).join('');
+        bar.innerHTML = `<div class="rg-missing-label">待框答案（${missingNums.length}/${expectedNums.length}）· 点击指定下一框题号：</div><div class="rg-missing-pills">${pills}</div>`;
     }
 
     function renderSidebar() {
@@ -486,18 +1083,20 @@
         }
         if (tipEl) {
             if (tab === 'answer') {
-                tipEl.textContent = '答案独立拉框，仅按题号匹配题目';
+                tipEl.textContent = '答案独立拉框，仅按题号匹配题目；选中框可拖边缘微调';
             } else if (bankType === 'preview') {
-                tipEl.textContent = '预习模式：框完后请手动输入跳题题号';
+                tipEl.textContent = '预习模式：框完后手动输入跳题题号；选中框可拖边缘微调';
             } else if (bankType === 'variation') {
-                tipEl.textContent = '举一反三模式：框完后请勾选对应原题';
+                tipEl.textContent = '举一反三模式：框完后勾选对应原题；选中框可拖边缘微调';
             } else {
-                tipEl.textContent = '课后巩固：自动递增题号，支持设为大题';
+                tipEl.textContent = '课后巩固：自动递增题号，支持大题与选中框边缘拖拽微调';
             }
         }
         if (finishBtn) {
             finishBtn.disabled = rgState.exercise.items.length === 0;
         }
+
+        renderMissingAnswerBar();
 
         if (contBanner && contText) {
             if (rgState.continueTargetId) {
@@ -520,9 +1119,30 @@
         listEl.innerHTML = tabState.items.map((it) => {
             const pages = Array.from(new Set(it.regions.map(r => 'P' + (r.pageOffset + 1)))).join(', ');
             const isActive = rgState.selectedId === it.id;
-            const bigSubmetaHtml = it.isBig
-                ? `<div class="rg-card-submeta">大题 · 原文 ${(it.stemBoxes || []).length} / 小问 ${(it.subqBoxes || []).length}</div>`
-                : '';
+
+            let bigDetailHtml = '';
+            if (it.isBig) {
+                const stemChips = (it.stemBoxes || []).map((sb, sIdx) => `
+                    <span class="rg-subq-chip stem-chip" title="P${sb.pageOffset + 1}">
+                        <span>原文${sIdx + 1}</span>
+                        <button type="button" class="rg-subq-del-btn" onclick="event.stopPropagation(); rgDeleteSubBox('${it.id}', 'stem', ${sIdx})" title="删除原文框">×</button>
+                    </span>
+                `).join('');
+                const subqChips = (it.subqBoxes || []).map((qb, qIdx) => `
+                    <span class="rg-subq-chip" title="P${qb.pageOffset + 1}">
+                        <span>#</span>
+                        <input type="text" class="rg-subq-num-input" value="${escapeHtmlRg(qb.num)}"
+                            onclick="event.stopPropagation()"
+                            oninput="rgUpdateSubqNum('${it.id}', ${qIdx}, this.value)"
+                            onchange="rgUpdateSubqNum('${it.id}', ${qIdx}, this.value)">
+                        <button type="button" class="rg-subq-del-btn" onclick="event.stopPropagation(); rgDeleteSubBox('${it.id}', 'subq', ${qIdx})" title="删除小问框">×</button>
+                    </span>
+                `).join('');
+                bigDetailHtml = `
+                    <div class="rg-card-submeta">大题 · 原文 ${(it.stemBoxes || []).length} / 小问 ${(it.subqBoxes || []).length}</div>
+                    ${(stemChips || subqChips) ? `<div class="rg-subq-list">${stemChips}${subqChips}</div>` : ''}
+                `;
+            }
 
             let headerEditorHtml = '';
             if (bankType === 'variation' && tab === 'exercise') {
@@ -566,7 +1186,7 @@
                         </div>
                         <span class="rg-card-meta">${escapeHtmlRg(pages)}</span>
                     </div>
-                    ${bigSubmetaHtml}
+                    ${bigDetailHtml}
                 `;
             }
 
@@ -611,8 +1231,8 @@
         }
         if (hint) {
             hint.textContent = rgState.subMode.target === 'stem'
-                ? '当前：绿虚线框选公共原文/题干，完成后切换“2. 框选小问”'
-                : '当前：红框依次框出各小问（自动递增小问题号）';
+                ? '当前：绿虚线框选公共原文/题干，按 2 切换“框选小问”'
+                : '当前：红框依次框出各小问（自动递增，可在右侧卡片单独改号）';
         }
     }
 
@@ -621,6 +1241,20 @@
         const lbl = btn.querySelector('.rg-btn-label');
         if (lbl) lbl.textContent = text;
         else btn.textContent = text;
+    }
+
+    function hasRegionDebugPermission() {
+        if (typeof window.isRegionDebugAdminUser === 'function') {
+            return window.isRegionDebugAdminUser();
+        }
+        const u = window.currentUser;
+        return Boolean(u && (u.is_admin || u.role === 'admin' || u.role === 'super_admin'));
+    }
+
+    function hasSavedRegionCropInCurrentQuestions() {
+        return Array.isArray(currentQuestions) && currentQuestions.some(q =>
+            q && q.questionMeta && q.questionMeta.mode === 'region_crop' && q.exercisePdf && q.exercisePdf.url
+        );
     }
 
     function syncStageUi() {
@@ -633,6 +1267,8 @@
         const prevBtn = document.getElementById('rg-prev-stage-btn');
         const nextBtn = document.getElementById('rg-next-stage-btn');
         const finishBtn = document.getElementById('rg-finish-btn');
+        const clearBtn = document.getElementById('rg-clear-draft-btn');
+        const loadExistBtn = document.getElementById('rg-load-existing-btn');
         const exBox = document.getElementById('rg-exercise-upload-box');
         const ansBox = document.getElementById('rg-answer-upload-box');
 
@@ -641,6 +1277,15 @@
 
         if (gate) gate.style.display = st === 'upload' ? 'block' : 'none';
         if (ws) ws.style.display = st === 'upload' ? 'none' : 'grid';
+
+        const hasAnyDraft = Boolean(
+            rgState.exercise.pdfDoc || rgState.answer.pdfDoc ||
+            rgState.exercise.items.length > 0 || rgState.answer.items.length > 0
+        );
+        if (clearBtn) clearBtn.style.display = hasAnyDraft ? 'inline-flex' : 'none';
+        if (loadExistBtn) {
+            loadExistBtn.style.display = (hasRegionDebugPermission() && st === 'upload' && hasSavedRegionCropInCurrentQuestions()) ? 'inline-flex' : 'none';
+        }
 
         if (pillUp) {
             pillUp.classList.toggle('active', st === 'upload');
@@ -693,7 +1338,201 @@
         renderBoxOverlay();
     }
 
-    window.openRegionDebugStudio = async function () {
+    function reconstructRgItemsFromQuestions(questions) {
+        const exItems = [];
+        const ansItems = [];
+        const ansDedup = new Map();
+        const bigGroups = new Map();
+        let seq = 1;
+        const bankType = getCurrentBankTypeSafe();
+
+        const regSig = (arr) => (arr || []).map(r => `${r.pageOffset}:${r.x}:${r.y}:${r.w}:${r.h}`).join(';');
+
+        questions.forEach(q => {
+            const meta = q && q.questionMeta;
+            if (!meta || meta.mode !== 'region_crop') return;
+
+            const isGroup = bankType !== 'variation' && Array.isArray(meta.groupNums) && meta.groupNums.length > 1;
+            let exItem = null;
+            if (isGroup) {
+                const gKey = meta.groupNums.join(',');
+                exItem = bigGroups.get(gKey);
+                if (!exItem) {
+                    exItem = {
+                        id: `exercise_${seq++}`,
+                        label: String(meta.groupNums[0]),
+                        targetExId: null,
+                        parentNums: [],
+                        isBig: true,
+                        regions: (meta.regions || []).map(r => ({ ...r })),
+                        stemBoxes: (meta.stemBoxes || []).map(sb => ({ ...sb })),
+                        subqBoxes: []
+                    };
+                    bigGroups.set(gKey, exItem);
+                    exItems.push(exItem);
+                }
+                if (meta.box) {
+                    exItem.subqBoxes.push({ ...meta.box, num: parseInt(q.id, 10) || q.id, customNum: false });
+                }
+            } else {
+                const pNums = Array.isArray(q.parentQuestionNums) && q.parentQuestionNums.length > 0
+                    ? q.parentQuestionNums
+                    : (q.parentQuestionNum ? [Number(q.parentQuestionNum)] : []);
+                exItem = {
+                    id: `exercise_${seq++}`,
+                    label: bankType === 'variation' ? '' : String(q.id || ''),
+                    targetExId: null,
+                    parentNums: pNums,
+                    isBig: false,
+                    regions: (meta.regions || []).map(r => ({ ...r })),
+                    stemBoxes: [],
+                    subqBoxes: []
+                };
+                exItems.push(exItem);
+            }
+
+            if (Array.isArray(meta.answerRegions) && meta.answerRegions.length > 0) {
+                const aSig = bankType === 'variation' ? `var_${exItem.id}` : regSig(meta.answerRegions);
+                let ansItem = ansDedup.get(aSig);
+                if (!ansItem) {
+                    ansItem = {
+                        id: `answer_${seq++}`,
+                        label: (bankType === 'variation' || isGroup) ? '' : String(q.id || ''),
+                        targetExId: bankType === 'variation' ? exItem.id : null,
+                        parentNums: [],
+                        isBig: Boolean(isGroup && meta.answerBox),
+                        regions: meta.answerRegions.map(r => ({ ...r })),
+                        stemBoxes: [],
+                        subqBoxes: []
+                    };
+                    ansDedup.set(aSig, ansItem);
+                    ansItems.push(ansItem);
+                }
+                if (isGroup && meta.answerBox) {
+                    ansItem.isBig = true;
+                    if (!ansItem.label) ansItem.label = String(meta.groupNums[0]);
+                    ansItem.subqBoxes.push({ ...meta.answerBox, num: parseInt(q.id, 10) || q.id, customNum: false });
+                } else if (!isGroup && !ansItem.label && bankType !== 'variation') {
+                    ansItem.label = String(q.id || '');
+                }
+            }
+        });
+
+        return { exItems, ansItems, nextSeq: seq };
+    }
+
+    async function loadPdfFromUrlToFile(url, fallbackName) {
+        const resp = await fetch(url, { cache: 'no-cache' });
+        if (!resp.ok) throw new Error('原卷 PDF 下载失败');
+        const blob = await resp.blob();
+        const file = new File([blob], fallbackName || 'origin.pdf', { type: 'application/pdf' });
+        const buf = await file.arrayBuffer();
+        const pdfDoc = await pdfjsLib.getDocument({ data: buf }).promise;
+        return { file, pdfDoc };
+    }
+
+    window.rgLoadFromCurrentQuestions = async function (focusQuestion = null) {
+        if (!hasRegionDebugPermission()) {
+            showToast('整卷框题为测试功能，仅限管理员使用', 'warn');
+            return false;
+        }
+        if (!hasSavedRegionCropInCurrentQuestions()) {
+            showToast('当前题库中暂无整卷框题数据', 'warn');
+            return false;
+        }
+        const firstRegionQ = currentQuestions.find(q =>
+            q && q.questionMeta && q.questionMeta.mode === 'region_crop' && q.exercisePdf && q.exercisePdf.url
+        );
+        const firstAnsQ = currentQuestions.find(q =>
+            q && q.questionMeta && q.questionMeta.mode === 'region_crop' && q.answerPdf && q.answerPdf.url
+        );
+        if (!firstRegionQ) return false;
+
+        showToast('正在载入原卷 PDF 与已有框选区域...', 'info');
+        try {
+            const exLoaded = await loadPdfFromUrlToFile(firstRegionQ.exercisePdf.url, firstRegionQ.exercisePdf.name || '题目原卷.pdf');
+            let ansLoaded = null;
+            if (firstAnsQ && firstAnsQ.answerPdf && firstAnsQ.answerPdf.url) {
+                ansLoaded = await loadPdfFromUrlToFile(firstAnsQ.answerPdf.url, firstAnsQ.answerPdf.name || '答案原卷.pdf');
+            }
+
+            const rebuilt = reconstructRgItemsFromQuestions(currentQuestions);
+            rgState.exercise = {
+                file: exLoaded.file,
+                pdfDoc: exLoaded.pdfDoc,
+                pageNum: 1,
+                totalPages: exLoaded.pdfDoc.numPages,
+                items: rebuilt.exItems
+            };
+            const exLbl = document.getElementById('rg-exercise-file-label');
+            if (exLbl) exLbl.textContent = `${exLoaded.file.name} (${exLoaded.pdfDoc.numPages} 页)`;
+
+            if (ansLoaded) {
+                rgState.answer = {
+                    file: ansLoaded.file,
+                    pdfDoc: ansLoaded.pdfDoc,
+                    pageNum: 1,
+                    totalPages: ansLoaded.pdfDoc.numPages,
+                    items: rebuilt.ansItems
+                };
+                const ansLbl = document.getElementById('rg-answer-file-label');
+                if (ansLbl) ansLbl.textContent = `${ansLoaded.file.name} (${ansLoaded.pdfDoc.numPages} 页)`;
+            } else {
+                rgState.answer = { file: null, pdfDoc: null, pageNum: 1, totalPages: 0, items: [] };
+            }
+
+            rgState.nextSeq = rebuilt.nextSeq;
+            rgState.stage = 'exercise';
+            rgState.activeTab = 'exercise';
+            rgState.continueTargetId = null;
+            rgState.subMode = null;
+
+            if (focusQuestion) {
+                const target = findRgItemForQuestion(focusQuestion);
+                if (target) {
+                    rgState.selectedId = target.id;
+                    if (target.regions && target.regions.length > 0) {
+                        rgState.exercise.pageNum = Math.min(rgState.exercise.totalPages, Math.max(1, (target.regions[0].pageOffset || 0) + 1));
+                    }
+                }
+            }
+            renderAllRg();
+            await renderPdfPage();
+            scheduleDraftSave();
+            showToast(`已载入 ${rebuilt.exItems.length} 组框选区域，可直接微调`, 'success');
+            return true;
+        } catch (err) {
+            console.error('Load saved region_crop failed:', err);
+            showToast('载入原卷失败：' + (err.message || '网络异常'), 'error');
+            return false;
+        }
+    };
+
+    function findRgItemForQuestion(q) {
+        if (!q) return null;
+        const qIdStr = String(q.id || '').trim();
+        const bankType = getCurrentBankTypeSafe();
+        if (bankType === 'variation') {
+            const qRegions = (q.questionMeta && Array.isArray(q.questionMeta.regions)) ? q.questionMeta.regions : [];
+            const sig = qRegions.map(r => `${r.pageOffset}:${r.x}:${r.y}:${r.w}:${r.h}`).join(';');
+            return rgState.exercise.items.find(it =>
+                (it.regions || []).map(r => `${r.pageOffset}:${r.x}:${r.y}:${r.w}:${r.h}`).join(';') === sig
+            ) || null;
+        }
+        return rgState.exercise.items.find(it => {
+            if (String(it.label || '').trim() === qIdStr) return true;
+            if (it.isBig && Array.isArray(it.subqBoxes)) {
+                return it.subqBoxes.some(sb => String(sb.num || '').trim() === qIdStr);
+            }
+            return false;
+        }) || null;
+    }
+
+    window.openRegionDebugStudio = async function (opts = {}) {
+        if (!hasRegionDebugPermission()) {
+            showToast('整卷框题为测试功能，仅限管理员使用', 'warn');
+            return;
+        }
         if (window.currentUser && window.currentUser.role === 'assistant') {
             showToast('助教账号仅具备查看权限，无法录入或上传题目', 'warn');
             return;
@@ -702,34 +1541,16 @@
             showToast('请先选齐学科、年级、班层与专题', 'warn');
             return;
         }
-        await loadCurrentData();
+        if (!opts.skipReload) {
+            await loadCurrentData();
+        }
         if (getCurrentBankTypeSafe() === 'variation' && typeof loadHomeworkQuestionsForVariation === 'function') {
             await loadHomeworkQuestionsForVariation();
         }
 
-        const newContextKey = [
-            getCurrentBankTypeSafe(),
-            typeof getSelectedYear === 'function' ? getSelectedYear() : '',
-            typeof getSelectedSeason === 'function' ? getSelectedSeason() : '',
-            subjectSelect.value,
-            gradeSelect.value,
-            tierSelect.value,
-            weekSelect.value
-        ].join('|');
-
+        const newContextKey = buildContextKeyFromSelectors();
         if (rgState.contextKey && rgState.contextKey !== newContextKey) {
-            rgState.exercise = { file: null, pdfDoc: null, pageNum: 1, totalPages: 0, items: [] };
-            rgState.answer = { file: null, pdfDoc: null, pageNum: 1, totalPages: 0, items: [] };
-            rgState.selectedId = null;
-            rgState.continueTargetId = null;
-            rgState.subMode = null;
-            rgState.twoTapStart = null;
-            rgState.stage = 'upload';
-            rgState.activeTab = 'exercise';
-            const exLbl = document.getElementById('rg-exercise-file-label');
-            const ansLbl = document.getElementById('rg-answer-file-label');
-            if (exLbl) exLbl.textContent = '必传 · 点击选择单栏题目原卷 PDF';
-            if (ansLbl) ansLbl.textContent = '必传 · 点击选择答案原卷 PDF';
+            resetStudioMemoryState();
         }
         rgState.contextKey = newContextKey;
 
@@ -741,9 +1562,74 @@
         }
 
         bindCanvasEventsOnce();
+
+        // 若内存中尚无 PDF，尝试从 IndexedDB 恢复上次未导入草稿
+        let restoredFromDraft = false;
+        if (!rgState.exercise.pdfDoc && !rgState.answer.pdfDoc) {
+            const draft = await loadDraftFromIdb(newContextKey);
+            if (draft) {
+                restoredFromDraft = await restoreDraftRecord(draft);
+            }
+        }
+
         goToStep('debug');
+
+        if (opts.focusQuestion) {
+            if (rgState.exercise.pdfDoc) {
+                rgState.stage = 'exercise';
+                rgState.activeTab = 'exercise';
+                const target = findRgItemForQuestion(opts.focusQuestion);
+                if (target) {
+                    rgState.selectedId = target.id;
+                    if (target.regions && target.regions.length > 0) {
+                        rgState.exercise.pageNum = Math.min(rgState.exercise.totalPages, Math.max(1, (target.regions[0].pageOffset || 0) + 1));
+                    }
+                }
+            } else if (hasSavedRegionCropInCurrentQuestions()) {
+                await window.rgLoadFromCurrentQuestions(opts.focusQuestion);
+                return;
+            }
+        }
+
         renderAllRg();
         await renderPdfPage();
+        if (restoredFromDraft) {
+            showToast('已自动恢复上次未导入的框题草稿', 'info');
+        }
+    };
+
+    window.rgEditQuestionRegionFromStep4 = async function (index) {
+        if (!hasRegionDebugPermission()) {
+            showToast('整卷框题为测试功能，仅限管理员使用', 'warn');
+            return;
+        }
+        const q = Array.isArray(currentQuestions) ? currentQuestions[index] : null;
+        if (!q) return;
+        await window.openRegionDebugStudio({ skipReload: true, focusQuestion: q });
+    };
+
+    window.rgClearDraftPrompt = function () {
+        if (typeof showCustomDialog === 'function') {
+            showCustomDialog({
+                title: '清空框题草稿',
+                body: '确定要清空当前已上传的原卷 PDF 与所有框选记录吗？此操作无法恢复。',
+                confirmText: '确定清空',
+                danger: true,
+                onConfirm: async () => {
+                    await window.rgClearSavedDraft(rgState.contextKey);
+                    resetStudioMemoryState();
+                    renderAllRg();
+                    await renderPdfPage();
+                    showToast('已清空当前框题草稿');
+                }
+            });
+            return;
+        }
+        window.rgClearSavedDraft(rgState.contextKey).then(async () => {
+            resetStudioMemoryState();
+            renderAllRg();
+            await renderPdfPage();
+        });
     };
 
     window.exitRegionDebugStudio = function () {
@@ -765,6 +1651,7 @@
             rgState.twoTapStart = null;
             renderAllRg();
             await renderPdfPage();
+            scheduleDraftSave();
             return;
         }
         if (rgState.stage === 'exercise') {
@@ -798,8 +1685,11 @@
             rgState.continueTargetId = null;
             rgState.subMode = null;
             rgState.twoTapStart = null;
+            rgState.presetNextLabel = null;
+            rgState.presetNextTargetExId = null;
             renderAllRg();
             await renderPdfPage();
+            scheduleDraftSave();
         }
     };
 
@@ -807,16 +1697,20 @@
         rgState.continueTargetId = null;
         rgState.subMode = null;
         rgState.twoTapStart = null;
+        rgState.presetNextLabel = null;
+        rgState.presetNextTargetExId = null;
         if (rgState.stage === 'answer') {
             rgState.stage = 'exercise';
             rgState.activeTab = 'exercise';
             renderAllRg();
             await renderPdfPage();
+            scheduleDraftSave();
             return;
         }
         if (rgState.stage === 'exercise') {
             rgState.stage = 'upload';
             renderAllRg();
+            scheduleDraftSave();
         }
     };
 
@@ -844,9 +1738,10 @@
                 renderAllRg();
                 await renderPdfPage();
             }
+            scheduleDraftSave();
             showToast(`已加载${tab === 'answer' ? '答案' : '题目'} PDF（${pdfDoc.numPages} 页）`);
         } catch (err) {
-            console.error('Debug PDF load error:', err);
+            console.error('Region PDF load error:', err);
             showToast('PDF 解析失败：' + (err.message || '未知错误'), 'error');
         } finally {
             inputEl.value = '';
@@ -855,6 +1750,9 @@
 
     window.rgToggleFullWidth = function (checked) {
         rgState.fullWidth = Boolean(checked);
+        syncFullWidthUi();
+        renderBoxOverlay();
+        scheduleDraftSave();
     };
 
     window.rgToggleInteractMode = function () {
@@ -887,6 +1785,17 @@
     window.rgZoom = async function (delta) {
         rgState.scale = Math.max(0.5, Math.min(2.2, Number((rgState.scale + delta).toFixed(2))));
         await renderPdfPage();
+        scheduleDraftSave();
+    };
+
+    window.rgPresetNextAnswerNum = function (numStr) {
+        rgState.presetNextLabel = (rgState.presetNextLabel === numStr) ? null : numStr;
+        renderMissingAnswerBar();
+    };
+
+    window.rgPresetNextAnswerTarget = function (exId) {
+        rgState.presetNextTargetExId = (rgState.presetNextTargetExId === exId) ? null : exId;
+        renderMissingAnswerBar();
     };
 
     window.rgUndoLastRegion = function () {
@@ -904,6 +1813,7 @@
             tabState.items.pop();
         }
         renderAllRg();
+        scheduleDraftSave();
     };
 
     window.rgSelectItem = async function (itemId) {
@@ -931,13 +1841,62 @@
         if (it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
             const base = parseInt(it.label, 10);
             if (!isNaN(base) && base > 0) {
-                it.subqBoxes.forEach((sb, idx) => {
-                    sb.num = base + idx;
+                let cursor = base;
+                it.subqBoxes.forEach((sb) => {
+                    if (!sb.customNum) {
+                        sb.num = cursor;
+                    }
+                    const parsed = parseInt(sb.num, 10);
+                    cursor = (!isNaN(parsed) && parsed >= cursor) ? (parsed + 1) : (cursor + 1);
+                });
+                const subInputs = document.querySelectorAll(`.rg-card[data-id="${itemId}"] .rg-subq-num-input`);
+                subInputs.forEach((inp, idx) => {
+                    if (it.subqBoxes[idx]) inp.value = it.subqBoxes[idx].num;
                 });
             }
         }
         renderBoxOverlay();
+        renderMissingAnswerBar();
         syncStageUi();
+        scheduleDraftSave();
+    };
+
+    window.rgUpdateSubqNum = function (itemId, subIdx, val) {
+        const tabState = getTabState();
+        const it = tabState.items.find(x => x.id === itemId);
+        if (!it || !Array.isArray(it.subqBoxes) || !it.subqBoxes[subIdx]) return;
+        const clean = String(val || '').trim();
+        it.subqBoxes[subIdx].num = clean || '';
+        it.subqBoxes[subIdx].customNum = Boolean(clean);
+        renderBoxOverlay();
+        renderMissingAnswerBar();
+        scheduleDraftSave();
+    };
+
+    window.rgDeleteSubBox = function (itemId, kind, idx) {
+        const tabState = getTabState();
+        const it = tabState.items.find(x => x.id === itemId);
+        if (!it) return;
+        if (kind === 'stem' && Array.isArray(it.stemBoxes)) {
+            it.stemBoxes.splice(idx, 1);
+        } else if (kind === 'subq' && Array.isArray(it.subqBoxes)) {
+            it.subqBoxes.splice(idx, 1);
+        }
+        renderAllRg();
+        scheduleDraftSave();
+    };
+
+    window.rgDeleteRegionSlice = function (itemId, regionIdx) {
+        const tabState = getTabState();
+        const it = tabState.items.find(x => x.id === itemId);
+        if (!it) return;
+        if (Array.isArray(it.regions) && it.regions.length > 1) {
+            it.regions.splice(regionIdx, 1);
+            renderAllRg();
+            scheduleDraftSave();
+            return;
+        }
+        window.rgDeleteItem(itemId);
     };
 
     window.rgBindAnswerToExercise = function (ansItemId, exItemId) {
@@ -945,6 +1904,7 @@
         if (!it) return;
         it.targetExId = exItemId;
         renderAllRg();
+        scheduleDraftSave();
     };
 
     window.rgToggleVarParent = function (itemId, numsCsv) {
@@ -963,6 +1923,7 @@
             it.parentNums.sort((a, b) => a - b);
         }
         renderAllRg();
+        scheduleDraftSave();
     };
 
     window.rgStartContinue = function (itemId) {
@@ -995,6 +1956,7 @@
             await renderPdfPage();
         }
         renderAllRg();
+        scheduleDraftSave();
     };
 
     window.rgSetSubDrawTarget = function (target) {
@@ -1014,6 +1976,7 @@
             it.subqBoxes.pop();
         }
         renderAllRg();
+        scheduleDraftSave();
     };
 
     window.rgExitSubMode = function () {
@@ -1028,6 +1991,7 @@
         if (rgState.continueTargetId === itemId) rgState.continueTargetId = null;
         if (rgState.subMode && rgState.subMode.itemId === itemId) rgState.subMode = null;
         renderAllRg();
+        scheduleDraftSave();
     };
 
     async function generateRegionCropThumb(pdfDoc, region, pageCanvasCache) {
@@ -1041,8 +2005,11 @@
                 srcCanvas = document.createElement('canvas');
                 srcCanvas.width = Math.round(viewport.width);
                 srcCanvas.height = Math.round(viewport.height);
-                const ctx = srcCanvas.getContext('2d');
+                const ctx = srcCanvas.getContext('2d', { alpha: false });
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, srcCanvas.width, srcCanvas.height);
                 await page.render({ canvasContext: ctx, viewport }).promise;
+                page.cleanup();
                 pageCanvasCache.set(pageNum, srcCanvas);
             }
             const sx = Math.max(0, Math.floor((region.x ?? 0) * srcCanvas.width));
@@ -1054,17 +2021,59 @@
             const scale = targetW / sw;
             out.width = targetW;
             out.height = Math.max(12, Math.round(sh * scale));
-            const octx = out.getContext('2d');
+            const octx = out.getContext('2d', { alpha: false });
             octx.fillStyle = '#ffffff';
             octx.fillRect(0, 0, out.width, out.height);
             octx.drawImage(srcCanvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
-            return out.toDataURL('image/jpeg', 0.82);
+            const dataUrl = out.toDataURL('image/jpeg', 0.82);
+            out.width = 0;
+            out.height = 0;
+            return dataUrl;
         } catch (err) {
             return null;
         }
     }
 
+    function releaseCanvasCache(cacheMap) {
+        if (!cacheMap) return;
+        cacheMap.forEach(c => {
+            if (c) {
+                c.width = 0;
+                c.height = 0;
+            }
+        });
+        cacheMap.clear();
+    }
+
+    function collectExistingStep4FieldMap() {
+        const byId = new Map();
+        const byVarSig = new Map();
+        if (!Array.isArray(currentQuestions)) return { byId, byVarSig };
+        currentQuestions.forEach(q => {
+            if (!q) return;
+            const fields = {
+                topic: q.topic || '',
+                videoUrl: q.videoUrl || q.video_url || ''
+            };
+            if (q.id !== undefined && q.id !== null) {
+                byId.set(String(q.id).trim(), fields);
+            }
+            const pNums = Array.isArray(q.parentQuestionNums) && q.parentQuestionNums.length > 0
+                ? [...q.parentQuestionNums].sort((a, b) => a - b)
+                : (q.parentQuestionNum ? [Number(q.parentQuestionNum)] : []);
+            if (pNums.length > 0) {
+                const key = `${pNums.join(',')}#${q.subNum || 1}`;
+                byVarSig.set(key, fields);
+            }
+        });
+        return { byId, byVarSig };
+    }
+
     window.rgFinishAndImport = async function () {
+        if (!hasRegionDebugPermission()) {
+            showToast('整卷框题为测试功能，仅限管理员使用', 'warn');
+            return;
+        }
         const exItems = rgState.exercise.items;
         if (!rgState.exercise.file || exItems.length === 0) {
             showToast('请先上传题目原卷并框选至少一道题', 'warn');
@@ -1082,7 +2091,7 @@
                 && !String(it.label || '').trim()
             );
             if (missing) {
-                showToast('预习模式请为每道框选题目手动输入题号', 'warn');
+                showToast('预习模式请先为每道框选题目手动输入题号', 'warn');
                 rgSelectItem(missing.id);
                 return;
             }
@@ -1090,7 +2099,7 @@
         if (bankType === 'variation') {
             const missing = exItems.find(it => !Array.isArray(it.parentNums) || it.parentNums.length === 0);
             if (missing) {
-                showToast('举一反三模式请为每道题勾选对应的原题', 'warn');
+                showToast('举一反三模式请先为每道题勾选对应的原题', 'warn');
                 rgSelectItem(missing.id);
                 return;
             }
@@ -1149,11 +2158,15 @@
             }
         }
 
+        const prevFields = collectExistingStep4FieldMap();
         const finishBtn = document.getElementById('rg-finish-btn');
         if (finishBtn) {
             finishBtn.disabled = true;
             setBtnLabel(finishBtn, '正在上传原卷并导入');
         }
+
+        const exPageCache = new Map();
+        const ansPageCache = new Map();
 
         try {
             const exUpload = await uploadPdfBlob(rgState.exercise.file);
@@ -1181,9 +2194,6 @@
                 };
             }
 
-            const exPageCache = new Map();
-            const ansPageCache = new Map();
-
             const imported = [];
             const varSubCounter = new Map();
 
@@ -1198,7 +2208,8 @@
                     const matchedAns = findMatchedAns(it, '', primaryP);
                     const hwQ = (Array.isArray(homeworkQuestionsForVariation) ? homeworkQuestionsForVariation : [])
                         .find(item => Number(item.id) === Number(primaryP));
-                    const inheritedTopic = (hwQ && hwQ.topic) ? String(hwQ.topic).trim() : '';
+                    const prevVar = prevFields.byVarSig.get(`${pNums.join(',')}#${nextSub}`);
+                    const inheritedTopic = (hwQ && hwQ.topic) ? String(hwQ.topic).trim() : (prevVar ? prevVar.topic : '');
                     const itemAnsThumb = matchedAns && ansPdfObj
                         ? ((await generateRegionCropThumb(rgState.answer.pdfDoc, matchedAns.regions[0], ansPageCache)) || ansPdfObj.thumb)
                         : null;
@@ -1209,7 +2220,7 @@
                         subNum: nextSub,
                         isVariation: true,
                         topic: inheritedTopic,
-                        videoUrl: '',
+                        videoUrl: prevVar ? prevVar.videoUrl : '',
                         exercisePdf: { ...exPdfObj, thumb: itemExThumb },
                         answerPdf: matchedAns && ansPdfObj ? { ...ansPdfObj, thumb: itemAnsThumb } : null,
                         questionMeta: {
@@ -1233,10 +2244,11 @@
                         const itemAnsThumb = matchedAns && ansPdfObj
                             ? ((await generateRegionCropThumb(rgState.answer.pdfDoc, subAnsRegion, ansPageCache)) || ansPdfObj.thumb)
                             : null;
+                        const prev = prevFields.byId.get(qKey);
                         imported.push({
                             id: qKey,
-                            topic: '',
-                            videoUrl: '',
+                            topic: prev ? prev.topic : '',
+                            videoUrl: prev ? prev.videoUrl : '',
                             exercisePdf: { ...exPdfObj, thumb: subExThumb },
                             answerPdf: matchedAns && ansPdfObj ? { ...ansPdfObj, thumb: itemAnsThumb } : null,
                             questionMeta: {
@@ -1258,10 +2270,11 @@
                 const itemAnsThumb = matchedAns && ansPdfObj
                     ? ((await generateRegionCropThumb(rgState.answer.pdfDoc, matchedAns.regions[0], ansPageCache)) || ansPdfObj.thumb)
                     : null;
+                const prev = prevFields.byId.get(qKey);
                 imported.push({
                     id: qKey,
-                    topic: '',
-                    videoUrl: '',
+                    topic: prev ? prev.topic : '',
+                    videoUrl: prev ? prev.videoUrl : '',
                     exercisePdf: { ...exPdfObj, thumb: itemExThumb },
                     answerPdf: matchedAns && ansPdfObj ? { ...ansPdfObj, thumb: itemAnsThumb } : null,
                     questionMeta: {
@@ -1292,9 +2305,11 @@
                 handleUnauthorized();
                 return;
             }
-            console.error('Region debug import error:', err);
+            console.error('Region import error:', err);
             showToast('导入失败：' + (err.message || '网络异常'), 'error');
         } finally {
+            releaseCanvasCache(exPageCache);
+            releaseCanvasCache(ansPageCache);
             if (finishBtn) {
                 finishBtn.disabled = false;
                 setBtnLabel(finishBtn, '完成框选并导入第 4 步');

@@ -281,14 +281,35 @@ async function initQuestionBank() {
         });
 }
 
+function isRegionDebugAdminUser(user) {
+    user = user || window.currentUser;
+    if (!user) return false;
+    return Boolean(user.is_admin) || user.role === 'admin' || user.role === 'super_admin';
+}
+window.isRegionDebugAdminUser = isRegionDebugAdminUser;
+
+function applyRegionDebugAdminVisibility(user) {
+    const allowed = isRegionDebugAdminUser(user);
+    const entryBtn = document.getElementById('rg-entry-btn');
+    if (entryBtn) {
+        entryBtn.style.display = allowed ? 'inline-flex' : 'none';
+    }
+    const loadExistBtn = document.getElementById('rg-load-existing-btn');
+    if (loadExistBtn && !allowed) {
+        loadExistBtn.style.display = 'none';
+    }
+}
+
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
         initQuestionBank();
         applyAssistantReadOnlyModeIfNeed();
+        applyRegionDebugAdminVisibility();
     });
 } else {
     initQuestionBank();
     applyAssistantReadOnlyModeIfNeed();
+    applyRegionDebugAdminVisibility();
 }
 
 // 助教只读模式适配
@@ -335,6 +356,7 @@ function applyAssistantReadOnlyModeIfNeed(user) {
 
 window.addEventListener('authChecked', (e) => {
     applyAssistantReadOnlyModeIfNeed(e.detail);
+    applyRegionDebugAdminVisibility(e.detail);
     if (typeof applySavedDataFilter === 'function' && allSavedDataList.length > 0) {
         applySavedDataFilter();
     }
@@ -565,12 +587,12 @@ function goBack() {
     // Step 4 回退到 Step 3 前检查是否有未保存修改
     if (currentStep === 4 && isDirty) {
         const targetStep = window.rgImportedActive ? 'debug' : (currentStep - 1);
-        const backDesc = window.rgImportedActive ? '返回整卷框题工作台' : '返回上一步（标注题号）';
+        const backDesc = window.rgImportedActive ? '返回整卷框题工作台（重新导入时将按题号保留已填知识点与微课链接）' : '返回上一步（标注题号）';
         showCustomDialog({
-            title: '未保存的更改',
-            body: `当前题目与知识点配置尚未保存，确定要${backDesc}吗？`,
-            confirmText: '返回上一步',
-            danger: true,
+            title: window.rgImportedActive ? '返回修改框选' : '未保存的更改',
+            body: window.rgImportedActive ? `确定要${backDesc}吗？` : `当前题目与知识点配置尚未保存，确定要${backDesc}吗？`,
+            confirmText: window.rgImportedActive ? '返回框题工作台' : '返回上一步',
+            danger: !window.rgImportedActive,
             onConfirm: () => {
                 isDirty = false;
                 goToStep(targetStep);
@@ -3690,6 +3712,10 @@ async function executeSaveQuestions(data) {
         const result = await apiPost(data);
         if (result.success) {
             isDirty = false;
+            if (typeof window.rgClearSavedDraft === 'function') {
+                const draftKey = [data.bankType, data.year, data.season, data.subject, data.grade, data.tier, data.week].join('|');
+                window.rgClearSavedDraft(draftKey);
+            }
             // 性能优化：不再执行全量 DOM 清空重绘 renderQuestionList()，仅更新保存状态与已有统计
             updateStatus();
             renderSavedDataList();
@@ -4685,6 +4711,14 @@ function renderQuestionList() {
                     </div>
                     ${isAssistant ? '' : `
                     <div class="big-question-header-actions">
+                        ${(isRegionDebugAdminUser() && firstQ.questionMeta && firstQ.questionMeta.mode === 'region_crop') ? `
+                        <button type="button" class="big-question-action-btn" onclick="rgEditQuestionRegionFromStep4(${firstIdx})" title="回到整卷框题工作台调整此大题的框选区域">
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                            </svg>
+                            <span>调整整卷框选</span>
+                        </button>` : ''}
                         <button type="button" class="big-question-action-btn" onclick="openStep4BigQuestionBoxModal(${firstIdx})" title="在高清大图上预览或微调每道小问的框选位置">
                             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="3" y="3" width="18" height="18" rx="2" stroke-dasharray="4 2"></rect>
@@ -4850,6 +4884,13 @@ function renderQuestionList() {
                 </div>
                 ${isAssistant ? '' : `
                 <div class="question-actions">
+                    ${(isRegionDebugAdminUser() && q.questionMeta && q.questionMeta.mode === 'region_crop') ? `
+                    <button class="question-action-btn" onclick="rgEditQuestionRegionFromStep4(${originalIndex})" title="回到整卷框题工作台调整此题框选">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                        </svg>
+                    </button>` : ''}
                     <button class="question-action-btn question-remove-btn" onclick="removeQuestion(${originalIndex})" title="删除此题">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -4909,6 +4950,13 @@ function renderQuestionList() {
                 </div>
                 ${isAssistant ? '' : `
                 <div class="question-actions">
+                    ${(isRegionDebugAdminUser() && q.questionMeta && q.questionMeta.mode === 'region_crop') ? `
+                    <button class="question-action-btn" onclick="rgEditQuestionRegionFromStep4(${originalIndex})" title="回到整卷框题工作台调整此题框选">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                        </svg>
+                    </button>` : ''}
                     ${canConvertBigQ ? `
                     <button class="question-action-btn" onclick="openStep4BigQuestionBoxModal(${originalIndex})" title="设为大题并框选各小问位置">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

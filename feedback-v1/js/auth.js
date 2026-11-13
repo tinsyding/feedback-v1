@@ -249,6 +249,7 @@
         if (!user) return;
         const navActions = document.querySelector('.nav-actions');
         const isAssistant = user.role === 'assistant';
+        const isPureAdmin = Boolean(user.is_admin && (user.role === 'admin' || user.role === 'super_admin'));
         const isTestAccount = user.username === '0';
         const displayName = isTestAccount ? (user.real_name || '测试账号') : (user.real_name || user.username);
 
@@ -256,6 +257,8 @@
         let roleBadgeHtml = '';
         if (isAssistant) {
             roleBadgeHtml = `<span class="badge-role-assistant" title="助教账号">助教</span>`;
+        } else if (isPureAdmin) {
+            roleBadgeHtml = `<span class="badge-role-teacher" title="管理员账号">管理员</span>`;
         } else if (!isTestAccount) {
             roleBadgeHtml = `<span class="badge-role-teacher">教师</span>`;
         }
@@ -264,6 +267,8 @@
         let actionBtnsHtml = '';
         if (isAssistant) {
             actionBtnsHtml = `<button type="button" class="btn-nav-logout" onclick="window.handleFrontLogout()" title="退出当前账号">退出</button>`;
+        } else if (isPureAdmin) {
+            actionBtnsHtml = `<a class="btn-nav-logout" href="admin.html" title="返回管理后台">管理后台</a>`;
         } else if (!isTestAccount) {
             actionBtnsHtml = `
                 <button type="button" class="btn-nav-assistant-mgr" onclick="window.openAssistantModal()" title="管理当前教师名下的助教账号">助教管理</button>

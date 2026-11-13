@@ -1699,11 +1699,23 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                         group.firstOrder = parentNum;
                     }
 
+                    const getItemRegionSig = (it) => {
+                        if (!it || it.mode !== 'region_crop') return '';
+                        const rgs = Array.isArray(it.regions) ? it.regions : [];
+                        return rgs.map(r => `${r.pageOffset}:${r.x}:${r.y}:${r.w}:${r.h}`).join(';');
+                    };
                     if (!item.isVariation) {
                         group.originalItems.push(item);
                     } else {
-                        // 同一考点组内变式按 url 去重并合并关联原题
-                        const existingVar = group.variationItems.find(v => v.url === item.url);
+                        // 同一考点组内变式按 url（region_crop 模式额外比对框选区域）去重并合并关联原题
+                        const curSig = getItemRegionSig(item);
+                        const existingVar = group.variationItems.find(v => {
+                            if (v.url !== item.url) return false;
+                            if (v.mode === 'region_crop' || item.mode === 'region_crop') {
+                                return getItemRegionSig(v) === curSig;
+                            }
+                            return true;
+                        });
                         if (existingVar) {
                             const mergedPNums = Array.from(new Set(
                                 (existingVar.parentNums || []).concat(item.parentNums || [])
@@ -1753,6 +1765,20 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                     const groupItems = group.originalItems.concat(group.variationItems);
                     if (groupItems.length === 0) return;
 
+                    const getClusterItemSig = (it) => {
+                        if (!it || it.mode !== 'region_crop') return '';
+                        const rgs = Array.isArray(it.regions) ? it.regions : [];
+                        return rgs.map(r => `${r.pageOffset}:${r.x}:${r.y}:${r.w}:${r.h}`).join(';');
+                    };
+                    const isSameClusterItem = (a, b) => {
+                        if (!a || !b) return false;
+                        if (a.url !== b.url || a.isVariation !== b.isVariation) return false;
+                        if (a.mode === 'region_crop' || b.mode === 'region_crop') {
+                            return getClusterItemSig(a) === getClusterItemSig(b);
+                        }
+                        return true;
+                    };
+
                     groupItems.forEach((item, idx) => {
                         const pNum = item.parentNum;
                         const varTotal = totalVariationsInGroup;
@@ -1774,8 +1800,8 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             isGroupStart: idx === 0,
                             isGroupEnd: idx === groupItems.length - 1,
                             // 单题的开始与结束（供作答区与二维码判断）
-                            isClusterStart: idx === 0 || groupItems[idx - 1].url !== item.url || groupItems[idx - 1].isVariation !== item.isVariation,
-                            isClusterEnd: idx === groupItems.length - 1 || groupItems[idx + 1].url !== item.url || groupItems[idx + 1].isVariation !== item.isVariation
+                            isClusterStart: idx === 0 || !isSameClusterItem(groupItems[idx - 1], item),
+                            isClusterEnd: idx === groupItems.length - 1 || !isSameClusterItem(groupItems[idx + 1], item)
                         });
                     });
                 });
@@ -2102,14 +2128,22 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                     const sourceDoc = await PDFLib.PDFDocument.load(pdfBytes);
                     const pageCount = sourceDoc.getPageCount();
 
-                    // ===== 精简模式（原文 + 仅错题小问）：仅在题目版且已框选原文及错题框时启用 =====
+                    // ===== 精简模式（原文 + 仅错题小问）：题目版已框选原文及错题框，或 region_crop 答案版已框选小问答案框时启用 =====
                     const useCompactBigQ = (
-                        type === 'exercise' &&
                         window.retestBigQuestionMode === 'compact' &&
                         !qIsVariation &&
-                        typeof qItem === 'object' &&
-                        Array.isArray(qItem.stemBoxes) && qItem.stemBoxes.length > 0 &&
-                        Array.isArray(qItem.errorBoxes) && qItem.errorBoxes.length > 0
+                        typeof qItem === 'object' && (
+                            (
+                                type === 'exercise' &&
+                                Array.isArray(qItem.stemBoxes) && qItem.stemBoxes.length > 0 &&
+                                Array.isArray(qItem.errorBoxes) && qItem.errorBoxes.length > 0
+                            ) || (
+                                type === 'answer' &&
+                                qItem.mode === 'region_crop' &&
+                                Array.isArray(qItem.groupNums) && qItem.groupNums.length > 1 &&
+                                Array.isArray(qItem.answerErrorBoxes) && qItem.answerErrorBoxes.length > 0
+                            )
+                        )
                     );
 
                     if (useCompactBigQ) {
@@ -2119,9 +2153,12 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             if (pa !== pb) return pa - pb;
                             return (a.y || 0) - (b.y || 0);
                         });
-                        const sortedStems = sortBoxes(qItem.stemBoxes).map(sb => ({ kind: 'stem', box: sb }));
-                        const sortedErrors = sortBoxes(qItem.errorBoxes).map(eb => ({ kind: 'subq', box: eb }));
-                        const compactSlices = [...sortedStems, ...sortedErrors];
+                        const compactSlices = type === 'answer'
+                            ? sortBoxes(qItem.answerErrorBoxes).map(eb => ({ kind: 'subq', box: eb }))
+                            : [
+                                ...sortBoxes(qItem.stemBoxes).map(sb => ({ kind: 'stem', box: sb })),
+                                ...sortBoxes(qItem.errorBoxes).map(eb => ({ kind: 'subq', box: eb }))
+                            ];
 
                         const boxX = BOX_MARGIN_X;
                         const boxW = BOX_WIDTH;
@@ -2134,6 +2171,12 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                         const bigRangeTitle = itemGroupNums.length > 1
                             ? ('第' + itemGroupNums[0] + '~' + itemGroupNums[itemGroupNums.length - 1] + '题')
                             : (itemErrorNums.length > 1 ? ('第' + itemErrorNums.join('、') + '题') : ('第' + qParentNum + '题'));
+
+                        const buildCompactRunningLabel = () => {
+                            const bigErrNote = itemErrorNums.length > 0 ? ('（本篇错题：第 ' + itemErrorNums.join('、') + ' 题）') : '';
+                            if (type === 'answer') return bigRangeTitle + bigErrNote + ' · 答案（续）';
+                            return qSourceType === 'preview' ? bigRangeTitle + bigErrNote + ' · 预习（续）' : bigRangeTitle + bigErrNote + ' · 原题（续）';
+                        };
 
                         let isFirstCompactBlock = true;
                         let lastKindRendered = null;
@@ -2148,12 +2191,17 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             const origH = viewBox.height;
 
                             const padPt = 2;
+                            const bx = (typeof b.x === 'number') ? b.x : 0;
+                            const bw = (typeof b.w === 'number') ? b.w : 1;
+                            const leftPt = Math.max(0, bx * origW);
+                            const rightPt = Math.min(origW, (bx + bw) * origW);
+                            const effW = Math.max(24, rightPt - leftPt);
                             const topPt = Math.max(0, b.y * origH - padPt);
                             const bottomPt = Math.min(origH, (b.y + b.h) * origH + padPt);
                             const effH = Math.max(18, bottomPt - topPt);
 
-                            const scale = Math.min(innerContentW / origW, 1.0);
-                            const drawW = origW * scale;
+                            const scale = Math.min(innerContentW / effW, 1.0);
+                            const drawW = effW * scale;
                             const drawH = effH * scale;
                             const realDrawX = (boxX + 6) + (innerContentW - drawW) / 2;
 
@@ -2164,9 +2212,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                                 headerInfo = generateQuestionTopicBadge(qBadgeSpec, bannerW);
                                 headerGap = QUESTION_TOPIC_BANNER_GAP;
                             } else if (!currentPage) {
-                                const bigErrNote = itemErrorNums.length > 0 ? ('（本篇错题：第 ' + itemErrorNums.join('、') + ' 题）') : '';
-                                const runningLabel = (qSourceType === 'preview' ? bigRangeTitle + bigErrNote + ' · 预习（续）' : bigRangeTitle + bigErrNote + ' · 原题（续）');
-                                headerInfo = generateQuestionRunningHeader(runningLabel, bannerW, qBadgeSpec.theme);
+                                headerInfo = generateQuestionRunningHeader(buildCompactRunningLabel(), bannerW, qBadgeSpec.theme);
                                 headerGap = RUNNING_HEADER_GAP;
                             }
                             if (headerInfo) currentBannerBlock = headerInfo.heightPt + headerGap;
@@ -2180,9 +2226,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                                 currentPage = mergedPdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
                                 currentY = PAGE_HEIGHT - TOP_MARGIN;
                                 if (!isFirstCompactBlock && !headerInfo) {
-                                    const bigErrNote = itemErrorNums.length > 0 ? ('（本篇错题：第 ' + itemErrorNums.join('、') + ' 题）') : '';
-                                    const runningLabel = (qSourceType === 'preview' ? bigRangeTitle + bigErrNote + ' · 预习（续）' : bigRangeTitle + bigErrNote + ' · 原题（续）');
-                                    headerInfo = generateQuestionRunningHeader(runningLabel, bannerW, qBadgeSpec.theme);
+                                    headerInfo = generateQuestionRunningHeader(buildCompactRunningLabel(), bannerW, qBadgeSpec.theme);
                                     headerGap = RUNNING_HEADER_GAP;
                                     if (headerInfo) currentBannerBlock = headerInfo.heightPt + headerGap;
                                 }
@@ -2217,9 +2261,9 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             }
 
                             const embeddedSlice = await mergedPdf.embedPage(srcPage, {
-                                left: viewBox.x,
+                                left: viewBox.x + leftPt,
                                 bottom: viewBox.y + (origH - bottomPt),
-                                right: viewBox.x + origW,
+                                right: viewBox.x + rightPt,
                                 top: viewBox.y + (origH - topPt)
                             });
 

@@ -12,7 +12,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261113-23';
+            const v = '20261114-01';
             document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/question-bank.css?v=${v}">`);
@@ -194,7 +194,7 @@
                     <div class="qb-step-nav" style="grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
                         <span style="font-size: 0.85rem; color: var(--text-secondary);">若需上传新错题本，选好上方分类后点击下一步：</span>
                         <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                            <button type="button" class="btn secondary" onclick="openRegionDebugStudio()" title="免切题分页，直接上传原卷 PDF 逐题拉框标注（支持单题/大题/预习跳题/举一反三）">Debug · 整卷框题</button>
+                            <button type="button" class="btn secondary" id="rg-entry-btn" style="display: none;" onclick="openRegionDebugStudio()" title="测试功能（仅管理员可见）：免切题分页，直接上传原卷 PDF 逐题拉框标注">Debug · 整卷框题</button>
                             <button class="btn primary" onclick="goNextFromStep1()">录入新错题本 / 下一步</button>
                         </div>
                     </div>
@@ -628,6 +628,7 @@
                                 </span>
                                 <span class="rg-flow-step" id="rg-step-pill-answer">3. 框选答案</span>
                             </div>
+                            <button type="button" class="btn sm secondary" id="rg-clear-draft-btn" onclick="rgClearDraftPrompt()" title="清空当前框题原卷与草稿" style="display: none;">清空草稿</button>
                             <button type="button" class="btn secondary" id="rg-prev-stage-btn" onclick="rgGoPrevStage()" style="display: none;">
                                 <svg class="rg-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <polyline points="15 18 9 12 15 6"></polyline>
@@ -670,7 +671,10 @@
                                 <input type="checkbox" id="rg-fullwidth-toggle" checked onchange="rgToggleFullWidth(this.checked)">
                                 <span>横向自动打满（单栏）</span>
                             </label>
-                            <span class="rg-upload-gate-tip">两份 PDF 上传完成后，先逐题框选题目，再逐题框选答案</span>
+                            <div class="rg-upload-gate-right">
+                                <button type="button" class="btn sm secondary" id="rg-load-existing-btn" onclick="rgLoadFromCurrentQuestions()" style="display: none;">载入当前题库已有选区</button>
+                                <span class="rg-upload-gate-tip">两份 PDF 上传完成后，先逐题框选题目，再逐题框选答案（支持本地草稿自动恢复）</span>
+                            </div>
                         </div>
                     </div>
 
@@ -702,10 +706,12 @@
                                 <div class="rg-zoom-controls">
                                     <button type="button" class="btn sm secondary rg-mode-btn active" id="rg-interact-mode-btn" onclick="rgToggleInteractMode()" title="在手机上可切换：拉框模式（单指框题） / 浏览滚动（单指滑动页面）">模式: 拉框</button>
                                     <button type="button" class="btn sm secondary rg-mode-btn" id="rg-twotap-btn" onclick="rgToggleTwoTapMode()" title="开启后只需点击两次（上边界 + 下边界）即可快速成框，适合手机端单栏操作">两点定框: 关</button>
+                                    <button type="button" class="btn sm secondary rg-mode-btn active" id="rg-fullwidth-toolbar-btn" onclick="rgToggleFullWidth(!document.getElementById('rg-fullwidth-toggle')?.checked)" title="开启时拉框自动横跨单栏整宽；双栏试卷可临时关闭">全宽: 开</button>
                                     <button type="button" class="btn sm secondary" onclick="rgZoom(-0.15)">-</button>
                                     <span class="rg-zoom-val" id="rg-zoom-val">100%</span>
                                     <button type="button" class="btn sm secondary" onclick="rgZoom(0.15)">+</button>
-                                    <button type="button" class="btn sm secondary" onclick="rgUndoLastRegion()">撤销上一框</button>
+                                    <button type="button" class="btn sm secondary" onclick="rgUndoLastRegion()" title="快捷键: Ctrl/Cmd + Z">撤销上一框</button>
+                                    <span class="rg-shortcut-hint" title="快捷键：←/→ 翻页 · Ctrl+Z 撤销 · Delete 删除选中框 · Ctrl+滚轮 缩放 · 1/2 切换原文/小问 · Esc 退出子模式">快捷键</span>
                                 </div>
                             </div>
                             <div class="rg-viewport" id="rg-viewport">
@@ -726,6 +732,7 @@
                                 <span id="rg-sidebar-title">已框题目（0）</span>
                                 <span class="rg-sidebar-tip" id="rg-sidebar-tip">答案仅按题号自动匹配，不绑定排版</span>
                             </div>
+                            <div class="rg-missing-bar" id="rg-missing-bar" style="display: none;"></div>
                             <div class="rg-continue-banner" id="rg-continue-banner" style="display: none;">
                                 <span id="rg-continue-text">正在为第 1 题追加跨页区域：请翻页后直接拉框</span>
                                 <button type="button" class="btn sm secondary" onclick="rgCancelContinue()">取消</button>
@@ -887,7 +894,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261113-23';
+            const v = '20261114-01';
             document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
             document.write(`<script src="js/common.js?v=${v}"><\/script>`);
             document.write(`<script src="js/auth.js?v=${v}"><\/script>`);
