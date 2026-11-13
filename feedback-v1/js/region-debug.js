@@ -94,7 +94,17 @@
 
     function formatItemTitle(it, tab) {
         const bankType = getCurrentBankTypeSafe();
-        if (bankType === 'variation' && tab === 'exercise') {
+        if (bankType === 'variation') {
+            if (tab === 'answer') {
+                const exItem = rgState.exercise.items.find(x => x.id === it.targetExId);
+                if (exItem) {
+                    const compact = typeof formatCompactNumList === 'function'
+                        ? formatCompactNumList(exItem.parentNums)
+                        : (exItem.parentNums || []).join('、');
+                    return `答案 · 原题${compact || '?'}`;
+                }
+                return '答案（未绑定题目）';
+            }
             if (Array.isArray(it.parentNums) && it.parentNums.length > 0) {
                 const compact = typeof formatCompactNumList === 'function'
                     ? formatCompactNumList(it.parentNums)
@@ -301,10 +311,17 @@
         // 3. 新建一题 / 一条答案框
         const bankType = getCurrentBankTypeSafe();
         let label = '';
+        let targetExId = null;
         if (bankType === 'homework') {
             label = getNextAutoNumber(tab);
         } else if (bankType === 'variation') {
-            label = tab === 'answer' ? getNextAutoNumber(tab) : '';
+            if (tab === 'answer') {
+                const boundIds = new Set(tabState.items.map(x => x.targetExId).filter(Boolean));
+                const nextUnboundEx = rgState.exercise.items.find(ex => !boundIds.has(ex.id))
+                    || rgState.exercise.items[tabState.items.length]
+                    || null;
+                targetExId = nextUnboundEx ? nextUnboundEx.id : null;
+            }
         } else {
             // preview：不自动标号，手动输入跳题题号
             label = '';
@@ -313,6 +330,7 @@
         const newItem = {
             id: `${tab}_${rgState.nextSeq++}`,
             label,
+            targetExId,
             parentNums: [],
             isBig: false,
             regions: [rectObj],
@@ -521,6 +539,21 @@
                         <span class="rg-card-meta">${escapeHtmlRg(pages)}</span>
                     </div>
                     <div class="rg-var-parents">${chipsHtml}</div>
+                `;
+            } else if (bankType === 'variation' && tab === 'answer') {
+                const exChips = rgState.exercise.items.map((ex, idx) => {
+                    const compact = typeof formatCompactNumList === 'function'
+                        ? formatCompactNumList(ex.parentNums)
+                        : (ex.parentNums || []).join('、');
+                    const selected = it.targetExId === ex.id;
+                    return `<button type="button" class="rg-var-chip ${selected ? 'selected' : ''}" onclick="rgBindAnswerToExercise('${it.id}', '${ex.id}')">第${idx + 1}框·原题${escapeHtmlRg(compact)}</button>`;
+                }).join('');
+                headerEditorHtml = `
+                    <div class="rg-card-top">
+                        <span class="rg-card-num-wrap">${escapeHtmlRg(formatItemTitle(it, tab))}</span>
+                        <span class="rg-card-meta">${escapeHtmlRg(pages)}</span>
+                    </div>
+                    <div class="rg-var-parents">${exChips}</div>
                 `;
             } else {
                 const placeholder = bankType === 'preview' ? '输题号' : '题号';
@@ -889,6 +922,13 @@
         syncStageUi();
     };
 
+    window.rgBindAnswerToExercise = function (ansItemId, exItemId) {
+        const it = rgState.answer.items.find(x => x.id === ansItemId);
+        if (!it) return;
+        it.targetExId = exItemId;
+        renderAllRg();
+    };
+
     window.rgToggleVarParent = function (itemId, numsCsv) {
         const tabState = getTabState();
         const it = tabState.items.find(x => x.id === itemId);
@@ -1098,7 +1138,10 @@
                     const primaryP = pNums[0];
                     const nextSub = (varSubCounter.get(primaryP) || 0) + 1;
                     varSubCounter.set(primaryP, nextSub);
-                    const matchedAns = ansByNum.get(String(primaryP)) || ansByNum.get(String(it.label || '').trim()) || null;
+                    const matchedAns = rgState.answer.items.find(a => a.targetExId === it.id)
+                        || ansByNum.get(String(primaryP))
+                        || ansByNum.get(String(it.label || '').trim())
+                        || null;
                     const hwQ = (Array.isArray(homeworkQuestionsForVariation) ? homeworkQuestionsForVariation : [])
                         .find(item => Number(item.id) === Number(primaryP));
                     const inheritedTopic = (hwQ && hwQ.topic) ? String(hwQ.topic).trim() : '';
