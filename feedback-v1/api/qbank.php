@@ -77,21 +77,23 @@ function sanitizeQuestionMeta($rawMeta) {
         }
     }
 
-    if (!empty($rawMeta['box']) && is_array($rawMeta['box'])) {
-        $b = $rawMeta['box'];
-        $x = isset($b['x']) ? max(0.0, min(1.0, round(floatval($b['x']), 4))) : null;
-        $y = isset($b['y']) ? max(0.0, min(1.0, round(floatval($b['y']), 4))) : null;
-        $w = isset($b['w']) ? max(0.005, min(1.0, round(floatval($b['w']), 4))) : null;
-        $h = isset($b['h']) ? max(0.005, min(1.0, round(floatval($b['h']), 4))) : null;
-        $pageOffset = isset($b['pageOffset']) ? max(0, intval($b['pageOffset'])) : 0;
-        if ($x !== null && $y !== null && $w !== null && $h !== null) {
-            $clean['box'] = [
-                'pageOffset' => $pageOffset,
-                'x' => $x,
-                'y' => $y,
-                'w' => $w,
-                'h' => $h
-            ];
+    foreach (['box', 'answerBox'] as $boxKey) {
+        if (!empty($rawMeta[$boxKey]) && is_array($rawMeta[$boxKey])) {
+            $b = $rawMeta[$boxKey];
+            $x = isset($b['x']) ? max(0.0, min(1.0, round(floatval($b['x']), 4))) : null;
+            $y = isset($b['y']) ? max(0.0, min(1.0, round(floatval($b['y']), 4))) : null;
+            $w = isset($b['w']) ? max(0.005, min(1.0, round(floatval($b['w']), 4))) : null;
+            $h = isset($b['h']) ? max(0.005, min(1.0, round(floatval($b['h']), 4))) : null;
+            $pageOffset = isset($b['pageOffset']) ? max(0, intval($b['pageOffset'])) : 0;
+            if ($x !== null && $y !== null && $w !== null && $h !== null) {
+                $clean[$boxKey] = [
+                    'pageOffset' => $pageOffset,
+                    'x' => $x,
+                    'y' => $y,
+                    'w' => $w,
+                    'h' => $h
+                ];
+            }
         }
     }
 

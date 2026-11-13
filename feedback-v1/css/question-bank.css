@@ -3253,6 +3253,11 @@ input[type=number] {
     box-sizing: border-box;
 }
 
+.page-thumb-mini-box.answer-box {
+    border-color: #0284c7;
+    background: rgba(2, 132, 199, 0.08);
+}
+
 .page-thumb-mini-tag {
     position: absolute;
     top: -1px;
@@ -3265,6 +3270,23 @@ input[type=number] {
     background: #dc2626;
     color: #ffffff;
     border-radius: 2px 0 3px 0;
+    white-space: nowrap;
+}
+
+.page-thumb-mini-box.answer-box .page-thumb-mini-tag {
+    background: #0284c7;
+}
+
+.page-thumb-mini-tag.compact {
+    top: -1px;
+    left: -1px;
+    padding: 0 3px;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 11px;
+    height: 11px;
+    border-radius: 2px;
+    letter-spacing: -0.02em;
 }
 
 /* Lightbox 大题切换按钮与工具条 */
@@ -3419,6 +3441,27 @@ input[type=number] {
     border-style: dashed;
     background: rgba(220, 38, 38, 0.12);
     pointer-events: none;
+}
+
+.lightbox-subq-box.answer-box {
+    border-color: #0284c7;
+    background: rgba(2, 132, 199, 0.08);
+}
+
+.lightbox-subq-box.answer-box:hover {
+    background: rgba(2, 132, 199, 0.14);
+}
+
+.lightbox-subq-box.answer-box.draft-box {
+    background: rgba(2, 132, 199, 0.12);
+}
+
+.lightbox-subq-box.answer-box .lightbox-subq-tag {
+    border-color: #0284c7;
+}
+
+.lightbox-subq-box.answer-box .lightbox-subq-del {
+    background: #0284c7;
 }
 
 .lightbox-subq-tag {

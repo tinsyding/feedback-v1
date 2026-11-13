@@ -1452,6 +1452,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             ? p.groupNums.map(parseQNum).filter(n => n > 0)
                             : [];
                         const errorBoxes = Array.isArray(p.errorBoxes) ? p.errorBoxes : [];
+                        const answerErrorBoxes = Array.isArray(p.answerErrorBoxes) ? p.answerErrorBoxes : [];
 
                         validItems.push({
                             url: url,
@@ -1459,6 +1460,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             errorNums: errorNums,
                             groupNums: groupNums,
                             errorBoxes: errorBoxes,
+                            answerErrorBoxes: answerErrorBoxes,
                             subTopics: p.subTopics || null,
                             parentNum: pNum,
                             parentNums: pNums,
@@ -1941,9 +1943,10 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                         const bounds = await detectPdfContentBounds(pdfBytes, pIdx + 1, origW, origH);
                         let { topCropPt, bottomCutPt, effectiveHeightPt, isFullPage } = bounds;
 
-                        // 提取属于当前页的大题错题框选坐标，并保护其不被上下裁剪切除
-                        const pageErrorBoxes = (type === 'exercise' && typeof qItem === 'object' && Array.isArray(qItem.errorBoxes))
-                            ? qItem.errorBoxes.filter(b => b && (parseInt(b.pageOffset, 10) || 0) === pIdx && typeof b.x === 'number' && typeof b.y === 'number')
+                        // 提取属于当前页的大题错题框选坐标（题目取 errorBoxes，答案取 answerErrorBoxes），并保护其不被上下裁剪切除
+                        const activeBoxesSource = (type === 'exercise') ? qItem.errorBoxes : qItem.answerErrorBoxes;
+                        const pageErrorBoxes = (typeof qItem === 'object' && Array.isArray(activeBoxesSource))
+                            ? activeBoxesSource.filter(b => b && (parseInt(b.pageOffset, 10) || 0) === pIdx && typeof b.x === 'number' && typeof b.y === 'number')
                             : [];
                         if (pageErrorBoxes.length > 0) {
                             pageErrorBoxes.forEach(b => {

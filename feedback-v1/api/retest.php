@@ -111,11 +111,11 @@ function saveRevokedTokens(array $map) {
  * 获取指定周次题目的 PDF 列表 (优先从 MySQL qbank_questions 查询，回退到 JSON 文件)
  */
 function parseRetestQuestionMeta($rawMeta, $qNum) {
-    if (empty($rawMeta)) return ['groupNums' => [], 'box' => null];
+    if (empty($rawMeta)) return ['groupNums' => [], 'box' => null, 'answerBox' => null];
     if (is_string($rawMeta)) {
         $rawMeta = @json_decode($rawMeta, true);
     }
-    if (!is_array($rawMeta)) return ['groupNums' => [], 'box' => null];
+    if (!is_array($rawMeta)) return ['groupNums' => [], 'box' => null, 'answerBox' => null];
 
     $groupNums = [];
     if (!empty($rawMeta['groupNums']) && is_array($rawMeta['groupNums'])) {
@@ -125,21 +125,23 @@ function parseRetestQuestionMeta($rawMeta, $qNum) {
         sort($groupNums);
     }
 
-    $box = null;
-    if (!empty($rawMeta['box']) && is_array($rawMeta['box'])) {
-        $b = $rawMeta['box'];
-        if (isset($b['x'], $b['y'], $b['w'], $b['h'])) {
-            $box = [
-                'num' => intval($qNum),
-                'pageOffset' => isset($b['pageOffset']) ? max(0, intval($b['pageOffset'])) : 0,
-                'x' => max(0.0, min(1.0, round(floatval($b['x']), 4))),
-                'y' => max(0.0, min(1.0, round(floatval($b['y']), 4))),
-                'w' => max(0.005, min(1.0, round(floatval($b['w']), 4))),
-                'h' => max(0.005, min(1.0, round(floatval($b['h']), 4)))
-            ];
+    $parseBox = function($b) use ($qNum) {
+        if (empty($b) || !is_array($b) || !isset($b['x'], $b['y'], $b['w'], $b['h'])) {
+            return null;
         }
-    }
-    return ['groupNums' => $groupNums, 'box' => $box];
+        return [
+            'num' => intval($qNum),
+            'pageOffset' => isset($b['pageOffset']) ? max(0, intval($b['pageOffset'])) : 0,
+            'x' => max(0.0, min(1.0, round(floatval($b['x']), 4))),
+            'y' => max(0.0, min(1.0, round(floatval($b['y']), 4))),
+            'w' => max(0.005, min(1.0, round(floatval($b['w']), 4))),
+            'h' => max(0.005, min(1.0, round(floatval($b['h']), 4)))
+        ];
+    };
+
+    $box = $parseBox($rawMeta['box'] ?? null);
+    $answerBox = $parseBox($rawMeta['answerBox'] ?? null);
+    return ['groupNums' => $groupNums, 'box' => $box, 'answerBox' => $answerBox];
 }
 
 function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $year = null, $season = null, $bankType = 'homework') {
@@ -297,6 +299,7 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                                 'errorNums' => [$qNum],
                                 'groupNums' => $inferredGroup,
                                 'errorBoxes' => $metaParsed['box'] ? [$metaParsed['box']] : [],
+                                'answerErrorBoxes' => $metaParsed['answerBox'] ? [$metaParsed['answerBox']] : [],
                                 'subTopics' => $curTopic !== '' ? [$qNum => $curTopic] : [],
                                 'topic' => $curTopic,
                                 'videoUrl' => $r['video_url'] ?: null,
@@ -317,6 +320,9 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                                 $pdfList[$existIdx]['groupNums'] = $mergedGroup;
                                 if ($metaParsed['box']) {
                                     $pdfList[$existIdx]['errorBoxes'][] = $metaParsed['box'];
+                                }
+                                if ($metaParsed['answerBox']) {
+                                    $pdfList[$existIdx]['answerErrorBoxes'][] = $metaParsed['answerBox'];
                                 }
                                 if ($curTopic !== '') {
                                     $pdfList[$existIdx]['subTopics'][$qNum] = $curTopic;
@@ -441,6 +447,7 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                             'errorNums' => [$qNum],
                             'groupNums' => $inferredGroup,
                             'errorBoxes' => $metaParsed['box'] ? [$metaParsed['box']] : [],
+                            'answerErrorBoxes' => $metaParsed['answerBox'] ? [$metaParsed['answerBox']] : [],
                             'subTopics' => $curTopic !== '' ? [$qNum => $curTopic] : [],
                             'topic' => $curTopic,
                             'videoUrl' => $q['videoUrl'] ?? ($q['video_url'] ?? null),
@@ -460,6 +467,9 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                         $pdfList[$existIdx]['groupNums'] = $mergedGroup;
                         if ($metaParsed['box']) {
                             $pdfList[$existIdx]['errorBoxes'][] = $metaParsed['box'];
+                        }
+                        if ($metaParsed['answerBox']) {
+                            $pdfList[$existIdx]['answerErrorBoxes'][] = $metaParsed['answerBox'];
                         }
                         if ($curTopic !== '') {
                             $pdfList[$existIdx]['subTopics'][$qNum] = $curTopic;

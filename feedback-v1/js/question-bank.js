@@ -27,8 +27,9 @@ let batchQuestionLabels = [];
 let batchAnswerLabels = [];
 let batchQuestionThumbs = [];
 let batchAnswerThumbs = [];
-// 每页题目 PDF 上的大题小问框选坐标数组: batchPageBoxes[pageIndex] = [{ x, y, w, h }, ...]
+// 每页题目/答案 PDF 上的大题小问框选坐标数组: batchPageBoxes[pageIndex] = [{ x, y, w, h }, ...]
 let batchPageBoxes = [];
+let batchAnswerPageBoxes = [];
 // 自动识别出的题号（null 表示该页未识别到），以及当前题号是否仍来自自动识别
 let batchQuestionDetectedLabels = [];
 let batchAnswerDetectedLabels = [];
@@ -1127,6 +1128,7 @@ function buildDefaultLabels() {
     batchAnswerInheritedFlags = [];
     batchAnswerAutoCount = 0;
     batchAnswerInheritedCount = 0;
+    batchAnswerPageBoxes = Array.from({ length: batchAnswerPageCount }, () => []);
     for (let i = 0; i < batchAnswerPageCount; i++) {
         const detected = batchAnswerDetectedLabels[i];
         const hasDetected = Number.isInteger(detected) && detected > 0;
@@ -1153,14 +1155,15 @@ function buildDefaultLabels() {
 }
 
 /**
- * 获取具有相同起始题号的所有题目页索引（升序）
+ * 获取具有相同起始题号的所有题目/答案页索引（升序），题目与答案完全独立
  */
-function getGroupPagesByStartLabel(startLabel) {
+function getGroupPagesByStartLabel(startLabel, kind = 'q') {
     const target = parseInt(startLabel, 10);
     if (!target || target <= 0) return [];
+    const labels = kind === 'a' ? batchAnswerLabels : batchQuestionLabels;
     const pages = [];
-    for (let i = 0; i < batchQuestionLabels.length; i++) {
-        if (parseInt(batchQuestionLabels[i], 10) === target) {
+    for (let i = 0; i < labels.length; i++) {
+        if (parseInt(labels[i], 10) === target) {
             pages.push(i);
         }
     }
@@ -1168,14 +1171,15 @@ function getGroupPagesByStartLabel(startLabel) {
 }
 
 /**
- * 获取指定起始题号对应的大题框选与题号区间信息
+ * 获取指定起始题号对应的大题框选与题号区间信息（kind: 'q' 题目 | 'a' 答案，完全独立不关联）
  */
-function getGroupBoxesInfo(startLabel) {
+function getGroupBoxesInfo(startLabel, kind = 'q') {
     const startNum = parseInt(startLabel, 10) || 1;
-    const pages = getGroupPagesByStartLabel(startNum);
+    const pages = getGroupPagesByStartLabel(startNum, kind);
+    const allBoxes = kind === 'a' ? batchAnswerPageBoxes : batchPageBoxes;
     const boxesWithMeta = [];
     pages.forEach((pIdx, pageOffset) => {
-        const pBoxes = Array.isArray(batchPageBoxes[pIdx]) ? batchPageBoxes[pIdx] : [];
+        const pBoxes = Array.isArray(allBoxes[pIdx]) ? allBoxes[pIdx] : [];
         pBoxes.forEach((b, bIdx) => {
             const qNum = startNum + boxesWithMeta.length;
             boxesWithMeta.push({
@@ -1246,33 +1250,35 @@ function matchAnswerLabelToQuestionGroup(ansLabel) {
 }
 
 /**
- * 当某页框选小问数量变化时，自动重算该大题之后所有题目页的起始题号
+ * 当某页框选小问数量变化时，自动重算该大题之后所有同类型页（题目或答案）的起始题号
  */
-function cascadeQuestionLabelsAfterGroup(anchorPageIdx) {
-    if (!autoCascadeNumbers || anchorPageIdx < 0 || anchorPageIdx >= batchQuestionLabels.length) return;
-    const startLbl = parseInt(batchQuestionLabels[anchorPageIdx], 10) || 1;
-    const groupPages = getGroupPagesByStartLabel(startLbl);
+function cascadeQuestionLabelsAfterGroup(anchorPageIdx, kind = 'q') {
+    const labels = kind === 'a' ? batchAnswerLabels : batchQuestionLabels;
+    const boxesArr = kind === 'a' ? batchAnswerPageBoxes : batchPageBoxes;
+    if (!autoCascadeNumbers || anchorPageIdx < 0 || anchorPageIdx >= labels.length) return;
+    const startLbl = parseInt(labels[anchorPageIdx], 10) || 1;
+    const groupPages = getGroupPagesByStartLabel(startLbl, kind);
     const lastPageOfGroup = groupPages.length > 0 ? Math.max(...groupPages) : anchorPageIdx;
-    const groupInfo = getGroupBoxesInfo(startLbl);
+    const groupInfo = getGroupBoxesInfo(startLbl, kind);
 
     let nextExpectedStart = groupInfo.endNum + 1;
     let i = lastPageOfGroup + 1;
-    while (i < batchQuestionLabels.length) {
-        const oldLbl = parseInt(batchQuestionLabels[i], 10) || 1;
+    while (i < labels.length) {
+        const oldLbl = parseInt(labels[i], 10) || 1;
         // 找出原本与第 i 页共享同一题号的连续续页
         let j = i;
-        while (j + 1 < batchQuestionLabels.length && parseInt(batchQuestionLabels[j + 1], 10) === oldLbl) {
+        while (j + 1 < labels.length && parseInt(labels[j + 1], 10) === oldLbl) {
             j++;
         }
         // 统计这一组页面上的框选总数
         let boxCnt = 0;
         for (let k = i; k <= j; k++) {
-            boxCnt += (Array.isArray(batchPageBoxes[k]) ? batchPageBoxes[k].length : 0);
+            boxCnt += (Array.isArray(boxesArr[k]) ? boxesArr[k].length : 0);
         }
         const span = boxCnt > 0 ? boxCnt : 1;
         for (let k = i; k <= j; k++) {
-            batchQuestionLabels[k] = nextExpectedStart;
-            markPageLabelManual('q', k);
+            labels[k] = nextExpectedStart;
+            markPageLabelManual(kind, k);
         }
         nextExpectedStart += span;
         i = j + 1;
@@ -1418,15 +1424,21 @@ function renderPageGrid(containerId, thumbs, labels, kind) {
         let isPaired = false;
         let groupInfo = null;
         let pageBoxesMeta = [];
+        let matchedQGroupInfo = null;
 
         if (kind === 'q') {
-            groupInfo = getGroupBoxesInfo(currNum);
-            isPaired = Array.isArray(batchAnswerLabels) && batchAnswerLabels.some(aNum => groupInfo.groupNums.includes(parseInt(aNum, 10)));
+            groupInfo = getGroupBoxesInfo(currNum, 'q');
+            isPaired = Array.isArray(batchAnswerLabels) && batchAnswerLabels.some((aNum, aIdx) => {
+                const aInfo = getGroupBoxesInfo(aNum, 'a');
+                return aInfo.groupNums.some(n => groupInfo.groupNums.includes(n));
+            });
             pageBoxesMeta = groupInfo.boxesWithMeta.filter(b => b.pageIndex === i);
         } else {
+            groupInfo = getGroupBoxesInfo(currNum, 'a');
+            pageBoxesMeta = groupInfo.boxesWithMeta.filter(b => b.pageIndex === i);
             const matchRes = matchAnswerLabelToQuestionGroup(currNum);
-            isPaired = matchRes.isPaired;
-            groupInfo = matchRes.groupInfo;
+            isPaired = matchRes.isPaired || (groupInfo.isBigQuestion && groupInfo.groupNums.some(n => matchAnswerLabelToQuestionGroup(n).isPaired));
+            matchedQGroupInfo = matchRes.groupInfo;
         }
 
         const isAuto = Boolean(autoFlags && autoFlags[i]);
@@ -1434,31 +1446,31 @@ function renderPageGrid(containerId, thumbs, labels, kind) {
         card.className = `page-card page-card-${kind}${isPaired ? ' paired' : ''}`;
         card.dataset.pageIndex = String(i);
 
-        const miniBoxesHtml = (kind === 'q' && pageBoxesMeta.length > 0)
-            ? `<div class="page-thumb-box-overlay">${pageBoxesMeta.map(b => `
-                <div class="page-thumb-mini-box" style="left:${(b.x * 100).toFixed(2)}%;top:${(b.y * 100).toFixed(2)}%;width:${(b.w * 100).toFixed(2)}%;height:${(b.h * 100).toFixed(2)}%;">
-                    <span class="page-thumb-mini-tag">第${b.num}题</span>
-                </div>
-            `).join('')}</div>`
+        const miniBoxesHtml = (pageBoxesMeta.length > 0)
+            ? `<div class="page-thumb-box-overlay">${pageBoxesMeta.map(b => {
+                const compact = isBoxCrowded(b, pageBoxesMeta, true);
+                return `
+                <div class="page-thumb-mini-box${kind === 'a' ? ' answer-box' : ''}" style="left:${(b.x * 100).toFixed(2)}%;top:${(b.y * 100).toFixed(2)}%;width:${(b.w * 100).toFixed(2)}%;height:${(b.h * 100).toFixed(2)}%;">
+                    <span class="page-thumb-mini-tag${compact ? ' compact' : ''}">${compact ? b.num : `第${b.num}题`}</span>
+                </div>`;
+            }).join('')}</div>`
             : '';
 
         const rangePillHtml = (groupInfo && groupInfo.isBigQuestion)
             ? `<span class="page-range-pill" title="本大题包含第 ${groupInfo.startNum} ~ ${groupInfo.endNum} 题（共 ${groupInfo.count} 问）">${groupInfo.startNum} ~ ${groupInfo.endNum} (${groupInfo.count}问)</span>`
-            : '';
+            : (kind === 'a' && matchedQGroupInfo && matchedQGroupInfo.isBigQuestion
+                ? `<span class="page-range-pill" title="对应题目第 ${matchedQGroupInfo.startNum} ~ ${matchedQGroupInfo.endNum} 题">${matchedQGroupInfo.startNum} ~ ${matchedQGroupInfo.endNum} 解析</span>`
+                : '');
 
-        const bigQBtnHtml = (kind === 'q')
-            ? `<button type="button" class="page-bigq-btn ${groupInfo && groupInfo.isBigQuestion ? 'active' : ''}"
-                       onclick="openBigQuestionBoxMode(${i}, event)"
-                       title="将本页设为大题，并在图上拉框标出各小问位置与题号">
+        const bigQBtnHtml = `<button type="button" class="page-bigq-btn ${groupInfo && groupInfo.isBigQuestion ? 'active' : ''}"
+                       onclick="openBigQuestionBoxMode(${i}, event, '${kind}')"
+                       title="${kind === 'a' ? '将本页答案设为大题，并在图上拉框标出各小问答案位置与题号' : '将本页设为大题，并在图上拉框标出各小问位置与题号'}">
                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
                        <rect x="3" y="3" width="18" height="18" rx="2"></rect>
                        <path d="M9 3v18M3 9h6M3 15h6"></path>
                    </svg>
                    <span>${groupInfo && groupInfo.isBigQuestion ? `已框 ${groupInfo.count} 问 (${groupInfo.startNum}~${groupInfo.endNum})` : '设为大题'}</span>
-               </button>`
-            : (groupInfo && groupInfo.isBigQuestion
-                ? `<span class="page-range-pill" title="已匹配大题第 ${groupInfo.startNum} ~ ${groupInfo.endNum} 题">${groupInfo.startNum} ~ ${groupInfo.endNum} 解析</span>`
-                : '');
+               </button>`;
 
         card.innerHTML = `
             <div class="page-thumb-wrap" onclick="openPageLightbox('${kind}', ${i})" title="点击全屏放大查看">
@@ -1518,7 +1530,7 @@ function openPageLightbox(kind, index, enterBoxMode = false) {
     lightboxKind = kind;
     lightboxIndex = index;
     lightboxZoom = 1;
-    lightboxBoxMode = Boolean(enterBoxMode && kind === 'q');
+    lightboxBoxMode = Boolean(enterBoxMode);
 
     const dialog = document.getElementById('page-lightbox-dialog');
     if (!dialog) return;
@@ -1527,31 +1539,40 @@ function openPageLightbox(kind, index, enterBoxMode = false) {
     dialog.classList.add('active');
 }
 
-function openBigQuestionBoxMode(pageIndex, event) {
+function openBigQuestionBoxMode(pageIndex, event, kind = 'q') {
     if (event) {
         event.stopPropagation();
         event.preventDefault();
     }
-    if (!Array.isArray(batchPageBoxes) || batchPageBoxes.length < batchQuestionPageCount) {
-        batchPageBoxes = Array.from({ length: batchQuestionPageCount }, (_, idx) => (batchPageBoxes && batchPageBoxes[idx]) ? batchPageBoxes[idx] : []);
+    const targetKind = kind === 'a' ? 'a' : 'q';
+    const pageCount = targetKind === 'a' ? batchAnswerPageCount : batchQuestionPageCount;
+    const labels = targetKind === 'a' ? batchAnswerLabels : batchQuestionLabels;
+    if (targetKind === 'a') {
+        if (!Array.isArray(batchAnswerPageBoxes) || batchAnswerPageBoxes.length < pageCount) {
+            batchAnswerPageBoxes = Array.from({ length: pageCount }, (_, idx) => (batchAnswerPageBoxes && batchAnswerPageBoxes[idx]) ? batchAnswerPageBoxes[idx] : []);
+        }
+    } else {
+        if (!Array.isArray(batchPageBoxes) || batchPageBoxes.length < pageCount) {
+            batchPageBoxes = Array.from({ length: pageCount }, (_, idx) => (batchPageBoxes && batchPageBoxes[idx]) ? batchPageBoxes[idx] : []);
+        }
     }
-    // 若当前页尚未框选且不是第 1 页，根据上一页结束题号自动校准本页起始题号
-    const curBoxes = batchPageBoxes[pageIndex] || [];
+    const boxesArr = targetKind === 'a' ? batchAnswerPageBoxes : batchPageBoxes;
+    // 若当前页尚未框选且不是第 1 页，根据同类型上一页结束题号自动校准本页起始题号（题目与答案完全独立）
+    const curBoxes = boxesArr[pageIndex] || [];
     if (curBoxes.length === 0 && pageIndex > 0) {
-        const prevLbl = parseInt(batchQuestionLabels[pageIndex - 1], 10) || 1;
-        const prevInfo = getGroupBoxesInfo(prevLbl);
-        const curLbl = parseInt(batchQuestionLabels[pageIndex], 10) || 1;
-        // 如果当前页不是上一页的续页（或者上一页尚未框选），确保起始题号紧接上一题末尾
+        const prevLbl = parseInt(labels[pageIndex - 1], 10) || 1;
+        const prevInfo = getGroupBoxesInfo(prevLbl, targetKind);
+        const curLbl = parseInt(labels[pageIndex], 10) || 1;
         if (curLbl !== prevLbl) {
             const expectedStart = prevInfo.endNum + 1;
             if (curLbl !== expectedStart) {
-                batchQuestionLabels[pageIndex] = expectedStart;
-                markPageLabelManual('q', pageIndex);
-                cascadeQuestionLabelsAfterGroup(pageIndex);
+                labels[pageIndex] = expectedStart;
+                markPageLabelManual(targetKind, pageIndex);
+                cascadeQuestionLabelsAfterGroup(pageIndex, targetKind);
             }
         }
     }
-    openPageLightbox('q', pageIndex, true);
+    openPageLightbox(targetKind, pageIndex, true);
 }
 window.openBigQuestionBoxMode = openBigQuestionBoxMode;
 
@@ -1567,7 +1588,7 @@ function closePageLightbox() {
 }
 
 function toggleLightboxBoxMode() {
-    if (lightboxKind !== 'q' && !lightboxStep4Context) return;
+    if (lightboxKind !== 'q' && lightboxKind !== 'a' && !lightboxStep4Context) return;
     lightboxBoxMode = !lightboxBoxMode;
     updateLightboxContent();
 }
@@ -1589,6 +1610,12 @@ window.finishLightboxBoxMode = finishLightboxBoxMode;
 function getActiveLightboxBoxesForCurrentPage() {
     if (lightboxStep4Context) {
         return lightboxStep4Context.pageBoxes[lightboxIndex] || [];
+    }
+    if (lightboxKind === 'a') {
+        if (!Array.isArray(batchAnswerPageBoxes[lightboxIndex])) {
+            batchAnswerPageBoxes[lightboxIndex] = [];
+        }
+        return batchAnswerPageBoxes[lightboxIndex];
     }
     if (!Array.isArray(batchPageBoxes[lightboxIndex])) {
         batchPageBoxes[lightboxIndex] = [];
@@ -1620,43 +1647,53 @@ function getActiveLightboxGroupSummary() {
             boxesWithMeta
         };
     }
-    const currStart = parseInt(batchQuestionLabels[lightboxIndex], 10) || 1;
-    return getGroupBoxesInfo(currStart);
+    const labels = lightboxKind === 'a' ? batchAnswerLabels : batchQuestionLabels;
+    const currStart = parseInt(labels[lightboxIndex], 10) || 1;
+    return getGroupBoxesInfo(currStart, lightboxKind);
 }
 
-function isBoxCrowded(b, allBoxes) {
+function isBoxCrowded(b, allBoxes, isThumb = false) {
     if (!b) return false;
-    if (b.w < 0.16 || b.h < 0.055 || (Array.isArray(allBoxes) && allBoxes.length >= 6)) {
-        return true;
+    if (isThumb) {
+        if (b.w < 0.25 || b.h < 0.08 || (Array.isArray(allBoxes) && allBoxes.length >= 4)) {
+            return true;
+        }
+    } else {
+        if (b.w < 0.16 || b.h < 0.055 || (Array.isArray(allBoxes) && allBoxes.length >= 6)) {
+            return true;
+        }
     }
     if (!Array.isArray(allBoxes)) return false;
+    const hThresh = isThumb ? 0.09 : 0.06;
+    const vThresh = isThumb ? 0.07 : 0.045;
     return allBoxes.some(other => {
         if (!other || other === b) return false;
         const hGap = Math.max(0, Math.max(b.x, other.x) - Math.min(b.x + b.w, other.x + other.w));
         const vGap = Math.max(0, Math.max(b.y, other.y) - Math.min(b.y + b.h, other.y + other.h));
-        return hGap < 0.06 && vGap < 0.045;
+        return hGap < hThresh && vGap < vThresh;
     });
 }
 
 function renderLightboxBoxesOverlay() {
     const layer = document.getElementById('lightbox-box-layer');
     if (!layer) return;
-    const isQ = (lightboxKind === 'q') || Boolean(lightboxStep4Context);
-    layer.classList.toggle('drawing-enabled', Boolean(isQ && lightboxBoxMode));
+    const canBox = (lightboxKind === 'q' || lightboxKind === 'a') || Boolean(lightboxStep4Context);
+    layer.classList.toggle('drawing-enabled', Boolean(canBox && lightboxBoxMode));
 
-    if (!isQ) {
+    if (!canBox) {
         layer.innerHTML = '';
         return;
     }
 
     const summary = getActiveLightboxGroupSummary();
     const currentPageBoxes = summary.boxesWithMeta.filter(b => b.pageIndex === lightboxIndex);
+    const isAnswerMode = !lightboxStep4Context && lightboxKind === 'a';
 
     layer.innerHTML = currentPageBoxes.map(b => {
-        const compact = isBoxCrowded(b, currentPageBoxes);
+        const compact = isBoxCrowded(b, currentPageBoxes, false);
         const tagText = compact ? `${b.num}` : `第 ${b.num} 题`;
         return `
-        <div class="lightbox-subq-box${compact ? ' compact' : ''}" style="left:${(b.x * 100).toFixed(2)}%;top:${(b.y * 100).toFixed(2)}%;width:${(b.w * 100).toFixed(2)}%;height:${(b.h * 100).toFixed(2)}%;">
+        <div class="lightbox-subq-box${compact ? ' compact' : ''}${isAnswerMode ? ' answer-box' : ''}" style="left:${(b.x * 100).toFixed(2)}%;top:${(b.y * 100).toFixed(2)}%;width:${(b.w * 100).toFixed(2)}%;height:${(b.h * 100).toFixed(2)}%;">
             <span class="lightbox-subq-tag${compact ? ' compact' : ''}" title="第 ${b.num} 题">${tagText}</span>
             <button type="button" class="lightbox-subq-del" onclick="deletePageBox(${b.localBoxIndex}, event)" title="删除第 ${b.num} 题选框">
                 <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
@@ -1681,9 +1718,10 @@ function renderLightboxBoxesOverlay() {
         }
     }
     if (summaryEl) {
+        const unitLabel = isAnswerMode ? '题答案' : '问';
         summaryEl.textContent = summary.count > 0
-            ? `已框选 ${summary.count} 问（第 ${summary.startNum} ~ ${summary.endNum} 题）· 下一框为第 ${summary.endNum + 1} 题`
-            : `起始第 ${summary.startNum} 题 · 请拖拽框选第 1 问`;
+            ? `已框选 ${summary.count} ${unitLabel}（第 ${summary.startNum} ~ ${summary.endNum} 题）· 下一框为第 ${summary.endNum + 1} 题`
+            : `起始第 ${summary.startNum} 题 · 请拖拽框选第 1 ${isAnswerMode ? '题答案' : '问'}`;
     }
     const pageRawBoxes = getActiveLightboxBoxesForCurrentPage();
     if (undoBtn) undoBtn.disabled = pageRawBoxes.length === 0;
@@ -1692,14 +1730,15 @@ function renderLightboxBoxesOverlay() {
         if (lightboxStep4Context) {
             extendBtn.style.display = (lightboxIndex + 1 < lightboxStep4Context.pageThumbs.length) ? 'inline-flex' : 'none';
         } else {
-            extendBtn.style.display = (lightboxIndex + 1 < batchQuestionPageCount) ? 'inline-flex' : 'none';
+            const totalCount = lightboxKind === 'a' ? batchAnswerPageCount : batchQuestionPageCount;
+            extendBtn.style.display = (lightboxIndex + 1 < totalCount) ? 'inline-flex' : 'none';
         }
     }
 }
 
 function onBoxesMutated() {
     if (!lightboxStep4Context) {
-        cascadeQuestionLabelsAfterGroup(lightboxIndex);
+        cascadeQuestionLabelsAfterGroup(lightboxIndex, lightboxKind);
         updatePairedIndicators();
         updateAnnotationStatus();
     }
@@ -1748,20 +1787,23 @@ function extendBigQuestionToNextPage() {
         }
         return;
     }
-    if (lightboxIndex + 1 >= batchQuestionPageCount) {
+    const targetKind = lightboxKind === 'a' ? 'a' : 'q';
+    const totalCount = targetKind === 'a' ? batchAnswerPageCount : batchQuestionPageCount;
+    const labels = targetKind === 'a' ? batchAnswerLabels : batchQuestionLabels;
+    if (lightboxIndex + 1 >= totalCount) {
         showToast('已经是最后一页');
         return;
     }
-    const currStart = parseInt(batchQuestionLabels[lightboxIndex], 10) || 1;
+    const currStart = parseInt(labels[lightboxIndex], 10) || 1;
     const nextIdx = lightboxIndex + 1;
-    batchQuestionLabels[nextIdx] = currStart;
-    markPageLabelManual('q', nextIdx);
-    cascadeQuestionLabelsAfterGroup(nextIdx);
+    labels[nextIdx] = currStart;
+    markPageLabelManual(targetKind, nextIdx);
+    cascadeQuestionLabelsAfterGroup(nextIdx, targetKind);
     lightboxIndex = nextIdx;
     lightboxZoom = 1;
     lightboxBoxMode = true;
     updateLightboxContent();
-    const summary = getGroupBoxesInfo(currStart);
+    const summary = getGroupBoxesInfo(currStart, targetKind);
     showToast(`第 ${nextIdx + 1} 页已并入本大题（第 ${currStart} 题起），请继续拉框（下一框为第 ${summary.count > 0 ? summary.endNum + 1 : currStart} 题）`);
 }
 window.extendBigQuestionToNextPage = extendBigQuestionToNextPage;
@@ -1788,7 +1830,7 @@ function initLightboxBoxDrawingEvents() {
 
     layer.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
-        if (!lightboxBoxMode || (lightboxKind !== 'q' && !lightboxStep4Context)) return;
+        if (!lightboxBoxMode || (lightboxKind !== 'q' && lightboxKind !== 'a' && !lightboxStep4Context)) return;
         if (e.target && e.target.closest('.lightbox-subq-del')) return;
 
         e.preventDefault();
@@ -1800,14 +1842,15 @@ function initLightboxBoxDrawingEvents() {
 
         const summary = getActiveLightboxGroupSummary();
         const nextNum = summary.count > 0 ? (summary.endNum + 1) : summary.startNum;
+        const isAnswerMode = !lightboxStep4Context && lightboxKind === 'a';
 
         draftEl = document.createElement('div');
-        draftEl.className = 'lightbox-subq-box draft-box';
+        draftEl.className = `lightbox-subq-box draft-box${isAnswerMode ? ' answer-box' : ''}`;
         draftEl.style.left = `${(startX * 100).toFixed(2)}%`;
         draftEl.style.top = `${(startY * 100).toFixed(2)}%`;
         draftEl.style.width = '0%';
         draftEl.style.height = '0%';
-        draftEl.innerHTML = `<span class="lightbox-subq-tag">第 ${nextNum} 题</span>`;
+        draftEl.innerHTML = `<span class="lightbox-subq-tag">${summary.count >= 5 ? nextNum : `第 ${nextNum} 题`}</span>`;
         layer.appendChild(draftEl);
     });
 
@@ -1893,10 +1936,10 @@ function updateLightboxContent() {
     }
     if (labelInput) labelInput.value = labels[lightboxIndex] || '';
 
-    const isQ = (lightboxKind === 'q') || isStep4;
-    const summary = isQ ? getActiveLightboxGroupSummary() : null;
+    const canBox = (lightboxKind === 'q' || lightboxKind === 'a') || isStep4;
+    const summary = canBox ? getActiveLightboxGroupSummary() : null;
     if (bigqToggleBtn) {
-        bigqToggleBtn.style.display = (lightboxKind === 'q' && !isStep4) ? 'inline-flex' : 'none';
+        bigqToggleBtn.style.display = ((lightboxKind === 'q' || lightboxKind === 'a') && !isStep4) ? 'inline-flex' : 'none';
         bigqToggleBtn.classList.toggle('active', Boolean(lightboxBoxMode));
     }
     if (bigqToggleText && summary) {
@@ -1905,7 +1948,7 @@ function updateLightboxContent() {
             : (summary.count > 0 ? `编辑大题框选 (${summary.count}问)` : '设为大题（框选小问）');
     }
     if (boxmodeBar) {
-        boxmodeBar.style.display = (isQ && (lightboxBoxMode || (summary && summary.count > 0))) ? 'flex' : 'none';
+        boxmodeBar.style.display = (canBox && (lightboxBoxMode || (summary && summary.count > 0))) ? 'flex' : 'none';
     }
 
     if (navInfo) navInfo.textContent = `第 ${lightboxIndex + 1} / ${total} 页`;
@@ -2127,10 +2170,14 @@ function updatePairedIndicators() {
             if (!card) return;
             let isPaired = false;
             if (k === 'q') {
-                const gInfo = getGroupBoxesInfo(num);
-                isPaired = Array.isArray(batchAnswerLabels) && batchAnswerLabels.some(aNum => gInfo.groupNums.includes(parseInt(aNum, 10)));
+                const gInfo = getGroupBoxesInfo(num, 'q');
+                isPaired = Array.isArray(batchAnswerLabels) && batchAnswerLabels.some(aNum => {
+                    const aInfo = getGroupBoxesInfo(aNum, 'a');
+                    return aInfo.groupNums.some(n => gInfo.groupNums.includes(n));
+                });
             } else {
-                isPaired = matchAnswerLabelToQuestionGroup(num).isPaired;
+                const aInfo = getGroupBoxesInfo(num, 'a');
+                isPaired = matchAnswerLabelToQuestionGroup(num).isPaired || (aInfo.isBigQuestion && aInfo.groupNums.some(n => matchAnswerLabelToQuestionGroup(n).isPaired));
             }
             if (isPaired) {
                 card.classList.add('paired');
@@ -2226,36 +2273,19 @@ function onPageLabelChange(kind, index, value) {
         if (lbInput && lbInput.value !== String(num)) lbInput.value = num;
     }
 
-    // 题号智能顺延：当修改题号时，自动考虑大题跨度顺延后续页码
+    // 题号智能顺延：当修改题号时，自动考虑大题跨度顺延同类型后续页码（题目与答案独立）
     if (autoCascadeNumbers && diff !== 0 && index + 1 < arr.length) {
-        if (kind === 'q') {
-            cascadeQuestionLabelsAfterGroup(index);
-            for (let j = index + 1; j < arr.length; j++) {
-                const input = document.querySelector(`input.page-label-input[data-kind="q"][data-index="${j}"]`);
-                if (input) {
-                    input.value = arr[j];
+        cascadeQuestionLabelsAfterGroup(index, kind);
+        for (let j = index + 1; j < arr.length; j++) {
+            const input = document.querySelector(`input.page-label-input[data-kind="${kind}"][data-index="${j}"]`);
+            if (input) {
+                input.value = arr[j];
+                input.classList.remove('cascade-highlight');
+                void input.offsetWidth;
+                input.classList.add('cascade-highlight');
+                setTimeout(() => {
                     input.classList.remove('cascade-highlight');
-                    void input.offsetWidth;
-                    input.classList.add('cascade-highlight');
-                    setTimeout(() => {
-                        input.classList.remove('cascade-highlight');
-                    }, 1200);
-                }
-            }
-        } else {
-            for (let j = index + 1; j < arr.length; j++) {
-                arr[j] = Math.max(1, arr[j] + diff);
-                markPageLabelManual(kind, j);
-                const input = document.querySelector(`input.page-label-input[data-kind="${kind}"][data-index="${j}"]`);
-                if (input) {
-                    input.value = arr[j];
-                    input.classList.remove('cascade-highlight');
-                    void input.offsetWidth;
-                    input.classList.add('cascade-highlight');
-                    setTimeout(() => {
-                        input.classList.remove('cascade-highlight');
-                    }, 1200);
-                }
+                }, 1200);
             }
         }
 
@@ -2304,7 +2334,9 @@ async function goNextFromMapping() {
 
     const coveredSet = getAllCoveredQuestionNumsSet();
     for (let i = 0; i < batchAnswerLabels.length; i++) {
-        if (!coveredSet.has(parseInt(batchAnswerLabels[i], 10))) {
+        const aInfo = getGroupBoxesInfo(batchAnswerLabels[i], 'a');
+        const hasAnyCovered = aInfo.groupNums.some(n => coveredSet.has(n));
+        if (!hasAnyCovered) {
             showToast(`答案第 ${i + 1} 页标注了题目页没有的题号 ${batchAnswerLabels[i]}，请检查`);
             return;
         }
@@ -5550,22 +5582,43 @@ async function importWithLabels(exerciseFile, answerFile) {
         return false;
     }
 
+    // 独立收集所有答案大题的框选坐标映射（按题号独立映射，不与题目框数强制绑定）
+    const answerBoxByQNum = {};
+    const visitedAnsStarts = new Set();
+    batchAnswerLabels.forEach(lbl => {
+        const aStart = parseInt(lbl, 10);
+        if (!aStart || visitedAnsStarts.has(aStart)) return;
+        visitedAnsStarts.add(aStart);
+        const aInfo = getGroupBoxesInfo(aStart, 'a');
+        if (aInfo.isBigQuestion && Array.isArray(aInfo.boxesWithMeta)) {
+            aInfo.boxesWithMeta.forEach(ab => {
+                answerBoxByQNum[ab.num] = {
+                    pageIndex: ab.pageIndex,
+                    x: ab.x,
+                    y: ab.y,
+                    w: ab.w,
+                    h: ab.h
+                };
+            });
+        }
+    });
+
     batchAnswerLabels.forEach((label, pageIdx) => {
         const aNum = parseInt(label, 10);
-        // 查找包含该题号的题目组（兼容单题与大题范围）
-        let matchedKey = String(label);
-        if (!groups[matchedKey]) {
-            for (const sNum of sliceNums) {
-                const k = String(sNum);
-                if (groups[k] && Array.isArray(groups[k].groupNums) && groups[k].groupNums.includes(aNum)) {
-                    matchedKey = k;
-                    break;
+        const aInfo = getGroupBoxesInfo(aNum, 'a');
+        const ansTargetNums = (aInfo.isBigQuestion && aInfo.groupNums.length > 0) ? aInfo.groupNums : [aNum];
+        // 查找包含该答案页（或答案大题任意小问）的题目组
+        sliceNums.forEach(sNum => {
+            const k = String(sNum);
+            const grp = groups[k];
+            if (!grp) return;
+            const grpNums = Array.isArray(grp.groupNums) && grp.groupNums.length > 0 ? grp.groupNums : [sNum];
+            if (ansTargetNums.some(n => grpNums.includes(n))) {
+                if (!grp.answer.includes(pageIdx)) {
+                    grp.answer.push(pageIdx);
                 }
             }
-        }
-        if (groups[matchedKey]) {
-            groups[matchedKey].answer.push(pageIdx);
-        }
+        });
     });
 
     const isVar = getBankType() === 'variation';
@@ -5587,6 +5640,22 @@ async function importWithLabels(exerciseFile, answerFile) {
         });
     }
 
+    const buildAnswerBoxForQNum = (qNum, grp) => {
+        const ansItem = answerBoxByQNum[qNum];
+        if (!ansItem) return null;
+        if (!grp.answer.includes(ansItem.pageIndex)) {
+            grp.answer.push(ansItem.pageIndex);
+        }
+        const pageOffset = grp.answer.indexOf(ansItem.pageIndex);
+        return {
+            pageOffset: pageOffset >= 0 ? pageOffset : 0,
+            x: ansItem.x,
+            y: ansItem.y,
+            w: ansItem.w,
+            h: ansItem.h
+        };
+    };
+
     currentQuestions = [];
     sliceNums.forEach((num, sliceIdx) => {
         const key = String(num);
@@ -5600,22 +5669,27 @@ async function importWithLabels(exerciseFile, answerFile) {
             gInfo.boxesWithMeta.forEach(flatItem => {
                 const targetIdx = currentQuestions.length;
                 grp.targetIndices.push(targetIdx);
+                const qMeta = {
+                    groupNums: [...gInfo.groupNums],
+                    box: {
+                        pageOffset: flatItem.pageOffset,
+                        x: flatItem.x,
+                        y: flatItem.y,
+                        w: flatItem.w,
+                        h: flatItem.h
+                    }
+                };
+                const ansBox = buildAnswerBoxForQNum(flatItem.num, grp);
+                if (ansBox) {
+                    qMeta.answerBox = ansBox;
+                }
                 currentQuestions.push({
                     id: flatItem.num,
                     parentQuestionNum: null,
                     subNum: 1,
                     topic: '',
                     videoUrl: '',
-                    questionMeta: {
-                        groupNums: [...gInfo.groupNums],
-                        box: {
-                            pageOffset: flatItem.pageOffset,
-                            x: flatItem.x,
-                            y: flatItem.y,
-                            w: flatItem.w,
-                            h: flatItem.h
-                        }
-                    },
+                    questionMeta: qMeta,
                     exercisePdf: { status: 'uploading', name: `题目_第${rangeStr}题.pdf`, thumb: qThumb },
                     answerPdf: aThumb ? { status: 'uploading', name: `答案_第${rangeStr}题.pdf`, thumb: aThumb } : null
                 });
@@ -5629,7 +5703,7 @@ async function importWithLabels(exerciseFile, answerFile) {
             const topic = isVar ? (bucketTopicMap[parentNum] || '') : '';
             const targetIdx = currentQuestions.length;
             grp.targetIndices.push(targetIdx);
-            currentQuestions.push({
+            const qItemObj = {
                 id: num,
                 parentQuestionNum: parentNum,
                 subNum: 1,
@@ -5637,7 +5711,12 @@ async function importWithLabels(exerciseFile, answerFile) {
                 videoUrl: '',
                 exercisePdf: { status: 'uploading', name: `题目_第${num}题.pdf`, thumb: qThumb },
                 answerPdf: aThumb ? { status: 'uploading', name: `答案_第${num}题.pdf`, thumb: aThumb } : null
-            });
+            };
+            const ansBox = !isVar ? buildAnswerBoxForQNum(num, grp) : null;
+            if (ansBox) {
+                qItemObj.questionMeta = { answerBox: ansBox };
+            }
+            currentQuestions.push(qItemObj);
         }
     });
 
