@@ -3442,6 +3442,18 @@ input[type=number] {
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
 }
 
+.lightbox-subq-tag.compact {
+    top: -17px;
+    left: -2px;
+    height: 16px;
+    min-width: 18px;
+    justify-content: center;
+    padding: 0 5px;
+    font-size: 10px;
+    font-weight: 700;
+    border-radius: 3px 3px 3px 0;
+}
+
 .lightbox-subq-del {
     position: absolute;
     top: -10px;
@@ -3459,7 +3471,20 @@ input[type=number] {
     padding: 0;
     line-height: 1;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-    transition: transform 0.12s ease, background-color 0.12s ease;
+    transition: transform 0.12s ease, background-color 0.12s ease, opacity 0.12s ease;
+}
+
+.lightbox-subq-box.compact .lightbox-subq-del {
+    top: -8px;
+    right: -8px;
+    width: 16px;
+    height: 16px;
+    opacity: 0;
+}
+
+.lightbox-subq-box.compact:hover .lightbox-subq-del,
+.lightbox-subq-box.compact:focus-within .lightbox-subq-del {
+    opacity: 1;
 }
 
 .lightbox-subq-del:hover {

@@ -1624,6 +1624,20 @@ function getActiveLightboxGroupSummary() {
     return getGroupBoxesInfo(currStart);
 }
 
+function isBoxCrowded(b, allBoxes) {
+    if (!b) return false;
+    if (b.w < 0.16 || b.h < 0.055 || (Array.isArray(allBoxes) && allBoxes.length >= 6)) {
+        return true;
+    }
+    if (!Array.isArray(allBoxes)) return false;
+    return allBoxes.some(other => {
+        if (!other || other === b) return false;
+        const hGap = Math.max(0, Math.max(b.x, other.x) - Math.min(b.x + b.w, other.x + other.w));
+        const vGap = Math.max(0, Math.max(b.y, other.y) - Math.min(b.y + b.h, other.y + other.h));
+        return hGap < 0.06 && vGap < 0.045;
+    });
+}
+
 function renderLightboxBoxesOverlay() {
     const layer = document.getElementById('lightbox-box-layer');
     if (!layer) return;
@@ -1638,14 +1652,18 @@ function renderLightboxBoxesOverlay() {
     const summary = getActiveLightboxGroupSummary();
     const currentPageBoxes = summary.boxesWithMeta.filter(b => b.pageIndex === lightboxIndex);
 
-    layer.innerHTML = currentPageBoxes.map(b => `
-        <div class="lightbox-subq-box" style="left:${(b.x * 100).toFixed(2)}%;top:${(b.y * 100).toFixed(2)}%;width:${(b.w * 100).toFixed(2)}%;height:${(b.h * 100).toFixed(2)}%;">
-            <span class="lightbox-subq-tag">第 ${b.num} 题</span>
+    layer.innerHTML = currentPageBoxes.map(b => {
+        const compact = isBoxCrowded(b, currentPageBoxes);
+        const tagText = compact ? `${b.num}` : `第 ${b.num} 题`;
+        return `
+        <div class="lightbox-subq-box${compact ? ' compact' : ''}" style="left:${(b.x * 100).toFixed(2)}%;top:${(b.y * 100).toFixed(2)}%;width:${(b.w * 100).toFixed(2)}%;height:${(b.h * 100).toFixed(2)}%;">
+            <span class="lightbox-subq-tag${compact ? ' compact' : ''}" title="第 ${b.num} 题">${tagText}</span>
             <button type="button" class="lightbox-subq-del" onclick="deletePageBox(${b.localBoxIndex}, event)" title="删除第 ${b.num} 题选框">
                 <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
         </div>
-    `).join('');
+    `;
+    }).join('');
 
     // 更新顶部胶囊与工具栏计数
     const rangePill = document.getElementById('lightbox-group-range-pill');
@@ -3784,7 +3802,7 @@ async function openStep4BigQuestionBoxModal(firstIndex) {
         const buf = await resp.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
         const pageThumbs = [];
-        const boxesByOffset = {};
+        const pageBoxes = [];
 
         for (let p = 1; p <= pdf.numPages; p++) {
             const page = await pdf.getPage(p);
@@ -3800,7 +3818,7 @@ async function openStep4BigQuestionBoxModal(firstIndex) {
             await page.render({ canvasContext: ctx, viewport }).promise;
             pageThumbs.push(canvas.toDataURL('image/jpeg', 0.88));
             page.cleanup();
-            boxesByOffset[p - 1] = [];
+            pageBoxes.push([]);
         }
         if (typeof pdf.destroy === 'function') {
             try { await pdf.destroy(); } catch (_) {}
@@ -3812,8 +3830,8 @@ async function openStep4BigQuestionBoxModal(firstIndex) {
             const box = mq && mq.questionMeta && mq.questionMeta.box;
             if (box && typeof box.x === 'number') {
                 const offset = Math.min(pageThumbs.length - 1, Math.max(0, parseInt(box.pageOffset, 10) || 0));
-                if (!boxesByOffset[offset]) boxesByOffset[offset] = [];
-                boxesByOffset[offset].push({
+                if (!pageBoxes[offset]) pageBoxes[offset] = [];
+                pageBoxes[offset].push({
                     x: box.x,
                     y: box.y,
                     w: box.w,
@@ -3828,7 +3846,7 @@ async function openStep4BigQuestionBoxModal(firstIndex) {
             memberIndices: indices,
             startNum,
             pageThumbs,
-            boxesByOffset
+            pageBoxes
         };
         lightboxKind = 'q';
         lightboxIndex = 0;
@@ -3837,6 +3855,7 @@ async function openStep4BigQuestionBoxModal(firstIndex) {
 
         const lightbox = document.getElementById('page-lightbox-dialog');
         if (lightbox) {
+            initLightboxBoxDrawingEvents();
             updateLightboxContent();
             lightbox.classList.add('active');
         }
@@ -3849,7 +3868,7 @@ window.openStep4BigQuestionBoxModal = openStep4BigQuestionBoxModal;
 
 function applyStep4BigQuestionBoxes() {
     if (!lightboxStep4Context) return;
-    const { memberIndices, startNum, pageThumbs, boxesByOffset } = lightboxStep4Context;
+    const { memberIndices, startNum, pageThumbs, pageBoxes } = lightboxStep4Context;
     const sortedOldIndices = [...memberIndices].sort((a, b) => a - b);
     const firstIdx = sortedOldIndices[0];
     const lastOldIdx = sortedOldIndices[sortedOldIndices.length - 1];
@@ -3858,7 +3877,7 @@ function applyStep4BigQuestionBoxes() {
 
     const flatBoxes = [];
     for (let offset = 0; offset < pageThumbs.length; offset++) {
-        const list = boxesByOffset[offset] || [];
+        const list = pageBoxes[offset] || [];
         list.forEach(box => {
             flatBoxes.push({
                 qNum: startNum + flatBoxes.length,
@@ -5576,13 +5595,13 @@ async function importWithLabels(exerciseFile, answerFile) {
         const qThumb = batchQuestionThumbs[grp.question[0]] || null;
         const aThumb = grp.answer.length > 0 ? (batchAnswerThumbs[grp.answer[0]] || null) : null;
 
-        if (!isVar && gInfo.isBigQuestion && gInfo.flatBoxes.length > 0) {
+        if (!isVar && gInfo.isBigQuestion && Array.isArray(gInfo.boxesWithMeta) && gInfo.boxesWithMeta.length > 0) {
             const rangeStr = `${gInfo.startNum}-${gInfo.endNum}`;
-            gInfo.flatBoxes.forEach(flatItem => {
+            gInfo.boxesWithMeta.forEach(flatItem => {
                 const targetIdx = currentQuestions.length;
                 grp.targetIndices.push(targetIdx);
                 currentQuestions.push({
-                    id: flatItem.qNum,
+                    id: flatItem.num,
                     parentQuestionNum: null,
                     subNum: 1,
                     topic: '',
@@ -5591,10 +5610,10 @@ async function importWithLabels(exerciseFile, answerFile) {
                         groupNums: [...gInfo.groupNums],
                         box: {
                             pageOffset: flatItem.pageOffset,
-                            x: flatItem.box.x,
-                            y: flatItem.box.y,
-                            w: flatItem.box.w,
-                            h: flatItem.box.h
+                            x: flatItem.x,
+                            y: flatItem.y,
+                            w: flatItem.w,
+                            h: flatItem.h
                         }
                     },
                     exercisePdf: { status: 'uploading', name: `题目_第${rangeStr}题.pdf`, thumb: qThumb },

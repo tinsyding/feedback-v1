@@ -1181,20 +1181,24 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         }
     }
 
-    // 大题小问页内错题角标缓存（高对比黑底白字「错题 X」，专为黑白激光打印优化）
+    // 大题小问页内错题角标缓存（高对比黑底白字「错题 X」或紧凑纯数字「X」，专为黑白激光打印优化）
     const errorBoxTagCache = {};
-    function generateErrorBoxTagPng(qNum) {
-        const text = '错题 ' + qNum;
-        if (errorBoxTagCache[text]) return errorBoxTagCache[text];
+    function generateErrorBoxTagPng(qNum, compact = false) {
+        const text = compact ? String(qNum) : ('错题 ' + qNum);
+        const cacheKey = (compact ? 'C_' : 'F_') + text;
+        if (errorBoxTagCache[cacheKey]) return errorBoxTagCache[cacheKey];
         try {
             const K = 2;
             const testCanvas = document.createElement('canvas');
             const testCtx = testCanvas.getContext('2d');
-            const font = '700 ' + Math.round(8.5 * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+            const fontSizePt = compact ? 7.5 : 8.5;
+            const font = '700 ' + Math.round(fontSizePt * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
             testCtx.font = font;
             const tw = testCtx.measureText(text).width;
-            const wPt = Math.max(28, Math.ceil((tw / K) + 10));
-            const hPt = 13;
+            const wPt = compact
+                ? Math.max(13, Math.ceil((tw / K) + 6))
+                : Math.max(28, Math.ceil((tw / K) + 10));
+            const hPt = compact ? 11 : 13;
             const wpx = Math.round(wPt * K);
             const hpx = Math.round(hPt * K);
 
@@ -1204,7 +1208,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             const ctx = canvas.getContext('2d');
 
             // 白色外描边光晕（防止压在原卷黑色边框线上看不清）+ 纯深黑实心底色
-            questionTopicBadgeRoundRect(ctx, 0.5 * K, 0.5 * K, wpx - 1 * K, hpx - 1 * K, 2.5 * K);
+            questionTopicBadgeRoundRect(ctx, 0.5 * K, 0.5 * K, wpx - 1 * K, hpx - 1 * K, (compact ? 2 : 2.5) * K);
             ctx.fillStyle = '#0f172a';
             ctx.fill();
             ctx.lineWidth = 1 * K;
@@ -1222,7 +1226,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 widthPt: wPt,
                 heightPt: hPt
             };
-            errorBoxTagCache[text] = res;
+            errorBoxTagCache[cacheKey] = res;
             return res;
         } catch (e) {
             console.warn('generateErrorBoxTagPng failed:', e);
@@ -2152,9 +2156,16 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                                         borderWidth: 1.6
                                     });
 
-                                    // 左上角反白高对比「错题 X」胶囊角标
+                                    // 左上角反白高对比角标：选框较紧凑或邻近拥挤时仅显示数字，宽敞时显示「错题 X」
                                     if (eb.qNum) {
-                                        const tagSpec = generateErrorBoxTagPng(eb.qNum);
+                                        const hasCloseNeighbor = pageErrorBoxes.some(other => {
+                                            if (!other || other === eb) return false;
+                                            const hGap = Math.max(0, Math.max(eb.x, other.x) - Math.min(eb.x + eb.w, other.x + other.w));
+                                            const vGap = Math.max(0, Math.max(eb.y, other.y) - Math.min(eb.y + eb.h, other.y + other.h));
+                                            return hGap < 0.06 && vGap < 0.045;
+                                        });
+                                        const isCompactTag = (ebW < 55 || ebH < 26 || pageErrorBoxes.length >= 5 || hasCloseNeighbor);
+                                        const tagSpec = generateErrorBoxTagPng(eb.qNum, isCompactTag);
                                         if (tagSpec && tagSpec.dataUrl) {
                                             const tagImg = await mergedPdf.embedPng(tagSpec.dataUrl);
                                             const tagX = Math.max(boxX + 4, ebX - 1);
