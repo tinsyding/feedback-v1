@@ -4061,6 +4061,10 @@ input[type=number] {
     border-radius: 0;
 }
 
+.rg-var-chip-group .rg-var-chip:focus-visible {
+    outline-offset: -2px;
+}
+
 .rg-var-preview-btn {
     border: none;
     border-left: 1px solid var(--border-subtle);
@@ -4176,6 +4180,12 @@ input[type=number] {
     color: var(--text-primary);
     white-space: nowrap;
     flex-shrink: 0;
+}
+
+span.rg-card-num-wrap {
+    white-space: normal;
+    flex-shrink: 1;
+    min-width: 0;
 }
 
 .rg-num-input {
@@ -4378,7 +4388,7 @@ input[type=number] {
     background: var(--brand-light);
 }
 
-.rg-upload-box:focus-within {
+.rg-upload-box:focus-visible {
     outline: var(--focus-ring);
     outline-offset: var(--focus-offset);
 }
