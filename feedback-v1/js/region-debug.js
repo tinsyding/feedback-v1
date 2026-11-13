@@ -616,6 +616,13 @@
         }
     }
 
+    function setBtnLabel(btn, text) {
+        if (!btn) return;
+        const lbl = btn.querySelector('.rg-btn-label');
+        if (lbl) lbl.textContent = text;
+        else btn.textContent = text;
+    }
+
     function syncStageUi() {
         const st = rgState.stage;
         const gate = document.getElementById('rg-upload-gate');
@@ -652,21 +659,21 @@
                 prevBtn.style.display = 'none';
             } else if (st === 'exercise') {
                 prevBtn.style.display = 'inline-flex';
-                prevBtn.textContent = '← 重新上传 PDF';
+                setBtnLabel(prevBtn, '重新上传 PDF');
             } else {
                 prevBtn.style.display = 'inline-flex';
-                prevBtn.textContent = '← 返回修改题目框选';
+                setBtnLabel(prevBtn, '返回修改题目框选');
             }
         }
 
         if (nextBtn) {
             if (st === 'upload') {
                 nextBtn.style.display = 'inline-flex';
-                nextBtn.textContent = '开始框选题目 PDF →';
+                setBtnLabel(nextBtn, '开始框选题目 PDF');
                 nextBtn.disabled = !(rgState.exercise.pdfDoc && rgState.answer.pdfDoc);
             } else if (st === 'exercise') {
                 nextBtn.style.display = 'inline-flex';
-                nextBtn.textContent = '题目已框完，下一步：框选答案 PDF →';
+                setBtnLabel(nextBtn, '下一步：框选答案 PDF');
                 nextBtn.disabled = rgState.exercise.items.length === 0;
             } else {
                 nextBtn.style.display = 'none';
@@ -721,8 +728,8 @@
             rgState.activeTab = 'exercise';
             const exLbl = document.getElementById('rg-exercise-file-label');
             const ansLbl = document.getElementById('rg-answer-file-label');
-            if (exLbl) exLbl.textContent = '点击选择单栏题目原卷 PDF';
-            if (ansLbl) ansLbl.textContent = '点击选择答案原卷 PDF';
+            if (exLbl) exLbl.textContent = '必传 · 点击选择单栏题目原卷 PDF';
+            if (ansLbl) ansLbl.textContent = '必传 · 点击选择答案原卷 PDF';
         }
         rgState.contextKey = newContextKey;
 
@@ -768,7 +775,10 @@
             }
             const bankType = getCurrentBankTypeSafe();
             if (bankType === 'preview') {
-                const missing = exItems.find(it => !String(it.label || '').trim());
+                const missing = exItems.find(it =>
+                    !(it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0)
+                    && !String(it.label || '').trim()
+                );
                 if (missing) {
                     showToast('预习模式请先为每道框选题目输入题号', 'warn');
                     rgSelectItem(missing.id);
@@ -1142,7 +1152,7 @@
         const finishBtn = document.getElementById('rg-finish-btn');
         if (finishBtn) {
             finishBtn.disabled = true;
-            finishBtn.textContent = '正在上传原卷并导入...';
+            setBtnLabel(finishBtn, '正在上传原卷并导入');
         }
 
         try {
@@ -1287,7 +1297,7 @@
         } finally {
             if (finishBtn) {
                 finishBtn.disabled = false;
-                finishBtn.textContent = '完成框选并导入第 4 步 →';
+                setBtnLabel(finishBtn, '完成框选并导入第 4 步');
             }
         }
     };

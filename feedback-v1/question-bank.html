@@ -12,7 +12,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261113-21';
+            const v = '20261113-22';
             document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/question-bank.css?v=${v}">`);
@@ -602,25 +602,49 @@
                     <div class="rg-studio-topbar">
                         <div class="rg-studio-title-group">
                             <button type="button" class="btn sm secondary" onclick="exitRegionDebugStudio()" title="返回第 1 步配置">
-                                ← 返回首页
+                                <svg class="rg-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <polyline points="15 18 9 12 15 6"></polyline>
+                                </svg>
+                                <span>返回首页</span>
                             </button>
                             <div>
-                                <h2 class="step-heading" style="margin: 0;">整卷框题工作台 <span class="rg-beta-pill">Debug</span></h2>
+                                <h2 class="step-heading" style="margin: 0;">整卷框题工作台</h2>
                                 <div class="rg-context-line" id="rg-context-line">未选择分类</div>
                             </div>
                         </div>
                         <div class="rg-studio-top-actions">
                             <div class="rg-flow-steps" aria-label="框题步骤">
                                 <span class="rg-flow-step active" id="rg-step-pill-upload">1. 上传原卷</span>
-                                <span class="rg-flow-sep">→</span>
+                                <span class="rg-flow-sep" aria-hidden="true">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <polyline points="9 18 15 12 9 6"></polyline>
+                                    </svg>
+                                </span>
                                 <span class="rg-flow-step" id="rg-step-pill-exercise">2. 框选题目</span>
-                                <span class="rg-flow-sep">→</span>
+                                <span class="rg-flow-sep" aria-hidden="true">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <polyline points="9 18 15 12 9 6"></polyline>
+                                    </svg>
+                                </span>
                                 <span class="rg-flow-step" id="rg-step-pill-answer">3. 框选答案</span>
                             </div>
-                            <button type="button" class="btn secondary" id="rg-prev-stage-btn" onclick="rgGoPrevStage()" style="display: none;">← 上一步</button>
-                            <button type="button" class="btn primary" id="rg-next-stage-btn" onclick="rgGoNextStage()" disabled>开始框选题目 PDF →</button>
+                            <button type="button" class="btn secondary" id="rg-prev-stage-btn" onclick="rgGoPrevStage()" style="display: none;">
+                                <svg class="rg-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <polyline points="15 18 9 12 15 6"></polyline>
+                                </svg>
+                                <span class="rg-btn-label">上一步</span>
+                            </button>
+                            <button type="button" class="btn primary" id="rg-next-stage-btn" onclick="rgGoNextStage()" disabled>
+                                <span class="rg-btn-label">开始框选题目 PDF</span>
+                                <svg class="rg-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <polyline points="9 18 15 12 9 6"></polyline>
+                                </svg>
+                            </button>
                             <button type="button" class="btn primary" id="rg-finish-btn" onclick="rgFinishAndImport()" style="display: none;">
-                                完成框选并导入第 4 步 →
+                                <span class="rg-btn-label">完成框选并导入第 4 步</span>
+                                <svg class="rg-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <polyline points="9 18 15 12 9 6"></polyline>
+                                </svg>
                             </button>
                         </div>
                     </div>
@@ -628,16 +652,16 @@
                     <!-- 第 1 步：上传题目 PDF 与答案 PDF -->
                     <div class="rg-upload-gate" id="rg-upload-gate">
                         <div class="rg-upload-gate-grid">
-                            <label class="rg-upload-box" id="rg-exercise-upload-box" for="rg-exercise-file">
+                            <label class="rg-upload-box" id="rg-exercise-upload-box" for="rg-exercise-file" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('rg-exercise-file')?.click();}">
                                 <span class="rg-upload-dot exercise"></span>
-                                <div class="rg-upload-box-title">1. 上传题目原卷 PDF（必传）</div>
-                                <div class="rg-upload-box-sub" id="rg-exercise-file-label">点击选择单栏题目原卷 PDF</div>
+                                <div class="rg-upload-box-title">1. 上传题目原卷 PDF</div>
+                                <div class="rg-upload-box-sub" id="rg-exercise-file-label">必传 · 点击选择单栏题目原卷 PDF</div>
                                 <input type="file" id="rg-exercise-file" accept=".pdf,application/pdf" hidden onchange="rgHandlePdfUpload('exercise', this)">
                             </label>
-                            <label class="rg-upload-box" id="rg-answer-upload-box" for="rg-answer-file">
+                            <label class="rg-upload-box" id="rg-answer-upload-box" for="rg-answer-file" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('rg-answer-file')?.click();}">
                                 <span class="rg-upload-dot answer"></span>
-                                <div class="rg-upload-box-title">2. 上传答案原卷 PDF（必传）</div>
-                                <div class="rg-upload-box-sub" id="rg-answer-file-label">点击选择答案原卷 PDF</div>
+                                <div class="rg-upload-box-title">2. 上传答案原卷 PDF</div>
+                                <div class="rg-upload-box-sub" id="rg-answer-file-label">必传 · 点击选择答案原卷 PDF</div>
                                 <input type="file" id="rg-answer-file" accept=".pdf,application/pdf" hidden onchange="rgHandlePdfUpload('answer', this)">
                             </label>
                         </div>
@@ -686,8 +710,8 @@
                             </div>
                             <div class="rg-viewport" id="rg-viewport">
                                 <div class="rg-empty-state" id="rg-empty-state">
-                                    <p>请先在上方上传「题目原卷 PDF」或「答案原卷 PDF」</p>
-                                    <p class="rg-empty-sub">上传后直接在整页上按住左键拖拽拉框，松手即生成一道题；若同一道题跨页，可在右侧卡片点「+ 跨页续框」。</p>
+                                    <p>尚未加载原卷 PDF</p>
+                                    <p class="rg-empty-sub">请先返回上一步上传题目与答案原卷，再进入画布直接拖拽框选；若同一道题跨页，可在右侧卡片点「+ 跨页续框」。</p>
                                 </div>
                                 <div class="rg-stage" id="rg-stage" style="display: none;">
                                     <canvas id="rg-pdf-canvas"></canvas>
@@ -858,18 +882,12 @@
         </div>
     </div>
 
-    <!-- Floating Hover Preview Popover -->
-    <div id="quick-hover-popover" class="quick-hover-popover">
-        <div class="popover-title" id="popover-title">题目预览</div>
-        <img id="popover-img" src="" alt="预览">
-    </div>
-
     <div class="toast-container" id="toast-container"></div>
 
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261113-21';
+            const v = '20261113-22';
             document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
             document.write(`<script src="js/common.js?v=${v}"><\/script>`);
             document.write(`<script src="js/auth.js?v=${v}"><\/script>`);

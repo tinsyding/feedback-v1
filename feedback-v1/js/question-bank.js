@@ -1014,17 +1014,11 @@ function mergeAllSameTopicVariations() {
 window.mergeAllSameTopicVariations = mergeAllSameTopicVariations;
 window.onVariationParentChange = onVariationParentChange;
 
-async function onHoverHomeworkPreview() {
-    // 已关闭悬停预览，点击可直接打开查看
-}
-window.onHoverHomeworkPreview = onHoverHomeworkPreview;
-
 function previewHomeworkQuestion(parentNum, event) {
     if (event) {
         event.stopPropagation();
         event.preventDefault();
     }
-    if (typeof hideHoverPopover === "function") hideHoverPopover();
     const hwQ = (homeworkQuestionsForVariation || []).find(q => Number(q.id) === Number(parentNum));
     const exPdf = hwQ && hwQ.exercisePdf ? hwQ.exercisePdf : null;
     if (!exPdf || !exPdf.url) {
@@ -4775,8 +4769,6 @@ function renderQuestionList() {
             const previewBtnsHtml = parentNums.length === 1
                 ? `<button type="button" class="var-hw-preview-btn"
                            onclick="previewHomeworkQuestion(${primaryParentNum}, event)"
-                           onmouseenter="onHoverHomeworkPreview(event, ${primaryParentNum})"
-                           onmouseleave="hideHoverPopover()"
                            title="查阅课后第 ${primaryParentNum} 题原题 PDF">
                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
@@ -4789,8 +4781,6 @@ function renderQuestionList() {
                        ${parentNums.map(p => `
                            <button type="button" class="var-hw-preview-btn compact"
                                    onclick="previewHomeworkQuestion(${p}, event)"
-                                   onmouseenter="onHoverHomeworkPreview(event, ${p})"
-                                   onmouseleave="hideHoverPopover()"
                                    title="查阅课后第 ${p} 题原题 PDF">${p}</button>
                        `).join('')}
                    </div>`;
@@ -5590,20 +5580,6 @@ function renderPdfBtn(q, index, type) {
         </div>
     `;
 }
-
-function showHoverPopover() {
-    // 已关闭悬停预览，点击卡片直接打开预览
-    const popover = document.getElementById('quick-hover-popover');
-    if (popover) popover.classList.remove('active');
-}
-
-function hideHoverPopover() {
-    const popover = document.getElementById('quick-hover-popover');
-    if (popover) popover.classList.remove('active');
-}
-
-window.showHoverPopover = showHoverPopover;
-window.hideHoverPopover = hideHoverPopover;
 
 function openPdfManageDialog(index, type) {
     const data = type === 'exercise' ? currentQuestions[index].exercisePdf : currentQuestions[index].answerPdf;
@@ -6510,7 +6486,6 @@ window.resetSavedFilters = resetSavedFilters;
 
 window.previewHomeworkQuestion = previewHomeworkQuestion;
 window.onVariationParentChange = onVariationParentChange;
-window.onHoverHomeworkPreview = onHoverHomeworkPreview;
 
 window.addEventListener('resize', () => {
     document.querySelectorAll('.question-topic-input').forEach(el => {

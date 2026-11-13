@@ -1002,9 +1002,9 @@
         /* 题头考点提示开关 */
         .choice-topic-hint-box {
             background: #f8fafc;
-            border: 1.5px solid #e2e8f0;
+            border: 1px solid #e2e8f0;
             border-radius: var(--radius-lg, 12px);
-            padding: 11px 13px;
+            padding: 12px;
             margin-bottom: 12px;
         }
 
@@ -1017,21 +1017,20 @@
 
         .choice-topic-hint-label {
             font-size: 0.82rem;
-            font-weight: 700;
+            font-weight: 600;
             color: var(--text-main, #1e293b);
             display: flex;
             align-items: center;
-            gap: 5px;
+            gap: 8px;
         }
 
         .choice-topic-hint-state {
-            font-size: 0.68rem;
-            font-weight: 700;
-            padding: 2px 7px;
-            border-radius: 9999px;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: var(--radius-sm, 6px);
             background: #dbeafe;
             color: #1d4ed8;
-            letter-spacing: 0.3px;
         }
 
         .choice-topic-hint-state.hidden {
@@ -1052,30 +1051,35 @@
         .choice-topic-hint-segmented {
             display: flex;
             background: #e2e8f0;
-            padding: 3px;
+            padding: 4px;
             border-radius: 10px;
-            gap: 3px;
+            gap: 4px;
         }
 
         .topic-hint-seg-btn {
             flex: 1;
-            padding: 7px 8px;
+            padding: 8px;
             border: none;
             background: transparent;
-            border-radius: 7px;
+            border-radius: var(--radius-sm, 6px);
             font-size: 0.78rem;
             font-weight: 600;
             color: #64748b;
             cursor: pointer;
-            transition: all 0.18s ease;
+            transition: background-color var(--dur-fast, 150ms) var(--ease, cubic-bezier(0.22, 1, 0.36, 1)), color var(--dur-fast, 150ms) var(--ease, cubic-bezier(0.22, 1, 0.36, 1));
             white-space: nowrap;
+        }
+
+        .topic-hint-seg-btn:focus-visible {
+            outline: var(--focus-ring, 2px solid #2563eb);
+            outline-offset: 1px;
         }
 
         .topic-hint-seg-btn.active {
             background: #ffffff;
-            color: var(--primary, #2563eb);
-            font-weight: 700;
-            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+            color: var(--brand-500, #2563eb);
+            font-weight: 600;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
         }
 
         .choice-options {
