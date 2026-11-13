@@ -111,11 +111,11 @@ function saveRevokedTokens(array $map) {
  * 获取指定周次题目的 PDF 列表 (优先从 MySQL qbank_questions 查询，回退到 JSON 文件)
  */
 function parseRetestQuestionMeta($rawMeta, $qNum) {
-    if (empty($rawMeta)) return ['groupNums' => [], 'box' => null, 'answerBox' => null];
+    if (empty($rawMeta)) return ['groupNums' => [], 'box' => null, 'answerBox' => null, 'stemBoxes' => []];
     if (is_string($rawMeta)) {
         $rawMeta = @json_decode($rawMeta, true);
     }
-    if (!is_array($rawMeta)) return ['groupNums' => [], 'box' => null, 'answerBox' => null];
+    if (!is_array($rawMeta)) return ['groupNums' => [], 'box' => null, 'answerBox' => null, 'stemBoxes' => []];
 
     $groupNums = [];
     if (!empty($rawMeta['groupNums']) && is_array($rawMeta['groupNums'])) {
@@ -141,7 +141,17 @@ function parseRetestQuestionMeta($rawMeta, $qNum) {
 
     $box = $parseBox($rawMeta['box'] ?? null);
     $answerBox = $parseBox($rawMeta['answerBox'] ?? null);
-    return ['groupNums' => $groupNums, 'box' => $box, 'answerBox' => $answerBox];
+    $stemBoxes = [];
+    if (!empty($rawMeta['stemBoxes']) && is_array($rawMeta['stemBoxes'])) {
+        foreach ($rawMeta['stemBoxes'] as $sb) {
+            $parsedSb = $parseBox($sb);
+            if ($parsedSb) {
+                unset($parsedSb['num']);
+                $stemBoxes[] = $parsedSb;
+            }
+        }
+    }
+    return ['groupNums' => $groupNums, 'box' => $box, 'answerBox' => $answerBox, 'stemBoxes' => $stemBoxes];
 }
 
 function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $year = null, $season = null, $bankType = 'homework') {
@@ -300,6 +310,7 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                                 'groupNums' => $inferredGroup,
                                 'errorBoxes' => $metaParsed['box'] ? [$metaParsed['box']] : [],
                                 'answerErrorBoxes' => $metaParsed['answerBox'] ? [$metaParsed['answerBox']] : [],
+                                'stemBoxes' => $metaParsed['stemBoxes'] ?? [],
                                 'subTopics' => $curTopic !== '' ? [$qNum => $curTopic] : [],
                                 'topic' => $curTopic,
                                 'videoUrl' => $r['video_url'] ?: null,
@@ -323,6 +334,9 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                                 }
                                 if ($metaParsed['answerBox']) {
                                     $pdfList[$existIdx]['answerErrorBoxes'][] = $metaParsed['answerBox'];
+                                }
+                                if (empty($pdfList[$existIdx]['stemBoxes']) && !empty($metaParsed['stemBoxes'])) {
+                                    $pdfList[$existIdx]['stemBoxes'] = $metaParsed['stemBoxes'];
                                 }
                                 if ($curTopic !== '') {
                                     $pdfList[$existIdx]['subTopics'][$qNum] = $curTopic;
@@ -448,6 +462,7 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                             'groupNums' => $inferredGroup,
                             'errorBoxes' => $metaParsed['box'] ? [$metaParsed['box']] : [],
                             'answerErrorBoxes' => $metaParsed['answerBox'] ? [$metaParsed['answerBox']] : [],
+                            'stemBoxes' => $metaParsed['stemBoxes'] ?? [],
                             'subTopics' => $curTopic !== '' ? [$qNum => $curTopic] : [],
                             'topic' => $curTopic,
                             'videoUrl' => $q['videoUrl'] ?? ($q['video_url'] ?? null),
@@ -470,6 +485,9 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                         }
                         if ($metaParsed['answerBox']) {
                             $pdfList[$existIdx]['answerErrorBoxes'][] = $metaParsed['answerBox'];
+                        }
+                        if (empty($pdfList[$existIdx]['stemBoxes']) && !empty($metaParsed['stemBoxes'])) {
+                            $pdfList[$existIdx]['stemBoxes'] = $metaParsed['stemBoxes'];
                         }
                         if ($curTopic !== '') {
                             $pdfList[$existIdx]['subTopics'][$qNum] = $curTopic;

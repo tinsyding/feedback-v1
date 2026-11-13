@@ -3464,6 +3464,93 @@ input[type=number] {
     background: #0284c7;
 }
 
+/* 原文区绿色虚线框样式与步骤切换控件 */
+.page-thumb-mini-box.stem-box {
+    border-color: #059669;
+    border-style: dashed;
+    background: rgba(5, 150, 105, 0.08);
+}
+
+.page-thumb-mini-box.stem-box .page-thumb-mini-tag {
+    background: #059669;
+}
+
+.lightbox-subq-box.stem-box {
+    border-color: #059669;
+    border-style: dashed;
+    background: rgba(5, 150, 105, 0.08);
+}
+
+.lightbox-subq-box.stem-box:hover {
+    background: rgba(5, 150, 105, 0.14);
+}
+
+.lightbox-subq-box.stem-box.draft-box {
+    background: rgba(5, 150, 105, 0.12);
+}
+
+.lightbox-subq-box.stem-box .lightbox-subq-tag {
+    border-color: #059669;
+    background: #065f46;
+}
+
+.lightbox-subq-box.stem-box .lightbox-subq-del {
+    background: #059669;
+}
+
+.lightbox-boxmode-dot.stem-mode {
+    background: #059669;
+}
+
+.lightbox-target-switch {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px;
+    border-radius: 7px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    gap: 2px;
+}
+
+.lightbox-target-btn {
+    height: 24px;
+    padding: 0 9px;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.lightbox-target-btn:hover {
+    color: var(--text-primary);
+}
+
+.lightbox-target-btn.active {
+    background: #dc2626;
+    color: #ffffff;
+}
+
+.lightbox-target-btn#lightbox-target-stem-btn.active {
+    background: #059669;
+    color: #ffffff;
+}
+
+#lightbox-fullwidth-btn.active {
+    background: rgba(37, 99, 235, 0.16);
+    border-color: rgba(37, 99, 235, 0.45);
+    color: #60a5fa;
+}
+
+[data-theme="light"] #lightbox-fullwidth-btn.active {
+    background: #eff6ff;
+    border-color: #93c5fd;
+    color: #1d4ed8;
+}
+
 .lightbox-subq-tag {
     position: absolute;
     top: -22px;

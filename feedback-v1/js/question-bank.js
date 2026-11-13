@@ -30,6 +30,8 @@ let batchAnswerThumbs = [];
 // 每页题目/答案 PDF 上的大题小问框选坐标数组: batchPageBoxes[pageIndex] = [{ x, y, w, h }, ...]
 let batchPageBoxes = [];
 let batchAnswerPageBoxes = [];
+// 每页题目 PDF 上的大题原文区框选坐标数组: batchStemBoxes[pageIndex] = [{ x, y, w, h }, ...]
+let batchStemBoxes = [];
 // 自动识别出的题号（null 表示该页未识别到），以及当前题号是否仍来自自动识别
 let batchQuestionDetectedLabels = [];
 let batchAnswerDetectedLabels = [];
@@ -1103,6 +1105,7 @@ function buildDefaultLabels() {
     batchQuestionAutoCount = 0;
     batchQuestionInheritedCount = 0;
     batchPageBoxes = Array.from({ length: batchQuestionPageCount }, () => []);
+    batchStemBoxes = Array.from({ length: batchQuestionPageCount }, () => []);
     for (let i = 0; i < batchQuestionPageCount; i++) {
         const detected = batchQuestionDetectedLabels[i];
         const hasDetected = Number.isInteger(detected) && detected > 0;
@@ -1178,6 +1181,7 @@ function getGroupBoxesInfo(startLabel, kind = 'q') {
     const pages = getGroupPagesByStartLabel(startNum, kind);
     const allBoxes = kind === 'a' ? batchAnswerPageBoxes : batchPageBoxes;
     const boxesWithMeta = [];
+    const stemBoxesWithMeta = [];
     pages.forEach((pIdx, pageOffset) => {
         const pBoxes = Array.isArray(allBoxes[pIdx]) ? allBoxes[pIdx] : [];
         pBoxes.forEach((b, bIdx) => {
@@ -1193,10 +1197,24 @@ function getGroupBoxesInfo(startLabel, kind = 'q') {
                 h: b.h
             });
         });
+        if (kind === 'q') {
+            const sBoxes = Array.isArray(batchStemBoxes[pIdx]) ? batchStemBoxes[pIdx] : [];
+            sBoxes.forEach((sb, sbIdx) => {
+                stemBoxesWithMeta.push({
+                    pageIndex: pIdx,
+                    pageOffset: pageOffset,
+                    localBoxIndex: sbIdx,
+                    x: sb.x,
+                    y: sb.y,
+                    w: sb.w,
+                    h: sb.h
+                });
+            });
+        }
     });
     const count = boxesWithMeta.length;
-    const isBigQuestion = count > 0;
-    const span = isBigQuestion ? count : 1;
+    const isBigQuestion = count > 0 || stemBoxesWithMeta.length > 0;
+    const span = count > 0 ? count : 1;
     const endNum = startNum + span - 1;
     const groupNums = [];
     for (let k = startNum; k <= endNum; k++) {
@@ -1210,7 +1228,8 @@ function getGroupBoxesInfo(startLabel, kind = 'q') {
         span,
         groupNums,
         pages,
-        boxesWithMeta
+        boxesWithMeta,
+        stemBoxesWithMeta
     };
 }
 
@@ -1424,6 +1443,7 @@ function renderPageGrid(containerId, thumbs, labels, kind) {
         let isPaired = false;
         let groupInfo = null;
         let pageBoxesMeta = [];
+        let pageStemMeta = [];
         let matchedQGroupInfo = null;
 
         if (kind === 'q') {
@@ -1433,6 +1453,7 @@ function renderPageGrid(containerId, thumbs, labels, kind) {
                 return aInfo.groupNums.some(n => groupInfo.groupNums.includes(n));
             });
             pageBoxesMeta = groupInfo.boxesWithMeta.filter(b => b.pageIndex === i);
+            pageStemMeta = (groupInfo.stemBoxesWithMeta || []).filter(sb => sb.pageIndex === i);
         } else {
             groupInfo = getGroupBoxesInfo(currNum, 'a');
             pageBoxesMeta = groupInfo.boxesWithMeta.filter(b => b.pageIndex === i);
@@ -1446,8 +1467,14 @@ function renderPageGrid(containerId, thumbs, labels, kind) {
         card.className = `page-card page-card-${kind}${isPaired ? ' paired' : ''}`;
         card.dataset.pageIndex = String(i);
 
-        const miniBoxesHtml = (pageBoxesMeta.length > 0)
-            ? `<div class="page-thumb-box-overlay">${pageBoxesMeta.map(b => {
+        const stemOverlayHtml = pageStemMeta.map(sb => `
+            <div class="page-thumb-mini-box stem-box" style="left:${(sb.x * 100).toFixed(2)}%;top:${(sb.y * 100).toFixed(2)}%;width:${(sb.w * 100).toFixed(2)}%;height:${(sb.h * 100).toFixed(2)}%;">
+                <span class="page-thumb-mini-tag compact">原文</span>
+            </div>
+        `).join('');
+
+        const miniBoxesHtml = (pageBoxesMeta.length > 0 || pageStemMeta.length > 0)
+            ? `<div class="page-thumb-box-overlay">${stemOverlayHtml}${pageBoxesMeta.map(b => {
                 const compact = isBoxCrowded(b, pageBoxesMeta, true);
                 return `
                 <div class="page-thumb-mini-box${kind === 'a' ? ' answer-box' : ''}" style="left:${(b.x * 100).toFixed(2)}%;top:${(b.y * 100).toFixed(2)}%;width:${(b.w * 100).toFixed(2)}%;height:${(b.h * 100).toFixed(2)}%;">
@@ -1522,8 +1549,34 @@ let lightboxKind = 'q';
 let lightboxIndex = 0;
 let lightboxZoom = 1;
 let lightboxBoxMode = false;
-// Step 4 独立重框模式上下文: { startNum, groupIndices, pageThumbs, pageBoxes }
+// 框选目标: 'stem'（原文区） | 'subq'（小问题号）
+let lightboxDrawTarget = 'subq';
+// 单栏试卷：松手自动左右通栏打满
+let lightboxFullWidthSnap = true;
+// Step 4 独立重框模式上下文: { startNum, groupIndices, pageThumbs, pageBoxes, stemBoxes }
 let lightboxStep4Context = null;
+
+function setLightboxDrawTarget(target) {
+    if (target === 'stem' && lightboxKind === 'a' && !lightboxStep4Context) {
+        lightboxDrawTarget = 'subq';
+    } else {
+        lightboxDrawTarget = target === 'stem' ? 'stem' : 'subq';
+    }
+    renderLightboxBoxesOverlay();
+}
+window.setLightboxDrawTarget = setLightboxDrawTarget;
+
+function toggleLightboxFullWidthSnap() {
+    lightboxFullWidthSnap = !lightboxFullWidthSnap;
+    const btn = document.getElementById('lightbox-fullwidth-btn');
+    if (btn) {
+        btn.classList.toggle('active', lightboxFullWidthSnap);
+        const span = btn.querySelector('span');
+        if (span) span.textContent = lightboxFullWidthSnap ? '横向通栏: 开' : '横向通栏: 关';
+    }
+    showToast(lightboxFullWidthSnap ? '已开启：拉框松手自动左右打满' : '已关闭：按实际拖拽宽度框选');
+}
+window.toggleLightboxFullWidthSnap = toggleLightboxFullWidthSnap;
 
 function openPageLightbox(kind, index, enterBoxMode = false) {
     lightboxStep4Context = null;
@@ -1531,6 +1584,14 @@ function openPageLightbox(kind, index, enterBoxMode = false) {
     lightboxIndex = index;
     lightboxZoom = 1;
     lightboxBoxMode = Boolean(enterBoxMode);
+
+    if (lightboxBoxMode && kind === 'q') {
+        const currStart = parseInt(batchQuestionLabels[index], 10) || 1;
+        const summary = getGroupBoxesInfo(currStart, 'q');
+        lightboxDrawTarget = (summary.stemBoxesWithMeta && summary.stemBoxesWithMeta.length > 0) ? 'subq' : 'stem';
+    } else {
+        lightboxDrawTarget = 'subq';
+    }
 
     const dialog = document.getElementById('page-lightbox-dialog');
     if (!dialog) return;
@@ -1623,10 +1684,25 @@ function getActiveLightboxBoxesForCurrentPage() {
     return batchPageBoxes[lightboxIndex];
 }
 
+function getActiveLightboxStemBoxesForCurrentPage() {
+    if (lightboxStep4Context) {
+        if (!Array.isArray(lightboxStep4Context.stemBoxes[lightboxIndex])) {
+            lightboxStep4Context.stemBoxes[lightboxIndex] = [];
+        }
+        return lightboxStep4Context.stemBoxes[lightboxIndex];
+    }
+    if (lightboxKind !== 'q') return [];
+    if (!Array.isArray(batchStemBoxes[lightboxIndex])) {
+        batchStemBoxes[lightboxIndex] = [];
+    }
+    return batchStemBoxes[lightboxIndex];
+}
+
 function getActiveLightboxGroupSummary() {
     if (lightboxStep4Context) {
         const startNum = lightboxStep4Context.startNum;
         const boxesWithMeta = [];
+        const stemBoxesWithMeta = [];
         lightboxStep4Context.pageBoxes.forEach((pBoxes, pOffset) => {
             (pBoxes || []).forEach((b, bIdx) => {
                 boxesWithMeta.push({
@@ -1638,13 +1714,24 @@ function getActiveLightboxGroupSummary() {
                 });
             });
         });
+        (lightboxStep4Context.stemBoxes || []).forEach((sBoxes, pOffset) => {
+            (sBoxes || []).forEach((sb, sbIdx) => {
+                stemBoxesWithMeta.push({
+                    pageIndex: pOffset,
+                    pageOffset: pOffset,
+                    localBoxIndex: sbIdx,
+                    ...sb
+                });
+            });
+        });
         const count = boxesWithMeta.length;
         return {
-            isBigQuestion: count > 0,
+            isBigQuestion: count > 0 || stemBoxesWithMeta.length > 0,
             startNum,
             endNum: count > 0 ? (startNum + count - 1) : startNum,
             count,
-            boxesWithMeta
+            boxesWithMeta,
+            stemBoxesWithMeta
         };
     }
     const labels = lightboxKind === 'a' ? batchAnswerLabels : batchQuestionLabels;
@@ -1687,9 +1774,19 @@ function renderLightboxBoxesOverlay() {
 
     const summary = getActiveLightboxGroupSummary();
     const currentPageBoxes = summary.boxesWithMeta.filter(b => b.pageIndex === lightboxIndex);
+    const currentPageStems = (summary.stemBoxesWithMeta || []).filter(sb => sb.pageIndex === lightboxIndex);
     const isAnswerMode = !lightboxStep4Context && lightboxKind === 'a';
 
-    layer.innerHTML = currentPageBoxes.map(b => {
+    const stemsHtml = currentPageStems.map((sb, idx) => `
+        <div class="lightbox-subq-box stem-box" style="left:${(sb.x * 100).toFixed(2)}%;top:${(sb.y * 100).toFixed(2)}%;width:${(sb.w * 100).toFixed(2)}%;height:${(sb.h * 100).toFixed(2)}%;">
+            <span class="lightbox-subq-tag" title="大题原文/题干区域">${currentPageStems.length > 1 ? `原文 ${idx + 1}` : '原文'}</span>
+            <button type="button" class="lightbox-subq-del" onclick="deleteStemBox(${sb.localBoxIndex}, event)" title="删除此原文选框">
+                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+        </div>
+    `).join('');
+
+    const subqsHtml = currentPageBoxes.map(b => {
         const compact = isBoxCrowded(b, currentPageBoxes, false);
         const tagText = compact ? `${b.num}` : `第 ${b.num} 题`;
         return `
@@ -1702,13 +1799,43 @@ function renderLightboxBoxesOverlay() {
     `;
     }).join('');
 
+    layer.innerHTML = stemsHtml + subqsHtml;
+
     // 更新顶部胶囊与工具栏计数
     const rangePill = document.getElementById('lightbox-group-range-pill');
     const summaryEl = document.getElementById('lightbox-boxmode-summary');
+    const guideEl = document.getElementById('lightbox-boxmode-guide');
+    const dotEl = document.getElementById('lightbox-boxmode-dot');
+    const targetSwitch = document.getElementById('lightbox-target-switch');
+    const stemBtn = document.getElementById('lightbox-target-stem-btn');
+    const subqBtn = document.getElementById('lightbox-target-subq-btn');
+    const fwBtn = document.getElementById('lightbox-fullwidth-btn');
     const undoBtn = document.getElementById('lightbox-box-undo-btn');
     const clearBtn = document.getElementById('lightbox-box-clear-btn');
     const alignBtn = document.getElementById('lightbox-box-align-btn');
     const extendBtn = document.getElementById('lightbox-box-extend-btn');
+
+    const isDrawingStem = !isAnswerMode && lightboxDrawTarget === 'stem';
+    if (targetSwitch) {
+        targetSwitch.style.display = isAnswerMode ? 'none' : 'inline-flex';
+    }
+    if (stemBtn) stemBtn.classList.toggle('active', isDrawingStem);
+    if (subqBtn) subqBtn.classList.toggle('active', !isDrawingStem);
+    if (dotEl) dotEl.classList.toggle('stem-mode', isDrawingStem);
+    if (fwBtn) {
+        fwBtn.classList.toggle('active', lightboxFullWidthSnap);
+        const span = fwBtn.querySelector('span');
+        if (span) span.textContent = lightboxFullWidthSnap ? '横向通栏: 开' : '横向通栏: 关';
+    }
+    if (guideEl) {
+        if (isDrawingStem) {
+            guideEl.textContent = '第 1 步：请拖拽框选大题「原文/题干」区域（框好后自动切换框选题号）';
+        } else if (isAnswerMode) {
+            guideEl.textContent = '请依次拖拽框选各小题答案区域';
+        } else {
+            guideEl.textContent = '第 2 步：请依次拖拽框选各小问题号与作答区';
+        }
+    }
 
     if (rangePill) {
         if (summary.count > 0) {
@@ -1720,14 +1847,18 @@ function renderLightboxBoxesOverlay() {
     }
     if (summaryEl) {
         const unitLabel = isAnswerMode ? '题答案' : '问';
+        const stemBadge = (!isAnswerMode && (summary.stemBoxesWithMeta || []).length > 0)
+            ? `原文 ${(summary.stemBoxesWithMeta || []).length} 段 · `
+            : '';
         summaryEl.textContent = summary.count > 0
-            ? `已框选 ${summary.count} ${unitLabel}（第 ${summary.startNum} ~ ${summary.endNum} 题）· 下一框为第 ${summary.endNum + 1} 题`
-            : `起始第 ${summary.startNum} 题 · 请拖拽框选第 1 ${isAnswerMode ? '题答案' : '问'}`;
+            ? `${stemBadge}已框选 ${summary.count} ${unitLabel}（第 ${summary.startNum} ~ ${summary.endNum} 题）· 下一框为第 ${summary.endNum + 1} 题`
+            : `${stemBadge}起始第 ${summary.startNum} 题 · ${isDrawingStem ? '等待框选原文' : `请框选第 1 ${unitLabel}`}`;
     }
     const pageRawBoxes = getActiveLightboxBoxesForCurrentPage();
+    const pageStemBoxes = getActiveLightboxStemBoxesForCurrentPage();
     if (alignBtn) alignBtn.disabled = pageRawBoxes.length < 2;
-    if (undoBtn) undoBtn.disabled = pageRawBoxes.length === 0;
-    if (clearBtn) clearBtn.disabled = pageRawBoxes.length === 0;
+    if (undoBtn) undoBtn.disabled = (isDrawingStem ? pageStemBoxes.length === 0 : pageRawBoxes.length === 0);
+    if (clearBtn) clearBtn.disabled = (pageRawBoxes.length === 0 && pageStemBoxes.length === 0);
     if (extendBtn) {
         if (lightboxStep4Context) {
             extendBtn.style.display = (lightboxIndex + 1 < lightboxStep4Context.pageThumbs.length) ? 'inline-flex' : 'none';
@@ -1737,6 +1868,19 @@ function renderLightboxBoxesOverlay() {
         }
     }
 }
+
+function deleteStemBox(localIdx, event) {
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+    }
+    const arr = getActiveLightboxStemBoxesForCurrentPage();
+    if (localIdx >= 0 && localIdx < arr.length) {
+        arr.splice(localIdx, 1);
+        onBoxesMutated();
+    }
+}
+window.deleteStemBox = deleteStemBox;
 
 function onBoxesMutated() {
     if (!lightboxStep4Context) {
@@ -1761,6 +1905,15 @@ function deletePageBox(localIdx, event) {
 window.deletePageBox = deletePageBox;
 
 function undoLastPageBox() {
+    const isDrawingStem = (lightboxKind === 'q' || Boolean(lightboxStep4Context)) && lightboxDrawTarget === 'stem';
+    if (isDrawingStem) {
+        const sArr = getActiveLightboxStemBoxesForCurrentPage();
+        if (sArr.length > 0) {
+            sArr.pop();
+            onBoxesMutated();
+        }
+        return;
+    }
     const arr = getActiveLightboxBoxesForCurrentPage();
     if (arr.length > 0) {
         arr.pop();
@@ -1923,22 +2076,34 @@ function alignCurrentPageBoxes() {
     }
     const aligned = normalizePageBoxesSafely(arr);
     for (let i = 0; i < arr.length; i++) {
-        arr[i].x = aligned[i].x;
+        let nx = aligned[i].x;
+        let nw = aligned[i].w;
+        if (lightboxFullWidthSnap) {
+            const nr = Math.max(nx + nw, 0.97);
+            nx = Math.min(nx, 0.03);
+            nw = nr - nx;
+        }
+        arr[i].x = Number(nx.toFixed(4));
         arr[i].y = aligned[i].y;
-        arr[i].w = aligned[i].w;
+        arr[i].w = Number(nw.toFixed(4));
         arr[i].h = aligned[i].h;
     }
     onBoxesMutated();
-    showToast('已按同列边缘与安全间隙完成对齐规整', 'success');
+    showToast('已按单栏通栏与安全间隙完成对齐规整', 'success');
 }
 window.alignCurrentPageBoxes = alignCurrentPageBoxes;
 
 function clearCurrentPageBoxes() {
     const arr = getActiveLightboxBoxesForCurrentPage();
-    if (arr.length > 0) {
+    const sArr = (lightboxKind === 'q' || lightboxStep4Context) ? getActiveLightboxStemBoxesForCurrentPage() : [];
+    if (arr.length > 0 || sArr.length > 0) {
         arr.length = 0;
+        if (sArr.length > 0) sArr.length = 0;
+        if (lightboxKind === 'q' || lightboxStep4Context) {
+            lightboxDrawTarget = 'stem';
+        }
         onBoxesMutated();
-        showToast('已清空本页框选的小问');
+        showToast('已清空本页框选内容');
     }
 }
 window.clearCurrentPageBoxes = clearCurrentPageBoxes;
@@ -2009,14 +2174,15 @@ function initLightboxBoxDrawingEvents() {
         const summary = getActiveLightboxGroupSummary();
         const nextNum = summary.count > 0 ? (summary.endNum + 1) : summary.startNum;
         const isAnswerMode = !lightboxStep4Context && lightboxKind === 'a';
+        const isDrawingStem = !isAnswerMode && lightboxDrawTarget === 'stem';
 
         draftEl = document.createElement('div');
-        draftEl.className = `lightbox-subq-box draft-box${isAnswerMode ? ' answer-box' : ''}`;
+        draftEl.className = `lightbox-subq-box draft-box${isAnswerMode ? ' answer-box' : ''}${isDrawingStem ? ' stem-box' : ''}`;
         draftEl.style.left = `${(startX * 100).toFixed(2)}%`;
         draftEl.style.top = `${(startY * 100).toFixed(2)}%`;
         draftEl.style.width = '0%';
         draftEl.style.height = '0%';
-        draftEl.innerHTML = `<span class="lightbox-subq-tag">${summary.count >= 5 ? nextNum : `第 ${nextNum} 题`}</span>`;
+        draftEl.innerHTML = `<span class="lightbox-subq-tag">${isDrawingStem ? '原文' : (summary.count >= 5 ? nextNum : `第 ${nextNum} 题`)}</span>`;
         layer.appendChild(draftEl);
     });
 
@@ -2037,9 +2203,9 @@ function initLightboxBoxDrawingEvents() {
         if (!isDragging) return;
         isDragging = false;
         const pos = getRelPos(e.clientX, e.clientY);
-        const left = Math.min(startX, pos.x);
+        let left = Math.min(startX, pos.x);
         const top = Math.min(startY, pos.y);
-        const width = Math.abs(pos.x - startX);
+        let width = Math.abs(pos.x - startX);
         const height = Math.abs(pos.y - startY);
 
         if (draftEl && draftEl.parentNode) {
@@ -2052,13 +2218,33 @@ function initLightboxBoxDrawingEvents() {
             return;
         }
 
-        const arr = getActiveLightboxBoxesForCurrentPage();
-        arr.push({
+        // 单栏横向自动通栏打满（左至 3%，右至 97%）
+        if (lightboxFullWidthSnap) {
+            const right = Math.max(left + width, 0.97);
+            left = Math.min(left, 0.03);
+            width = right - left;
+        }
+
+        const newBox = {
             x: Number(left.toFixed(4)),
             y: Number(top.toFixed(4)),
             w: Number(width.toFixed(4)),
             h: Number(height.toFixed(4))
-        });
+        };
+
+        const isDrawingStem = (lightboxKind === 'q' || Boolean(lightboxStep4Context)) && lightboxDrawTarget === 'stem';
+        if (isDrawingStem) {
+            const sArr = getActiveLightboxStemBoxesForCurrentPage();
+            sArr.push(newBox);
+            // 框好原文后自动切入第 2 步：框选题号
+            lightboxDrawTarget = 'subq';
+            onBoxesMutated();
+            showToast('原文区已框选！请按顺序框选各小问题号（若原文跨页可点“1. 框选原文”继续补框）', 'success');
+            return;
+        }
+
+        const arr = getActiveLightboxBoxesForCurrentPage();
+        arr.push(newBox);
         onBoxesMutated();
     });
 }
@@ -4001,6 +4187,7 @@ async function openStep4BigQuestionBoxModal(firstIndex) {
         const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
         const pageThumbs = [];
         const pageBoxes = [];
+        const stemBoxes = [];
 
         for (let p = 1; p <= pdf.numPages; p++) {
             const page = await pdf.getPage(p);
@@ -4017,12 +4204,23 @@ async function openStep4BigQuestionBoxModal(firstIndex) {
             pageThumbs.push(canvas.toDataURL('image/jpeg', 0.88));
             page.cleanup();
             pageBoxes.push([]);
+            stemBoxes.push([]);
         }
         if (typeof pdf.destroy === 'function') {
             try { await pdf.destroy(); } catch (_) {}
         }
 
-        // Pre-populate existing boxes from group members
+        // Pre-populate existing stemBoxes & sub-question boxes from group members
+        const existingStems = firstQ.questionMeta && Array.isArray(firstQ.questionMeta.stemBoxes)
+            ? firstQ.questionMeta.stemBoxes
+            : [];
+        existingStems.forEach(sb => {
+            if (sb && typeof sb.x === 'number') {
+                const offset = Math.min(pageThumbs.length - 1, Math.max(0, parseInt(sb.pageOffset, 10) || 0));
+                stemBoxes[offset].push({ x: sb.x, y: sb.y, w: sb.w, h: sb.h });
+            }
+        });
+
         indices.forEach(idx => {
             const mq = currentQuestions[idx];
             const box = mq && mq.questionMeta && mq.questionMeta.box;
@@ -4044,12 +4242,14 @@ async function openStep4BigQuestionBoxModal(firstIndex) {
             memberIndices: indices,
             startNum,
             pageThumbs,
-            pageBoxes
+            pageBoxes,
+            stemBoxes
         };
         lightboxKind = 'q';
         lightboxIndex = 0;
         lightboxZoom = 1;
         lightboxBoxMode = true;
+        lightboxDrawTarget = existingStems.length > 0 ? 'subq' : 'stem';
 
         const lightbox = document.getElementById('page-lightbox-dialog');
         if (lightbox) {
@@ -4066,12 +4266,20 @@ window.openStep4BigQuestionBoxModal = openStep4BigQuestionBoxModal;
 
 function applyStep4BigQuestionBoxes() {
     if (!lightboxStep4Context) return;
-    const { memberIndices, startNum, pageThumbs, pageBoxes } = lightboxStep4Context;
+    const { memberIndices, startNum, pageThumbs, pageBoxes, stemBoxes } = lightboxStep4Context;
     const sortedOldIndices = [...memberIndices].sort((a, b) => a - b);
     const firstIdx = sortedOldIndices[0];
     const lastOldIdx = sortedOldIndices[sortedOldIndices.length - 1];
     const baseQ = currentQuestions[firstIdx];
     if (!baseQ) return;
+
+    const flatStemBoxes = [];
+    for (let offset = 0; offset < pageThumbs.length; offset++) {
+        const sList = (stemBoxes && stemBoxes[offset]) || [];
+        sList.forEach(sb => {
+            flatStemBoxes.push({ pageOffset: offset, x: sb.x, y: sb.y, w: sb.w, h: sb.h });
+        });
+    }
 
     const flatBoxes = [];
     for (let offset = 0; offset < pageThumbs.length; offset++) {
@@ -4121,6 +4329,22 @@ function applyStep4BigQuestionBoxes() {
     const groupNums = flatBoxes.map(item => item.qNum);
     const newGroupQuestions = flatBoxes.map((item, k) => {
         const prevMember = sortedOldIndices[k] !== undefined ? currentQuestions[sortedOldIndices[k]] : null;
+        const qMeta = {
+            groupNums: [...groupNums],
+            box: {
+                pageOffset: item.pageOffset,
+                x: item.box.x,
+                y: item.box.y,
+                w: item.box.w,
+                h: item.box.h
+            }
+        };
+        if (flatStemBoxes.length > 0) {
+            qMeta.stemBoxes = flatStemBoxes.map(sb => ({ ...sb }));
+        }
+        if (prevMember && prevMember.questionMeta && prevMember.questionMeta.answerBox) {
+            qMeta.answerBox = { ...prevMember.questionMeta.answerBox };
+        }
         return {
             id: item.qNum,
             parentQuestionNum: null,
@@ -4129,16 +4353,7 @@ function applyStep4BigQuestionBoxes() {
             videoUrl: prevMember && prevMember.videoUrl ? prevMember.videoUrl : (baseQ.videoUrl || ''),
             exercisePdf: baseQ.exercisePdf ? { ...baseQ.exercisePdf } : null,
             answerPdf: baseQ.answerPdf ? { ...baseQ.answerPdf } : null,
-            questionMeta: {
-                groupNums: [...groupNums],
-                box: {
-                    pageOffset: item.pageOffset,
-                    x: item.box.x,
-                    y: item.box.y,
-                    w: item.box.w,
-                    h: item.box.h
-                }
-            }
+            questionMeta: qMeta
         };
     });
 
@@ -5832,6 +6047,15 @@ async function importWithLabels(exerciseFile, answerFile) {
 
         if (!isVar && gInfo.isBigQuestion && Array.isArray(gInfo.boxesWithMeta) && gInfo.boxesWithMeta.length > 0) {
             const rangeStr = `${gInfo.startNum}-${gInfo.endNum}`;
+            const stemBoxesPayload = Array.isArray(gInfo.stemBoxesWithMeta) && gInfo.stemBoxesWithMeta.length > 0
+                ? gInfo.stemBoxesWithMeta.map(sb => ({
+                    pageOffset: sb.pageOffset,
+                    x: sb.x,
+                    y: sb.y,
+                    w: sb.w,
+                    h: sb.h
+                }))
+                : null;
             gInfo.boxesWithMeta.forEach(flatItem => {
                 const targetIdx = currentQuestions.length;
                 grp.targetIndices.push(targetIdx);
@@ -5845,6 +6069,9 @@ async function importWithLabels(exerciseFile, answerFile) {
                         h: flatItem.h
                     }
                 };
+                if (stemBoxesPayload) {
+                    qMeta.stemBoxes = stemBoxesPayload.map(sb => ({ ...sb }));
+                }
                 const ansBox = buildAnswerBoxForQNum(flatItem.num, grp);
                 if (ansBox) {
                     qMeta.answerBox = ansBox;

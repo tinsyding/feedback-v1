@@ -12,7 +12,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261113-5';
+            const v = '20261113-6';
             document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/question-bank.css?v=${v}">`);
@@ -681,11 +681,19 @@
             </div>
             <div class="lightbox-boxmode-bar" id="lightbox-boxmode-bar" style="display: none;">
                 <div class="lightbox-boxmode-info">
-                    <span class="lightbox-boxmode-dot"></span>
+                    <span class="lightbox-boxmode-dot" id="lightbox-boxmode-dot"></span>
+                    <div class="lightbox-target-switch" id="lightbox-target-switch" style="display: none;">
+                        <button type="button" class="lightbox-target-btn" id="lightbox-target-stem-btn" onclick="setLightboxDrawTarget('stem')">1. 框选原文</button>
+                        <button type="button" class="lightbox-target-btn active" id="lightbox-target-subq-btn" onclick="setLightboxDrawTarget('subq')">2. 框选题号</button>
+                    </div>
                     <span class="lightbox-boxmode-guide" id="lightbox-boxmode-guide">按住鼠标在卷面上依次拖拽拉框，每个框自动对应一问</span>
                     <span class="lightbox-boxmode-summary" id="lightbox-boxmode-summary">尚未框选小问</span>
                 </div>
                 <div class="lightbox-boxmode-actions">
+                    <button type="button" class="btn sm secondary active" id="lightbox-fullwidth-btn" onclick="toggleLightboxFullWidthSnap()" title="单栏试卷开启后，每次拉框松手自动左右打满到页边距">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12h16M4 6v12M20 6v12"></path></svg>
+                        <span>横向通栏: 开</span>
+                    </button>
                     <button type="button" class="btn sm secondary" id="lightbox-box-align-btn" onclick="alignCurrentPageBoxes()" disabled title="安全对齐同列框选边缘并统一相近行高（不会缩小原框或侵占相邻题）">
                         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="14" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>
                         <span>对齐规整</span>
@@ -740,7 +748,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261113-5';
+            const v = '20261113-6';
             document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
             document.write(`<script src="js/common.js?v=${v}"><\/script>`);
             document.write(`<script src="js/auth.js?v=${v}"><\/script>`);
