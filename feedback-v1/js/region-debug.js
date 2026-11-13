@@ -8,6 +8,7 @@
 
     const rgState = {
         initialized: false,
+        contextKey: '',
         activeTab: 'exercise',
         fullWidth: true,
         scale: 1.0,
@@ -510,6 +511,32 @@
             await loadHomeworkQuestionsForVariation();
         }
 
+        const newContextKey = [
+            getCurrentBankTypeSafe(),
+            typeof getSelectedYear === 'function' ? getSelectedYear() : '',
+            typeof getSelectedSeason === 'function' ? getSelectedSeason() : '',
+            subjectSelect.value,
+            gradeSelect.value,
+            tierSelect.value,
+            weekSelect.value
+        ].join('|');
+
+        if (rgState.contextKey && rgState.contextKey !== newContextKey) {
+            rgState.exercise = { file: null, pdfDoc: null, pageNum: 1, totalPages: 0, items: [] };
+            rgState.answer = { file: null, pdfDoc: null, pageNum: 1, totalPages: 0, items: [] };
+            rgState.selectedId = null;
+            rgState.continueTargetId = null;
+            rgState.subMode = null;
+            rgState.activeTab = 'exercise';
+            const exLbl = document.getElementById('rg-exercise-file-label');
+            const ansLbl = document.getElementById('rg-answer-file-label');
+            if (exLbl) exLbl.textContent = '上传题目原卷 PDF（单栏）';
+            if (ansLbl) ansLbl.textContent = '上传答案原卷 PDF（可选，独立框选）';
+            document.getElementById('rg-tab-exercise')?.classList.add('active');
+            document.getElementById('rg-tab-answer')?.classList.remove('active');
+        }
+        rgState.contextKey = newContextKey;
+
         const ctxEl = document.getElementById('rg-context-line');
         if (ctxEl) {
             const typeLabel = typeof getBankTypeLabel === 'function' ? getBankTypeLabel(getCurrentBankTypeSafe()) : getCurrentBankTypeSafe();
@@ -796,9 +823,9 @@
                     varSubCounter.set(primaryP, nextSub);
                     const matchedAns = ansByNum.get(String(primaryP)) || ansByNum.get(String(it.label || '').trim()) || null;
                     imported.push({
-                        id: `${primaryP}-${nextSub}`,
-                        parentNum: primaryP,
-                        parentNums: pNums,
+                        id: String(imported.length + 1),
+                        parentQuestionNum: primaryP,
+                        parentQuestionNums: pNums,
                         subNum: nextSub,
                         isVariation: true,
                         topic: '',
@@ -857,8 +884,13 @@
                 });
             });
 
+            if (bankType === 'variation' && typeof recalcVariationSubNums === 'function') {
+                recalcVariationSubNums(imported);
+            }
+
             currentQuestions = imported;
             batchImported = true;
+            window.rgImportedActive = true;
             isDirty = true;
             rgState.subMode = null;
             rgState.continueTargetId = null;

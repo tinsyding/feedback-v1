@@ -564,16 +564,22 @@ function goBack() {
     }
     // Step 4 回退到 Step 3 前检查是否有未保存修改
     if (currentStep === 4 && isDirty) {
+        const targetStep = window.rgImportedActive ? 'debug' : (currentStep - 1);
+        const backDesc = window.rgImportedActive ? '返回整卷框题工作台' : '返回上一步（标注题号）';
         showCustomDialog({
             title: '未保存的更改',
-            body: '当前题目与知识点配置尚未保存，确定要返回上一步（标注题号）吗？',
+            body: `当前题目与知识点配置尚未保存，确定要${backDesc}吗？`,
             confirmText: '返回上一步',
             danger: true,
             onConfirm: () => {
                 isDirty = false;
-                goToStep(currentStep - 1);
+                goToStep(targetStep);
             }
         });
+        return;
+    }
+    if (currentStep === 4 && window.rgImportedActive) {
+        goToStep('debug');
         return;
     }
     goToStep(currentStep - 1);
@@ -590,6 +596,7 @@ async function goToConfigStep() {
             onConfirm: async () => {
                 isDirty = false;
                 batchImported = false;
+                window.rgImportedActive = false;
                 await loadCurrentData();
                 goToStep(1);
             }
@@ -597,6 +604,7 @@ async function goToConfigStep() {
         return;
     }
     batchImported = false;
+    window.rgImportedActive = false;
     goToStep(1);
 }
 window.goToConfigStep = goToConfigStep;

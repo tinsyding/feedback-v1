@@ -245,7 +245,7 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                         $varParams[] = $season;
                         $varParams[] = $seasonMap[$season] ?? $season;
                     }
-                    $varSql = "SELECT `id`, `parent_question_num`, `parent_question_nums`, `sub_num`, `topic`, `exercise_pdf`, `answer_pdf`
+                    $varSql = "SELECT `id`, `parent_question_num`, `parent_question_nums`, `sub_num`, `topic`, `question_meta`, `exercise_pdf`, `answer_pdf`
                                FROM `qbank_questions`
                                WHERE " . implode(' AND ', $varWhereParts) . "
                                ORDER BY `parent_question_num` ASC, `sub_num` ASC, `id` ASC";
@@ -258,7 +258,7 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                         if ($season) {
                             $fallbackVarWhere[] = "(`season` = ? OR `season` = ?)";
                         }
-                        $fallbackVarSql = "SELECT `id`, `parent_question_num`, `sub_num`, `topic`, `exercise_pdf`, `answer_pdf`
+                        $fallbackVarSql = "SELECT `id`, `parent_question_num`, `sub_num`, `topic`, `question_meta`, `exercise_pdf`, `answer_pdf`
                                            FROM `qbank_questions`
                                            WHERE " . implode(' AND ', $fallbackVarWhere) . "
                                            ORDER BY `parent_question_num` ASC, `sub_num` ASC, `id` ASC";
