@@ -2143,10 +2143,11 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             const b = slice.box;
                             const pOff = Math.min(pageCount - 1, Math.max(0, parseInt(b.pageOffset, 10) || 0));
                             const srcPage = sourceDoc.getPage(pOff);
-                            const { width: origW, height: origH } = srcPage.getSize();
-                            const mediaBox = srcPage.getMediaBox();
+                            const viewBox = (typeof srcPage.getCropBox === 'function' ? srcPage.getCropBox() : null) || srcPage.getMediaBox();
+                            const origW = viewBox.width;
+                            const origH = viewBox.height;
 
-                            const padPt = 4;
+                            const padPt = 2;
                             const topPt = Math.max(0, b.y * origH - padPt);
                             const bottomPt = Math.min(origH, (b.y + b.h) * origH + padPt);
                             const effH = Math.max(18, bottomPt - topPt);
@@ -2303,10 +2304,11 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             const rg = sortedRegions[rIdx];
                             const pOff = Math.min(pageCount - 1, Math.max(0, parseInt(rg.pageOffset, 10) || 0));
                             const srcPage = sourceDoc.getPage(pOff);
-                            const { width: origW, height: origH } = srcPage.getSize();
-                            const mediaBox = srcPage.getMediaBox();
+                            const viewBox = (typeof srcPage.getCropBox === 'function' ? srcPage.getCropBox() : null) || srcPage.getMediaBox();
+                            const origW = viewBox.width;
+                            const origH = viewBox.height;
 
-                            const padPt = 4;
+                            const padPt = 2;
                             const leftPt = Math.max(0, (rg.x ?? 0) * origW);
                             const rightPt = Math.min(origW, ((rg.x ?? 0) + (rg.w ?? 1)) * origW);
                             const effW = Math.max(24, rightPt - leftPt);
@@ -2370,10 +2372,10 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             }
 
                             const embeddedSlice = await mergedPdf.embedPage(srcPage, {
-                                left: mediaBox.x + leftPt,
-                                bottom: mediaBox.y + (origH - bottomPt),
-                                right: mediaBox.x + rightPt,
-                                top: mediaBox.y + (origH - topPt)
+                                left: viewBox.x + leftPt,
+                                bottom: viewBox.y + (origH - bottomPt),
+                                right: viewBox.x + rightPt,
+                                top: viewBox.y + (origH - topPt)
                             });
 
                             const sliceBottomY = currentY - drawH;

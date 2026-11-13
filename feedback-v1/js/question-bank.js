@@ -4738,6 +4738,13 @@ function renderQuestionList() {
                         <span class="var-sub-badge">变式 ${subNum}</span>
                         ${previewBtnsHtml}
                     </div>
+                    ${(() => {
+                        if (!q.topic && Array.isArray(homeworkQuestionsForVariation) && homeworkQuestionsForVariation.length > 0) {
+                            const matchedHw = homeworkQuestionsForVariation.find(item => Number(item.id) === Number(primaryParentNum));
+                            if (matchedHw && matchedHw.topic) q.topic = String(matchedHw.topic).trim();
+                        }
+                        return '';
+                    })()}
                     <div class="var-topic-readonly" title="${escapeHtml(q.topic || '跟随原题自动同步')}">
                         <span class="var-topic-label">知识点：</span>
                         <span class="var-topic-text">${escapeHtml(q.topic || '跟随原题自动同步')}</span>
@@ -5757,9 +5764,10 @@ async function previewSlicedRegions(pdfUrl, regions, title, fallbackName) {
         for (const rg of sorted) {
             const pOff = Math.min(pageCount - 1, Math.max(0, parseInt(rg.pageOffset, 10) || 0));
             const srcPage = srcDoc.getPage(pOff);
-            const { width: origW, height: origH } = srcPage.getSize();
-            const mediaBox = srcPage.getMediaBox();
-            const padPt = 4;
+            const viewBox = (typeof srcPage.getCropBox === 'function' ? srcPage.getCropBox() : null) || srcPage.getMediaBox();
+            const origW = viewBox.width;
+            const origH = viewBox.height;
+            const padPt = 2;
             const leftPt = Math.max(0, (rg.x ?? 0) * origW);
             const rightPt = Math.min(origW, ((rg.x ?? 0) + (rg.w ?? 1)) * origW);
             const effW = Math.max(24, rightPt - leftPt);
@@ -5768,10 +5776,10 @@ async function previewSlicedRegions(pdfUrl, regions, title, fallbackName) {
             const effH = Math.max(18, bottomPt - topPt);
 
             const embedded = await outDoc.embedPage(srcPage, {
-                left: mediaBox.x + leftPt,
-                bottom: mediaBox.y + (origH - bottomPt),
-                right: mediaBox.x + rightPt,
-                top: mediaBox.y + (origH - topPt)
+                left: viewBox.x + leftPt,
+                bottom: viewBox.y + (origH - bottomPt),
+                right: viewBox.x + rightPt,
+                top: viewBox.y + (origH - topPt)
             });
             const page = outDoc.addPage([effW, effH]);
             page.drawPage(embedded, { x: 0, y: 0, width: effW, height: effH });

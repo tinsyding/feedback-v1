@@ -1095,6 +1095,9 @@
                     const nextSub = (varSubCounter.get(primaryP) || 0) + 1;
                     varSubCounter.set(primaryP, nextSub);
                     const matchedAns = ansByNum.get(String(primaryP)) || ansByNum.get(String(it.label || '').trim()) || null;
+                    const hwQ = (Array.isArray(homeworkQuestionsForVariation) ? homeworkQuestionsForVariation : [])
+                        .find(item => Number(item.id) === Number(primaryP));
+                    const inheritedTopic = (hwQ && hwQ.topic) ? String(hwQ.topic).trim() : '';
                     const itemAnsThumb = matchedAns && ansPdfObj
                         ? ((await generateRegionCropThumb(rgState.answer.pdfDoc, matchedAns.regions[0], ansPageCache)) || ansPdfObj.thumb)
                         : null;
@@ -1104,7 +1107,7 @@
                         parentQuestionNums: pNums,
                         subNum: nextSub,
                         isVariation: true,
-                        topic: '',
+                        topic: inheritedTopic,
                         videoUrl: '',
                         exercisePdf: { ...exPdfObj, thumb: itemExThumb },
                         answerPdf: matchedAns && ansPdfObj ? { ...ansPdfObj, thumb: itemAnsThumb } : null,
