@@ -2217,10 +2217,10 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             }
 
                             const embeddedSlice = await mergedPdf.embedPage(srcPage, {
-                                left: mediaBox.x,
-                                bottom: mediaBox.y + (origH - bottomPt),
-                                right: mediaBox.x + origW,
-                                top: mediaBox.y + (origH - topPt)
+                                left: viewBox.x,
+                                bottom: viewBox.y + (origH - bottomPt),
+                                right: viewBox.x + origW,
+                                top: viewBox.y + (origH - topPt)
                             });
 
                             const sliceBottomY = currentY - drawH;
