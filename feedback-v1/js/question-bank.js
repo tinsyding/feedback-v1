@@ -5422,8 +5422,15 @@ function renderPdfBtn(q, index, type) {
         ? `<img class="q-pdf-mini-thumb" src="${data.thumb}" alt="${label}缩略图" onmouseenter="showHoverPopover(event, '${escapeHtml(data.thumb)}', '${label} · 第 ${q.id} 题')" onmouseleave="hideHoverPopover()">`
         : `<span class="q-pdf-mini-thumb" style="display:flex;align-items:center;justify-content:center;background:var(--bg-secondary);"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg></span>`;
 
+    const hasRegionCrop = q && q.questionMeta && q.questionMeta.mode === 'region_crop' &&
+        Array.isArray(type === 'answer' ? q.questionMeta.answerRegions : q.questionMeta.regions) &&
+        (type === 'answer' ? q.questionMeta.answerRegions : q.questionMeta.regions).length > 0;
+    const clickHandler = hasRegionCrop
+        ? `previewRegionCropQuestion(${index}, '${type}')`
+        : `previewPdf('${escapeHtml(data.url)}', '${escapeHtml(data.name || label + ' PDF')}')`;
+
     return `
-        <div class="q-pdf-thumb-card" onclick="previewPdf('${escapeHtml(data.url)}', '${escapeHtml(data.name || label + ' PDF')}')" title="点击全屏预览${label} PDF">
+        <div class="q-pdf-thumb-card" onclick="${clickHandler}" title="点击全屏预览${label} PDF">
             ${thumbImg}
             <div class="q-pdf-info">
                 <span class="q-pdf-tag-title">${label}</span>
@@ -5673,7 +5680,74 @@ function closePdfPreview() {
     const frame = document.getElementById('pdf-preview-frame');
     if (dialog) dialog.classList.remove('active');
     if (frame) frame.src = '';
+    if (pdfPreviewUrl && pdfPreviewUrl.startsWith('blob:')) {
+        try { URL.revokeObjectURL(pdfPreviewUrl); } catch (_) {}
+    }
     pdfPreviewUrl = '';
+}
+
+const regionPreviewBytesCache = new Map();
+
+async function previewRegionCropQuestion(index, type) {
+    const q = currentQuestions[index];
+    if (!q) return;
+    const data = type === 'answer' ? q.answerPdf : q.exercisePdf;
+    if (!data || !data.url) {
+        showToast('暂无可预览的 PDF');
+        return;
+    }
+    const regions = (q.questionMeta && q.questionMeta.mode === 'region_crop')
+        ? (type === 'answer' ? q.questionMeta.answerRegions : q.questionMeta.regions)
+        : null;
+    if (!Array.isArray(regions) || regions.length === 0 || !window.PDFLib) {
+        previewPdf(data.url, data.name || 'PDF 预览');
+        return;
+    }
+
+    try {
+        let pdfBytes = regionPreviewBytesCache.get(data.url);
+        if (!pdfBytes) {
+            const res = await fetch(data.url, { credentials: 'same-origin' });
+            if (!res.ok) throw new Error('PDF 加载失败');
+            pdfBytes = await res.arrayBuffer();
+            regionPreviewBytesCache.set(data.url, pdfBytes);
+        }
+        const srcDoc = await PDFLib.PDFDocument.load(pdfBytes);
+        const outDoc = await PDFLib.PDFDocument.create();
+        const pageCount = srcDoc.getPageCount();
+        const sorted = [...regions].sort((a, b) => (a.pageOffset || 0) - (b.pageOffset || 0) || (a.y || 0) - (b.y || 0));
+
+        for (const rg of sorted) {
+            const pOff = Math.min(pageCount - 1, Math.max(0, parseInt(rg.pageOffset, 10) || 0));
+            const srcPage = srcDoc.getPage(pOff);
+            const { width: origW, height: origH } = srcPage.getSize();
+            const mediaBox = srcPage.getMediaBox();
+            const padPt = 4;
+            const leftPt = Math.max(0, (rg.x ?? 0) * origW);
+            const rightPt = Math.min(origW, ((rg.x ?? 0) + (rg.w ?? 1)) * origW);
+            const effW = Math.max(24, rightPt - leftPt);
+            const topPt = Math.max(0, (rg.y ?? 0) * origH - padPt);
+            const bottomPt = Math.min(origH, ((rg.y ?? 0) + (rg.h ?? 1)) * origH + padPt);
+            const effH = Math.max(18, bottomPt - topPt);
+
+            const embedded = await outDoc.embedPage(srcPage, {
+                left: mediaBox.x + leftPt,
+                bottom: mediaBox.y + (origH - bottomPt),
+                right: mediaBox.x + rightPt,
+                top: mediaBox.y + (origH - topPt)
+            });
+            const page = outDoc.addPage([effW, effH]);
+            page.drawPage(embedded, { x: 0, y: 0, width: effW, height: effH });
+        }
+
+        const outBytes = await outDoc.save();
+        const blobUrl = URL.createObjectURL(new Blob([outBytes], { type: 'application/pdf' }));
+        const label = type === 'answer' ? '答案' : '题目';
+        previewPdf(blobUrl, `${label} · 第 ${q.id} 题（框选切片）`);
+    } catch (err) {
+        console.error('Region crop preview failed:', err);
+        previewPdf(data.url, data.name || 'PDF 预览');
+    }
 }
 
 function openPdfInNewTab() {

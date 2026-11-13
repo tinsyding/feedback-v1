@@ -834,6 +834,40 @@
         renderAllRg();
     };
 
+    async function generateRegionCropThumb(pdfDoc, region, pageCanvasCache) {
+        if (!pdfDoc || !region) return null;
+        try {
+            const pageNum = Math.min(pdfDoc.numPages, Math.max(1, (parseInt(region.pageOffset, 10) || 0) + 1));
+            let srcCanvas = pageCanvasCache.get(pageNum);
+            if (!srcCanvas) {
+                const page = await pdfDoc.getPage(pageNum);
+                const viewport = page.getViewport({ scale: 1.0 });
+                srcCanvas = document.createElement('canvas');
+                srcCanvas.width = Math.round(viewport.width);
+                srcCanvas.height = Math.round(viewport.height);
+                const ctx = srcCanvas.getContext('2d');
+                await page.render({ canvasContext: ctx, viewport }).promise;
+                pageCanvasCache.set(pageNum, srcCanvas);
+            }
+            const sx = Math.max(0, Math.floor((region.x ?? 0) * srcCanvas.width));
+            const sy = Math.max(0, Math.floor((region.y ?? 0) * srcCanvas.height));
+            const sw = Math.max(12, Math.min(srcCanvas.width - sx, Math.ceil((region.w ?? 1) * srcCanvas.width)));
+            const sh = Math.max(12, Math.min(srcCanvas.height - sy, Math.ceil((region.h ?? 1) * srcCanvas.height)));
+            const out = document.createElement('canvas');
+            const targetW = Math.min(480, sw);
+            const scale = targetW / sw;
+            out.width = targetW;
+            out.height = Math.max(12, Math.round(sh * scale));
+            const octx = out.getContext('2d');
+            octx.fillStyle = '#ffffff';
+            octx.fillRect(0, 0, out.width, out.height);
+            octx.drawImage(srcCanvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
+            return out.toDataURL('image/jpeg', 0.82);
+        } catch (err) {
+            return null;
+        }
+    }
+
     window.rgFinishAndImport = async function () {
         const exItems = rgState.exercise.items;
         if (!rgState.exercise.file || exItems.length === 0) {
@@ -908,16 +942,24 @@
                 }
             });
 
+            const exPageCache = new Map();
+            const ansPageCache = new Map();
+
             const imported = [];
             const varSubCounter = new Map();
 
-            exItems.forEach((it) => {
+            for (const it of exItems) {
+                const itemExThumb = (await generateRegionCropThumb(rgState.exercise.pdfDoc, it.regions[0], exPageCache)) || exPdfObj.thumb;
+
                 if (bankType === 'variation') {
                     const pNums = [...it.parentNums].sort((a, b) => a - b);
                     const primaryP = pNums[0];
                     const nextSub = (varSubCounter.get(primaryP) || 0) + 1;
                     varSubCounter.set(primaryP, nextSub);
                     const matchedAns = ansByNum.get(String(primaryP)) || ansByNum.get(String(it.label || '').trim()) || null;
+                    const itemAnsThumb = matchedAns && ansPdfObj
+                        ? ((await generateRegionCropThumb(rgState.answer.pdfDoc, matchedAns.regions[0], ansPageCache)) || ansPdfObj.thumb)
+                        : null;
                     imported.push({
                         id: String(imported.length + 1),
                         parentQuestionNum: primaryP,
@@ -926,8 +968,8 @@
                         isVariation: true,
                         topic: '',
                         videoUrl: '',
-                        exercisePdf: { ...exPdfObj },
-                        answerPdf: matchedAns && ansPdfObj ? { ...ansPdfObj } : null,
+                        exercisePdf: { ...exPdfObj, thumb: itemExThumb },
+                        answerPdf: matchedAns && ansPdfObj ? { ...ansPdfObj, thumb: itemAnsThumb } : null,
                         questionMeta: {
                             mode: 'region_crop',
                             regions: it.regions,
@@ -935,21 +977,26 @@
                             stemBoxes: it.isBig ? (it.stemBoxes || []) : []
                         }
                     });
-                    return;
+                    continue;
                 }
 
                 if (it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
                     const groupNums = it.subqBoxes.map(sb => parseInt(sb.num, 10)).filter(n => !isNaN(n)).sort((a, b) => a - b);
-                    it.subqBoxes.forEach((sb) => {
+                    for (const sb of it.subqBoxes) {
                         const qKey = String(sb.num).trim();
                         const matchedAns = ansByNum.get(qKey) || ansByNum.get(String(it.label || '').trim()) || null;
                         const matchedAnsSub = ansSubByNum.get(qKey) || null;
+                        const subExThumb = (await generateRegionCropThumb(rgState.exercise.pdfDoc, sb, exPageCache)) || itemExThumb;
+                        const subAnsRegion = matchedAnsSub || (matchedAns && matchedAns.regions ? matchedAns.regions[0] : null);
+                        const itemAnsThumb = matchedAns && ansPdfObj
+                            ? ((await generateRegionCropThumb(rgState.answer.pdfDoc, subAnsRegion, ansPageCache)) || ansPdfObj.thumb)
+                            : null;
                         imported.push({
                             id: qKey,
                             topic: '',
                             videoUrl: '',
-                            exercisePdf: { ...exPdfObj },
-                            answerPdf: matchedAns && ansPdfObj ? { ...ansPdfObj } : null,
+                            exercisePdf: { ...exPdfObj, thumb: subExThumb },
+                            answerPdf: matchedAns && ansPdfObj ? { ...ansPdfObj, thumb: itemAnsThumb } : null,
                             questionMeta: {
                                 mode: 'region_crop',
                                 groupNums,
@@ -960,25 +1007,28 @@
                                 answerRegions: matchedAns ? matchedAns.regions : []
                             }
                         });
-                    });
-                    return;
+                    }
+                    continue;
                 }
 
                 const qKey = String(it.label || '').trim();
                 const matchedAns = ansByNum.get(qKey) || null;
+                const itemAnsThumb = matchedAns && ansPdfObj
+                    ? ((await generateRegionCropThumb(rgState.answer.pdfDoc, matchedAns.regions[0], ansPageCache)) || ansPdfObj.thumb)
+                    : null;
                 imported.push({
                     id: qKey,
                     topic: '',
                     videoUrl: '',
-                    exercisePdf: { ...exPdfObj },
-                    answerPdf: matchedAns && ansPdfObj ? { ...ansPdfObj } : null,
+                    exercisePdf: { ...exPdfObj, thumb: itemExThumb },
+                    answerPdf: matchedAns && ansPdfObj ? { ...ansPdfObj, thumb: itemAnsThumb } : null,
                     questionMeta: {
                         mode: 'region_crop',
                         regions: it.regions,
                         answerRegions: matchedAns ? matchedAns.regions : []
                     }
                 });
-            });
+            }
 
             if (bankType === 'variation' && typeof recalcVariationSubNums === 'function') {
                 recalcVariationSubNums(imported);

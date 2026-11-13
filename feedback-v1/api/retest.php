@@ -209,7 +209,8 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
             foreach ($allWeekRows as $wr) {
                 $qn = intval($wr['question_num']);
                 $exU = trim($wr['exercise_pdf'] ?? '');
-                if ($exU !== '' && $qn > 0) {
+                $wrMeta = parseRetestQuestionMeta($wr['question_meta'] ?? null, $qn);
+                if ($exU !== '' && $qn > 0 && ($wrMeta['mode'] ?? null) !== 'region_crop') {
                     if (!isset($pdfSharedNumsMap[$exU])) $pdfSharedNumsMap[$exU] = [];
                     $pdfSharedNumsMap[$exU][] = $qn;
                 }
@@ -307,9 +308,12 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                         $r = $rowMap[$qNum];
                         $exerciseUrl = $r['exercise_pdf'] ?: null;
                         $metaParsed = parseRetestQuestionMeta($r['question_meta'] ?? null, $qNum);
+                        $curMode = $metaParsed['mode'] ?? null;
                         $inferredGroup = !empty($metaParsed['groupNums'])
                             ? $metaParsed['groupNums']
-                            : ($exerciseUrl && !empty($pdfSharedNumsMap[$exerciseUrl]) ? $pdfSharedNumsMap[$exerciseUrl] : [$qNum]);
+                            : (($curMode !== 'region_crop' && $exerciseUrl && !empty($pdfSharedNumsMap[$exerciseUrl]))
+                                ? $pdfSharedNumsMap[$exerciseUrl]
+                                : [$qNum]);
                         sort($inferredGroup);
                         $curTopic = trim($r['topic'] ?? '');
 
@@ -500,7 +504,8 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
         foreach ($foundEntry['questions'] as $jq) {
             $jExUrl = $jq['exercisePdf']['url'] ?? '';
             $jIds = array_filter(array_map('intval', explode(',', str_replace(['，', '、'], ',', (string)($jq['id'] ?? '')))));
-            if ($jExUrl !== '' && !empty($jIds)) {
+            $jqMeta = parseRetestQuestionMeta($jq['questionMeta'] ?? ($jq['question_meta'] ?? null), $jIds[0] ?? 0);
+            if ($jExUrl !== '' && !empty($jIds) && ($jqMeta['mode'] ?? null) !== 'region_crop') {
                 if (!isset($jsonSharedMap[$jExUrl])) $jsonSharedMap[$jExUrl] = [];
                 $jsonSharedMap[$jExUrl] = array_values(array_unique(array_merge($jsonSharedMap[$jExUrl], $jIds)));
                 sort($jsonSharedMap[$jExUrl]);
@@ -513,9 +518,12 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                 if (in_array((string)$errNum, $ids)) {
                     $exerciseUrl = $q['exercisePdf']['url'] ?? null;
                     $metaParsed = parseRetestQuestionMeta($q['questionMeta'] ?? ($q['question_meta'] ?? null), $qNum);
+                    $curMode = $metaParsed['mode'] ?? null;
                     $inferredGroup = !empty($metaParsed['groupNums'])
                         ? $metaParsed['groupNums']
-                        : ($exerciseUrl && !empty($jsonSharedMap[$exerciseUrl]) ? $jsonSharedMap[$exerciseUrl] : array_map('intval', $ids));
+                        : (($curMode !== 'region_crop' && $exerciseUrl && !empty($jsonSharedMap[$exerciseUrl]))
+                            ? $jsonSharedMap[$exerciseUrl]
+                            : array_map('intval', $ids));
                     sort($inferredGroup);
                     $curTopic = trim($q['topic'] ?? '');
 
