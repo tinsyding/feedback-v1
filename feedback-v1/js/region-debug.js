@@ -96,7 +96,10 @@
         const bankType = getCurrentBankTypeSafe();
         if (bankType === 'variation' && tab === 'exercise') {
             if (Array.isArray(it.parentNums) && it.parentNums.length > 0) {
-                return '原题' + it.parentNums.join('、') + ' · 举一反三';
+                const compact = typeof formatCompactNumList === 'function'
+                    ? formatCompactNumList(it.parentNums)
+                    : it.parentNums.join('、');
+                return '原题' + compact + ' · 举一反三';
             }
             return '举一反三（未选原题）';
         }
@@ -538,7 +541,7 @@
                     ${(bankType === 'variation' && tab === 'exercise') ? `<div class="rg-card-meta">${escapeHtmlRg(pages)}${escapeHtmlRg(bigSummary)}</div>` : ''}
                     <div class="rg-card-actions" onclick="event.stopPropagation()">
                         <button type="button" class="btn sm secondary" onclick="rgStartContinue('${it.id}')">+ 跨页续框</button>
-                        <button type="button" class="btn sm secondary" onclick="rgEnterSubMode('${it.id}')">${it.isBig ? '继续细分大题' : '设为大题'}</button>
+                        ${bankType === 'variation' ? '' : `<button type="button" class="btn sm secondary" onclick="rgEnterSubMode('${it.id}')">${it.isBig ? '继续细分大题' : '设为大题'}</button>`}
                         <button type="button" class="btn sm secondary" onclick="rgDeleteItem('${it.id}')">删除</button>
                     </div>
                 </div>

@@ -807,15 +807,70 @@ async function loadHomeworkQuestionsForVariation() {
     }
 }
 
-function getConsolidationBuckets() {
-    if (homeworkQuestionsForVariation && homeworkQuestionsForVariation.length > 0) {
-        return homeworkQuestionsForVariation.map((q, idx) => ({
-            parentNum: parseInt(q.id || (idx + 1), 10),
-            topic: (q.topic || '').trim(),
-            exercisePdf: q.exercisePdf || null
-        }));
+function formatCompactNumList(nums) {
+    const arr = Array.from(new Set((nums || []).map(n => parseInt(n, 10)).filter(n => n > 0))).sort((a, b) => a - b);
+    if (arr.length === 0) return '';
+    if (arr.length === 1) return String(arr[0]);
+    const parts = [];
+    let start = arr[0];
+    let prev = arr[0];
+    for (let i = 1; i < arr.length; i++) {
+        if (arr[i] === prev + 1) {
+            prev = arr[i];
+        } else {
+            parts.push(start === prev ? String(start) : (prev - start >= 2 ? `${start}~${prev}` : `${start}、${prev}`));
+            start = prev = arr[i];
+        }
     }
-    return [];
+    parts.push(start === prev ? String(start) : (prev - start >= 2 ? `${start}~${prev}` : `${start}、${prev}`));
+    return parts.join('、');
+}
+
+function getConsolidationBuckets() {
+    if (!Array.isArray(homeworkQuestionsForVariation) || homeworkQuestionsForVariation.length === 0) {
+        return [];
+    }
+    const bucketMap = new Map();
+    const order = [];
+    homeworkQuestionsForVariation.forEach((q, idx) => {
+        const qNum = parseInt(q.id || (idx + 1), 10);
+        if (!qNum || qNum <= 0) return;
+        const meta = q.questionMeta || null;
+        let key = `single:${qNum}`;
+        let groupNums = [qNum];
+
+        if (meta && Array.isArray(meta.groupNums) && meta.groupNums.length > 1) {
+            groupNums = Array.from(new Set(meta.groupNums.map(n => parseInt(n, 10)).filter(n => n > 0))).sort((a, b) => a - b);
+            key = `group:${groupNums.join(',')}`;
+        } else if ((!meta || meta.mode !== 'region_crop') && q.exercisePdf && q.exercisePdf.url) {
+            key = `url:${q.exercisePdf.url}`;
+        }
+
+        if (!bucketMap.has(key)) {
+            const b = {
+                parentNum: groupNums[0],
+                nums: [...groupNums],
+                topic: (q.topic || '').trim(),
+                exercisePdf: q.exercisePdf || null
+            };
+            bucketMap.set(key, b);
+            order.push(b);
+        } else {
+            const existing = bucketMap.get(key);
+            if (!existing.nums.includes(qNum)) {
+                existing.nums.push(qNum);
+                existing.nums.sort((a, b) => a - b);
+                existing.parentNum = existing.nums[0];
+            }
+            if (!existing.topic && q.topic) existing.topic = String(q.topic).trim();
+            if (!existing.exercisePdf && q.exercisePdf) existing.exercisePdf = q.exercisePdf;
+        }
+    });
+
+    return order.map(b => ({
+        ...b,
+        label: b.nums.length > 1 ? `第${formatCompactNumList(b.nums)}题` : `第${b.parentNum}题`
+    }));
 }
 const getVariationBucketList = getConsolidationBuckets;
 
@@ -848,21 +903,27 @@ function onVariationParentChange(index, parentNum) {
         ? [...q.parentQuestionNums]
         : [parseInt(q.parentQuestionNum || 1, 10)];
 
+    const bucket = getConsolidationBuckets().find(b => (b.nums || [b.parentNum]).includes(pNum));
+    const bucketNums = bucket && Array.isArray(bucket.nums) && bucket.nums.length > 0 ? bucket.nums : [pNum];
     const hwQ = (homeworkQuestionsForVariation || []).find(item => Number(item.id) === pNum);
     const cleanTopicStr = t => String(t || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
     const isSameTopic = hwQ && cleanTopicStr(hwQ.topic) === cleanTopicStr(q.topic);
 
-    if (pNums.includes(pNum)) {
-        if (pNums.length > 1) {
-            pNums = pNums.filter(n => n !== pNum);
+    const allSelected = bucketNums.every(n => pNums.includes(n));
+    if (allSelected) {
+        const remaining = pNums.filter(n => !bucketNums.includes(n));
+        if (remaining.length > 0) {
+            pNums = remaining;
         } else {
             return;
         }
     } else {
         if (isSameTopic && q.topic) {
-            pNums.push(pNum);
+            bucketNums.forEach(n => {
+                if (!pNums.includes(n)) pNums.push(n);
+            });
         } else {
-            pNums = [pNum];
+            pNums = [...bucketNums];
             if (hwQ && hwQ.topic) {
                 q.topic = hwQ.topic.trim();
             }
@@ -4679,8 +4740,8 @@ function renderQuestionList() {
             : [parseInt(q.parentQuestionNum || q.id, 10) || 1];
         const primaryParentNum = parentNums[0] || 1;
         const subNum = parseInt(q.subNum, 10) || 1;
-        const parentNumsLabel = parentNums.join('、');
-        const badgeLabel = parentNums.length > 1 ? `${parentNums.join('+')}-${subNum}` : `${primaryParentNum}-${subNum}`;
+        const parentNumsLabel = formatCompactNumList(parentNums);
+        const badgeLabel = parentNums.length > 1 ? `${parentNumsLabel}-${subNum}` : `${primaryParentNum}-${subNum}`;
 
         if (isVariationBank) {
             item.classList.add('variation-item');
@@ -4757,17 +4818,17 @@ function renderQuestionList() {
                     <span class="var-selector-label">选择原题：</span>
                     <div class="variation-parent-pills">
                         ${variationBuckets.map(b => {
-                            const isSelected = parentNums.includes(Number(b.parentNum));
+                            const bNums = Array.isArray(b.nums) && b.nums.length > 0 ? b.nums : [Number(b.parentNum)];
+                            const isSelected = bNums.every(n => parentNums.includes(n));
                             const isSameTopic = curTopicClean && cleanTopicStr(b.topic) === curTopicClean;
                             const cls = ['var-parent-pill'];
                             if (isSelected) cls.push('active');
                             else if (isSameTopic) cls.push('same-topic-hint');
+                            const bLabel = b.label || ('第' + b.parentNum + '题');
                             return `<button type="button" class="${cls.join(' ')}"
                                 onclick="onVariationParentChange(${originalIndex}, ${b.parentNum})"
-                                onmouseenter="onHoverHomeworkPreview(event, ${b.parentNum})"
-                                onmouseleave="hideHoverPopover()"
-                                title="关联课后第 ${b.parentNum} 题${b.topic ? '：' + escapeHtml(b.topic) : ''}${isSameTopic ? ' (同知识点)' : ''}"
-                                ${isAssistant ? 'disabled' : ''}>第${b.parentNum}题</button>`;
+                                title="关联课后 ${escapeHtml(bLabel)}${b.topic ? '：' + escapeHtml(b.topic) : ''}${isSameTopic ? ' (同知识点)' : ''}"
+                                ${isAssistant ? 'disabled' : ''}>${escapeHtml(bLabel)}</button>`;
                         }).join('')}
                         ${mergePillHtml}
                     </div>
