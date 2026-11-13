@@ -953,17 +953,8 @@ function mergeAllSameTopicVariations() {
 window.mergeAllSameTopicVariations = mergeAllSameTopicVariations;
 window.onVariationParentChange = onVariationParentChange;
 
-async function onHoverHomeworkPreview(event, parentNum) {
-    const hwQ = (homeworkQuestionsForVariation || []).find(item => Number(item.id) === Number(parentNum));
-    if (!hwQ || !hwQ.exercisePdf) return;
-    const title = `课后第 ${parentNum} 题${hwQ.topic ? ' · ' + hwQ.topic : ''}`;
-    if (hwQ.exercisePdf.thumb) {
-        showHoverPopover(event, hwQ.exercisePdf.thumb, title);
-    } else if (hwQ.exercisePdf.url) {
-        const cropBox = getRegionCropThumbBox(hwQ, 'exercise');
-        const thumb = await ensurePdfThumbnail(hwQ.exercisePdf, cropBox);
-        if (thumb) showHoverPopover(event, thumb, title);
-    }
+async function onHoverHomeworkPreview() {
+    // 已关闭悬停预览，点击可直接打开查看
 }
 window.onHoverHomeworkPreview = onHoverHomeworkPreview;
 
@@ -5480,7 +5471,7 @@ function renderPdfBtn(q, index, type) {
 
     // Uploaded: Has thumbnail preview
     const thumbImg = data.thumb 
-        ? `<img class="q-pdf-mini-thumb" src="${data.thumb}" alt="${label}缩略图" onmouseenter="showHoverPopover(event, '${escapeHtml(data.thumb)}', '${label} · 第 ${q.id} 题')" onmouseleave="hideHoverPopover()">`
+        ? `<img class="q-pdf-mini-thumb" src="${data.thumb}" alt="${label}缩略图">`
         : `<span class="q-pdf-mini-thumb" style="display:flex;align-items:center;justify-content:center;background:var(--bg-secondary);"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg></span>`;
 
     const hasRegionCrop = q && q.questionMeta && q.questionMeta.mode === 'region_crop' &&
@@ -5504,26 +5495,10 @@ function renderPdfBtn(q, index, type) {
     `;
 }
 
-function showHoverPopover(e, thumbUrl, title) {
+function showHoverPopover() {
+    // 已关闭悬停预览，点击卡片直接打开预览
     const popover = document.getElementById('quick-hover-popover');
-    if (!popover || !thumbUrl) return;
-    const img = document.getElementById('popover-img');
-    const titleEl = document.getElementById('popover-title');
-    if (img) img.src = thumbUrl;
-    if (titleEl) titleEl.textContent = title || '预览';
-
-    const rect = e.target.getBoundingClientRect();
-    let top = rect.bottom + 8;
-    let left = rect.left;
-    if (top + 420 > window.innerHeight) {
-        top = Math.max(10, rect.top - 400);
-    }
-    if (left + 330 > window.innerWidth) {
-        left = window.innerWidth - 340;
-    }
-    popover.style.top = `${top}px`;
-    popover.style.left = `${left}px`;
-    popover.classList.add('active');
+    if (popover) popover.classList.remove('active');
 }
 
 function hideHoverPopover() {
