@@ -97,27 +97,33 @@ function sanitizeQuestionMeta($rawMeta) {
         }
     }
 
-    if (!empty($rawMeta['stemBoxes']) && is_array($rawMeta['stemBoxes'])) {
-        $cleanStems = [];
-        foreach ($rawMeta['stemBoxes'] as $sb) {
-            if (!is_array($sb)) continue;
-            $x = isset($sb['x']) ? max(0.0, min(1.0, round(floatval($sb['x']), 4))) : null;
-            $y = isset($sb['y']) ? max(0.0, min(1.0, round(floatval($sb['y']), 4))) : null;
-            $w = isset($sb['w']) ? max(0.005, min(1.0, round(floatval($sb['w']), 4))) : null;
-            $h = isset($sb['h']) ? max(0.005, min(1.0, round(floatval($sb['h']), 4))) : null;
-            $pageOffset = isset($sb['pageOffset']) ? max(0, intval($sb['pageOffset'])) : 0;
-            if ($x !== null && $y !== null && $w !== null && $h !== null) {
-                $cleanStems[] = [
-                    'pageOffset' => $pageOffset,
-                    'x' => $x,
-                    'y' => $y,
-                    'w' => $w,
-                    'h' => $h
-                ];
+    if (!empty($rawMeta['mode']) && $rawMeta['mode'] === 'region_crop') {
+        $clean['mode'] = 'region_crop';
+    }
+
+    foreach (['stemBoxes', 'regions', 'answerRegions'] as $arrKey) {
+        if (!empty($rawMeta[$arrKey]) && is_array($rawMeta[$arrKey])) {
+            $cleanList = [];
+            foreach ($rawMeta[$arrKey] as $sb) {
+                if (!is_array($sb)) continue;
+                $x = isset($sb['x']) ? max(0.0, min(1.0, round(floatval($sb['x']), 4))) : null;
+                $y = isset($sb['y']) ? max(0.0, min(1.0, round(floatval($sb['y']), 4))) : null;
+                $w = isset($sb['w']) ? max(0.005, min(1.0, round(floatval($sb['w']), 4))) : null;
+                $h = isset($sb['h']) ? max(0.005, min(1.0, round(floatval($sb['h']), 4))) : null;
+                $pageOffset = isset($sb['pageOffset']) ? max(0, intval($sb['pageOffset'])) : 0;
+                if ($x !== null && $y !== null && $w !== null && $h !== null) {
+                    $cleanList[] = [
+                        'pageOffset' => $pageOffset,
+                        'x' => $x,
+                        'y' => $y,
+                        'w' => $w,
+                        'h' => $h
+                    ];
+                }
             }
-        }
-        if (!empty($cleanStems)) {
-            $clean['stemBoxes'] = $cleanStems;
+            if (!empty($cleanList)) {
+                $clean[$arrKey] = $cleanList;
+            }
         }
     }
 

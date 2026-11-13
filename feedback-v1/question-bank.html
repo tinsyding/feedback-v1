@@ -12,7 +12,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261113-6';
+            const v = '20261113-7';
             document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/question-bank.css?v=${v}">`);
@@ -193,7 +193,10 @@
 
                     <div class="qb-step-nav" style="grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
                         <span style="font-size: 0.85rem; color: var(--text-secondary);">若需上传新错题本，选好上方分类后点击下一步：</span>
-                        <button class="btn primary" onclick="goNextFromStep1()">录入新错题本 / 下一步</button>
+                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                            <button type="button" class="btn secondary" onclick="openRegionDebugStudio()" title="免切题分页，直接上传原卷 PDF 逐题拉框标注（支持单题/大题/预习跳题/举一反三）">Debug · 整卷框题</button>
+                            <button class="btn primary" onclick="goNextFromStep1()">录入新错题本 / 下一步</button>
+                        </div>
                     </div>
 
                     <!-- Saved data overview directly in Step 1 -->
@@ -592,6 +595,109 @@
                     </div>
                 </div>
             </section>
+
+            <!-- Debug: Whole-Paper Region-Crop Studio (免切题整卷框题) -->
+            <section id="step-debug" class="step-panel">
+                <div class="step-card rg-studio-card">
+                    <div class="rg-studio-topbar">
+                        <div class="rg-studio-title-group">
+                            <button type="button" class="btn sm secondary" onclick="exitRegionDebugStudio()" title="返回第 1 步配置">
+                                ← 返回首页
+                            </button>
+                            <div>
+                                <h2 class="step-heading" style="margin: 0;">整卷框题工作台 <span class="rg-beta-pill">Debug</span></h2>
+                                <div class="rg-context-line" id="rg-context-line">未选择分类</div>
+                            </div>
+                        </div>
+                        <div class="rg-studio-top-actions">
+                            <div class="rg-tab-switch" role="tablist">
+                                <button type="button" class="rg-tab-btn active" id="rg-tab-exercise" onclick="rgSwitchTab('exercise')">题目原卷</button>
+                                <button type="button" class="rg-tab-btn" id="rg-tab-answer" onclick="rgSwitchTab('answer')">答案原卷</button>
+                            </div>
+                            <button type="button" class="btn primary" id="rg-finish-btn" onclick="rgFinishAndImport()" disabled>
+                                完成框选并导入第 4 步 →
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="rg-upload-strip" id="rg-upload-strip">
+                        <label class="rg-upload-chip" for="rg-exercise-file">
+                            <span class="rg-upload-dot exercise"></span>
+                            <span id="rg-exercise-file-label">上传题目原卷 PDF（单栏）</span>
+                            <input type="file" id="rg-exercise-file" accept=".pdf,application/pdf" hidden onchange="rgHandlePdfUpload('exercise', this)">
+                        </label>
+                        <label class="rg-upload-chip" for="rg-answer-file">
+                            <span class="rg-upload-dot answer"></span>
+                            <span id="rg-answer-file-label">上传答案原卷 PDF（可选，独立框选）</span>
+                            <input type="file" id="rg-answer-file" accept=".pdf,application/pdf" hidden onchange="rgHandlePdfUpload('answer', this)">
+                        </label>
+                        <label class="rg-snap-toggle">
+                            <input type="checkbox" id="rg-fullwidth-toggle" checked onchange="rgToggleFullWidth(this.checked)">
+                            <span>横向自动打满（单栏）</span>
+                        </label>
+                    </div>
+
+                    <!-- 大题内部细分工具栏（点击某框的“设为大题”后激活） -->
+                    <div class="rg-submode-bar" id="rg-submode-bar" style="display: none;">
+                        <div class="rg-submode-left">
+                            <span class="rg-submode-badge" id="rg-submode-badge">大题细分模式</span>
+                            <div class="rg-subtarget-switch" id="rg-subtarget-switch">
+                                <button type="button" class="rg-subtarget-btn active" id="rg-subtarget-stem" onclick="rgSetSubDrawTarget('stem')">1. 框选原文/公共题干</button>
+                                <button type="button" class="rg-subtarget-btn" id="rg-subtarget-subq" onclick="rgSetSubDrawTarget('subq')">2. 框选小问</button>
+                            </div>
+                            <span class="rg-submode-hint" id="rg-submode-hint">先用绿框框出公共原文，再切换到“框选小问”框出各小题</span>
+                        </div>
+                        <div class="rg-submode-actions">
+                            <button type="button" class="btn sm secondary" onclick="rgUndoSubBox()">撤销小框</button>
+                            <button type="button" class="btn sm primary" onclick="rgExitSubMode()">完成大题细分</button>
+                        </div>
+                    </div>
+
+                    <div class="rg-workspace">
+                        <!-- 左侧：PDF 整卷画布 -->
+                        <div class="rg-canvas-col">
+                            <div class="rg-canvas-toolbar">
+                                <div class="rg-page-nav">
+                                    <button type="button" class="btn sm secondary" id="rg-prev-page" onclick="rgChangePage(-1)">上一页</button>
+                                    <span class="rg-page-info" id="rg-page-info">0 / 0 页</span>
+                                    <button type="button" class="btn sm secondary" id="rg-next-page" onclick="rgChangePage(1)">下一页</button>
+                                </div>
+                                <div class="rg-zoom-controls">
+                                    <button type="button" class="btn sm secondary" onclick="rgZoom(-0.15)">-</button>
+                                    <span class="rg-zoom-val" id="rg-zoom-val">100%</span>
+                                    <button type="button" class="btn sm secondary" onclick="rgZoom(0.15)">+</button>
+                                    <button type="button" class="btn sm secondary" onclick="rgUndoLastRegion()">撤销上一框</button>
+                                </div>
+                            </div>
+                            <div class="rg-viewport" id="rg-viewport">
+                                <div class="rg-empty-state" id="rg-empty-state">
+                                    <p>请先在上方上传「题目原卷 PDF」或「答案原卷 PDF」</p>
+                                    <p class="rg-empty-sub">上传后直接在整页上按住左键拖拽拉框，松手即生成一道题；若同一道题跨页，可在右侧卡片点「+ 跨页续框」。</p>
+                                </div>
+                                <div class="rg-stage" id="rg-stage" style="display: none;">
+                                    <canvas id="rg-pdf-canvas"></canvas>
+                                    <div class="rg-box-layer" id="rg-box-layer"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 右侧：已框题目 / 答案列表 -->
+                        <aside class="rg-sidebar">
+                            <div class="rg-sidebar-header">
+                                <span id="rg-sidebar-title">已框题目（0）</span>
+                                <span class="rg-sidebar-tip" id="rg-sidebar-tip">答案仅按题号自动匹配，不绑定排版</span>
+                            </div>
+                            <div class="rg-continue-banner" id="rg-continue-banner" style="display: none;">
+                                <span id="rg-continue-text">正在为第 1 题追加跨页区域：请翻页后直接拉框</span>
+                                <button type="button" class="btn sm secondary" onclick="rgCancelContinue()">取消</button>
+                            </div>
+                            <div class="rg-list" id="rg-list">
+                                <div class="rg-list-empty">暂无框选区域</div>
+                            </div>
+                        </aside>
+                    </div>
+                </div>
+            </section>
         </main>
     </div>
 
@@ -748,11 +854,12 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261113-6';
+            const v = '20261113-7';
             document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
             document.write(`<script src="js/common.js?v=${v}"><\/script>`);
             document.write(`<script src="js/auth.js?v=${v}"><\/script>`);
             document.write(`<script src="js/question-bank.js?v=${v}"><\/script>`);
+            document.write(`<script src="js/region-debug.js?v=${v}"><\/script>`);
         })();
     </script>
 </body>

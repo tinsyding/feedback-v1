@@ -1618,6 +1618,9 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             errorNum: parseQNum(p.errorNum),
                             errorNums: errorNums,
                             groupNums: groupNums,
+                            mode: p.mode || null,
+                            regions: Array.isArray(p.regions) ? p.regions : [],
+                            answerRegions: Array.isArray(p.answerRegions) ? p.answerRegions : [],
                             errorBoxes: errorBoxes,
                             answerErrorBoxes: answerErrorBoxes,
                             stemBoxes: stemBoxes,
@@ -2057,6 +2060,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             const RUNNING_HEADER_GAP = 4;
 
             const mergedPdf = await PDFLib.PDFDocument.create();
+            const pdfBytesCache = new Map();
             let currentPage = null;
             let currentY = PAGE_HEIGHT - TOP_MARGIN;
 
@@ -2085,11 +2089,15 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 const qBadgeSpec = buildQuestionBadgeSpec(qItem, qWeek, qTopic);
 
                 try {
-                    const fetchUrl = targetUrl + (targetUrl.includes('?') ? '&' : '?') + 't=' + (window.retestCacheVersion || Date.now());
-                    const pdfBytes = await fetch(fetchUrl, { cache: 'no-cache' }).then(res => {
-                        if (!res.ok) throw new Error('Fetch failed');
-                        return res.arrayBuffer();
-                    });
+                    let pdfBytes = pdfBytesCache.get(targetUrl);
+                    if (!pdfBytes) {
+                        const fetchUrl = targetUrl + (targetUrl.includes('?') ? '&' : '?') + 't=' + (window.retestCacheVersion || Date.now());
+                        pdfBytes = await fetch(fetchUrl, { cache: 'no-cache' }).then(res => {
+                            if (!res.ok) throw new Error('Fetch failed');
+                            return res.arrayBuffer();
+                        });
+                        pdfBytesCache.set(targetUrl, pdfBytes);
+                    }
 
                     const sourceDoc = await PDFLib.PDFDocument.load(pdfBytes);
                     const pageCount = sourceDoc.getPageCount();
@@ -2257,6 +2265,171 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
                             isFirstCompactBlock = false;
                             lastKindRendered = slice.kind;
+                        }
+                        continue;
+                    }
+
+                    // ===== 整卷框题模式（region_crop）：按框选的 regions / answerRegions 切片排版 =====
+                    const targetRegions = (typeof qItem === 'object' && qItem.mode === 'region_crop')
+                        ? (type === 'answer'
+                            ? (Array.isArray(qItem.answerRegions) ? qItem.answerRegions : [])
+                            : (Array.isArray(qItem.regions) ? qItem.regions : []))
+                        : [];
+                    if (targetRegions.length > 0) {
+                        const sortedRegions = [...targetRegions].sort((a, b) => {
+                            const pa = parseInt(a.pageOffset, 10) || 0;
+                            const pb = parseInt(b.pageOffset, 10) || 0;
+                            if (pa !== pb) return pa - pb;
+                            return (a.y || 0) - (b.y || 0);
+                        });
+                        const indentX = qIsVariation ? VARIATION_INDENT : 0;
+                        const boxX = BOX_MARGIN_X + indentX;
+                        const boxW = BOX_WIDTH - indentX;
+                        const bannerW = boxW - 16;
+                        const bannerX = boxX + 8;
+                        const innerContentW = boxW - 12;
+                        const relevantErrBoxes = type === 'answer'
+                            ? (Array.isArray(qItem.answerErrorBoxes) ? qItem.answerErrorBoxes : [])
+                            : (Array.isArray(qItem.errorBoxes) ? qItem.errorBoxes : []);
+                        const regionGapAfter = (typeof qItem === 'object' && qItem.isGroupEnd === false) ? BOX_GAP_ITEM : BOX_GAP_CLUSTER;
+                        const itemGroupNums = Array.isArray(qItem.groupNums) ? qItem.groupNums : [];
+                        const itemErrorNums = Array.isArray(qItem.errorNums) ? qItem.errorNums : [];
+                        const regionTitle = itemGroupNums.length > 1
+                            ? ('第' + itemGroupNums[0] + '~' + itemGroupNums[itemGroupNums.length - 1] + '题')
+                            : ('第' + qParentNum + '题');
+
+                        let isFirstRegion = true;
+                        for (let rIdx = 0; rIdx < sortedRegions.length; rIdx++) {
+                            const rg = sortedRegions[rIdx];
+                            const pOff = Math.min(pageCount - 1, Math.max(0, parseInt(rg.pageOffset, 10) || 0));
+                            const srcPage = sourceDoc.getPage(pOff);
+                            const { width: origW, height: origH } = srcPage.getSize();
+                            const mediaBox = srcPage.getMediaBox();
+
+                            const padPt = 4;
+                            const leftPt = Math.max(0, (rg.x ?? 0) * origW);
+                            const rightPt = Math.min(origW, ((rg.x ?? 0) + (rg.w ?? 1)) * origW);
+                            const effW = Math.max(24, rightPt - leftPt);
+                            const topPt = Math.max(0, (rg.y ?? 0) * origH - padPt);
+                            const bottomPt = Math.min(origH, ((rg.y ?? 0) + (rg.h ?? 1)) * origH + padPt);
+                            const effH = Math.max(18, bottomPt - topPt);
+
+                            const scale = Math.min(innerContentW / effW, 1.0);
+                            const drawW = effW * scale;
+                            const drawH = effH * scale;
+                            const realDrawX = (boxX + 6) + (innerContentW - drawW) / 2;
+
+                            let headerInfo = null;
+                            let headerGap = 0;
+                            let currentBannerBlock = 0;
+                            if (isFirstRegion) {
+                                headerInfo = generateQuestionTopicBadge(qBadgeSpec, bannerW);
+                                headerGap = QUESTION_TOPIC_BANNER_GAP;
+                            } else if (!currentPage) {
+                                const runningLabel = (qIsVariation
+                                    ? ('原题' + qParentNum + '-举一反三' + (qVariationTotal > 1 ? qSubNum : '') + '（续）')
+                                    : (qSourceType === 'preview' ? regionTitle + ' · 预习（续）' : regionTitle + ' · 原题（续）'));
+                                headerInfo = generateQuestionRunningHeader(runningLabel, bannerW, qBadgeSpec.theme);
+                                headerGap = RUNNING_HEADER_GAP;
+                            }
+                            if (headerInfo) currentBannerBlock = headerInfo.heightPt + headerGap;
+
+                            const isLastRegion = (rIdx === sortedRegions.length - 1);
+                            const answerH = isLastRegion ? SEPARATOR_HEIGHT : 0;
+                            const sepGap = isFirstRegion ? 0 : 4;
+                            const sliceBlockH = (isFirstRegion || !currentPage ? BOX_PAD_TOP : 0) + currentBannerBlock + sepGap + drawH + answerH + (isLastRegion ? BOX_PAD_BOTTOM : 4);
+
+                            if (!currentPage || (currentY - sliceBlockH < BOTTOM_MARGIN)) {
+                                currentPage = mergedPdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+                                currentY = PAGE_HEIGHT - TOP_MARGIN;
+                                if (!isFirstRegion && !headerInfo) {
+                                    const runningLabel = (qIsVariation
+                                        ? ('原题' + qParentNum + '-举一反三' + (qVariationTotal > 1 ? qSubNum : '') + '（续）')
+                                        : (qSourceType === 'preview' ? regionTitle + ' · 预习（续）' : regionTitle + ' · 原题（续）'));
+                                    headerInfo = generateQuestionRunningHeader(runningLabel, bannerW, qBadgeSpec.theme);
+                                    headerGap = RUNNING_HEADER_GAP;
+                                    if (headerInfo) currentBannerBlock = headerInfo.heightPt + headerGap;
+                                }
+                            }
+
+                            if (isFirstRegion || currentY === PAGE_HEIGHT - TOP_MARGIN) {
+                                currentY -= BOX_PAD_TOP;
+                            }
+                            if (headerInfo && headerInfo.dataUrl) {
+                                const hImg = await mergedPdf.embedPng(headerInfo.dataUrl);
+                                currentPage.drawImage(hImg, {
+                                    x: bannerX,
+                                    y: currentY - headerInfo.heightPt,
+                                    width: bannerW,
+                                    height: headerInfo.heightPt
+                                });
+                                currentY -= (headerInfo.heightPt + headerGap);
+                            }
+                            if (!isFirstRegion) {
+                                currentY -= 4;
+                            }
+
+                            const embeddedSlice = await mergedPdf.embedPage(srcPage, {
+                                left: mediaBox.x + leftPt,
+                                bottom: mediaBox.y + (origH - bottomPt),
+                                right: mediaBox.x + rightPt,
+                                top: mediaBox.y + (origH - topPt)
+                            });
+
+                            const sliceBottomY = currentY - drawH;
+                            currentPage.drawPage(embeddedSlice, {
+                                x: realDrawX,
+                                y: sliceBottomY,
+                                width: drawW,
+                                height: drawH
+                            });
+
+                            // 若有大题内小问错题框落在当前区域切片中，按相对切片比例绘制小问角标
+                            if (relevantErrBoxes.length > 0 && itemGroupNums.length > 1) {
+                                for (const eb of relevantErrBoxes) {
+                                    const ebPage = parseInt(eb.pageOffset, 10) || 0;
+                                    if (ebPage !== pOff) continue;
+                                    const ebTopPt = (eb.y || 0) * origH;
+                                    const ebBotPt = ((eb.y || 0) + (eb.h || 0)) * origH;
+                                    if (ebBotPt < topPt || ebTopPt > bottomPt) continue;
+                                    const ebQNum = eb.num || eb.qNum;
+                                    if (!ebQNum) continue;
+                                    const tagSpec = generateErrorBoxTagPng(ebQNum, itemErrorNums.length > 4);
+                                    if (tagSpec && tagSpec.dataUrl) {
+                                        const tagImg = await mergedPdf.embedPng(tagSpec.dataUrl);
+                                        const relYRatio = Math.max(0, Math.min(1, (ebTopPt - topPt) / effH));
+                                        const relXRatio = Math.max(0, Math.min(1, (((eb.x || 0) * origW) - leftPt) / effW));
+                                        const tagX = Math.max(boxX + 2, realDrawX + relXRatio * drawW - 2);
+                                        const tagY = Math.max(sliceBottomY, currentY - relYRatio * drawH - tagSpec.heightPt - 1);
+                                        currentPage.drawImage(tagImg, {
+                                            x: tagX,
+                                            y: tagY,
+                                            width: tagSpec.widthPt,
+                                            height: tagSpec.heightPt
+                                        });
+                                    }
+                                }
+                            }
+
+                            currentY = sliceBottomY;
+                            if (isLastRegion) {
+                                if (window.retestQrCodeEnabled !== false && videoUrl) {
+                                    try {
+                                        const qrDataUrl = await generateQuestionQrBadge(videoUrl, regionTitle);
+                                        if (qrDataUrl) {
+                                            const qrImage = await mergedPdf.embedPng(qrDataUrl);
+                                            const qrW = 46;
+                                            const qrH = Math.round(qrW * (262 / 208));
+                                            const qrX = boxX + boxW - qrW - 6;
+                                            const qrY = Math.max(BOTTOM_MARGIN + 2, currentY - SEPARATOR_HEIGHT + 2);
+                                            currentPage.drawImage(qrImage, { x: qrX, y: qrY, width: qrW, height: qrH });
+                                        }
+                                    } catch (qrErr) {}
+                                }
+                                currentY -= (SEPARATOR_HEIGHT + BOX_PAD_BOTTOM + regionGapAfter);
+                            }
+
+                            isFirstRegion = false;
                         }
                         continue;
                     }

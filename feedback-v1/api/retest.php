@@ -111,11 +111,12 @@ function saveRevokedTokens(array $map) {
  * 获取指定周次题目的 PDF 列表 (优先从 MySQL qbank_questions 查询，回退到 JSON 文件)
  */
 function parseRetestQuestionMeta($rawMeta, $qNum) {
-    if (empty($rawMeta)) return ['groupNums' => [], 'box' => null, 'answerBox' => null, 'stemBoxes' => []];
+    $empty = ['mode' => '', 'groupNums' => [], 'box' => null, 'answerBox' => null, 'stemBoxes' => [], 'regions' => [], 'answerRegions' => []];
+    if (empty($rawMeta)) return $empty;
     if (is_string($rawMeta)) {
         $rawMeta = @json_decode($rawMeta, true);
     }
-    if (!is_array($rawMeta)) return ['groupNums' => [], 'box' => null, 'answerBox' => null, 'stemBoxes' => []];
+    if (!is_array($rawMeta)) return $empty;
 
     $groupNums = [];
     if (!empty($rawMeta['groupNums']) && is_array($rawMeta['groupNums'])) {
@@ -139,19 +140,29 @@ function parseRetestQuestionMeta($rawMeta, $qNum) {
         ];
     };
 
-    $box = $parseBox($rawMeta['box'] ?? null);
-    $answerBox = $parseBox($rawMeta['answerBox'] ?? null);
-    $stemBoxes = [];
-    if (!empty($rawMeta['stemBoxes']) && is_array($rawMeta['stemBoxes'])) {
-        foreach ($rawMeta['stemBoxes'] as $sb) {
-            $parsedSb = $parseBox($sb);
-            if ($parsedSb) {
-                unset($parsedSb['num']);
-                $stemBoxes[] = $parsedSb;
+    $parseBoxArray = function($rawArr) use ($parseBox) {
+        $res = [];
+        if (!empty($rawArr) && is_array($rawArr)) {
+            foreach ($rawArr as $sb) {
+                $parsed = $parseBox($sb);
+                if ($parsed) {
+                    unset($parsed['num']);
+                    $res[] = $parsed;
+                }
             }
         }
-    }
-    return ['groupNums' => $groupNums, 'box' => $box, 'answerBox' => $answerBox, 'stemBoxes' => $stemBoxes];
+        return $res;
+    };
+
+    return [
+        'mode' => (!empty($rawMeta['mode']) && $rawMeta['mode'] === 'region_crop') ? 'region_crop' : '',
+        'groupNums' => $groupNums,
+        'box' => $parseBox($rawMeta['box'] ?? null),
+        'answerBox' => $parseBox($rawMeta['answerBox'] ?? null),
+        'stemBoxes' => $parseBoxArray($rawMeta['stemBoxes'] ?? null),
+        'regions' => $parseBoxArray($rawMeta['regions'] ?? null),
+        'answerRegions' => $parseBoxArray($rawMeta['answerRegions'] ?? null)
+    ];
 }
 
 function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $year = null, $season = null, $bankType = 'homework') {
@@ -302,12 +313,23 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                         sort($inferredGroup);
                         $curTopic = trim($r['topic'] ?? '');
 
-                        if ($exerciseUrl && !isset($uniquePdfs[$exerciseUrl])) {
+                        $curMode = $metaParsed['mode'] ?? null;
+                        $uniqueKey = $exerciseUrl;
+                        if ($exerciseUrl && $curMode === 'region_crop') {
+                            $uniqueKey = count($inferredGroup) > 1
+                                ? ($exerciseUrl . '::group::' . implode(',', $inferredGroup))
+                                : ($exerciseUrl . '::q::' . $qNum);
+                        }
+
+                        if ($exerciseUrl && !isset($uniquePdfs[$uniqueKey])) {
                             $newIdx = count($pdfList);
                             $pdfList[] = [
                                 'errorNum' => $qNum,
                                 'errorNums' => [$qNum],
                                 'groupNums' => $inferredGroup,
+                                'mode' => $curMode,
+                                'regions' => $metaParsed['regions'] ?? [],
+                                'answerRegions' => $metaParsed['answerRegions'] ?? [],
                                 'errorBoxes' => $metaParsed['box'] ? [$metaParsed['box']] : [],
                                 'answerErrorBoxes' => $metaParsed['answerBox'] ? [$metaParsed['answerBox']] : [],
                                 'stemBoxes' => $metaParsed['stemBoxes'] ?? [],
@@ -318,9 +340,9 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                                 'answerPdf' => $r['answer_pdf'] ?: null,
                                 'sourceType' => $bankType
                             ];
-                            $uniquePdfs[$exerciseUrl] = $newIdx;
-                        } elseif ($exerciseUrl && isset($uniquePdfs[$exerciseUrl]) && is_int($uniquePdfs[$exerciseUrl])) {
-                            $existIdx = $uniquePdfs[$exerciseUrl];
+                            $uniquePdfs[$uniqueKey] = $newIdx;
+                        } elseif ($exerciseUrl && isset($uniquePdfs[$uniqueKey]) && is_int($uniquePdfs[$uniqueKey])) {
+                            $existIdx = $uniquePdfs[$uniqueKey];
                             if (isset($pdfList[$existIdx]) && empty($pdfList[$existIdx]['isVariation'])) {
                                 if (!in_array($qNum, $pdfList[$existIdx]['errorNums'], true)) {
                                     $pdfList[$existIdx]['errorNums'][] = $qNum;
@@ -329,6 +351,37 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                                 $mergedGroup = array_values(array_unique(array_merge($pdfList[$existIdx]['groupNums'] ?? [], $inferredGroup)));
                                 sort($mergedGroup);
                                 $pdfList[$existIdx]['groupNums'] = $mergedGroup;
+                                if ($curMode && empty($pdfList[$existIdx]['mode'])) {
+                                    $pdfList[$existIdx]['mode'] = $curMode;
+                                }
+                                if (!empty($metaParsed['regions'])) {
+                                    $existingRegions = $pdfList[$existIdx]['regions'] ?? [];
+                                    foreach ($metaParsed['regions'] as $rg) {
+                                        $dup = false;
+                                        foreach ($existingRegions as $erg) {
+                                            if ($erg['pageOffset'] === $rg['pageOffset'] && abs($erg['x'] - $rg['x']) < 0.002 && abs($erg['y'] - $rg['y']) < 0.002 && abs($erg['w'] - $rg['w']) < 0.002 && abs($erg['h'] - $rg['h']) < 0.002) {
+                                                $dup = true;
+                                                break;
+                                            }
+                                        }
+                                        if (!$dup) $existingRegions[] = $rg;
+                                    }
+                                    $pdfList[$existIdx]['regions'] = $existingRegions;
+                                }
+                                if (!empty($metaParsed['answerRegions'])) {
+                                    $existingAnsRegions = $pdfList[$existIdx]['answerRegions'] ?? [];
+                                    foreach ($metaParsed['answerRegions'] as $arg) {
+                                        $dup = false;
+                                        foreach ($existingAnsRegions as $earg) {
+                                            if ($earg['pageOffset'] === $arg['pageOffset'] && abs($earg['x'] - $arg['x']) < 0.002 && abs($earg['y'] - $arg['y']) < 0.002 && abs($earg['w'] - $arg['w']) < 0.002 && abs($earg['h'] - $arg['h']) < 0.002) {
+                                                $dup = true;
+                                                break;
+                                            }
+                                        }
+                                        if (!$dup) $existingAnsRegions[] = $arg;
+                                    }
+                                    $pdfList[$existIdx]['answerRegions'] = $existingAnsRegions;
+                                }
                                 if ($metaParsed['box']) {
                                     $pdfList[$existIdx]['errorBoxes'][] = $metaParsed['box'];
                                 }
@@ -364,13 +417,25 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                     if (isset($varMap[$qNum])) {
                         foreach ($varMap[$qNum] as $vRow) {
                             $vExUrl = $vRow['exercise_pdf'] ?: null;
-                            if ($vExUrl && !isset($uniquePdfs[$vExUrl])) {
+                            $vMetaParsed = parseRetestQuestionMeta($vRow['question_meta'] ?? null, intval($vRow['question_num'] ?? 0));
+                            $vMode = $vMetaParsed['mode'] ?? null;
+                            $vUniqueKey = $vExUrl;
+                            if ($vExUrl && $vMode === 'region_crop') {
+                                $vUniqueKey = $vExUrl . '::var::' . ($vRow['id'] ?? ($qNum . '_' . intval($vRow['sub_num'] ?? 1)));
+                            }
+                            if ($vExUrl && !isset($uniquePdfs[$vUniqueKey])) {
                                 $pdfList[] = [
                                     'errorNum' => $errNum,
                                     'parentNum' => $qNum,
                                     'parentNums' => $vRow['parent_nums'] ?? [$qNum],
                                     'matchedParentNums' => $vRow['matched_parent_nums'] ?? [$qNum],
                                     'subNum' => intval($vRow['sub_num'] ?? 1),
+                                    'mode' => $vMode,
+                                    'regions' => $vMetaParsed['regions'] ?? [],
+                                    'answerRegions' => $vMetaParsed['answerRegions'] ?? [],
+                                    'errorBoxes' => $vMetaParsed['box'] ? [$vMetaParsed['box']] : [],
+                                    'answerErrorBoxes' => $vMetaParsed['answerBox'] ? [$vMetaParsed['answerBox']] : [],
+                                    'stemBoxes' => $vMetaParsed['stemBoxes'] ?? [],
                                     'topic' => $vRow['topic'] ?? '',
                                     'videoUrl' => null,
                                     'exercisePdf' => $vExUrl,
@@ -378,7 +443,7 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                                     'sourceType' => 'variation',
                                     'isVariation' => true
                                 ];
-                                $uniquePdfs[$vExUrl] = true;
+                                $uniquePdfs[$vUniqueKey] = true;
                             }
                         }
                     }
@@ -454,12 +519,23 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                     sort($inferredGroup);
                     $curTopic = trim($q['topic'] ?? '');
 
-                    if ($exerciseUrl && !isset($uniquePdfs[$exerciseUrl])) {
+                    $curMode = $metaParsed['mode'] ?? null;
+                    $uniqueKey = $exerciseUrl;
+                    if ($exerciseUrl && $curMode === 'region_crop') {
+                        $uniqueKey = count($inferredGroup) > 1
+                            ? ($exerciseUrl . '::group::' . implode(',', $inferredGroup))
+                            : ($exerciseUrl . '::q::' . $qNum);
+                    }
+
+                    if ($exerciseUrl && !isset($uniquePdfs[$uniqueKey])) {
                         $newIdx = count($pdfList);
                         $pdfList[] = [
                             'errorNum' => $qNum,
                             'errorNums' => [$qNum],
                             'groupNums' => $inferredGroup,
+                            'mode' => $curMode,
+                            'regions' => $metaParsed['regions'] ?? [],
+                            'answerRegions' => $metaParsed['answerRegions'] ?? [],
                             'errorBoxes' => $metaParsed['box'] ? [$metaParsed['box']] : [],
                             'answerErrorBoxes' => $metaParsed['answerBox'] ? [$metaParsed['answerBox']] : [],
                             'stemBoxes' => $metaParsed['stemBoxes'] ?? [],
@@ -470,9 +546,9 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                             'answerPdf' => $q['answerPdf']['url'] ?? null,
                             'sourceType' => $bankType
                         ];
-                        $uniquePdfs[$exerciseUrl] = $newIdx;
-                    } elseif ($exerciseUrl && isset($uniquePdfs[$exerciseUrl]) && is_int($uniquePdfs[$exerciseUrl])) {
-                        $existIdx = $uniquePdfs[$exerciseUrl];
+                        $uniquePdfs[$uniqueKey] = $newIdx;
+                    } elseif ($exerciseUrl && isset($uniquePdfs[$uniqueKey]) && is_int($uniquePdfs[$uniqueKey])) {
+                        $existIdx = $uniquePdfs[$uniqueKey];
                         if (!in_array($qNum, $pdfList[$existIdx]['errorNums'], true)) {
                             $pdfList[$existIdx]['errorNums'][] = $qNum;
                             sort($pdfList[$existIdx]['errorNums']);
@@ -480,6 +556,37 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                         $mergedGroup = array_values(array_unique(array_merge($pdfList[$existIdx]['groupNums'] ?? [], $inferredGroup)));
                         sort($mergedGroup);
                         $pdfList[$existIdx]['groupNums'] = $mergedGroup;
+                        if ($curMode && empty($pdfList[$existIdx]['mode'])) {
+                            $pdfList[$existIdx]['mode'] = $curMode;
+                        }
+                        if (!empty($metaParsed['regions'])) {
+                            $existingRegions = $pdfList[$existIdx]['regions'] ?? [];
+                            foreach ($metaParsed['regions'] as $rg) {
+                                $dup = false;
+                                foreach ($existingRegions as $erg) {
+                                    if ($erg['pageOffset'] === $rg['pageOffset'] && abs($erg['x'] - $rg['x']) < 0.002 && abs($erg['y'] - $rg['y']) < 0.002 && abs($erg['w'] - $rg['w']) < 0.002 && abs($erg['h'] - $rg['h']) < 0.002) {
+                                        $dup = true;
+                                        break;
+                                    }
+                                }
+                                if (!$dup) $existingRegions[] = $rg;
+                            }
+                            $pdfList[$existIdx]['regions'] = $existingRegions;
+                        }
+                        if (!empty($metaParsed['answerRegions'])) {
+                            $existingAnsRegions = $pdfList[$existIdx]['answerRegions'] ?? [];
+                            foreach ($metaParsed['answerRegions'] as $arg) {
+                                $dup = false;
+                                foreach ($existingAnsRegions as $earg) {
+                                    if ($earg['pageOffset'] === $arg['pageOffset'] && abs($earg['x'] - $arg['x']) < 0.002 && abs($earg['y'] - $arg['y']) < 0.002 && abs($earg['w'] - $arg['w']) < 0.002 && abs($earg['h'] - $arg['h']) < 0.002) {
+                                        $dup = true;
+                                        break;
+                                    }
+                                }
+                                if (!$dup) $existingAnsRegions[] = $arg;
+                            }
+                            $pdfList[$existIdx]['answerRegions'] = $existingAnsRegions;
+                        }
                         if ($metaParsed['box']) {
                             $pdfList[$existIdx]['errorBoxes'][] = $metaParsed['box'];
                         }

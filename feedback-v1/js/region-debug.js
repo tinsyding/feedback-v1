@@ -1,0 +1,884 @@
+// ========== Whole-Paper Region-Crop Studio (Debug) ==========
+// 免切题分页：直接上传整卷原卷 PDF（单栏），逐题拉框标注，支持大题（先原文后小问）、
+// 跨页续框、预习跳题手动输题号、举一反三归属原题选择、以及答案独立拉框。
+
+(function () {
+    const FULL_WIDTH_X = 0.03;
+    const FULL_WIDTH_W = 0.94;
+
+    const rgState = {
+        initialized: false,
+        activeTab: 'exercise',
+        fullWidth: true,
+        scale: 1.0,
+        continueTargetId: null,
+        selectedId: null,
+        subMode: null, // { tab, itemId, target: 'stem' | 'subq' }
+        drag: null,
+        nextSeq: 1,
+        exercise: {
+            file: null,
+            pdfDoc: null,
+            pageNum: 1,
+            totalPages: 0,
+            items: []
+        },
+        answer: {
+            file: null,
+            pdfDoc: null,
+            pageNum: 1,
+            totalPages: 0,
+            items: []
+        }
+    };
+
+    function getTabState(tab = rgState.activeTab) {
+        return tab === 'answer' ? rgState.answer : rgState.exercise;
+    }
+
+    function escapeHtmlRg(str) {
+        return String(str ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function getCurrentBankTypeSafe() {
+        return typeof getBankType === 'function' ? getBankType() : 'homework';
+    }
+
+    function getNextAutoNumber(tab) {
+        const items = getTabState(tab).items;
+        let maxNum = 0;
+        items.forEach(it => {
+            const n = parseInt(it.label, 10);
+            if (!isNaN(n) && n > maxNum) maxNum = n;
+            if (it.isBig && Array.isArray(it.subqBoxes)) {
+                it.subqBoxes.forEach(sb => {
+                    const sn = parseInt(sb.num, 10);
+                    if (!isNaN(sn) && sn > maxNum) maxNum = sn;
+                });
+            }
+        });
+        return String(maxNum + 1);
+    }
+
+    function getVariationParentOptions() {
+        const buckets = typeof getConsolidationBuckets === 'function'
+            ? getConsolidationBuckets()
+            : [];
+        if (Array.isArray(buckets) && buckets.length > 0) {
+            return buckets.map(b => ({
+                nums: Array.isArray(b.nums) ? b.nums : [parseInt(b.id, 10)].filter(Boolean),
+                label: b.label || ('第' + b.id + '题')
+            }));
+        }
+        const list = Array.isArray(homeworkQuestionsForVariation) ? homeworkQuestionsForVariation : [];
+        return list.map(q => {
+            const n = parseInt(q.question_num || q.id, 10);
+            return n > 0 ? { nums: [n], label: '第' + n + '题' } : null;
+        }).filter(Boolean);
+    }
+
+    function formatItemTitle(it, tab) {
+        const bankType = getCurrentBankTypeSafe();
+        if (bankType === 'variation' && tab === 'exercise') {
+            if (Array.isArray(it.parentNums) && it.parentNums.length > 0) {
+                return '原题' + it.parentNums.join('、') + ' · 举一反三';
+            }
+            return '举一反三（未选原题）';
+        }
+        if (it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
+            const nums = it.subqBoxes.map(b => parseInt(b.num, 10)).filter(n => !isNaN(n)).sort((a, b) => a - b);
+            if (nums.length > 1) return `第 ${nums[0]}~${nums[nums.length - 1]} 题（大题）`;
+            if (nums.length === 1) return `第 ${nums[0]} 题（大题）`;
+        }
+        if (it.label) return `第 ${it.label} 题`;
+        return '待输入题号';
+    }
+
+    function bindCanvasEventsOnce() {
+        if (rgState.initialized) return;
+        rgState.initialized = true;
+
+        const stage = document.getElementById('rg-stage');
+        const layer = document.getElementById('rg-box-layer');
+        if (!stage || !layer) return;
+
+        const getNormPoint = (e) => {
+            const rect = stage.getBoundingClientRect();
+            const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / Math.max(1, rect.width)));
+            const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / Math.max(1, rect.height)));
+            return { x, y };
+        };
+
+        stage.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            const tabState = getTabState();
+            if (!tabState.pdfDoc) return;
+            e.preventDefault();
+            const pt = getNormPoint(e);
+            const draftEl = document.createElement('div');
+            draftEl.className = 'rg-box draft';
+            layer.appendChild(draftEl);
+            rgState.drag = { startX: pt.x, startY: pt.y, curX: pt.x, curY: pt.y, draftEl };
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!rgState.drag) return;
+            const pt = getNormPoint(e);
+            rgState.drag.curX = pt.x;
+            rgState.drag.curY = pt.y;
+            let x = Math.min(rgState.drag.startX, pt.x);
+            let w = Math.abs(pt.x - rgState.drag.startX);
+            if (rgState.fullWidth) {
+                x = FULL_WIDTH_X;
+                w = FULL_WIDTH_W;
+            }
+            const y = Math.min(rgState.drag.startY, pt.y);
+            const h = Math.abs(pt.y - rgState.drag.startY);
+            const el = rgState.drag.draftEl;
+            el.style.left = (x * 100) + '%';
+            el.style.top = (y * 100) + '%';
+            el.style.width = (w * 100) + '%';
+            el.style.height = (h * 100) + '%';
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (!rgState.drag) return;
+            const d = rgState.drag;
+            rgState.drag = null;
+            if (d.draftEl && d.draftEl.parentNode) {
+                d.draftEl.parentNode.removeChild(d.draftEl);
+            }
+
+            let x = Math.min(d.startX, d.curX);
+            let w = Math.abs(d.curX - d.startX);
+            const y = Math.min(d.startY, d.curY);
+            const h = Math.abs(d.curY - d.startY);
+
+            if (h < 0.015 || (!rgState.fullWidth && w < 0.015)) {
+                return;
+            }
+            if (rgState.fullWidth) {
+                x = FULL_WIDTH_X;
+                w = FULL_WIDTH_W;
+            }
+
+            const tab = rgState.activeTab;
+            const tabState = getTabState(tab);
+            const pageOffset = tabState.pageNum - 1;
+            const rectObj = {
+                pageOffset,
+                x: Number(x.toFixed(4)),
+                y: Number(y.toFixed(4)),
+                w: Number(w.toFixed(4)),
+                h: Number(h.toFixed(4))
+            };
+
+            onBoxDrawn(tab, rectObj);
+        });
+    }
+
+    function onBoxDrawn(tab, rectObj) {
+        const tabState = getTabState(tab);
+
+        // 1. 大题内部细分模式（先原文后小问）
+        if (rgState.subMode && rgState.subMode.tab === tab) {
+            const parentItem = tabState.items.find(it => it.id === rgState.subMode.itemId);
+            if (!parentItem) {
+                rgState.subMode = null;
+                renderAllRg();
+                return;
+            }
+            if (rgState.subMode.target === 'stem') {
+                parentItem.stemBoxes = parentItem.stemBoxes || [];
+                parentItem.stemBoxes.push(rectObj);
+            } else {
+                parentItem.subqBoxes = parentItem.subqBoxes || [];
+                const baseNum = parseInt(parentItem.label, 10) || 1;
+                const nextSubNum = parentItem.subqBoxes.length === 0
+                    ? baseNum
+                    : (Math.max(...parentItem.subqBoxes.map(b => parseInt(b.num, 10) || baseNum)) + 1);
+                parentItem.subqBoxes.push({ ...rectObj, num: nextSubNum });
+            }
+            renderAllRg();
+            return;
+        }
+
+        // 2. 跨页续框模式
+        if (rgState.continueTargetId) {
+            const targetItem = tabState.items.find(it => it.id === rgState.continueTargetId);
+            rgState.continueTargetId = null;
+            if (targetItem) {
+                targetItem.regions.push(rectObj);
+                rgState.selectedId = targetItem.id;
+                renderAllRg();
+                return;
+            }
+        }
+
+        // 3. 新建一题 / 一条答案框
+        const bankType = getCurrentBankTypeSafe();
+        let label = '';
+        if (bankType === 'homework') {
+            label = getNextAutoNumber(tab);
+        } else if (bankType === 'variation') {
+            label = tab === 'answer' ? getNextAutoNumber(tab) : '';
+        } else {
+            // preview：不自动标号，手动输入跳题题号
+            label = '';
+        }
+
+        const newItem = {
+            id: `${tab}_${rgState.nextSeq++}`,
+            label,
+            parentNums: [],
+            isBig: false,
+            regions: [rectObj],
+            stemBoxes: [],
+            subqBoxes: []
+        };
+        tabState.items.push(newItem);
+        rgState.selectedId = newItem.id;
+        renderAllRg();
+
+        if (bankType === 'preview' || (bankType === 'variation' && tab === 'answer')) {
+            requestAnimationFrame(() => {
+                const input = document.querySelector(`.rg-card[data-id="${newItem.id}"] .rg-num-input`);
+                if (input) {
+                    input.focus();
+                    input.select();
+                }
+            });
+        }
+    }
+
+    async function renderPdfPage() {
+        const tabState = getTabState();
+        const emptyEl = document.getElementById('rg-empty-state');
+        const stageEl = document.getElementById('rg-stage');
+        const canvas = document.getElementById('rg-pdf-canvas');
+        const pageInfo = document.getElementById('rg-page-info');
+        const prevBtn = document.getElementById('rg-prev-page');
+        const nextBtn = document.getElementById('rg-next-page');
+        const zoomVal = document.getElementById('rg-zoom-val');
+
+        if (zoomVal) zoomVal.textContent = Math.round(rgState.scale * 100) + '%';
+
+        if (!tabState.pdfDoc) {
+            if (emptyEl) emptyEl.style.display = 'block';
+            if (stageEl) stageEl.style.display = 'none';
+            if (pageInfo) pageInfo.textContent = '0 / 0 页';
+            if (prevBtn) prevBtn.disabled = true;
+            if (nextBtn) nextBtn.disabled = true;
+            return;
+        }
+
+        if (emptyEl) emptyEl.style.display = 'none';
+        if (stageEl) stageEl.style.display = 'inline-block';
+
+        const page = await tabState.pdfDoc.getPage(tabState.pageNum);
+        const viewport = page.getViewport({ scale: 1.35 * rgState.scale });
+        const ctx = canvas.getContext('2d');
+        canvas.width = Math.round(viewport.width);
+        canvas.height = Math.round(viewport.height);
+        await page.render({ canvasContext: ctx, viewport }).promise;
+
+        if (pageInfo) pageInfo.textContent = `${tabState.pageNum} / ${tabState.totalPages} 页`;
+        if (prevBtn) prevBtn.disabled = tabState.pageNum <= 1;
+        if (nextBtn) nextBtn.disabled = tabState.pageNum >= tabState.totalPages;
+
+        renderBoxOverlay();
+    }
+
+    function renderBoxOverlay() {
+        const layer = document.getElementById('rg-box-layer');
+        if (!layer) return;
+        const tab = rgState.activeTab;
+        const tabState = getTabState(tab);
+        const pageOffset = tabState.pageNum - 1;
+        layer.innerHTML = '';
+
+        tabState.items.forEach(it => {
+            it.regions.forEach((rg, rIdx) => {
+                if (rg.pageOffset !== pageOffset) return;
+                const div = document.createElement('div');
+                div.className = `rg-box ${tab === 'answer' ? 'answer' : ''} ${rgState.selectedId === it.id ? 'active' : ''}`;
+                div.style.left = (rg.x * 100) + '%';
+                div.style.top = (rg.y * 100) + '%';
+                div.style.width = (rg.w * 100) + '%';
+                div.style.height = (rg.h * 100) + '%';
+
+                const tag = document.createElement('span');
+                tag.className = 'rg-box-tag';
+                const suffix = it.regions.length > 1 ? ` (${rIdx + 1}/${it.regions.length})` : '';
+                tag.textContent = formatItemTitle(it, tab) + suffix;
+                div.appendChild(tag);
+
+                div.addEventListener('mousedown', (e) => e.stopPropagation());
+                div.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    rgState.selectedId = it.id;
+                    renderAllRg();
+                });
+                layer.appendChild(div);
+            });
+
+            if (it.isBig) {
+                (it.stemBoxes || []).forEach((sb, sIdx) => {
+                    if (sb.pageOffset !== pageOffset) return;
+                    const div = document.createElement('div');
+                    div.className = 'rg-box stem';
+                    div.style.left = (sb.x * 100) + '%';
+                    div.style.top = (sb.y * 100) + '%';
+                    div.style.width = (sb.w * 100) + '%';
+                    div.style.height = (sb.h * 100) + '%';
+                    const tag = document.createElement('span');
+                    tag.className = 'rg-box-tag';
+                    tag.textContent = `原文${sIdx + 1}`;
+                    div.appendChild(tag);
+                    layer.appendChild(div);
+                });
+                (it.subqBoxes || []).forEach((qb) => {
+                    if (qb.pageOffset !== pageOffset) return;
+                    const div = document.createElement('div');
+                    div.className = 'rg-box subq';
+                    div.style.left = (qb.x * 100) + '%';
+                    div.style.top = (qb.y * 100) + '%';
+                    div.style.width = (qb.w * 100) + '%';
+                    div.style.height = (qb.h * 100) + '%';
+                    const tag = document.createElement('span');
+                    tag.className = 'rg-box-tag';
+                    tag.textContent = `${qb.num}`;
+                    div.appendChild(tag);
+                    layer.appendChild(div);
+                });
+            }
+        });
+    }
+
+    function renderSidebar() {
+        const tab = rgState.activeTab;
+        const tabState = getTabState(tab);
+        const bankType = getCurrentBankTypeSafe();
+        const listEl = document.getElementById('rg-list');
+        const titleEl = document.getElementById('rg-sidebar-title');
+        const tipEl = document.getElementById('rg-sidebar-tip');
+        const contBanner = document.getElementById('rg-continue-banner');
+        const contText = document.getElementById('rg-continue-text');
+        const finishBtn = document.getElementById('rg-finish-btn');
+
+        if (titleEl) {
+            titleEl.textContent = tab === 'answer'
+                ? `已框答案（${tabState.items.length}）`
+                : `已框题目（${tabState.items.length}）`;
+        }
+        if (tipEl) {
+            if (tab === 'answer') {
+                tipEl.textContent = '答案独立拉框，仅按题号匹配题目';
+            } else if (bankType === 'preview') {
+                tipEl.textContent = '预习模式：框完后请手动输入跳题题号';
+            } else if (bankType === 'variation') {
+                tipEl.textContent = '举一反三模式：框完后请勾选对应原题';
+            } else {
+                tipEl.textContent = '课后巩固：自动递增题号，支持设为大题';
+            }
+        }
+        if (finishBtn) {
+            finishBtn.disabled = rgState.exercise.items.length === 0;
+        }
+
+        if (contBanner && contText) {
+            if (rgState.continueTargetId) {
+                const target = tabState.items.find(it => it.id === rgState.continueTargetId);
+                contBanner.style.display = 'flex';
+                contText.textContent = `正在为「${target ? formatItemTitle(target, tab) : '当前题'}」追加跨页区域：请翻页后拉框`;
+            } else {
+                contBanner.style.display = 'none';
+            }
+        }
+
+        if (!listEl) return;
+        if (tabState.items.length === 0) {
+            listEl.innerHTML = '<div class="rg-list-empty">暂无框选区域，请在左侧画布按住左键拖拽拉框</div>';
+            return;
+        }
+
+        const varOptions = (bankType === 'variation' && tab === 'exercise') ? getVariationParentOptions() : [];
+
+        listEl.innerHTML = tabState.items.map((it) => {
+            const pages = Array.from(new Set(it.regions.map(r => 'P' + (r.pageOffset + 1)))).join(', ');
+            const isActive = rgState.selectedId === it.id;
+            const bigSummary = it.isBig
+                ? ` · 大题（原文${(it.stemBoxes || []).length} / 小问${(it.subqBoxes || []).length}）`
+                : '';
+
+            let headerEditorHtml = '';
+            if (bankType === 'variation' && tab === 'exercise') {
+                const chipsHtml = varOptions.length > 0
+                    ? varOptions.map(opt => {
+                        const selected = opt.nums.every(n => (it.parentNums || []).includes(n));
+                        return `<button type="button" class="rg-var-chip ${selected ? 'selected' : ''}" onclick="rgToggleVarParent('${it.id}', '${opt.nums.join(',')}')">${escapeHtmlRg(opt.label)}</button>`;
+                    }).join('')
+                    : '<span class="rg-card-meta">暂无课后巩固原题，可直接输入归属题号</span>';
+                headerEditorHtml = `
+                    <div class="rg-card-top">
+                        <span class="rg-card-num-wrap">${escapeHtmlRg(formatItemTitle(it, tab))}</span>
+                    </div>
+                    <div class="rg-var-parents">${chipsHtml}</div>
+                `;
+            } else {
+                const placeholder = bankType === 'preview' ? '输题号' : '题号';
+                headerEditorHtml = `
+                    <div class="rg-card-top">
+                        <div class="rg-card-num-wrap">
+                            <span>${it.isBig ? '起始题号' : '题号'}</span>
+                            <input type="text" class="rg-num-input" value="${escapeHtmlRg(it.label)}" placeholder="${placeholder}"
+                                onchange="rgUpdateItemLabel('${it.id}', this.value)" onclick="event.stopPropagation()">
+                        </div>
+                        <span class="rg-card-meta">${escapeHtmlRg(pages)}${escapeHtmlRg(bigSummary)}</span>
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="rg-card ${isActive ? 'active' : ''}" data-id="${it.id}" onclick="rgSelectItem('${it.id}')">
+                    ${headerEditorHtml}
+                    ${(bankType === 'variation' && tab === 'exercise') ? `<div class="rg-card-meta">${escapeHtmlRg(pages)}${escapeHtmlRg(bigSummary)}</div>` : ''}
+                    <div class="rg-card-actions" onclick="event.stopPropagation()">
+                        <button type="button" class="btn sm secondary" onclick="rgStartContinue('${it.id}')">+ 跨页续框</button>
+                        <button type="button" class="btn sm secondary" onclick="rgEnterSubMode('${it.id}')">${it.isBig ? '继续细分大题' : '设为大题'}</button>
+                        <button type="button" class="btn sm secondary" onclick="rgDeleteItem('${it.id}')">删除</button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function renderSubModeBar() {
+        const bar = document.getElementById('rg-submode-bar');
+        const badge = document.getElementById('rg-submode-badge');
+        const stemBtn = document.getElementById('rg-subtarget-stem');
+        const subqBtn = document.getElementById('rg-subtarget-subq');
+        const hint = document.getElementById('rg-submode-hint');
+        if (!bar) return;
+
+        if (!rgState.subMode || rgState.subMode.tab !== rgState.activeTab) {
+            bar.style.display = 'none';
+            return;
+        }
+        const tabState = getTabState(rgState.subMode.tab);
+        const it = tabState.items.find(x => x.id === rgState.subMode.itemId);
+        if (!it) {
+            rgState.subMode = null;
+            bar.style.display = 'none';
+            return;
+        }
+        bar.style.display = 'flex';
+        if (badge) badge.textContent = `大题细分：${formatItemTitle(it, rgState.subMode.tab)}`;
+        if (stemBtn) stemBtn.classList.toggle('active', rgState.subMode.target === 'stem');
+        if (subqBtn) {
+            subqBtn.classList.toggle('active', rgState.subMode.target === 'subq');
+            subqBtn.classList.toggle('subq', rgState.subMode.target === 'subq');
+        }
+        if (hint) {
+            hint.textContent = rgState.subMode.target === 'stem'
+                ? '当前：绿虚线框选公共原文/题干，完成后切换“2. 框选小问”'
+                : '当前：红框依次框出各小问（自动递增小问题号）';
+        }
+    }
+
+    function renderAllRg() {
+        renderSubModeBar();
+        renderSidebar();
+        renderBoxOverlay();
+    }
+
+    window.openRegionDebugStudio = async function () {
+        if (window.currentUser && window.currentUser.role === 'assistant') {
+            showToast('助教账号仅具备查看权限，无法录入或上传题目', 'warn');
+            return;
+        }
+        if (!subjectSelect || !subjectSelect.value || !gradeSelect || !gradeSelect.value || !tierSelect || !tierSelect.value || !weekSelect || !weekSelect.value) {
+            showToast('请先选齐学科、年级、班层与专题', 'warn');
+            return;
+        }
+        await loadCurrentData();
+        if (getCurrentBankTypeSafe() === 'variation' && typeof loadHomeworkQuestionsForVariation === 'function') {
+            await loadHomeworkQuestionsForVariation();
+        }
+
+        const ctxEl = document.getElementById('rg-context-line');
+        if (ctxEl) {
+            const typeLabel = typeof getBankTypeLabel === 'function' ? getBankTypeLabel(getCurrentBankTypeSafe()) : getCurrentBankTypeSafe();
+            const topicLabel = typeof getTopicLabel === 'function' ? getTopicLabel(weekSelect.value) : weekSelect.value;
+            ctxEl.textContent = `${typeLabel} · ${subjectSelect.value} · ${gradeSelect.value} · ${tierSelect.value} · ${topicLabel}`;
+        }
+
+        bindCanvasEventsOnce();
+        goToStep('debug');
+        renderAllRg();
+        await renderPdfPage();
+    };
+
+    window.exitRegionDebugStudio = function () {
+        rgState.subMode = null;
+        rgState.continueTargetId = null;
+        goToStep(1);
+    };
+
+    window.rgSwitchTab = async function (tab) {
+        if (tab !== 'exercise' && tab !== 'answer') return;
+        rgState.activeTab = tab;
+        rgState.continueTargetId = null;
+        document.getElementById('rg-tab-exercise')?.classList.toggle('active', tab === 'exercise');
+        document.getElementById('rg-tab-answer')?.classList.toggle('active', tab === 'answer');
+        renderSubModeBar();
+        renderSidebar();
+        await renderPdfPage();
+    };
+
+    window.rgHandlePdfUpload = async function (tab, inputEl) {
+        const file = inputEl && inputEl.files && inputEl.files[0];
+        if (!file) return;
+        try {
+            const buf = await file.arrayBuffer();
+            const pdfDoc = await pdfjsLib.getDocument({ data: buf }).promise;
+            const tabState = getTabState(tab);
+            tabState.file = file;
+            tabState.pdfDoc = pdfDoc;
+            tabState.pageNum = 1;
+            tabState.totalPages = pdfDoc.numPages;
+            tabState.items = [];
+            rgState.continueTargetId = null;
+            rgState.subMode = null;
+
+            const lbl = document.getElementById(tab === 'answer' ? 'rg-answer-file-label' : 'rg-exercise-file-label');
+            if (lbl) lbl.textContent = `${file.name} (${pdfDoc.numPages} 页)`;
+
+            await rgSwitchTab(tab);
+            showToast(`已加载${tab === 'answer' ? '答案' : '题目'} PDF（${pdfDoc.numPages} 页）`);
+        } catch (err) {
+            console.error('Debug PDF load error:', err);
+            showToast('PDF 解析失败：' + (err.message || '未知错误'), 'error');
+        } finally {
+            inputEl.value = '';
+        }
+    };
+
+    window.rgToggleFullWidth = function (checked) {
+        rgState.fullWidth = Boolean(checked);
+    };
+
+    window.rgChangePage = async function (delta) {
+        const tabState = getTabState();
+        if (!tabState.pdfDoc) return;
+        const next = Math.max(1, Math.min(tabState.totalPages, tabState.pageNum + delta));
+        if (next === tabState.pageNum) return;
+        tabState.pageNum = next;
+        await renderPdfPage();
+    };
+
+    window.rgZoom = async function (delta) {
+        rgState.scale = Math.max(0.5, Math.min(2.2, Number((rgState.scale + delta).toFixed(2))));
+        await renderPdfPage();
+    };
+
+    window.rgUndoLastRegion = function () {
+        const tab = rgState.activeTab;
+        const tabState = getTabState(tab);
+        if (rgState.subMode && rgState.subMode.tab === tab) {
+            rgUndoSubBox();
+            return;
+        }
+        if (tabState.items.length === 0) return;
+        const last = tabState.items[tabState.items.length - 1];
+        if (last.regions.length > 1) {
+            last.regions.pop();
+        } else {
+            tabState.items.pop();
+        }
+        renderAllRg();
+    };
+
+    window.rgSelectItem = async function (itemId) {
+        const tabState = getTabState();
+        const it = tabState.items.find(x => x.id === itemId);
+        if (!it) return;
+        rgState.selectedId = itemId;
+        if (it.regions.length > 0) {
+            const targetPage = it.regions[0].pageOffset + 1;
+            if (tabState.pageNum !== targetPage) {
+                tabState.pageNum = targetPage;
+                await renderPdfPage();
+                renderSidebar();
+                return;
+            }
+        }
+        renderAllRg();
+    };
+
+    window.rgUpdateItemLabel = function (itemId, val) {
+        const tabState = getTabState();
+        const it = tabState.items.find(x => x.id === itemId);
+        if (!it) return;
+        it.label = String(val || '').trim();
+        renderBoxOverlay();
+    };
+
+    window.rgToggleVarParent = function (itemId, numsCsv) {
+        const tabState = getTabState();
+        const it = tabState.items.find(x => x.id === itemId);
+        if (!it) return;
+        const nums = numsCsv.split(',').map(n => parseInt(n, 10)).filter(n => !isNaN(n) && n > 0);
+        it.parentNums = it.parentNums || [];
+        const allSelected = nums.every(n => it.parentNums.includes(n));
+        if (allSelected) {
+            it.parentNums = it.parentNums.filter(n => !nums.includes(n));
+        } else {
+            nums.forEach(n => {
+                if (!it.parentNums.includes(n)) it.parentNums.push(n);
+            });
+            it.parentNums.sort((a, b) => a - b);
+        }
+        renderAllRg();
+    };
+
+    window.rgStartContinue = function (itemId) {
+        rgState.continueTargetId = itemId;
+        rgState.selectedId = itemId;
+        renderSidebar();
+    };
+
+    window.rgCancelContinue = function () {
+        rgState.continueTargetId = null;
+        renderSidebar();
+    };
+
+    window.rgEnterSubMode = async function (itemId) {
+        const tab = rgState.activeTab;
+        const tabState = getTabState(tab);
+        const it = tabState.items.find(x => x.id === itemId);
+        if (!it) return;
+        it.isBig = true;
+        it.stemBoxes = it.stemBoxes || [];
+        it.subqBoxes = it.subqBoxes || [];
+        rgState.subMode = {
+            tab,
+            itemId,
+            target: it.stemBoxes.length === 0 ? 'stem' : 'subq'
+        };
+        rgState.selectedId = itemId;
+        if (it.regions.length > 0) {
+            tabState.pageNum = it.regions[0].pageOffset + 1;
+            await renderPdfPage();
+        }
+        renderAllRg();
+    };
+
+    window.rgSetSubDrawTarget = function (target) {
+        if (!rgState.subMode) return;
+        rgState.subMode.target = target === 'subq' ? 'subq' : 'stem';
+        renderSubModeBar();
+    };
+
+    window.rgUndoSubBox = function () {
+        if (!rgState.subMode) return;
+        const tabState = getTabState(rgState.subMode.tab);
+        const it = tabState.items.find(x => x.id === rgState.subMode.itemId);
+        if (!it) return;
+        if (rgState.subMode.target === 'stem' && it.stemBoxes.length > 0) {
+            it.stemBoxes.pop();
+        } else if (rgState.subMode.target === 'subq' && it.subqBoxes.length > 0) {
+            it.subqBoxes.pop();
+        }
+        renderAllRg();
+    };
+
+    window.rgExitSubMode = function () {
+        rgState.subMode = null;
+        renderAllRg();
+    };
+
+    window.rgDeleteItem = function (itemId) {
+        const tabState = getTabState();
+        tabState.items = tabState.items.filter(x => x.id !== itemId);
+        if (rgState.selectedId === itemId) rgState.selectedId = null;
+        if (rgState.continueTargetId === itemId) rgState.continueTargetId = null;
+        if (rgState.subMode && rgState.subMode.itemId === itemId) rgState.subMode = null;
+        renderAllRg();
+    };
+
+    window.rgFinishAndImport = async function () {
+        const exItems = rgState.exercise.items;
+        if (!rgState.exercise.file || exItems.length === 0) {
+            showToast('请先上传题目原卷并框选至少一道题', 'warn');
+            return;
+        }
+        const bankType = getCurrentBankTypeSafe();
+
+        if (bankType === 'preview') {
+            const missing = exItems.find(it => !String(it.label || '').trim());
+            if (missing) {
+                showToast('预习模式请为每道框选题目手动输入题号', 'warn');
+                rgSelectItem(missing.id);
+                return;
+            }
+        }
+        if (bankType === 'variation') {
+            const missing = exItems.find(it => !Array.isArray(it.parentNums) || it.parentNums.length === 0);
+            if (missing) {
+                showToast('举一反三模式请为每道题勾选对应的原题', 'warn');
+                rgSelectItem(missing.id);
+                return;
+            }
+        }
+
+        const finishBtn = document.getElementById('rg-finish-btn');
+        if (finishBtn) {
+            finishBtn.disabled = true;
+            finishBtn.textContent = '正在上传原卷并导入...';
+        }
+
+        try {
+            const exUpload = await uploadPdfBlob(rgState.exercise.file);
+            const exThumb = typeof generatePdfThumbnailFromFile === 'function'
+                ? await generatePdfThumbnailFromFile(rgState.exercise.file)
+                : null;
+            const exPdfObj = {
+                url: exUpload.url,
+                name: exUpload.originalName || rgState.exercise.file.name,
+                status: 'uploaded',
+                thumb: exThumb || null
+            };
+
+            let ansPdfObj = null;
+            if (rgState.answer.file && rgState.answer.items.length > 0) {
+                const ansUpload = await uploadPdfBlob(rgState.answer.file);
+                const ansThumb = typeof generatePdfThumbnailFromFile === 'function'
+                    ? await generatePdfThumbnailFromFile(rgState.answer.file)
+                    : null;
+                ansPdfObj = {
+                    url: ansUpload.url,
+                    name: ansUpload.originalName || rgState.answer.file.name,
+                    status: 'uploaded',
+                    thumb: ansThumb || null
+                };
+            }
+
+            // 按题号建立独立答案查找表（不与题目排版强绑定）
+            const ansByNum = new Map();
+            const ansSubByNum = new Map();
+            rgState.answer.items.forEach(aIt => {
+                const lbl = String(aIt.label || '').trim();
+                if (lbl) ansByNum.set(lbl, aIt);
+                if (aIt.isBig && Array.isArray(aIt.subqBoxes)) {
+                    aIt.subqBoxes.forEach(sb => {
+                        const sn = String(sb.num || '').trim();
+                        if (sn) {
+                            ansByNum.set(sn, aIt);
+                            ansSubByNum.set(sn, sb);
+                        }
+                    });
+                }
+            });
+
+            const imported = [];
+            const varSubCounter = new Map();
+
+            exItems.forEach((it) => {
+                if (bankType === 'variation') {
+                    const pNums = [...it.parentNums].sort((a, b) => a - b);
+                    const primaryP = pNums[0];
+                    const nextSub = (varSubCounter.get(primaryP) || 0) + 1;
+                    varSubCounter.set(primaryP, nextSub);
+                    const matchedAns = ansByNum.get(String(primaryP)) || ansByNum.get(String(it.label || '').trim()) || null;
+                    imported.push({
+                        id: `${primaryP}-${nextSub}`,
+                        parentNum: primaryP,
+                        parentNums: pNums,
+                        subNum: nextSub,
+                        isVariation: true,
+                        topic: '',
+                        videoUrl: '',
+                        exercisePdf: { ...exPdfObj },
+                        answerPdf: matchedAns && ansPdfObj ? { ...ansPdfObj } : null,
+                        questionMeta: {
+                            mode: 'region_crop',
+                            regions: it.regions,
+                            answerRegions: matchedAns ? matchedAns.regions : [],
+                            stemBoxes: it.isBig ? (it.stemBoxes || []) : []
+                        }
+                    });
+                    return;
+                }
+
+                if (it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
+                    const groupNums = it.subqBoxes.map(sb => parseInt(sb.num, 10)).filter(n => !isNaN(n)).sort((a, b) => a - b);
+                    it.subqBoxes.forEach((sb) => {
+                        const qKey = String(sb.num).trim();
+                        const matchedAns = ansByNum.get(qKey) || ansByNum.get(String(it.label || '').trim()) || null;
+                        const matchedAnsSub = ansSubByNum.get(qKey) || null;
+                        imported.push({
+                            id: qKey,
+                            topic: '',
+                            videoUrl: '',
+                            exercisePdf: { ...exPdfObj },
+                            answerPdf: matchedAns && ansPdfObj ? { ...ansPdfObj } : null,
+                            questionMeta: {
+                                mode: 'region_crop',
+                                groupNums,
+                                stemBoxes: it.stemBoxes || [],
+                                box: sb,
+                                answerBox: matchedAnsSub || null,
+                                regions: it.regions,
+                                answerRegions: matchedAns ? matchedAns.regions : []
+                            }
+                        });
+                    });
+                    return;
+                }
+
+                const qKey = String(it.label || '').trim();
+                const matchedAns = ansByNum.get(qKey) || null;
+                imported.push({
+                    id: qKey,
+                    topic: '',
+                    videoUrl: '',
+                    exercisePdf: { ...exPdfObj },
+                    answerPdf: matchedAns && ansPdfObj ? { ...ansPdfObj } : null,
+                    questionMeta: {
+                        mode: 'region_crop',
+                        regions: it.regions,
+                        answerRegions: matchedAns ? matchedAns.regions : []
+                    }
+                });
+            });
+
+            currentQuestions = imported;
+            batchImported = true;
+            isDirty = true;
+            rgState.subMode = null;
+            rgState.continueTargetId = null;
+
+            if (typeof renderQuestionList === 'function') renderQuestionList();
+            if (typeof updateStatus === 'function') updateStatus();
+            goToStep(4);
+            showToast(`已导入 ${imported.length} 道整卷框选题到第 4 步`);
+        } catch (err) {
+            if (err && err.unauthorized && typeof handleUnauthorized === 'function') {
+                handleUnauthorized();
+                return;
+            }
+            console.error('Region debug import error:', err);
+            showToast('导入失败：' + (err.message || '网络异常'), 'error');
+        } finally {
+            if (finishBtn) {
+                finishBtn.disabled = false;
+                finishBtn.textContent = '完成框选并导入第 4 步 →';
+            }
+        }
+    };
+})();
