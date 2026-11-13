@@ -76,10 +76,14 @@
             ? getConsolidationBuckets()
             : [];
         if (Array.isArray(buckets) && buckets.length > 0) {
-            return buckets.map(b => ({
-                nums: Array.isArray(b.nums) ? b.nums : [parseInt(b.id, 10)].filter(Boolean),
-                label: b.label || ('第' + b.id + '题')
-            }));
+            return buckets.map(b => {
+                const pNum = parseInt(b.parentNum ?? b.id, 10);
+                const nums = Array.isArray(b.nums) && b.nums.length > 0
+                    ? b.nums
+                    : (pNum > 0 ? [pNum] : []);
+                const label = b.label || (nums.length > 0 ? ('第' + nums.join('、') + '题') : '');
+                return nums.length > 0 ? { nums, label } : null;
+            }).filter(Boolean);
         }
         const list = Array.isArray(homeworkQuestionsForVariation) ? homeworkQuestionsForVariation : [];
         return list.map(q => {
