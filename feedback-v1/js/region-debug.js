@@ -160,6 +160,9 @@
             if (e.pointerType === 'mouse' && e.button !== 0) return;
             const tabState = getTabState();
             if (!tabState.pdfDoc) return;
+            if (document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('rg-num-input')) {
+                document.activeElement.blur();
+            }
             e.preventDefault();
             try { stage.setPointerCapture(e.pointerId); } catch (_) {}
             const pt = getNormPoint(e);
@@ -389,7 +392,8 @@
             it.regions.forEach((rg, rIdx) => {
                 if (rg.pageOffset !== pageOffset) return;
                 const div = document.createElement('div');
-                div.className = `rg-box ${tab === 'answer' ? 'answer' : ''} ${rgState.selectedId === it.id ? 'active' : ''}`;
+                const nearTopCls = rg.y < 0.03 ? ' near-top' : '';
+                div.className = `rg-box ${tab === 'answer' ? 'answer' : ''} ${rgState.selectedId === it.id ? 'active' : ''}${nearTopCls}`;
                 div.style.left = (rg.x * 100) + '%';
                 div.style.top = (rg.y * 100) + '%';
                 div.style.width = (rg.w * 100) + '%';
@@ -504,7 +508,8 @@
                 const chipsHtml = varOptions.length > 0
                     ? varOptions.map(opt => {
                         const selected = opt.nums.every(n => (it.parentNums || []).includes(n));
-                        return `<button type="button" class="rg-var-chip ${selected ? 'selected' : ''}" onclick="rgToggleVarParent('${it.id}', '${opt.nums.join(',')}')">${escapeHtmlRg(opt.label)}</button>`;
+                        const primaryP = opt.nums[0];
+                        return `<span class="rg-var-chip-group"><button type="button" class="rg-var-chip ${selected ? 'selected' : ''}" onclick="rgToggleVarParent('${it.id}', '${opt.nums.join(',')}')">${escapeHtmlRg(opt.label)}</button><button type="button" class="rg-var-preview-btn" onclick="event.stopPropagation(); if (typeof previewHomeworkQuestion === 'function') previewHomeworkQuestion(${primaryP}, event)" title="预览课后第 ${primaryP} 题原题">预览</button></span>`;
                     }).join('')
                     : '<span class="rg-card-meta">暂无课后巩固原题，可直接输入归属题号</span>';
                 headerEditorHtml = `
@@ -520,7 +525,7 @@
                         <div class="rg-card-num-wrap">
                             <span>${it.isBig ? '起始题号' : '题号'}</span>
                             <input type="text" class="rg-num-input" value="${escapeHtmlRg(it.label)}" placeholder="${placeholder}"
-                                onchange="rgUpdateItemLabel('${it.id}', this.value)" onclick="event.stopPropagation()">
+                                oninput="rgUpdateItemLabel('${it.id}', this.value)" onchange="rgUpdateItemLabel('${it.id}', this.value)" onclick="event.stopPropagation()">
                         </div>
                         <span class="rg-card-meta">${escapeHtmlRg(pages)}${escapeHtmlRg(bigSummary)}</span>
                     </div>
@@ -877,6 +882,7 @@
         if (!it) return;
         it.label = String(val || '').trim();
         renderBoxOverlay();
+        syncStageUi();
     };
 
     window.rgToggleVarParent = function (itemId, numsCsv) {

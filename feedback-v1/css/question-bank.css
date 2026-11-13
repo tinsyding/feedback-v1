@@ -4112,15 +4112,51 @@ input[type=number] {
 
 .rg-box-tag {
     position: absolute;
-    top: -1px;
-    left: -1px;
+    bottom: 100%;
+    left: -2px;
     background: #2563eb;
     color: #fff;
     font-size: 0.72rem;
     font-weight: 700;
-    padding: 1px 6px;
-    border-bottom-right-radius: 6px;
+    padding: 1px 7px;
+    border-radius: 5px 5px 0 0;
     white-space: nowrap;
+    pointer-events: none;
+}
+
+.rg-box.near-top .rg-box-tag {
+    bottom: auto;
+    top: -2px;
+    left: calc(100% + 4px);
+    border-radius: 5px;
+}
+
+.rg-var-chip-group {
+    display: inline-flex;
+    align-items: stretch;
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--border-subtle);
+}
+
+.rg-var-chip-group .rg-var-chip {
+    border: none;
+    border-radius: 0;
+}
+
+.rg-var-preview-btn {
+    border: none;
+    border-left: 1px solid var(--border-subtle);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-secondary);
+    padding: 2px 6px;
+    font-size: 0.72rem;
+    cursor: pointer;
+}
+
+.rg-var-preview-btn:hover {
+    background: rgba(59, 130, 246, 0.22);
+    color: #fff;
 }
 
 .rg-box.answer .rg-box-tag { background: #059669; }

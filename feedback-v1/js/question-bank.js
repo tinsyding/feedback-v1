@@ -971,7 +971,12 @@ function previewHomeworkQuestion(parentNum, event) {
         return;
     }
     const topic = hwQ && hwQ.topic ? ` (${hwQ.topic})` : "";
-    previewPdf(exPdf.url, `课后第 ${parentNum} 题 · 原题${topic}`);
+    const title = `课后第 ${parentNum} 题 · 原题${topic}`;
+    if (hwQ && hwQ.questionMeta && hwQ.questionMeta.mode === 'region_crop' && Array.isArray(hwQ.questionMeta.regions) && hwQ.questionMeta.regions.length > 0) {
+        previewSlicedRegions(exPdf.url, hwQ.questionMeta.regions, title, exPdf.name);
+        return;
+    }
+    previewPdf(exPdf.url, title);
 }
 window.previewHomeworkQuestion = previewHomeworkQuestion;
 
@@ -4510,7 +4515,9 @@ function renderQuestionList() {
                 const sampleGroup = topicMap[sameTopicGroups[0]];
                 hintText.innerHTML = `<strong>同考点关联提示：</strong>检测到本专题有 <strong>${sameTopicGroups.length} 组</strong> 同知识点原题（如第 ${sampleGroup.join('、')} 题【${escapeHtml(sameTopicGroups[0])}】）。`;
             } else {
-                hintText.innerHTML = `<strong>同考点关联提示：</strong>支持一道变式题同时关联多道同考点原题。学生做错任一对应原题时，错题本均自动输出该变式且仅练一次。`;
+                hintText.innerHTML = '';
+                const hintBox = document.getElementById('qb-variation-hint');
+                if (hintBox) hintBox.style.display = 'none';
             }
         }
     }
@@ -5724,29 +5731,23 @@ function closePdfPreview() {
 
 const regionPreviewBytesCache = new Map();
 
-async function previewRegionCropQuestion(index, type) {
-    const q = currentQuestions[index];
-    if (!q) return;
-    const data = type === 'answer' ? q.answerPdf : q.exercisePdf;
-    if (!data || !data.url) {
+async function previewSlicedRegions(pdfUrl, regions, title, fallbackName) {
+    if (!pdfUrl) {
         showToast('暂无可预览的 PDF');
         return;
     }
-    const regions = (q.questionMeta && q.questionMeta.mode === 'region_crop')
-        ? (type === 'answer' ? q.questionMeta.answerRegions : q.questionMeta.regions)
-        : null;
     if (!Array.isArray(regions) || regions.length === 0 || !window.PDFLib) {
-        previewPdf(data.url, data.name || 'PDF 预览');
+        previewPdf(pdfUrl, title || fallbackName || 'PDF 预览');
         return;
     }
 
     try {
-        let pdfBytes = regionPreviewBytesCache.get(data.url);
+        let pdfBytes = regionPreviewBytesCache.get(pdfUrl);
         if (!pdfBytes) {
-            const res = await fetch(data.url, { credentials: 'same-origin' });
+            const res = await fetch(pdfUrl, { credentials: 'same-origin' });
             if (!res.ok) throw new Error('PDF 加载失败');
             pdfBytes = await res.arrayBuffer();
-            regionPreviewBytesCache.set(data.url, pdfBytes);
+            regionPreviewBytesCache.set(pdfUrl, pdfBytes);
         }
         const srcDoc = await PDFLib.PDFDocument.load(pdfBytes);
         const outDoc = await PDFLib.PDFDocument.create();
@@ -5778,12 +5779,26 @@ async function previewRegionCropQuestion(index, type) {
 
         const outBytes = await outDoc.save();
         const blobUrl = URL.createObjectURL(new Blob([outBytes], { type: 'application/pdf' }));
-        const label = type === 'answer' ? '答案' : '题目';
-        previewPdf(blobUrl, `${label} · 第 ${q.id} 题（框选切片）`);
+        previewPdf(blobUrl, title || fallbackName || 'PDF 预览');
     } catch (err) {
         console.error('Region crop preview failed:', err);
-        previewPdf(data.url, data.name || 'PDF 预览');
+        previewPdf(pdfUrl, title || fallbackName || 'PDF 预览');
     }
+}
+
+async function previewRegionCropQuestion(index, type) {
+    const q = currentQuestions[index];
+    if (!q) return;
+    const data = type === 'answer' ? q.answerPdf : q.exercisePdf;
+    if (!data || !data.url) {
+        showToast('暂无可预览的 PDF');
+        return;
+    }
+    const regions = (q.questionMeta && q.questionMeta.mode === 'region_crop')
+        ? (type === 'answer' ? q.questionMeta.answerRegions : q.questionMeta.regions)
+        : null;
+    const label = type === 'answer' ? '答案' : '题目';
+    await previewSlicedRegions(data.url, regions, `${label} · 第 ${q.id} 题（框选切片）`, data.name);
 }
 
 function openPdfInNewTab() {
