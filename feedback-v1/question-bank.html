@@ -12,7 +12,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261114-02';
+            const v = '20261114-03';
             document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
             document.write(`<link rel="stylesheet" href="css/question-bank.css?v=${v}">`);
@@ -194,7 +194,7 @@
                     <div class="qb-step-nav" style="grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
                         <span style="font-size: 0.85rem; color: var(--text-secondary);">若需上传新错题本，选好上方分类后点击下一步：</span>
                         <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                            <button type="button" class="btn secondary" id="rg-entry-btn" style="display: none;" onclick="openRegionDebugStudio()" title="测试功能（仅管理员可见）：免切题分页，直接上传原卷 PDF 逐题拉框标注">Debug · 整卷框题</button>
+                            <button type="button" class="btn secondary" id="rg-entry-btn" style="display: none;" onclick="openRegionDebugStudio()" title="管理员专属：免切题分页，直接上传原卷 PDF 逐题拉框标注">免切题 · 整卷框题</button>
                             <button class="btn primary" onclick="goNextFromStep1()">录入新错题本 / 下一步</button>
                         </div>
                     </div>
@@ -894,7 +894,7 @@
     <script>
         (function () {
             // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261114-02';
+            const v = '20261114-03';
             document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
             document.write(`<script src="js/common.js?v=${v}"><\/script>`);
             document.write(`<script src="js/auth.js?v=${v}"><\/script>`);

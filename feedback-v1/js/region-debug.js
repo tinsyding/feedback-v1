@@ -1433,7 +1433,7 @@
 
     window.rgLoadFromCurrentQuestions = async function (focusQuestion = null) {
         if (!hasRegionDebugPermission()) {
-            showToast('整卷框题为测试功能，仅限管理员使用', 'warn');
+            showToast('整卷框题仅限管理员使用', 'warn');
             return false;
         }
         if (!hasSavedRegionCropInCurrentQuestions()) {
@@ -1530,7 +1530,7 @@
 
     window.openRegionDebugStudio = async function (opts = {}) {
         if (!hasRegionDebugPermission()) {
-            showToast('整卷框题为测试功能，仅限管理员使用', 'warn');
+            showToast('整卷框题仅限管理员使用', 'warn');
             return;
         }
         if (window.currentUser && window.currentUser.role === 'assistant') {
@@ -1600,7 +1600,7 @@
 
     window.rgEditQuestionRegionFromStep4 = async function (index) {
         if (!hasRegionDebugPermission()) {
-            showToast('整卷框题为测试功能，仅限管理员使用', 'warn');
+            showToast('整卷框题仅限管理员使用', 'warn');
             return;
         }
         const q = Array.isArray(currentQuestions) ? currentQuestions[index] : null;
@@ -2071,7 +2071,7 @@
 
     window.rgFinishAndImport = async function () {
         if (!hasRegionDebugPermission()) {
-            showToast('整卷框题为测试功能，仅限管理员使用', 'warn');
+            showToast('整卷框题仅限管理员使用', 'warn');
             return;
         }
         const exItems = rgState.exercise.items;
