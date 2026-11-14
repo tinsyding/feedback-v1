@@ -260,6 +260,7 @@
         if (!user) return;
         const navActions = document.querySelector('.nav-actions');
         const isAssistant = user.role === 'assistant';
+        const isAdmin = Boolean(user.is_admin || user.role === 'admin' || user.role === 'super_admin');
         const isPureAdmin = Boolean(user.is_admin && (user.role === 'admin' || user.role === 'super_admin'));
         const isTestAccount = user.username === '0';
         const displayName = isTestAccount ? (user.real_name || '测试账号') : (user.real_name || user.username);
@@ -268,7 +269,7 @@
         let roleBadgeHtml = '';
         if (isAssistant) {
             roleBadgeHtml = `<span class="badge-role-assistant" title="助教账号">助教</span>`;
-        } else if (isPureAdmin) {
+        } else if (isAdmin) {
             roleBadgeHtml = `<span class="badge-role-teacher" title="管理员账号">管理员</span>`;
         } else if (!isTestAccount) {
             roleBadgeHtml = `<span class="badge-role-teacher">教师</span>`;
@@ -276,18 +277,21 @@
 
         // 操作按钮集合
         let actionBtnsHtml = '';
-        if (isAssistant) {
+        if (isAssistant || isTestAccount) {
             actionBtnsHtml = `<button type="button" class="btn-nav-logout" onclick="window.handleFrontLogout()" title="退出当前账号">退出</button>`;
-        } else if (isPureAdmin) {
-            actionBtnsHtml = `<a class="btn-nav-logout" href="admin.html" title="返回管理后台">管理后台</a>`;
-        } else if (!isTestAccount) {
+        } else {
+            const adminLinkHtml = isAdmin
+                ? `<a class="btn-nav-reset-pwd" href="admin.html" title="返回管理后台" style="text-decoration:none;">管理后台</a>`
+                : '';
+            const resetPwdHtml = !isPureAdmin
+                ? `<button type="button" class="btn-nav-reset-pwd" onclick="window.openResetPasswordModal()" title="修改当前教师登录密码">修改密码</button>`
+                : '';
             actionBtnsHtml = `
-                <button type="button" class="btn-nav-assistant-mgr" onclick="window.openAssistantModal()" title="管理当前教师名下的助教账号">助教管理</button>
-                <button type="button" class="btn-nav-reset-pwd" onclick="window.openResetPasswordModal()" title="修改当前教师登录密码">修改密码</button>
+                ${adminLinkHtml}
+                <button type="button" class="btn-nav-assistant-mgr" onclick="window.openAssistantModal()" title="管理当前账号名下的助教账号">助教管理</button>
+                ${resetPwdHtml}
                 <button type="button" class="btn-nav-logout" onclick="window.handleFrontLogout()" title="退出当前账号">退出</button>
             `;
-        } else {
-            actionBtnsHtml = `<button type="button" class="btn-nav-logout" onclick="window.handleFrontLogout()" title="退出当前账号">退出</button>`;
         }
 
         if (navActions) {

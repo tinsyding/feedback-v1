@@ -13,6 +13,57 @@ function sendAuthResponse(bool $success, $data = null, ?string $error = null, in
     sendResponse($success, $data, $error, $code);
 }
 
+/**
+ * 解析当前可管理助教的账号上下文（支持教师及前台登录/联动登录的管理员）。
+ *
+ * @return array{0:int, 1:string} [ownerUserId, ownerUsername]
+ */
+function resolveAssistantOwnerContext(string $deniedSuffix): array {
+    $hasAdmin = function_exists('isAdminLoggedIn') ? isAdminLoggedIn() : !empty($_SESSION['admin_logged_in']);
+    $hasFrontUser = !empty($_SESSION['user_logged_in']);
+
+    if (!$hasFrontUser && !$hasAdmin) {
+        sendAuthResponse(false, null, "需要教师或管理员登录后才可{$deniedSuffix}", 401);
+    }
+
+    $role = $hasFrontUser ? ($_SESSION['user_role'] ?? 'teacher') : ($_SESSION['admin_role'] ?? 'super_admin');
+    if ($role === 'assistant') {
+        sendAuthResponse(false, null, "助教账号无权{$deniedSuffix}", 403);
+    }
+
+    $ownerUsername = $hasFrontUser
+        ? (string)($_SESSION['username'] ?? '')
+        : (string)($_SESSION['admin_username'] ?? '');
+
+    if ($ownerUsername === '0' || $ownerUsername === '') {
+        sendAuthResponse(false, null, "测试账号为公共体验账号，不支持{$deniedSuffix}", 403);
+    }
+
+    $ownerId = $hasFrontUser ? (int)($_SESSION['user_id'] ?? 0) : 0;
+    if ($ownerId <= 0) {
+        try {
+            $linkedUser = DB::fetchOne("SELECT `id` FROM `users` WHERE `username` = ? LIMIT 1", [$ownerUsername]);
+            if ($linkedUser) {
+                $ownerId = (int)$linkedUser['id'];
+            }
+        } catch (Throwable $ignore) {}
+    }
+
+    return [$ownerId, $ownerUsername];
+}
+
+/**
+ * 构造助教归属 SQL 条件，避免 $ownerId 为 0 时误匹配 teacher_id=0 的其它账号助教。
+ *
+ * @return array{0:string, 1:array} [whereClause, params]
+ */
+function buildAssistantOwnerCondition(int $ownerId, string $ownerUsername): array {
+    if ($ownerId > 0) {
+        return ['(`teacher_id` = ? OR `created_by` = ?)', [$ownerId, $ownerUsername]];
+    }
+    return ['`created_by` = ?', [$ownerUsername]];
+}
+
 $action = $_GET['action'] ?? '';
 $method = $_SERVER['REQUEST_METHOD'];
 
@@ -299,9 +350,24 @@ switch ($action) {
         break;
 
     case 'logout':
-        $uname = $_SESSION['username'] ?? 'unknown';
+        $uname = $_SESSION['username'] ?? $_SESSION['admin_username'] ?? 'unknown';
         $_SESSION['user_logged_in'] = false;
-        unset($_SESSION['user_logged_in'], $_SESSION['user_id'], $_SESSION['username'], $_SESSION['real_name'], $_SESSION['user_role'], $_SESSION['user_login_time']);
+        $_SESSION['admin_logged_in'] = false;
+        unset(
+            $_SESSION['user_logged_in'],
+            $_SESSION['user_id'],
+            $_SESSION['username'],
+            $_SESSION['real_name'],
+            $_SESSION['user_role'],
+            $_SESSION['user_teacher_id'],
+            $_SESSION['user_created_by'],
+            $_SESSION['user_login_time'],
+            $_SESSION['admin_logged_in'],
+            $_SESSION['admin_username'],
+            $_SESSION['admin_realname'],
+            $_SESSION['admin_role'],
+            $_SESSION['login_time']
+        );
 
         recordServerLog('action', 'user_auth', 'logout', [
             'username' => $uname,
@@ -446,24 +512,17 @@ switch ($action) {
         break;
 
     case 'assistant_list':
-        if (empty($_SESSION['user_logged_in']) || ($_SESSION['user_role'] ?? '') !== 'teacher') {
-            sendAuthResponse(false, null, '需要教师登录后才可管理助教账号', 401);
-        }
-        $teacherUsername = $_SESSION['username'] ?? '';
-        $teacherId = (int)($_SESSION['user_id'] ?? 0);
-
-        if ($teacherUsername === '0') {
-            sendAuthResponse(false, null, '测试账号为公共体验账号，不支持助教账号管理', 403);
-        }
+        [$teacherId, $teacherUsername] = resolveAssistantOwnerContext('管理助教账号');
+        [$ownerSql, $ownerParams] = buildAssistantOwnerCondition($teacherId, $teacherUsername);
 
         try {
             $assistants = DB::fetchAll(
                 "SELECT id, username, real_name, role, teacher_id, created_by, status, 
                         last_login_at, created_at, updated_at 
                  FROM `users` 
-                 WHERE `role` = 'assistant' AND (`teacher_id` = ? OR `created_by` = ?) 
+                 WHERE `role` = 'assistant' AND {$ownerSql} 
                  ORDER BY `id` DESC",
-                [$teacherId, $teacherUsername]
+                $ownerParams
             );
             sendAuthResponse(true, ['assistants' => $assistants]);
         } catch (Throwable $e) {
@@ -474,15 +533,7 @@ switch ($action) {
 
     case 'assistant_create':
         if ($method !== 'POST') sendAuthResponse(false, null, '只支持 POST 请求', 405);
-        if (empty($_SESSION['user_logged_in']) || ($_SESSION['user_role'] ?? '') !== 'teacher') {
-            sendAuthResponse(false, null, '需要教师登录后才可添加助教账号', 401);
-        }
-        $teacherUsername = $_SESSION['username'] ?? '';
-        $teacherId = (int)($_SESSION['user_id'] ?? 0);
-
-        if ($teacherUsername === '0') {
-            sendAuthResponse(false, null, '测试账号为公共体验账号，不支持创建助教账号', 403);
-        }
+        [$teacherId, $teacherUsername] = resolveAssistantOwnerContext('创建助教账号');
 
         $input = json_decode(file_get_contents('php://input'), true) ?: [];
         $rawUsername = trim((string)($input['username'] ?? ''));
@@ -551,15 +602,8 @@ switch ($action) {
 
     case 'assistant_update':
         if ($method !== 'POST') sendAuthResponse(false, null, '只支持 POST 请求', 405);
-        if (empty($_SESSION['user_logged_in']) || ($_SESSION['user_role'] ?? '') !== 'teacher') {
-            sendAuthResponse(false, null, '需要教师登录后才可修改助教账号', 401);
-        }
-        $teacherUsername = $_SESSION['username'] ?? '';
-        $teacherId = (int)($_SESSION['user_id'] ?? 0);
-
-        if ($teacherUsername === '0') {
-            sendAuthResponse(false, null, '测试账号为公共体验账号，不支持修改助教账号', 403);
-        }
+        [$teacherId, $teacherUsername] = resolveAssistantOwnerContext('修改助教账号');
+        [$ownerSql, $ownerParams] = buildAssistantOwnerCondition($teacherId, $teacherUsername);
 
         $input = json_decode(file_get_contents('php://input'), true) ?: [];
         $targetId = (int)($input['id'] ?? 0);
@@ -568,8 +612,8 @@ switch ($action) {
         }
 
         $target = DB::fetchOne(
-            "SELECT * FROM `users` WHERE `id` = ? AND `role` = 'assistant' AND (`teacher_id` = ? OR `created_by` = ?) LIMIT 1",
-            [$targetId, $teacherId, $teacherUsername]
+            "SELECT * FROM `users` WHERE `id` = ? AND `role` = 'assistant' AND {$ownerSql} LIMIT 1",
+            array_merge([$targetId], $ownerParams)
         );
         if (!$target) {
             sendAuthResponse(false, null, '未找到指定助教账号，或您无权修改此账号', 404);
@@ -631,15 +675,8 @@ switch ($action) {
 
     case 'assistant_delete':
         if ($method !== 'POST') sendAuthResponse(false, null, '只支持 POST 请求', 405);
-        if (empty($_SESSION['user_logged_in']) || ($_SESSION['user_role'] ?? '') !== 'teacher') {
-            sendAuthResponse(false, null, '需要教师登录后才可删除助教账号', 401);
-        }
-        $teacherUsername = $_SESSION['username'] ?? '';
-        $teacherId = (int)($_SESSION['user_id'] ?? 0);
-
-        if ($teacherUsername === '0') {
-            sendAuthResponse(false, null, '测试账号为公共体验账号，不支持删除助教账号', 403);
-        }
+        [$teacherId, $teacherUsername] = resolveAssistantOwnerContext('删除助教账号');
+        [$ownerSql, $ownerParams] = buildAssistantOwnerCondition($teacherId, $teacherUsername);
 
         $input = json_decode(file_get_contents('php://input'), true) ?: [];
         $targetId = (int)($input['id'] ?? 0);
@@ -648,8 +685,8 @@ switch ($action) {
         }
 
         $target = DB::fetchOne(
-            "SELECT * FROM `users` WHERE `id` = ? AND `role` = 'assistant' AND (`teacher_id` = ? OR `created_by` = ?) LIMIT 1",
-            [$targetId, $teacherId, $teacherUsername]
+            "SELECT * FROM `users` WHERE `id` = ? AND `role` = 'assistant' AND {$ownerSql} LIMIT 1",
+            array_merge([$targetId], $ownerParams)
         );
         if (!$target) {
             sendAuthResponse(false, null, '未找到指定助教账号，或您无权删除此账号', 404);
