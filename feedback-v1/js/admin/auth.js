@@ -5,12 +5,24 @@
         /* ========================================================
            Authentication & Authorization
            ======================================================== */
+        async function redirectNonAdminTarget() {
+            try {
+                const authRes = await fetch('api/auth.php?action=check');
+                const authJson = await authRes.json();
+                if (authJson.success && authJson.data?.loggedIn) {
+                    window.location.replace('upload.html');
+                    return;
+                }
+            } catch (_) {}
+            window.location.replace('index.html');
+        }
+
         async function checkAuth() {
             try {
                 const response = await fetch(`${API_BASE}?action=check`);
                 const result = await response.json();
                 if (!result.success || !result.data?.loggedIn) {
-                    window.location.href = 'admin-login.html';
+                    await redirectNonAdminTarget();
                     return false;
                 }
                 const uname = result.data.username || '管理员';
@@ -18,7 +30,7 @@
                 document.getElementById('user-avatar-letter').textContent = (uname[0] || 'A').toUpperCase();
                 return true;
             } catch (err) {
-                window.location.href = 'admin-login.html';
+                await redirectNonAdminTarget();
                 return false;
             }
         }
@@ -29,7 +41,7 @@
             try {
                 await fetch(`${API_BASE}?action=logout`, { method: 'POST' });
             } catch (err) {}
-            window.location.href = 'admin-login.html';
+            window.location.href = 'index.html';
         }
 
         function openChangePwdModal() {

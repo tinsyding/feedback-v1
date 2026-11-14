@@ -34,7 +34,6 @@ feedback-v1/
 ├── question-bank.html      # 错题本管理页
 ├── retest.html             # 学生错题巩固练习页
 ├── admin.html              # 管理后台
-├── admin-login.html        # 管理员登录页
 ├── 403.html ~ 50x.html     # 错误状态页
 ├── config.json             # 数据库连接凭据与配置 (不入库)
 ├── config.example.json     # 配置模板

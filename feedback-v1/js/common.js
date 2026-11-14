@@ -1028,7 +1028,6 @@ function initCommon() {
             'upload.html': 'upload',
             'viewer.html': 'viewer',
             'admin.html': 'admin',
-            'admin-login.html': 'admin',
             'question-bank.html': 'qbank',
             'index.html': 'home'
         };
