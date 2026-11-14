@@ -5484,7 +5484,6 @@ function applySavedDataFilter() {
                     <span class="saved-badge ${subjectClass}">${escapeHtml(item.subject)}</span>
                     <span class="saved-grade-tag">${escapeHtml(itemGrade)} · ${escapeHtml(item.tier)}层</span>
                 </div>
-                <span class="saved-card-time">${item.updatedAt ? formatTime(item.updatedAt) : ''}</span>
             </div>
             <div class="saved-card-body">
                 <h4 class="saved-card-title">${escapeHtml(topicName)}</h4>
@@ -5579,12 +5578,6 @@ function highlightActiveSavedItem() {
 
 // ========== Helpers ==========
 // Note: escapeHtml is defined at top of this file and in common.js
-
-function formatTime(ts) {
-    const d = new Date(ts);
-    const pad = n => n.toString().padStart(2, '0');
-    return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 // ========== Expose to window ==========
 window.onSelectorChange = onSelectorChange;
