@@ -598,9 +598,23 @@ switch ($action) {
 
             // 管理员表与前台教师账号特殊处理
             if ($table === 'admin_users' || $table === 'users') {
-                $rawPwd = $input['password'] ?? ($input['password_hash'] ?? '');
-                if (empty($rawPwd)) {
+                $usernameVal = trim((string)($input['username'] ?? ''));
+                if ($usernameVal === '') {
+                    sendResponse(false, null, '账号不能为空', 400);
+                }
+                $input['username'] = $usernameVal;
+
+                $exists = DB::fetchOne("SELECT `id` FROM `{$table}` WHERE `username` = ? LIMIT 1", [$usernameVal]);
+                if ($exists) {
+                    sendResponse(false, null, "账号 [{$usernameVal}] 已存在，请更换其它账号", 400);
+                }
+
+                $rawPwd = trim((string)($input['password'] ?? ($input['password_hash'] ?? '')));
+                if ($rawPwd === '') {
                     sendResponse(false, null, '新增账号必须设置登录密码', 400);
+                }
+                if (strlen($rawPwd) < 6) {
+                    sendResponse(false, null, '登录密码长度不能少于 6 位', 400);
                 }
                 $input['password_hash'] = password_hash($rawPwd, PASSWORD_BCRYPT);
                 if ($table === 'users') {
@@ -774,10 +788,13 @@ switch ($action) {
             }
 
             if ($table === 'admin_users' || $table === 'users') {
-                $rawPwd = $input['password'] ?? ($input['password_hash'] ?? '');
-                if (empty($rawPwd) || $rawPwd === '●●●●●●●●' || str_starts_with($rawPwd, '●')) {
+                $rawPwd = trim((string)($input['password'] ?? ($input['password_hash'] ?? '')));
+                if ($rawPwd === '' || $rawPwd === '●●●●●●●●' || str_starts_with($rawPwd, '●')) {
                     unset($input['password_hash'], $input['password']);
                 } else if (!str_starts_with($rawPwd, '$2y$') && !str_starts_with($rawPwd, '$2a$')) {
+                    if (strlen($rawPwd) < 6) {
+                        sendResponse(false, null, '登录密码长度不能少于 6 位', 400);
+                    }
                     $input['password_hash'] = password_hash($rawPwd, PASSWORD_BCRYPT);
                     if ($table === 'users') {
                         $input['initial_password'] = '';

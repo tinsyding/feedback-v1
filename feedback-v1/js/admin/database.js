@@ -1924,12 +1924,12 @@
                     </div>
                 `;
             } else if (dbModalActiveTable === 'users') {
-                const isTest = recordData.username === '0';
+                const isTest = isEdit && recordData.username === '0';
                 container.innerHTML = `
                     <div class="form-grid">
                         <div class="form-field">
                             <label>教师账号 (Username) *</label>
-                            <input type="text" id="field-username" value="${escapeHtml(recordData.username || '')}" placeholder="例如: JF001" ${isEdit && isTest ? 'readonly style="opacity:0.75;"' : ''} required autocomplete="off">
+                            <input type="text" id="field-username" value="${escapeHtml(recordData.username || '')}" placeholder="例如: JF001" ${isTest ? 'readonly style="opacity:0.75;"' : ''} required autocomplete="off">
                             <span class="field-hint">${isTest ? '测试账号为公共系统账号，工号不可更改' : '前台教师唯一登录工号或账号（如 JF001）'}</span>
                         </div>
                         <div class="form-field">
@@ -1938,16 +1938,17 @@
                             <span class="field-hint">教师展示名称，将显示在错题记录与反馈生成卡片中</span>
                         </div>
                         <div class="form-field">
+                            <label>登录密码 (Password) ${isEdit ? (isTest ? '' : '<span style="color:var(--text-muted); font-weight:normal;">(留空表示保持原密码不变)</span>') : '*'}</label>
+                            <input type="password" id="field-password" placeholder="${isTest ? '系统保留账号禁止修改密码' : (isEdit ? '留空表示不修改密码（新密码至少6位）' : '请输入登录密码（至少6位）')}" ${isTest ? 'disabled style="opacity:0.65; cursor:not-allowed;"' : (isEdit ? 'minlength="6"' : 'required minlength="6"')} autocomplete="new-password">
+                            <span class="field-hint">${isTest ? '测试账号 (0) 为系统保留账号，不支持修改或重置密码' : (isEdit ? '如无需修改密码直接留空；若输入新密码，后台将自动进行 BCrypt 哈希存储' : '必填，长度至少 6 位；后台将自动采用安全 BCrypt 哈希加密存储')}</span>
+                        </div>
+                        <div class="form-field">
                             <label>账号状态 (Status) *</label>
                             <select id="field-status" class="custom-select" required>
                                 <option value="1" ${recordData.status === undefined || parseInt(recordData.status, 10) === 1 ? 'selected' : ''}>启用 (允许登录)</option>
                                 <option value="0" ${parseInt(recordData.status, 10) === 0 ? 'selected' : ''}>禁用 (禁止登录)</option>
                             </select>
-                        </div>
-                        <div class="form-field">
-                            <label>初始密码备注 (Initial Password)</label>
-                            <input type="text" id="field-initial_password" value="${escapeHtml(recordData.initial_password || '')}" placeholder="教师初始分配密码">
-                            <span class="field-hint">仅供初始参考；重置密码请直接点击列表中的“重置密码”</span>
+                            <span class="field-hint">停用后该教师及名下助教状态需分别控制，本账号将无法登录</span>
                         </div>
                     </div>
                 `;
@@ -2127,17 +2128,29 @@
                 const username = document.getElementById('field-username')?.value.trim();
                 const realName = document.getElementById('field-real_name')?.value.trim();
                 const status = document.getElementById('field-status')?.value;
-                const initialPassword = document.getElementById('field-initial_password')?.value.trim();
+                const password = document.getElementById('field-password')?.value.trim() || '';
 
                 if (!username) {
                     showToast('教师账号不能为空', 'warn');
                     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存数据记录'; }
                     return;
                 }
+                if (!isEdit && !password) {
+                    showToast('新增教师账号必须设置登录密码', 'warn');
+                    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存数据记录'; }
+                    return;
+                }
+                if (password && password.length < 6) {
+                    showToast('登录密码长度不能少于 6 位', 'warn');
+                    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存数据记录'; }
+                    return;
+                }
                 data.username = username;
                 data.real_name = realName || username;
                 data.status = parseInt(status, 10) === 0 ? 0 : 1;
-                data.initial_password = initialPassword || '';
+                if (password && username !== '0') {
+                    data.password = password;
+                }
             } else {
                 schema.forEach(col => {
                     const colName = col.field || col.name;
@@ -2171,7 +2184,13 @@
                     if (activeTable === 'class_batches') {
                         await loadDbBatchOptions();
                     }
+                    if (activeTable === 'users' && typeof loadTeachersData === 'function') {
+                        loadTeachersData(isEdit ? teacherCurrentPage : 1);
+                    }
                     loadDbData(dbCurrentPage);
+                    if (typeof loadDbTables === 'function') {
+                        loadDbTables();
+                    }
                 } else {
                     showToast(json.error || '保存数据失败', 'error');
                 }
