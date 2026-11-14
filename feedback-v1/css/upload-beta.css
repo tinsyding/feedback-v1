@@ -137,16 +137,22 @@
     grid-column: 1 / -1;
 }
 
-/* 右侧配置卡片网格 */
+/* 右侧配置卡片网格：外层已是左右双栏，右侧配置卡片独占右栏整行以避免选项按钮与模板表单挤压 */
 .beta-pane-config .config-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
     gap: 16px;
     margin-bottom: 0;
 }
 
 .beta-pane-config .beta-span-full {
     grid-column: 1 / -1;
+}
+
+/* 防止胶囊按钮组（如“爱问云评语 + 固定模板”）在有限宽度下等分挤压导致文字与图标重叠 */
+.upload-beta-page .ui-pill-group.fill .ui-pill {
+    flex: 1 1 auto;
+    min-width: max-content;
 }
 
 /* Pane 内卡片保持清晰层级 */
@@ -234,10 +240,9 @@
     border-style: dashed;
 }
 
-/* 中等宽度笔记本（1100px ~ 1380px）：外层仍保留左右双栏，内层卡片改为单列防挤压 */
+/* 中等宽度笔记本（1100px ~ 1380px）：外层仍保留左右双栏，左侧上传卡片改为单列防挤压 */
 @media (max-width: 1380px) {
-    .beta-pane-upload .panel-grid,
-    .beta-pane-config .config-grid {
+    .beta-pane-upload .panel-grid {
         grid-template-columns: 1fr;
     }
 }
@@ -249,8 +254,7 @@
         gap: 18px;
     }
 
-    .beta-pane-upload .panel-grid,
-    .beta-pane-config .config-grid {
+    .beta-pane-upload .panel-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
@@ -265,7 +269,7 @@
     }
 
     .beta-pane-upload .panel-grid,
-    .beta-pane-config .config-grid {
+    .beta-pane-config .option-cards {
         grid-template-columns: 1fr;
     }
 
