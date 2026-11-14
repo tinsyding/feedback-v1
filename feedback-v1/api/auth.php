@@ -153,6 +153,7 @@ switch ($action) {
         }
 
         $user = null;
+        $adminUser = null;
         try {
             $user = DB::fetchOne("SELECT * FROM `users` WHERE `username` = ? LIMIT 1", [$username]);
         } catch (Throwable $e) {
@@ -160,7 +161,14 @@ switch ($action) {
             sendAuthResponse(false, ['require_captcha' => $requireCaptcha], '数据库连接异常，请稍后重试', 500);
         }
 
-        if (!$user) {
+        // 同步核验 admin_users：允许管理员直接从前台首页登录，或在同名教师账号密码一致时自动联动管理员会话
+        try {
+            $adminUser = DB::fetchOne("SELECT * FROM `admin_users` WHERE `username` = ? LIMIT 1", [$username]);
+        } catch (Throwable $ignore) {
+            $adminUser = null;
+        }
+
+        if (!$user && !$adminUser) {
             $_SESSION['front_login_fail_count'] = ($_SESSION['front_login_fail_count'] ?? 0) + 1;
             unset($_SESSION['front_captcha_code']);
             recordServerLog('warn', 'user_auth', 'login_failed_not_found', [
@@ -171,7 +179,9 @@ switch ($action) {
             sendAuthResponse(false, ['require_captcha' => true], '账号或密码错误', 401);
         }
 
-        if (intval($user['status']) !== 1) {
+        $userActive = $user && intval($user['status']) === 1;
+        $adminActive = $adminUser && intval($adminUser['status']) === 1;
+        if (!$userActive && !$adminActive) {
             $_SESSION['front_login_fail_count'] = ($_SESSION['front_login_fail_count'] ?? 0) + 1;
             unset($_SESSION['front_captcha_code']);
             recordServerLog('warn', 'user_auth', 'login_failed_disabled', [
@@ -182,9 +192,23 @@ switch ($action) {
             sendAuthResponse(false, ['require_captcha' => true], '该账号已被停用，请联系管理员', 403);
         }
 
-        $valid = !empty($user['password_hash']) && password_verify($password, $user['password_hash']);
+        $userValid = $userActive && !empty($user['password_hash']) && password_verify($password, $user['password_hash']);
 
-        if (!$valid) {
+        $adminValid = false;
+        if ($adminActive && !empty($adminUser['password_hash'])) {
+            $storedAdminHash = (string)$adminUser['password_hash'];
+            if (password_verify($password, $storedAdminHash)) {
+                $adminValid = true;
+            } elseif (hash_equals($storedAdminHash, hash('sha256', $password))) {
+                $adminValid = true;
+                try {
+                    $newHash = password_hash($password, PASSWORD_BCRYPT);
+                    DB::execute("UPDATE `admin_users` SET `password_hash` = ? WHERE `id` = ?", [$newHash, $adminUser['id']]);
+                } catch (Throwable $ignore) {}
+            }
+        }
+
+        if (!$userValid && !$adminValid) {
             $_SESSION['front_login_fail_count'] = ($_SESSION['front_login_fail_count'] ?? 0) + 1;
             unset($_SESSION['front_captcha_code']);
             recordServerLog('warn', 'user_auth', 'login_failed_wrong_password', [
@@ -199,35 +223,77 @@ switch ($action) {
         unset($_SESSION['front_login_fail_count'], $_SESSION['front_captcha_code']);
 
         session_regenerate_id(true);
-        $_SESSION['user_logged_in'] = true;
-        $_SESSION['user_id'] = $user['id'];
-        $_SESSION['username'] = $user['username'];
-        $_SESSION['real_name'] = $user['real_name'];
-        $_SESSION['user_role'] = $user['role'] ?: 'teacher';
-        $_SESSION['user_teacher_id'] = (int)($user['teacher_id'] ?? 0);
-        $_SESSION['user_created_by'] = $user['created_by'] ?? '';
-        $_SESSION['user_login_time'] = time();
-
         $clientIp = getClientIp();
-        try {
-            DB::execute("UPDATE `users` SET `last_login_at` = NOW(), `last_login_ip` = ? WHERE `id` = ?", [$clientIp, $user['id']]);
-        } catch (Throwable $ignore) {}
 
+        if ($userValid) {
+            $_SESSION['user_logged_in'] = true;
+            $_SESSION['user_id'] = $user['id'];
+            $_SESSION['username'] = $user['username'];
+            $_SESSION['real_name'] = $user['real_name'];
+            $_SESSION['user_role'] = $user['role'] ?: 'teacher';
+            $_SESSION['user_teacher_id'] = (int)($user['teacher_id'] ?? 0);
+            $_SESSION['user_created_by'] = $user['created_by'] ?? '';
+            $_SESSION['user_login_time'] = time();
+
+            try {
+                DB::execute("UPDATE `users` SET `last_login_at` = NOW(), `last_login_ip` = ? WHERE `id` = ?", [$clientIp, $user['id']]);
+            } catch (Throwable $ignore) {}
+        } else {
+            unset(
+                $_SESSION['user_logged_in'],
+                $_SESSION['user_id'],
+                $_SESSION['username'],
+                $_SESSION['real_name'],
+                $_SESSION['user_role'],
+                $_SESSION['user_teacher_id'],
+                $_SESSION['user_created_by'],
+                $_SESSION['user_login_time']
+            );
+        }
+
+        if ($adminValid) {
+            $_SESSION['admin_logged_in'] = true;
+            $_SESSION['admin_username'] = $adminUser['username'];
+            $_SESSION['admin_realname'] = $adminUser['real_name'] ?? '管理员';
+            $_SESSION['admin_role'] = $adminUser['role'] ?: 'super_admin';
+            $_SESSION['login_time'] = time();
+
+            try {
+                DB::execute("UPDATE `admin_users` SET `last_login_at` = NOW(), `last_login_ip` = ? WHERE `id` = ?", [$clientIp, $adminUser['id']]);
+            } catch (Throwable $ignore) {}
+        }
+
+        $logUsername = $userValid ? $user['username'] : $adminUser['username'];
+        $logRealName = $userValid ? $user['real_name'] : ($adminUser['real_name'] ?? '管理员');
         recordServerLog('action', 'user_auth', 'login_success', [
-            'username'  => $user['username'],
-            'real_name' => $user['real_name'],
+            'username'  => $logUsername,
+            'real_name' => $logRealName,
             'ip'        => $clientIp,
-            'message'   => "用户登录成功: {$user['username']}"
+            'message'   => $adminValid && !$userValid
+                ? "管理员从前台登录成功: {$logUsername}"
+                : "用户登录成功: {$logUsername}"
         ]);
 
-        $uRole = $user['role'] ?: 'teacher';
-        $hasAdminSession = function_exists('isAdminLoggedIn') ? isAdminLoggedIn() : !empty($_SESSION['admin_logged_in']);
+        if ($userValid) {
+            $uRole = $user['role'] ?: 'teacher';
+            $hasAdminSession = $adminValid || (function_exists('isAdminLoggedIn') ? isAdminLoggedIn() : !empty($_SESSION['admin_logged_in']));
+            sendAuthResponse(true, [
+                'username'   => $user['username'],
+                'real_name'  => $user['real_name'],
+                'role'       => $uRole,
+                'is_admin'   => $hasAdminSession || in_array($uRole, ['admin', 'super_admin'], true),
+                'created_by' => $user['created_by'] ?? '',
+                'message'    => '登录成功'
+            ]);
+        }
+
+        $aRole = $adminUser['role'] ?: 'super_admin';
         sendAuthResponse(true, [
-            'username'   => $user['username'],
-            'real_name'  => $user['real_name'],
-            'role'       => $uRole,
-            'is_admin'   => $hasAdminSession || in_array($uRole, ['admin', 'super_admin'], true),
-            'created_by' => $user['created_by'] ?? '',
+            'username'   => $adminUser['username'],
+            'real_name'  => $adminUser['real_name'] ?? '管理员',
+            'role'       => $aRole,
+            'is_admin'   => true,
+            'created_by' => '',
             'message'    => '登录成功'
         ]);
         break;

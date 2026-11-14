@@ -942,6 +942,7 @@
                 window.currentUser = currentUser;
                 hideAuthModal();
                 renderNavUser(currentUser);
+                window.dispatchEvent(new CustomEvent('authChecked', { detail: currentUser }));
                 if (typeof showToast === 'function') {
                     showToast(`已登录，${currentUser.real_name || currentUser.username}`, 'success');
                 }
