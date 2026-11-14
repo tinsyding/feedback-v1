@@ -62,7 +62,8 @@ fetch('api/public_config.php').then(r=>r.json()).then(c=>{
     };
     const sName = seasonNameMap[window.defaultSeason] || (isVacation ? '寒暑季' : '春秋季');
     const yrStr = window.semesterYear ? `${window.semesterYear}年` : '';
-    document.title = `反馈生成器 - ${yrStr}${sName} - 上传${isSplitLayout() ? '（Beta）' : ''}`;
+    const isBetaPage = isSplitLayout() || window.location.pathname.includes('upload-beta');
+    document.title = `反馈生成器 - ${yrStr}${sName} - 上传${isBetaPage ? '（Beta）' : ''}`;
     syncStep2PreviewConfig();
     updateSplitReadinessUI();
 });
@@ -263,7 +264,8 @@ function handleUploadStepClick(n) {
 window.handleUploadStepClick = handleUploadStepClick;
 
 function confirmReupload() {
-    window.location.href = isSplitLayout() ? 'upload-beta.html' : 'upload.html';
+    const isBetaPage = isSplitLayout() || window.location.pathname.includes('upload-beta');
+    window.location.href = isBetaPage ? 'upload-beta.html' : 'upload.html';
 }
 window.confirmReupload = confirmReupload;
 
