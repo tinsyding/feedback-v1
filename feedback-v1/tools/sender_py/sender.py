@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "2.0"
+APP_VERSION = "2.0.1"
 
 
 def asset_path(filename: str) -> str:
@@ -225,7 +225,13 @@ def safe_copy(text: str, retries: int = 5) -> bool:
     return False
 
 
-def search_and_enter(name: str, candidate_index: int = 1, down_first: bool = None) -> bool:
+def search_and_enter(
+    name: str,
+    candidate_index: int = 1,
+    down_first: bool = None,
+    search_wait: float = 1.5,
+    enter_wait: float = 1.2,
+) -> bool:
     """搜人进会话：第 candidate_index 个结果。Ctrl+F 聚焦→全选→Backspace 清空→粘贴→等结果→Down 定位→回车进会话。
 
     注意：企微中「文件传输助手」比较特殊，搜索后焦点停在输入框中，必须先按下一次 Down 键才能选中；
@@ -241,22 +247,23 @@ def search_and_enter(name: str, candidate_index: int = 1, down_first: bool = Non
         return False
     time.sleep(0.2)
     wu.tap_keys(wu.VK_CONTROL, wu.VK_F)
-    time.sleep(0.15)
+    time.sleep(0.25)
     wu.tap_keys(wu.VK_CONTROL, wu.VK_A)
-    time.sleep(0.1)
+    time.sleep(0.12)
     wu.tap_key(0x08)  # Backspace：清掉搜索框残留，防粘贴追加
-    time.sleep(0.1)
+    time.sleep(0.15)
     if not safe_copy(name):
         return False
+    time.sleep(0.05)
     wu.tap_keys(wu.VK_CONTROL, wu.VK_V)
-    time.sleep(1.0)  # 等搜索结果列表刷新；先 Down 选中候选，最后再 Enter
+    time.sleep(search_wait)  # 等搜索结果列表刷新；先 Down 选中候选，最后再 Enter
     for action in candidate_search_plan(candidate_index, down_first=down_first):
         if action == "down":
             wu.tap_key(wu.VK_DOWN)
-            time.sleep(0.2)
+            time.sleep(0.22)
         else:
             wu.tap_key(wu.VK_RETURN)
-            time.sleep(1.2)  # 等会话切换渲染完再截图
+            time.sleep(enter_wait)  # 等会话切换渲染完再截图
     return wu.is_foreground_wecom()
 
 
@@ -272,8 +279,9 @@ def paste_and_send(message: str) -> tuple:
         time.sleep(0.2)
     if not safe_copy(message):
         return (False, "剪贴板写入核验失败")
+    time.sleep(0.05)
     wu.tap_keys(wu.VK_CONTROL, wu.VK_V)
-    time.sleep(0.3)
+    time.sleep(0.35)
     try:
         import pyperclip
         if pyperclip.paste() != message:
@@ -815,6 +823,38 @@ def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
     return (judgment, judgment.get("detected_title"), None)
 
 
+def _capture_title_crop(rect, roi):
+    """截取当前企微标题栏区域图像；失败或无法截取时返回 None。"""
+    if not rect or not isinstance(roi, dict) or "title" not in roi:
+        return None
+    try:
+        try:
+            from sender_py.capture import capture_wecom_window, crop_by_rel
+        except ModuleNotFoundError:
+            from capture import capture_wecom_window, crop_by_rel
+        img = capture_wecom_window(rect)
+        if img is None:
+            return None
+        return crop_by_rel(img, roi["title"])
+    except Exception:
+        return None
+
+
+def _images_visually_same(img_a, img_b, diff_threshold: float = 0.8) -> bool:
+    """判断两张标题栏截图是否视觉一致（用于检测回车后企微会话是否尚未切走）。"""
+    if img_a is None or img_b is None:
+        return False
+    try:
+        from PIL import ImageChops, ImageStat
+        if img_a.size != img_b.size:
+            return False
+        diff = ImageChops.difference(img_a.convert("RGB"), img_b.convert("RGB"))
+        mean_channels = ImageStat.Stat(diff).mean
+        return (sum(mean_channels) / len(mean_channels)) < diff_threshold
+    except Exception:
+        return False
+
+
 def send_student(item: dict, server: str, token=None, config_path: str = None,
                  parent=None, log=print, should_stop=None, reply_analyzer=None,
                  verify_mode: str = "auto") -> dict:
@@ -884,31 +924,68 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         if should_stop is not None and should_stop():
             log(f"[{name}] 收到停止请求，候选{cand}未发送")
             return {"result": "stopped", "reason": "用户停止", "notes": notes}
+        prev_title_img = _capture_title_crop(rect, roi)
         log(f"  └ 正在通过企业微信快捷键 (Ctrl+F) 聚焦搜索候选 {cand}/{MAX_CANDIDATES}...")
         entered = search_and_enter(name, cand)
         if _check_and_handle_search_tab():
             return {"result": "unmatched", "reason": "未找到学生（弹出全局搜索窗口）", "notes": notes}
-        if entered:  # 截图前焦点守护：mss 截的是屏幕像素，失焦会被遮挡物污染
+        if not entered:
             if should_stop is not None and should_stop():
                 log(f"[{name}] 收到停止请求，候选 {cand} 未发送")
                 return {"result": "stopped", "reason": "用户停止", "notes": notes}
-            if not wu.find_and_activate_wecom():
-                if should_stop is not None and should_stop():
-                    log(f"[{name}] 收到停止请求，候选 {cand} 未发送")
-                    return {"result": "stopped", "reason": "用户停止", "notes": notes}
-                log(f"  └ 候选 {cand}：企微唤起失败，尝试下一候选")
-                _paced(CANDIDATE_GAP)
-                continue
-            import random
-            search_delay = random.uniform(*SEARCH_GAP)
-            log(f"  └ 搜索完成，随机停顿 {search_delay:.2f} 秒...")
-            deadline = time.monotonic() + search_delay
-            while time.monotonic() < deadline:
-                if should_stop is not None and should_stop():
-                    break
-                time.sleep(min(0.04, max(0.0, deadline - time.monotonic())))
+            log(f"  ⚠ 候选 {cand}：企微失焦或按键进入会话未成功，重新激活后重试一次...")
+            wu.find_and_activate_wecom()
+            time.sleep(0.25)
+            entered = search_and_enter(name, cand, search_wait=1.8, enter_wait=1.3)
             if _check_and_handle_search_tab():
                 return {"result": "unmatched", "reason": "未找到学生（弹出全局搜索窗口）", "notes": notes}
+            if not entered:
+                log(f"  └ 候选 {cand}：企微仍未处在前台，跳过本轮截图核验")
+                _paced(CANDIDATE_GAP)
+                continue
+        # 截图前焦点守护：mss 截的是屏幕像素，失焦会被遮挡物污染
+        if should_stop is not None and should_stop():
+            log(f"[{name}] 收到停止请求，候选 {cand} 未发送")
+            return {"result": "stopped", "reason": "用户停止", "notes": notes}
+        if not wu.find_and_activate_wecom():
+            if should_stop is not None and should_stop():
+                log(f"[{name}] 收到停止请求，候选 {cand} 未发送")
+                return {"result": "stopped", "reason": "用户停止", "notes": notes}
+            log(f"  └ 候选 {cand}：企微唤起失败，尝试下一候选")
+            _paced(CANDIDATE_GAP)
+            continue
+        import random
+        search_delay = random.uniform(*SEARCH_GAP)
+        log(f"  └ 搜索完成，随机停顿 {search_delay:.2f} 秒...")
+        deadline = time.monotonic() + search_delay
+        while time.monotonic() < deadline:
+            if should_stop is not None and should_stop():
+                break
+            time.sleep(min(0.04, max(0.0, deadline - time.monotonic())))
+        if _check_and_handle_search_tab():
+            return {"result": "unmatched", "reason": "未找到学生（弹出全局搜索窗口）", "notes": notes}
+        if prev_title_img is not None:
+            settled = False
+            for _poll in range(4):
+                cur_title_img = _capture_title_crop(rect, roi)
+                if cur_title_img is None or not _images_visually_same(prev_title_img, cur_title_img):
+                    settled = True
+                    break
+                if should_stop is not None and should_stop():
+                    return {"result": "stopped", "reason": "用户停止", "notes": notes}
+                time.sleep(0.25)
+            if not settled:
+                log(f"  ⚠ 候选 {cand}：回车后标题栏仍与切换前一致，疑似尚未切入目标会话，放慢重搜一次...")
+                entered = search_and_enter(name, cand, search_wait=2.2, enter_wait=1.5)
+                if _check_and_handle_search_tab():
+                    return {"result": "unmatched", "reason": "未找到学生（弹出全局搜索窗口）", "notes": notes}
+                if not entered:
+                    log(f"  └ 候选 {cand}：慢速重搜后企微仍未在前台，跳过本轮截图核验")
+                    _paced(CANDIDATE_GAP)
+                    continue
+                time.sleep(0.3)
+                if _check_and_handle_search_tab():
+                    return {"result": "unmatched", "reason": "未找到学生（弹出全局搜索窗口）", "notes": notes}
         if should_stop is not None and should_stop():
             log(f"  └ 收到停止请求，候选 {cand} 未发送")
             return {"result": "stopped", "reason": "用户停止", "notes": notes}

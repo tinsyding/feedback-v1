@@ -841,6 +841,135 @@ class TestStage6(unittest.TestCase):
             mock_search.assert_called_once_with("文件传输助手", 1)
             self.assertTrue(any("文件传输助手" in l for l in logs))
 
+    def test_find_and_activate_wecom_skips_alt_when_already_foreground(self):
+        """企微已在前台且非最小化时，不发送 Alt(VK_MENU)，避免打断焦点或误触发菜单。"""
+        mock_win32gui = mock.MagicMock()
+        mock_win32con = mock.MagicMock()
+        mock_u32 = mock.MagicMock()
+
+        with mock.patch.dict("sys.modules", {"win32gui": mock_win32gui, "win32con": mock_win32con}), \
+             mock.patch.object(wu, "_user32", return_value=mock_u32), \
+             mock.patch.object(wu, "get_wecom_hwnd", return_value=0xABCD), \
+             mock.patch.object(wu, "is_window_iconic", return_value=False):
+            # 已在前台：直接返回 True，不按 Alt、不调用 SetForegroundWindow
+            mock_win32gui.GetForegroundWindow.return_value = 0xABCD
+            self.assertTrue(wu.find_and_activate_wecom())
+            mock_u32.keybd_event.assert_not_called()
+            mock_win32gui.SetForegroundWindow.assert_not_called()
+
+            # 不在前台：使用 Alt 绕前台锁并调用 SetForegroundWindow
+            mock_win32gui.GetForegroundWindow.return_value = 0x9999
+            self.assertTrue(wu.find_and_activate_wecom())
+            self.assertEqual(mock_u32.keybd_event.call_count, 2)
+            mock_win32gui.SetForegroundWindow.assert_called_once_with(0xABCD)
+
+    def test_send_student_retries_unfocused_search_and_skips_stale_capture(self):
+        """search_and_enter 返回 False 时先重试一次；仍失焦则跳过截图，防止截到上一个人。"""
+        item = {
+            "sid": "65405",
+            "sname": "胡耔墨",
+            "studentName": "65405胡耔墨",
+            "message": "测试反馈话术内容",
+        }
+        roi = {"title": [0.3, 0.02, 0.6, 0.08], "chat": [0.3, 0.1, 0.9, 0.8]}
+
+        # 情况 1：第 1 次失焦返回 False，重试成功返回 True，随后匹配发送
+        logs_a = []
+        with mock.patch.object(wu, "find_and_activate_wecom", return_value=True), \
+             mock.patch.object(wu, "ensure_fully_visible", return_value=(True, (0, 0, 1000, 800))), \
+             mock.patch.object(wu, "get_dpi_scale", return_value=1.0), \
+             mock.patch.object(wu, "get_wecom_rect", return_value=(0, 0, 1000, 800)), \
+             mock.patch.object(wu, "find_wecom_search_tab_wnd", return_value=None), \
+             mock.patch("sender_py.sender.ensure_roi", return_value=roi), \
+             mock.patch("sender_py.sender._capture_title_crop", return_value=None), \
+             mock.patch("sender_py.sender.search_and_enter", side_effect=[False, True]) as mock_search, \
+             mock.patch("sender_py.sender.judge_candidate", return_value=(
+                 {"matched": True, "is_group": False, "needs_reply": False, "detected_title": "65405胡耔墨"},
+                 "65405胡耔墨",
+                 None,
+             )) as mock_judge, \
+             mock.patch("sender_py.sender.paste_and_send", return_value=(True, "已发送")), \
+             mock.patch("sender_py.sender.time.sleep", return_value=None):
+            res_a = send_student(item, "http://localhost:8000", log=logs_a.append)
+        self.assertEqual(res_a["result"], "sent")
+        self.assertEqual(mock_search.call_count, 2)
+        self.assertEqual(mock_search.call_args_list[1].kwargs, {"search_wait": 1.8, "enter_wait": 1.3})
+        self.assertEqual(mock_judge.call_count, 1)
+
+        # 情况 2：全部候选均失焦返回 False -> 绝不调用 judge_candidate
+        logs_b = []
+        with mock.patch.object(wu, "find_and_activate_wecom", return_value=True), \
+             mock.patch.object(wu, "ensure_fully_visible", return_value=(True, (0, 0, 1000, 800))), \
+             mock.patch.object(wu, "get_dpi_scale", return_value=1.0), \
+             mock.patch.object(wu, "get_wecom_rect", return_value=(0, 0, 1000, 800)), \
+             mock.patch.object(wu, "find_wecom_search_tab_wnd", return_value=None), \
+             mock.patch("sender_py.sender.ensure_roi", return_value=roi), \
+             mock.patch("sender_py.sender._capture_title_crop", return_value=None), \
+             mock.patch("sender_py.sender.search_and_enter", return_value=False) as mock_search_b, \
+             mock.patch("sender_py.sender.judge_candidate") as mock_judge_b, \
+             mock.patch("sender_py.sender.time.sleep", return_value=None):
+            res_b = send_student(item, "http://localhost:8000", log=logs_b.append)
+        self.assertEqual(res_b["result"], "unmatched")
+        self.assertEqual(mock_search_b.call_count, 6)
+        mock_judge_b.assert_not_called()
+
+    def test_send_student_title_unchanged_triggers_slow_retry(self):
+        """回车后标题栏画面与搜索前一致时，轮询等待并在仍未切换时放慢重搜一次。"""
+        item = {
+            "sid": "65405",
+            "sname": "胡耔墨",
+            "studentName": "65405胡耔墨",
+            "message": "测试反馈话术内容",
+        }
+        roi = {"title": [0.3, 0.02, 0.6, 0.08], "chat": [0.3, 0.1, 0.9, 0.8]}
+        dummy_prev = object()
+        dummy_cur = object()
+
+        # 轮询 4 次均视觉一致 -> 触发慢速重搜 search_wait=2.2, enter_wait=1.5
+        logs = []
+        with mock.patch.object(wu, "find_and_activate_wecom", return_value=True), \
+             mock.patch.object(wu, "ensure_fully_visible", return_value=(True, (0, 0, 1000, 800))), \
+             mock.patch.object(wu, "get_dpi_scale", return_value=1.0), \
+             mock.patch.object(wu, "get_wecom_rect", return_value=(0, 0, 1000, 800)), \
+             mock.patch.object(wu, "find_wecom_search_tab_wnd", return_value=None), \
+             mock.patch("sender_py.sender.ensure_roi", return_value=roi), \
+             mock.patch("sender_py.sender._capture_title_crop", side_effect=[dummy_prev, dummy_cur, dummy_cur, dummy_cur, dummy_cur]), \
+             mock.patch("sender_py.sender._images_visually_same", return_value=True), \
+             mock.patch("sender_py.sender.search_and_enter", return_value=True) as mock_search, \
+             mock.patch("sender_py.sender.judge_candidate", return_value=(
+                 {"matched": True, "is_group": False, "needs_reply": False, "detected_title": "65405胡耔墨"},
+                 "65405胡耔墨",
+                 None,
+             )), \
+             mock.patch("sender_py.sender.paste_and_send", return_value=(True, "已发送")), \
+             mock.patch("sender_py.sender.time.sleep", return_value=None):
+            res = send_student(item, "http://localhost:8000", log=logs.append)
+        self.assertEqual(res["result"], "sent")
+        self.assertEqual(mock_search.call_count, 2)
+        self.assertEqual(mock_search.call_args_list[1].kwargs, {"search_wait": 2.2, "enter_wait": 1.5})
+        self.assertTrue(any("疑似尚未切入目标会话" in l for l in logs))
+
+        # 轮询第 2 次标题栏发生变化 -> 不触发重搜
+        with mock.patch.object(wu, "find_and_activate_wecom", return_value=True), \
+             mock.patch.object(wu, "ensure_fully_visible", return_value=(True, (0, 0, 1000, 800))), \
+             mock.patch.object(wu, "get_dpi_scale", return_value=1.0), \
+             mock.patch.object(wu, "get_wecom_rect", return_value=(0, 0, 1000, 800)), \
+             mock.patch.object(wu, "find_wecom_search_tab_wnd", return_value=None), \
+             mock.patch("sender_py.sender.ensure_roi", return_value=roi), \
+             mock.patch("sender_py.sender._capture_title_crop", side_effect=[dummy_prev, dummy_cur, dummy_cur]), \
+             mock.patch("sender_py.sender._images_visually_same", side_effect=[True, False]), \
+             mock.patch("sender_py.sender.search_and_enter", return_value=True) as mock_search_fast, \
+             mock.patch("sender_py.sender.judge_candidate", return_value=(
+                 {"matched": True, "is_group": False, "needs_reply": False, "detected_title": "65405胡耔墨"},
+                 "65405胡耔墨",
+                 None,
+             )), \
+             mock.patch("sender_py.sender.paste_and_send", return_value=(True, "已发送")), \
+             mock.patch("sender_py.sender.time.sleep", return_value=None):
+            res2 = send_student(item, "http://localhost:8000", log=[].append)
+        self.assertEqual(res2["result"], "sent")
+        self.assertEqual(mock_search_fast.call_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -296,10 +296,16 @@ def tap_keys(*vks) -> bool:
     """依次按下又松开一组键（如 Ctrl+V 传 (VK_CONTROL, VK_V)）；按住修饰键再按主键。"""
     try:
         u32 = _user32()
+        multi = len(vks) > 1
         for vk in vks:
             u32.keybd_event(vk, 0, 0, 0)
+            if multi:
+                time.sleep(0.015)
+        time.sleep(0.025 if multi else 0.015)
         for vk in reversed(vks):
             u32.keybd_event(vk, 0, _KEYEVENTF_KEYUP, 0)
+            if multi:
+                time.sleep(0.01)
         return True
     except Exception:
         return False
@@ -324,7 +330,7 @@ def click_xy(x, y) -> bool:
 
 
 def find_and_activate_wecom() -> bool:
-    """恢复/显示企微主窗口并抢前台（Alt 绕前台锁）；失败返回 False。"""
+    """恢复/显示企微主窗口并抢前台（仅非前台时用 Alt 绕前台锁）；失败返回 False。"""
     try:
         import win32gui
         import win32con
@@ -335,10 +341,16 @@ def find_and_activate_wecom() -> bool:
     if hwnd is None:
         return False
     try:
-        if is_window_iconic(hwnd):
-            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-        else:
+        iconic = is_window_iconic(hwnd)
+        if not iconic:
+            try:
+                if win32gui.GetForegroundWindow() == hwnd:
+                    return True
+            except Exception:
+                pass
             win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+        else:
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
         u32.keybd_event(VK_MENU, 0, 0, 0)
         win32gui.SetForegroundWindow(hwnd)
         u32.keybd_event(VK_MENU, 0, _KEYEVENTF_KEYUP, 0)
