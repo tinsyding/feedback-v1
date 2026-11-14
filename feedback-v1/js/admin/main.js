@@ -136,6 +136,127 @@
         });
 
 
+        const ADMIN_CLICK_ACTIONS = {
+            'reset-active-zoom': () => resetActiveTableZoom(),
+            'resolve-confirm': (_el, arg) => resolveConfirm(arg === '1'),
+            'close-pwd-modal': () => closeChangePwdModal(),
+            'submit-pwd': () => submitChangePwd(),
+            'open-pwd-modal': () => openChangePwdModal(),
+            'logout': () => logout(),
+            'open-mobile-menu': () => openMobileMenu(),
+            'close-mobile-menu': () => closeMobileMenu(),
+            'set-season': (_el, arg) => setSeason(arg),
+            'toggle-api-key': () => toggleApiKeyVisibility(),
+            'test-ai-conn': () => testAiConnection(),
+            'save-config': () => saveConfig(),
+            'reset-records-filters': () => resetRecordsFilters(),
+            'rec-zoom': (_el, arg) => changeRecTableZoom(parseFloat(arg)),
+            'rec-zoom-reset': () => resetRecTableZoom(),
+            'toggle-records-view': () => toggleRecordsViewMode(),
+            'batch-delete-records': () => batchDeleteRecords(),
+            'reload-records': () => loadRecordsData(recCurrentPage),
+            'open-record-create': () => openRecordCreateModal(),
+            'records-sort': (_el, arg) => setRecordsSort(arg),
+            'reset-batches-filters': () => resetBatchesFilters(),
+            'batch-delete-batches': () => batchDeleteBatches(),
+            'reload-batches': () => loadBatchesData(batCurrentPage),
+            'batches-sort': (_el, arg) => setBatchesSort(arg),
+            'batch-delete-teachers': () => batchDeleteTeachers(),
+            'open-new-teacher': () => openDbRecordModal(null, 'users'),
+            'reload-teachers': () => loadTeachersData(),
+            'teacher-sort': (_el, arg) => setTeacherSort(arg),
+            'switch-logs-subview': (_el, arg) => switchLogsSubview(arg),
+            'quick-filter-sender': () => quickFilterSenderModule(),
+            'export-logs': () => exportLogs(),
+            'load-logs': () => loadLogs(),
+            'load-sender-clients': () => loadSenderClients(),
+            'db-zoom': (_el, arg) => changeDbTableZoom(parseFloat(arg)),
+            'db-zoom-reset': () => resetDbTableZoom(),
+            'toggle-db-view': () => toggleDbViewMode(),
+            'batch-delete-db': () => batchDeleteDbRecords(),
+            'reload-db': () => loadDbData(dbCurrentPage),
+            'open-db-create': () => openDbRecordModal(),
+            'db-sort': (_el, arg) => setDbSort(arg),
+            'open-changelog': () => openChangelogModal(),
+            'close-db-record': () => closeDbRecordModal(),
+            'save-db-record': () => saveDbRecord(),
+            'close-db-detail': () => closeDbDetailModal(),
+            'close-token-search': () => closeTokenSearchModal(),
+            'clear-token-input': () => clearTokenModalInput(),
+            'paste-token-search': () => pasteFromClipboardToTokenSearch(),
+            'do-token-search': () => doSearchStudentByToken(),
+            'close-changelog': () => closeChangelogModal(),
+            'add-changelog-row': () => addChangelogItemRow(),
+            'save-changelog': () => saveChangelog(),
+            'dock-batch-delete': () => triggerDockBatchDelete(),
+            'clear-all-selections': () => clearAllSelections()
+        };
+
+        const ADMIN_CHANGE_ACTIONS = {
+            'retest-qr-toggle': () => onRetestQrToggleChange(),
+            'sender-flash-toggle': () => onSenderFlashToggleChange(),
+            'records-per-page': (el) => changeRecordsPerPage(el.value),
+            'select-all-records': (el) => toggleSelectAllRecords(el.checked),
+            'batches-per-page': (el) => changeBatchesPerPage(el.value),
+            'select-all-batches': (el) => toggleSelectAllBatches(el.checked),
+            'reload-teachers-p1': () => loadTeachersData(1),
+            'teachers-per-page': (el) => changeTeachersPerPage(el.value),
+            'select-all-teachers': (el) => toggleSelectAllTeachers(el),
+            'load-logs': () => loadLogs(),
+            'load-sender-clients': () => loadSenderClients(),
+            'db-per-page': (el) => changeDbPerPage(el.value),
+            'select-all-db': (el) => toggleDbSelectAll(el)
+        };
+
+        const ADMIN_INPUT_ACTIONS = {
+            'overview-text': () => updateOverviewText(),
+            'debounce-records': () => debounceLoadRecordsData(),
+            'debounce-batches': () => debounceLoadBatchesData(),
+            'debounce-teachers': () => debounceLoadTeachersData(),
+            'debounce-logs': () => debounceLoadLogs(),
+            'render-sender-clients': () => renderSenderClientsList(),
+            'debounce-db': () => debounceLoadDbData(),
+            'token-modal-clear': () => toggleTokenModalClearBtn()
+        };
+
+        document.addEventListener('click', (e) => {
+            const target = e.target.closest('[data-action]');
+            if (!target) return;
+            const handler = ADMIN_CLICK_ACTIONS[target.dataset.action];
+            if (handler) handler(target, target.dataset.arg);
+        });
+
+        document.addEventListener('change', (e) => {
+            const target = e.target.closest('[data-change]');
+            if (!target) return;
+            const handler = ADMIN_CHANGE_ACTIONS[target.dataset.change];
+            if (handler) handler(target, target.dataset.arg);
+        });
+
+        document.addEventListener('input', (e) => {
+            const target = e.target.closest('[data-input]');
+            if (!target) return;
+            const handler = ADMIN_INPUT_ACTIONS[target.dataset.input];
+            if (handler) handler(target, target.dataset.arg);
+        });
+
+        const dbRecordForm = document.getElementById('db-record-form');
+        if (dbRecordForm) {
+            dbRecordForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                saveDbRecord();
+            });
+        }
+
+        const tokenModalInput = document.getElementById('token-modal-input');
+        if (tokenModalInput) {
+            tokenModalInput.addEventListener('keydown', (e) => {
+                if (!e.isComposing && e.keyCode !== 229 && e.key === 'Enter') {
+                    doSearchStudentByToken();
+                }
+            });
+        }
+
         /* ========================================================
            System Bootstrap
            ======================================================== */

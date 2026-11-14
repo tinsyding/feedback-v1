@@ -12,7 +12,11 @@
             const input = document.getElementById('token-modal-input');
             if (!modal || !input) return;
 
-            modal.style.display = 'flex';
+            if (window.DialogHelper) {
+                window.DialogHelper.open(modal, { dismissible: true });
+            } else {
+                modal.style.display = 'flex';
+            }
             if (prefillToken) {
                 input.value = prefillToken.trim();
                 toggleTokenModalClearBtn();
@@ -25,7 +29,13 @@
 
         function closeTokenSearchModal() {
             const modal = document.getElementById('token-search-modal');
-            if (modal) modal.style.display = 'none';
+            if (modal) {
+                if (window.DialogHelper) {
+                    window.DialogHelper.close(modal);
+                } else {
+                    modal.style.display = 'none';
+                }
+            }
         }
 
         function toggleTokenModalClearBtn() {
@@ -372,7 +382,7 @@
 
         function copyFullRetestLink(url) {
             if (!url) return;
-            copyTextToClipboard(url, '错题本链接已复制到剪贴板！');
+            copyTextToClipboard(url, '错题本链接已复制到剪贴板');
         }
 
         function locateStudentInRecords(studentName) {

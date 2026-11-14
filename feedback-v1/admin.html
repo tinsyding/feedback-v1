@@ -1,103 +1,85 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="light">
+<html lang="zh-CN" data-theme-scope="admin">
 
 <head>
-    <script>
-        (function () {
-            // 默认跟随系统（与教师端一致），用户手动切换后记住选择
-            const savedTheme = localStorage.getItem('admin_theme');
-            const theme = (savedTheme === 'light' || savedTheme === 'dark')
-                ? savedTheme
-                : (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
-            document.documentElement.setAttribute('data-theme', theme);
-        })();
-    </script>
-
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="color-scheme" content="light dark">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>管理控制台 - JF反馈系统 Pro</title>
+    <title>管理控制台 - JF反馈系统</title>
     <meta name="description" content="JF反馈系统管理员控制台">
-    <script>
-        (function () {
-            // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 Date.now()（会杀死全部缓存）
-            const v = '20261105-1';
-            document.write(`<link rel="stylesheet" href="css/admin.css?v=${v}">`);
-            document.write(`<link rel="stylesheet" href="css/tokens.css?v=${v}">`);
-        })();
-    </script>
-    <style>
-        body, body.admin-body { opacity: 1 !important; visibility: visible !important; }
-    </style>
+    <script src="js/theme-boot.js?v=20261114-04"></script>
+    <link rel="stylesheet" href="css/admin.css?v=20261114-04">
+    <link rel="stylesheet" href="css/tokens.css?v=20261114-04">
 </head>
 
 <body class="admin-body page-ready ready">
 
     <!-- Toast Notification Container -->
-    <div class="toast-container" id="toast-container"></div>
+    <div class="toast-container" id="toast-container" popover="manual"></div>
 
     <!-- Floating Table Wheel Zoom HUD -->
-    <div id="table-zoom-hud" class="table-zoom-hud" onclick="resetActiveTableZoom()" title="点击恢复 100% 原始大小"></div>
+    <button type="button" id="table-zoom-hud" class="table-zoom-hud" data-action="reset-active-zoom" title="点击恢复 100% 原始大小"></button>
 
     <!-- Confirm Dialog Modal -->
-    <div class="modal-overlay" id="confirm-modal" style="display: none;">
+    <dialog class="modal-overlay native-dialog" id="confirm-modal" closedby="any">
         <div class="modal-box" style="max-width: 440px;">
             <div class="modal-header">
                 <h4 id="confirm-modal-title">提示</h4>
-                <button class="modal-close" onclick="resolveConfirm(false)">
+                <button type="button" class="modal-close" data-action="resolve-confirm" data-arg="0" aria-label="关闭">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                 </button>
             </div>
             <div class="modal-body" id="confirm-modal-body" style="font-size: 0.95rem; line-height: 1.6;"></div>
             <div class="modal-footer">
-                <button type="button" class="btn secondary" onclick="resolveConfirm(false)">取消</button>
-                <button type="button" class="btn primary" id="confirm-modal-ok-btn" onclick="resolveConfirm(true)">确认</button>
+                <button type="button" class="btn secondary" data-action="resolve-confirm" data-arg="0">取消</button>
+                <button type="button" class="btn primary" id="confirm-modal-ok-btn" data-action="resolve-confirm" data-arg="1">确认</button>
             </div>
         </div>
-    </div>
+    </dialog>
 
     <!-- Change Password Modal -->
-    <div class="modal-overlay" id="change-pwd-modal" style="display: none;">
+    <dialog class="modal-overlay native-dialog" id="change-pwd-modal" closedby="any">
         <div class="modal-box" style="max-width: 440px;">
             <div class="modal-header">
                 <h4>修改当前管理员密码</h4>
-                <button class="modal-close" onclick="closeChangePwdModal()">
+                <button type="button" class="modal-close" data-action="close-pwd-modal" aria-label="关闭">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                 </button>
             </div>
             <div class="modal-body">
                 <div class="form-grid" style="display: flex; flex-direction: column; gap: 14px;">
                     <div class="form-field full-span">
-                        <label>原密码 *</label>
+                        <label for="pwd-old">原密码 *</label>
                         <input type="password" id="pwd-old" placeholder="请输入当前旧密码" autocomplete="current-password">
                     </div>
                     <div class="form-field full-span">
-                        <label>新密码 *</label>
+                        <label for="pwd-new">新密码 *</label>
                         <input type="password" id="pwd-new" placeholder="请输入新密码（至少6位）" autocomplete="new-password">
                     </div>
                     <div class="form-field full-span">
-                        <label>确认新密码 *</label>
+                        <label for="pwd-confirm">确认新密码 *</label>
                         <input type="password" id="pwd-confirm" placeholder="请再次输入新密码" autocomplete="new-password">
                     </div>
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn secondary" onclick="closeChangePwdModal()">取消</button>
-                <button type="button" class="btn primary" id="btn-save-pwd" onclick="submitChangePwd()">保存新密码</button>
+                <button type="button" class="btn secondary" data-action="close-pwd-modal">取消</button>
+                <button type="button" class="btn primary" id="btn-save-pwd" data-action="submit-pwd">保存新密码</button>
             </div>
         </div>
-    </div>
+    </dialog>
 
     <div class="admin-container">
         <!-- Sidebar Navigation -->
         <aside class="admin-sidebar">
             <div class="sidebar-header">
                 <a href="admin.html" class="sidebar-brand" style="text-decoration: none; padding: 4px 8px;">
-                    <span style="font-size: 1.18rem; font-weight: 800; color: var(--text-primary); letter-spacing: 0.5px;">控制台</span>
+                    <span style="font-size: 1.18rem; font-weight: 600; color: var(--text-primary); letter-spacing: 0.3px;">控制台</span>
                 </a>
-                <button class="sidebar-close-btn" id="sidebar-close-btn" onclick="closeMobileMenu()" title="关闭导航">
+                <button class="sidebar-close-btn" id="sidebar-close-btn" data-action="close-mobile-menu" title="关闭导航">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"></line>
                         <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -207,11 +189,11 @@
                         <div class="user-name-row" id="admin-username">管理员</div>
                         
                     </div>
-                    <button type="button" class="user-pwd-btn" onclick="openChangePwdModal()" title="修改登录密码">
+                    <button type="button" class="user-pwd-btn" data-action="open-pwd-modal" title="修改登录密码">
                         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0110 0v4"></path></svg>
                     </button>
                 </div>
-                <button class="logout-action-btn" onclick="logout()">
+                <button class="logout-action-btn" data-action="logout">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"></path>
                         <polyline points="16 17 21 12 16 7"></polyline>
@@ -227,7 +209,7 @@
             <!-- App Bar Header -->
             <header class="main-header">
                 <div class="header-left">
-                    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="openMobileMenu()" title="展开导航" aria-label="展开导航菜单">
+                    <button class="mobile-menu-btn" id="mobile-menu-btn" data-action="open-mobile-menu" title="展开导航" aria-label="展开导航菜单">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="3" y1="12" x2="21" y2="12"></line>
                             <line x1="3" y1="6" x2="21" y2="6"></line>
@@ -247,24 +229,27 @@
                 </div>
 
                 <div class="header-right">
-                    <!-- Theme Switcher -->
-                    <button class="theme-toggle-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="切换日间 / 暗夜模式">
-                        <svg class="sun-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="5"></circle>
-                            <line x1="12" y1="1" x2="12" y2="3"></line>
-                            <line x1="12" y1="21" x2="12" y2="23"></line>
-                            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-                            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-                            <line x1="1" y1="12" x2="3" y2="12"></line>
-                            <line x1="21" y1="12" x2="23" y2="12"></line>
-                            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-                            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-                        </svg>
-                        <svg class="moon-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-                        </svg>
-                        <span id="theme-toggle-text">暗夜模式</span>
-                    </button>
+                    <!-- 3-State Theme Switcher -->
+                    <div class="theme-segmented" role="group" aria-label="主题模式">
+                        <button type="button" class="theme-seg-btn" data-theme-set="light" title="浅色模式" aria-label="浅色模式" aria-pressed="false">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <circle cx="12" cy="12" r="4"></circle>
+                                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+                            </svg>
+                        </button>
+                        <button type="button" class="theme-seg-btn" data-theme-set="system" title="跟随系统" aria-label="跟随系统" aria-pressed="false">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                                <line x1="8" y1="21" x2="16" y2="21"></line>
+                                <line x1="12" y1="17" x2="12" y2="21"></line>
+                            </svg>
+                        </button>
+                        <button type="button" class="theme-seg-btn" data-theme-set="dark" title="深色模式" aria-label="深色模式" aria-pressed="false">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                            </svg>
+                        </button>
+                    </div>
                     <a href="index.html" class="header-quick-link" target="_blank" title="在新标签页中打开反馈系统前台">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
@@ -333,7 +318,7 @@
                                         <span>当前学年</span>
                                     </div>
                                     <div class="input-with-suffix" style="width: 100%;">
-                                        <input type="number" id="semester-year" min="2020" max="2035" value="2026" oninput="updateOverviewText()" style="width: 100%;">
+                                        <input type="number" id="semester-year" min="2020" max="2035" value="2026" data-input="overview-text" style="width: 100%;">
                                         <span class="suffix">年</span>
                                     </div>
                                 </div>
@@ -345,18 +330,18 @@
                                         <span>学期季节</span>
                                     </div>
                                     <div class="season-cards-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; width: 100%; margin: 0;">
-                                        <div class="season-card-item" id="season-spring" onclick="setSeason('spring')" style="padding: 7px 0; text-align: center;">
-                                            <div class="season-card-name" style="font-size: 0.92rem;">春</div>
-                                        </div>
-                                        <div class="season-card-item" id="season-summer" onclick="setSeason('summer')" style="padding: 7px 0; text-align: center;">
-                                            <div class="season-card-name" style="font-size: 0.92rem;">暑</div>
-                                        </div>
-                                        <div class="season-card-item active" id="season-autumn" onclick="setSeason('autumn')" style="padding: 7px 0; text-align: center;">
-                                            <div class="season-card-name" style="font-size: 0.92rem;">秋</div>
-                                        </div>
-                                        <div class="season-card-item" id="season-winter" onclick="setSeason('winter')" style="padding: 7px 0; text-align: center;">
-                                            <div class="season-card-name" style="font-size: 0.92rem;">寒</div>
-                                        </div>
+                                        <button type="button" class="season-card-item" id="season-spring" data-action="set-season" data-arg="spring" style="padding: 7px 0; text-align: center;">
+                                            <span class="season-card-name" style="font-size: 0.92rem;">春</span>
+                                        </button>
+                                        <button type="button" class="season-card-item" id="season-summer" data-action="set-season" data-arg="summer" style="padding: 7px 0; text-align: center;">
+                                            <span class="season-card-name" style="font-size: 0.92rem;">暑</span>
+                                        </button>
+                                        <button type="button" class="season-card-item active" id="season-autumn" data-action="set-season" data-arg="autumn" style="padding: 7px 0; text-align: center;">
+                                            <span class="season-card-name" style="font-size: 0.92rem;">秋</span>
+                                        </button>
+                                        <button type="button" class="season-card-item" id="season-winter" data-action="set-season" data-arg="winter" style="padding: 7px 0; text-align: center;">
+                                            <span class="season-card-name" style="font-size: 0.92rem;">寒</span>
+                                        </button>
                                     </div>
                                 </div>
 
@@ -367,7 +352,7 @@
                                         <span>总周次</span>
                                     </div>
                                     <div class="input-with-suffix" style="width: 100%;">
-                                        <input type="number" id="semester-weeks" min="1" max="30" value="14" oninput="updateOverviewText()" style="width: 100%;">
+                                        <input type="number" id="semester-weeks" min="1" max="30" value="14" data-input="overview-text" style="width: 100%;">
                                         <span class="suffix" id="weeks-unit-suffix">周</span>
                                     </div>
                                 </div>
@@ -385,7 +370,7 @@
                                 </div>
                                 <div style="display: flex; align-items: center; gap: 12px; flex-shrink: 0;">
                                     <label class="switch-control" title="切换是否在下载的PDF中嵌入视频讲解二维码">
-                                        <input type="checkbox" id="retest-qrcode-toggle" onchange="onRetestQrToggleChange()">
+                                        <input type="checkbox" id="retest-qrcode-toggle" data-change="retest-qr-toggle">
                                         <span class="switch-slider"></span>
                                     </label>
                                 </div>
@@ -406,7 +391,7 @@
                                 </div>
                                 <div style="display: flex; align-items: center; gap: 12px; flex-shrink: 0;">
                                     <label class="switch-control" title="切换是否使用云端 Qwen3.8-Flash 标题核验（关闭则强制客户端使用本地OCR）">
-                                        <input type="checkbox" id="sender-flash-toggle" onchange="onSenderFlashToggleChange()">
+                                        <input type="checkbox" id="sender-flash-toggle" data-change="sender-flash-toggle">
                                         <span class="switch-slider"></span>
                                     </label>
                                 </div>
@@ -440,7 +425,7 @@
                                     </label>
                                     <div style="position: relative; display: flex; align-items: center;">
                                         <input type="password" id="ai-api-key" placeholder="例如 sk-ws-..." style="padding-right: 42px; font-family: var(--font-mono); font-size: 0.85rem;">
-                                        <button type="button" id="ai-key-toggle-btn" onclick="toggleApiKeyVisibility()" title="显示/隐藏密钥" style="position: absolute; right: 8px; background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; display: flex; align-items: center; justify-content: center;">
+                                        <button type="button" id="ai-key-toggle-btn" data-action="toggle-api-key" title="显示/隐藏密钥" style="position: absolute; right: 8px; background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; display: flex; align-items: center; justify-content: center;">
                                             <svg id="ai-key-eye-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
                                                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
                                                 <circle cx="12" cy="12" r="3"></circle>
@@ -488,7 +473,7 @@
                                 <!-- 4. 连通性测试区 -->
                                 <div style="padding-top: 6px; display: flex; flex-direction: column; gap: 8px;">
                                     <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-                                        <button type="button" id="ai-test-btn" class="btn secondary" onclick="testAiConnection()" style="padding: 6px 14px; font-size: 0.84rem;">
+                                        <button type="button" id="ai-test-btn" class="btn secondary" data-action="test-ai-conn" style="padding: 6px 14px; font-size: 0.84rem;">
                                             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
                                                 <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
                                             </svg>
@@ -507,7 +492,7 @@
                                 <span id="save-status" class="save-status"></span>
                             </div>
                             <div style="display: flex; align-items: center; gap: 14px;">
-                                <button class="btn primary" onclick="saveConfig()">
+                                <button class="btn primary" data-action="save-config">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"></path>
                                         <polyline points="17 21 17 13 7 13 7 21"></polyline>
@@ -535,16 +520,16 @@
                                     <circle cx="11" cy="11" r="8"></circle>
                                     <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                                 </svg>
-                                <input type="text" id="rec-search-input" placeholder="搜索姓名、学号、批次号、Token、评语..." oninput="debounceLoadRecordsData()">
+                                <input type="text" id="rec-search-input" placeholder="搜索姓名、学号、批次号、Token、评语..." data-input="debounce-records">
                             </div>
 
-                            <select id="rec-per-page" class="custom-select" onchange="changeRecordsPerPage(this.value)">
+                            <select id="rec-per-page" class="custom-select" data-change="records-per-page">
                                 <option value="20">20 条/页</option>
                                 <option value="50">50 条/页</option>
                                 <option value="100">100 条/页</option>
                             </select>
 
-                            <button type="button" class="btn secondary" id="rec-reset-filter-btn" onclick="resetRecordsFilters()" style="display: none; padding: 6px 12px; font-size: 0.82rem;" title="重置并清空所有筛选条件">
+                            <button type="button" class="btn secondary" id="rec-reset-filter-btn" data-action="reset-records-filters" style="display: none; padding: 6px 12px; font-size: 0.82rem;" title="重置并清空所有筛选条件">
                                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
                                 <span>重置筛选</span>
                             </button>
@@ -553,34 +538,34 @@
                         <div class="toolbar-actions-group">
                             <!-- 学情表格缩放控制器 -->
                             <div class="table-zoom-group" id="rec-zoom-group" title="表格缩放：支持按住 Ctrl + 鼠标滚轮 实时缩放">
-                                <button type="button" class="btn-zoom-action" onclick="changeRecTableZoom(-0.1)" title="缩小表格 (Ctrl + 滚轮向下)">
+                                <button type="button" class="btn-zoom-action" data-action="rec-zoom" data-arg="-0.1" title="缩小表格 (Ctrl + 滚轮向下)">
                                     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                 </button>
-                                <span class="zoom-value-pill" id="rec-zoom-value-pill" onclick="resetRecTableZoom()" title="点击恢复 100% 原始大小">100%</span>
-                                <button type="button" class="btn-zoom-action" onclick="changeRecTableZoom(0.1)" title="放大表格 (Ctrl + 滚轮向上)">
+                                <button type="button" class="zoom-value-pill" id="rec-zoom-value-pill" data-action="rec-zoom-reset" title="点击恢复 100% 原始大小">100%</button>
+                                <button type="button" class="btn-zoom-action" data-action="rec-zoom" data-arg="0.1" title="放大表格 (Ctrl + 滚轮向上)">
                                     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                 </button>
                             </div>
-                            <button type="button" class="btn secondary" id="rec-view-mode-btn" onclick="toggleRecordsViewMode()" title="切换卡片/表格视图">
+                            <button type="button" class="btn secondary" id="rec-view-mode-btn" data-action="toggle-records-view" title="切换卡片/表格视图">
                                 <span id="rec-view-mode-icon" style="display:inline-flex;align-items:center;">
                                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
                                 </span>
                                 <span id="rec-view-mode-text">卡片视图</span>
                             </button>
-                            <button class="btn danger-subtle" id="rec-batch-delete-btn" style="display: none;" onclick="batchDeleteRecords()">
+                            <button class="btn danger-subtle" id="rec-batch-delete-btn" style="display: none;" data-action="batch-delete-records">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <polyline points="3 6 5 6 21 6"></polyline>
                                     <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                                 </svg>
                                 <span>批量删除 (<span id="rec-selected-count">0</span>)</span>
                             </button>
-                            <button class="btn secondary" onclick="loadRecordsData(recCurrentPage)" title="刷新当前学情数据">
+                            <button class="btn secondary" data-action="reload-records" title="刷新当前学情数据">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
                                 </svg>
                                 <span>刷新</span>
                             </button>
-                            <button class="btn primary" onclick="openRecordCreateModal()">
+                            <button class="btn primary" data-action="open-record-create">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <line x1="12" y1="5" x2="12" y2="19"></line>
                                     <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -597,16 +582,16 @@
                                 <thead id="rec-thead">
                                     <tr>
                                         <th style="width: 42px; text-align: center;">
-                                            <input type="checkbox" id="rec-select-all" onchange="toggleSelectAllRecords(this.checked)" style="accent-color: var(--primary); cursor: pointer;">
+                                            <input type="checkbox" id="rec-select-all" data-change="select-all-records" style="accent-color: var(--primary); cursor: pointer;">
                                         </th>
-                                        <th class="th-sortable" style="width: 140px;" onclick="setRecordsSort('student_name')">学生姓名</th>
+                                        <th class="th-sortable" style="width: 140px;"><button type="button" class="th-sort-btn" data-action="records-sort" data-arg="student_name">学生姓名</button></th>
                                         <th style="width: 180px;">年级 / 班层 / 学科</th>
-                                        <th class="th-sortable" style="width: 75px; text-align: center;" onclick="setRecordsSort('week_num')">周次</th>
-                                        <th class="th-sortable" style="width: 125px; text-align: center;" onclick="setRecordsSort('homework_score')">课后巩固成绩</th>
-                                        <th class="th-sortable" style="width: 190px;" onclick="setRecordsSort('error_count')">错题题号</th>
+                                        <th class="th-sortable" style="width: 75px; text-align: center;"><button type="button" class="th-sort-btn" style="justify-content: center;" data-action="records-sort" data-arg="week_num">周次</button></th>
+                                        <th class="th-sortable" style="width: 125px; text-align: center;"><button type="button" class="th-sort-btn" style="justify-content: center;" data-action="records-sort" data-arg="homework_score">课后巩固成绩</button></th>
+                                        <th class="th-sortable" style="width: 190px;"><button type="button" class="th-sort-btn" data-action="records-sort" data-arg="error_count">错题题号</button></th>
                                         <th style="width: 125px; max-width: 135px;">评语</th>
-                                        <th class="th-sortable" style="width: 115px;" onclick="setRecordsSort('created_by')">责任教师</th>
-                                        <th class="th-sortable cell-mono" style="width: 100px;" onclick="setRecordsSort('updated_at')">更改时间</th>
+                                        <th class="th-sortable" style="width: 115px;"><button type="button" class="th-sort-btn" data-action="records-sort" data-arg="created_by">责任教师</button></th>
+                                        <th class="th-sortable cell-mono" style="width: 100px;"><button type="button" class="th-sort-btn" data-action="records-sort" data-arg="updated_at">更改时间</button></th>
                                         <th style="width: 80px; text-align: right;">快捷操作</th>
                                     </tr>
                                 </thead>
@@ -645,30 +630,30 @@
                                     <circle cx="11" cy="11" r="8"></circle>
                                     <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                                 </svg>
-                                <input type="text" id="bat-search-input" placeholder="搜索批次编号、来源文件..." oninput="debounceLoadBatchesData()">
+                                <input type="text" id="bat-search-input" placeholder="搜索批次编号、来源文件..." data-input="debounce-batches">
                             </div>
 
-                            <select id="bat-per-page" class="custom-select" onchange="changeBatchesPerPage(this.value)">
+                            <select id="bat-per-page" class="custom-select" data-change="batches-per-page">
                                 <option value="20">20 条/页</option>
                                 <option value="50">50 条/页</option>
                                 <option value="100">100 条/页</option>
                             </select>
 
-                            <button type="button" class="btn secondary" id="bat-reset-filter-btn" onclick="resetBatchesFilters()" style="display: none; padding: 6px 12px; font-size: 0.82rem;" title="重置并清空所有筛选条件">
+                            <button type="button" class="btn secondary" id="bat-reset-filter-btn" data-action="reset-batches-filters" style="display: none; padding: 6px 12px; font-size: 0.82rem;" title="重置并清空所有筛选条件">
                                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
                                 <span>重置筛选</span>
                             </button>
                         </div>
 
                         <div class="toolbar-actions-group">
-                            <button class="btn danger-subtle" id="bat-batch-delete-btn" style="display: none;" onclick="batchDeleteBatches()">
+                            <button class="btn danger-subtle" id="bat-batch-delete-btn" style="display: none;" data-action="batch-delete-batches">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <polyline points="3 6 5 6 21 6"></polyline>
                                     <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                                 </svg>
                                 <span>批量删除 (<span id="bat-selected-count">0</span>)</span>
                             </button>
-                            <button class="btn secondary" onclick="loadBatchesData(batCurrentPage)" title="刷新生成批次数据">
+                            <button class="btn secondary" data-action="reload-batches" title="刷新生成批次数据">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
                                 </svg>
@@ -684,15 +669,15 @@
                                 <thead id="bat-thead">
                                     <tr>
                                         <th style="width: 42px; text-align: center;">
-                                            <input type="checkbox" id="bat-select-all" onchange="toggleSelectAllBatches(this.checked)" style="accent-color: var(--primary); cursor: pointer;">
+                                            <input type="checkbox" id="bat-select-all" data-change="select-all-batches" style="accent-color: var(--primary); cursor: pointer;">
                                         </th>
-                                        <th class="th-sortable cell-mono" style="width: 200px;" onclick="setBatchesSort('batch_code')">批次编号</th>
+                                        <th class="th-sortable cell-mono" style="width: 200px;"><button type="button" class="th-sort-btn" data-action="batches-sort" data-arg="batch_code">批次编号</button></th>
                                         <th style="width: 200px;">班级 / 学科</th>
-                                        <th class="th-sortable" style="width: 75px; text-align: center;" onclick="setBatchesSort('week_num')">周次</th>
-                                        <th class="th-sortable" style="width: 90px; text-align: center;" onclick="setBatchesSort('student_count')">学生数</th>
-                                        <th class="th-sortable" style="width: 90px; text-align: center;" onclick="setBatchesSort('error_student_count')">有错题</th>
-                                        <th class="th-sortable" style="width: 115px;" onclick="setBatchesSort('created_by')">责任教师</th>
-                                        <th class="th-sortable cell-mono" style="width: 150px;" onclick="setBatchesSort('created_at')">生成时间</th>
+                                        <th class="th-sortable" style="width: 75px; text-align: center;"><button type="button" class="th-sort-btn" style="justify-content: center;" data-action="batches-sort" data-arg="week_num">周次</button></th>
+                                        <th class="th-sortable" style="width: 90px; text-align: center;"><button type="button" class="th-sort-btn" style="justify-content: center;" data-action="batches-sort" data-arg="student_count">学生数</button></th>
+                                        <th class="th-sortable" style="width: 90px; text-align: center;"><button type="button" class="th-sort-btn" style="justify-content: center;" data-action="batches-sort" data-arg="error_student_count">有错题</button></th>
+                                        <th class="th-sortable" style="width: 115px;"><button type="button" class="th-sort-btn" data-action="batches-sort" data-arg="created_by">责任教师</button></th>
+                                        <th class="th-sortable cell-mono" style="width: 150px;"><button type="button" class="th-sort-btn" data-action="batches-sort" data-arg="created_at">生成时间</button></th>
                                         <th style="width: 150px; text-align: right;">快捷操作</th>
                                     </tr>
                                 </thead>
@@ -726,16 +711,16 @@
                                     <circle cx="11" cy="11" r="8"></circle>
                                     <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                                 </svg>
-                                <input type="text" id="teacher-search-input" placeholder="搜索账号、教师姓名、初始密码..." oninput="debounceLoadTeachersData()">
+                                <input type="text" id="teacher-search-input" placeholder="搜索账号、教师姓名、初始密码..." data-input="debounce-teachers">
                             </div>
 
-                            <select id="teacher-status-filter" class="custom-select" onchange="loadTeachersData(1)">
+                            <select id="teacher-status-filter" class="custom-select" data-change="reload-teachers-p1">
                                 <option value="">全部状态</option>
                                 <option value="1">正常 (允许登录)</option>
                                 <option value="0">已停用</option>
                             </select>
 
-                            <select id="teacher-per-page" class="custom-select" onchange="changeTeachersPerPage(this.value)">
+                            <select id="teacher-per-page" class="custom-select" data-change="teachers-per-page">
                                 <option value="20">20 条/页</option>
                                 <option value="50">50 条/页</option>
                                 <option value="100">100 条/页</option>
@@ -743,15 +728,15 @@
                         </div>
 
                         <div class="toolbar-action-group">
-                            <button type="button" class="btn secondary" id="teacher-batch-delete-btn" style="display: none; color: var(--error); border-color: rgba(239, 68, 68, 0.3);" onclick="batchDeleteTeachers()">
+                            <button type="button" class="btn secondary" id="teacher-batch-delete-btn" style="display: none; color: var(--error); border-color: rgba(239, 68, 68, 0.3);" data-action="batch-delete-teachers">
                                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                                 <span id="teacher-batch-delete-text">批量删除 (0)</span>
                             </button>
-                            <button type="button" class="btn primary" onclick="openDbRecordModal(null, 'users')">
+                            <button type="button" class="btn primary" data-action="open-new-teacher">
                                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                 <span>新增教师账号</span>
                             </button>
-                            <button type="button" class="btn secondary" onclick="loadTeachersData()" title="刷新教师列表">
+                            <button type="button" class="btn secondary" data-action="reload-teachers" title="刷新教师列表">
                                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
                                 <span>刷新</span>
                             </button>
@@ -765,13 +750,13 @@
                                 <thead id="teacher-thead">
                                     <tr>
                                         <th style="width: 44px; text-align: center;">
-                                            <input type="checkbox" id="teacher-select-all" onchange="toggleSelectAllTeachers(this)" style="accent-color: var(--primary); cursor: pointer;">
+                                            <input type="checkbox" id="teacher-select-all" data-change="select-all-teachers" style="accent-color: var(--primary); cursor: pointer;">
                                         </th>
-                                        <th class="th-sortable" onclick="setTeacherSort('id')" style="width: 80px; cursor: pointer; user-select: none;" title="点击切换按ID正序/倒序">ID</th>
-                                        <th class="th-sortable" onclick="setTeacherSort('username')" style="width: 140px; cursor: pointer; user-select: none;" title="点击切换按账号正序/倒序">登录账号</th>
-                                        <th class="th-sortable" onclick="setTeacherSort('real_name')" style="width: 170px; cursor: pointer; user-select: none;" title="点击切换按姓名正序/倒序">教师姓名</th>
-                                        <th class="th-sortable" onclick="setTeacherSort('status')" style="width: 110px; cursor: pointer; user-select: none;" title="点击切换按状态正序/倒序">账号状态</th>
-                                        <th class="th-sortable" onclick="setTeacherSort('assistant_count')" style="width: 110px; text-align: center; cursor: pointer; user-select: none;" title="点击切换按助教数量正序/倒序">助教数量</th>
+                                        <th class="th-sortable" style="width: 80px; user-select: none;" title="点击切换按ID正序/倒序"><button type="button" class="th-sort-btn" data-action="teacher-sort" data-arg="id">ID</button></th>
+                                        <th class="th-sortable" style="width: 140px; user-select: none;" title="点击切换按账号正序/倒序"><button type="button" class="th-sort-btn" data-action="teacher-sort" data-arg="username">登录账号</button></th>
+                                        <th class="th-sortable" style="width: 170px; user-select: none;" title="点击切换按姓名正序/倒序"><button type="button" class="th-sort-btn" data-action="teacher-sort" data-arg="real_name">教师姓名</button></th>
+                                        <th class="th-sortable" style="width: 110px; user-select: none;" title="点击切换按状态正序/倒序"><button type="button" class="th-sort-btn" data-action="teacher-sort" data-arg="status">账号状态</button></th>
+                                        <th class="th-sortable" style="width: 110px; text-align: center; user-select: none;" title="点击切换按助教数量正序/倒序"><button type="button" class="th-sort-btn" style="justify-content: center;" data-action="teacher-sort" data-arg="assistant_count">助教数量</button></th>
                                         <th style="width: 80px; text-align: right;">快捷操作</th>
                                     </tr>
                                 </thead>
@@ -793,16 +778,16 @@
                     <!-- Sub-view Switcher: Audit Stream vs Python Sender Raw Logs & Snapshots -->
                     <div class="db-tabs-bar" id="logs-subview-bar" style="margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
                         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                            <button type="button" class="btn primary" id="btn-log-subview-audit" onclick="switchLogsSubview('audit')" style="padding: 7px 14px; font-size: 0.86rem;">
+                            <button type="button" class="btn primary" id="btn-log-subview-audit" data-action="switch-logs-subview" data-arg="audit" style="padding: 7px 14px; font-size: 0.86rem;">
                                 <span>综合审计日志流 (含发送器实时事件)</span>
                             </button>
-                            <button type="button" class="btn secondary" id="btn-log-subview-sender" onclick="switchLogsSubview('sender')" style="padding: 7px 14px; font-size: 0.86rem;">
+                            <button type="button" class="btn secondary" id="btn-log-subview-sender" data-action="switch-logs-subview" data-arg="sender" style="padding: 7px 14px; font-size: 0.86rem;">
                                 <span>发送器客户端日志 (.log 原文件 / 批次汇总 / 核验截图)</span>
-                                <span id="sender-clients-count-badge" style="margin-left: 6px; background: rgba(37,99,235,0.15); color: var(--primary); padding: 1px 7px; border-radius: 999px; font-size: 0.76rem; font-weight: 700;">自动同步</span>
+                                <span id="sender-clients-count-badge" style="margin-left: 6px; background: rgba(37,99,235,0.15); color: var(--primary); padding: 1px 7px; border-radius: 999px; font-size: 0.76rem; font-weight: 600;">自动同步</span>
                             </button>
                         </div>
                         <div style="display: flex; gap: 8px; align-items: center;">
-                            <button type="button" class="btn secondary" id="btn-quick-filter-sender" onclick="quickFilterSenderModule()" style="padding: 6px 12px; font-size: 0.82rem;" title="在审计日志流中一键筛选 Python 自动反馈程序上报的日志">
+                            <button type="button" class="btn secondary" id="btn-quick-filter-sender" data-action="quick-filter-sender" style="padding: 6px 12px; font-size: 0.82rem;" title="在审计日志流中一键筛选 Python 自动反馈程序上报的日志">
                                 <span>仅看发送器 (sender_py)</span>
                             </button>
                         </div>
@@ -866,14 +851,14 @@
                                         <circle cx="11" cy="11" r="8"></circle>
                                         <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                                     </svg>
-                                    <input type="text" id="log-search-filter" placeholder="搜索详情、老师/机器名或报错关键字..." oninput="debounceLoadLogs()">
+                                    <input type="text" id="log-search-filter" placeholder="搜索详情、老师/机器名或报错关键字..." data-input="debounce-logs">
                                 </div>
 
-                                <select id="log-date-filter" class="custom-select" onchange="loadLogs()">
+                                <select id="log-date-filter" class="custom-select" data-change="load-logs">
                                     <option value="">近 7 天</option>
                                 </select>
 
-                                <select id="log-level-filter" class="custom-select" onchange="loadLogs()">
+                                <select id="log-level-filter" class="custom-select" data-change="load-logs">
                                     <option value="">全部级别</option>
                                     <option value="error">Error (系统错误)</option>
                                     <option value="warn">Warn (操作警告)</option>
@@ -881,20 +866,20 @@
                                     <option value="info">Info (常规信息)</option>
                                 </select>
 
-                                <select id="log-module-filter" class="custom-select" onchange="loadLogs()">
+                                <select id="log-module-filter" class="custom-select" data-change="load-logs">
                                     <option value="">全部模块</option>
                                 </select>
 
-                                <select id="log-event-filter" class="custom-select" onchange="loadLogs()">
+                                <select id="log-event-filter" class="custom-select" data-change="load-logs">
                                     <option value="">全部事件</option>
                                 </select>
 
-                                <input type="text" id="log-ip-filter" class="custom-input" style="width: 130px;" placeholder="筛选 IP..." oninput="debounceLoadLogs()">
-                                <input type="text" id="log-fingerprint-filter" class="custom-input" style="width: 140px;" placeholder="筛选指纹..." oninput="debounceLoadLogs()">
+                                <input type="text" id="log-ip-filter" class="custom-input" style="width: 130px;" placeholder="筛选 IP..." data-input="debounce-logs">
+                                <input type="text" id="log-fingerprint-filter" class="custom-input" style="width: 140px;" placeholder="筛选指纹..." data-input="debounce-logs">
                             </div>
 
                             <div class="toolbar-actions-group">
-                                <button class="btn secondary" onclick="exportLogs()">
+                                <button class="btn secondary" data-action="export-logs">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path>
                                         <polyline points="7 10 12 15 17 10"></polyline>
@@ -902,7 +887,7 @@
                                     </svg>
                                     <span>导出 CSV</span>
                                 </button>
-                                <button class="btn secondary" onclick="loadLogs()">
+                                <button class="btn secondary" data-action="load-logs">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <path d="M23 4v6h-6"></path>
                                         <path d="M1 20v-6h6"></path>
@@ -949,7 +934,7 @@
                     <div id="logs-sender-subview" style="display: none;">
                         <div class="pro-toolbar" style="margin-bottom: 14px;">
                             <div class="toolbar-filter-group">
-                                <select id="sender-date-filter" class="custom-select" onchange="loadSenderClients()">
+                                <select id="sender-date-filter" class="custom-select" data-change="load-sender-clients">
                                     <option value="">最近 7 天归档</option>
                                 </select>
                                 <div class="search-input-wrap" style="width: 260px;">
@@ -957,11 +942,11 @@
                                         <circle cx="11" cy="11" r="8"></circle>
                                         <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                                     </svg>
-                                    <input type="text" id="sender-client-search" placeholder="筛选老师姓名、主机名、文件名..." oninput="renderSenderClientsList()">
+                                    <input type="text" id="sender-client-search" placeholder="筛选老师姓名、主机名、文件名..." data-input="render-sender-clients">
                                 </div>
                             </div>
                             <div class="toolbar-actions-group">
-                                <button class="btn secondary" onclick="loadSenderClients()">
+                                <button class="btn secondary" data-action="load-sender-clients">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <path d="M23 4v6h-6"></path>
                                         <path d="M1 20v-6h6"></path>
@@ -1005,13 +990,13 @@
                                     <circle cx="11" cy="11" r="8"></circle>
                                     <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                                 </svg>
-                                <input type="text" id="db-search-input" placeholder="模糊搜索当前表记录..." oninput="debounceLoadDbData()">
+                                <input type="text" id="db-search-input" placeholder="模糊搜索当前表记录..." data-input="debounce-db">
                             </div>
 
                             <!-- Dynamic Extra Filters (Batch, Week, Err filters) -->
                             <div id="db-extra-filters" style="display: inline-flex; gap: 8px; align-items: center;"></div>
 
-                            <select id="db-per-page" class="custom-select" onchange="changeDbPerPage(this.value)">
+                            <select id="db-per-page" class="custom-select" data-change="db-per-page">
                                 <option value="20">20 条/页</option>
                                 <option value="50">50 条/页</option>
                                 <option value="100">100 条/页</option>
@@ -1021,34 +1006,34 @@
                         <div class="toolbar-actions-group">
                             <!-- 数据库表格缩放控制器 -->
                             <div class="table-zoom-group" id="db-zoom-group" title="表格缩放：支持按住 Ctrl + 鼠标滚轮 实时缩放">
-                                <button type="button" class="btn-zoom-action" onclick="changeDbTableZoom(-0.1)" title="缩小表格 (Ctrl + 滚轮向下)">
+                                <button type="button" class="btn-zoom-action" data-action="db-zoom" data-arg="-0.1" title="缩小表格 (Ctrl + 滚轮向下)">
                                     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                 </button>
-                                <span class="zoom-value-pill" id="db-zoom-value-pill" onclick="resetDbTableZoom()" title="点击恢复 100% 原始大小">100%</span>
-                                <button type="button" class="btn-zoom-action" onclick="changeDbTableZoom(0.1)" title="放大表格 (Ctrl + 滚轮向上)">
+                                <button type="button" class="zoom-value-pill" id="db-zoom-value-pill" data-action="db-zoom-reset" title="点击恢复 100% 原始大小">100%</button>
+                                <button type="button" class="btn-zoom-action" data-action="db-zoom" data-arg="0.1" title="放大表格 (Ctrl + 滚轮向上)">
                                     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                 </button>
                             </div>
-                            <button type="button" class="btn secondary" id="db-view-mode-btn" onclick="toggleDbViewMode()" title="切换卡片/表格视图">
+                            <button type="button" class="btn secondary" id="db-view-mode-btn" data-action="toggle-db-view" title="切换卡片/表格视图">
                                 <span id="db-view-mode-icon" style="display:inline-flex;align-items:center;">
                                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
                                 </span>
                                 <span id="db-view-mode-text">卡片视图</span>
                             </button>
-                            <button class="btn danger-subtle" id="db-batch-delete-btn" style="display: none;" onclick="batchDeleteDbRecords()">
+                            <button class="btn danger-subtle" id="db-batch-delete-btn" style="display: none;" data-action="batch-delete-db">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <polyline points="3 6 5 6 21 6"></polyline>
                                     <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                                 </svg>
                                 <span>批量删除 (<span id="db-selected-count">0</span>)</span>
                             </button>
-                            <button class="btn secondary" onclick="loadDbData(dbCurrentPage)">
+                            <button class="btn secondary" data-action="reload-db">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
                                 </svg>
                                 <span>刷新</span>
                             </button>
-                            <button class="btn primary" onclick="openDbRecordModal()">
+                            <button class="btn primary" data-action="open-db-create">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <line x1="12" y1="5" x2="12" y2="19"></line>
                                     <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -1090,9 +1075,9 @@
                 <div id="changelog-tab" class="tab-content">
                     <div class="pro-toolbar" style="margin-bottom: 24px;">
                         <div>
-                            <h2 style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin:0;">版本与更新公告</h2>
+                            <h2 style="font-size: 1.25rem; font-weight: 600; color: var(--text-primary); margin:0;">版本与更新公告</h2>
                         </div>
-                        <button class="btn primary" onclick="openChangelogModal()">
+                        <button class="btn primary" data-action="open-changelog">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <line x1="12" y1="5" x2="12" y2="19"></line>
                                 <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -1125,19 +1110,19 @@
     </div>
 
     <!-- Mobile Drawer Overlay -->
-    <div class="mobile-overlay" id="mobile-overlay" onclick="closeMobileMenu()"></div>
+    <div class="mobile-overlay" id="mobile-overlay" data-action="close-mobile-menu"></div>
 
     <!-- Modal: DB Record (Create / Edit) -->
-    <div class="modal-overlay" id="db-record-modal" style="display: none;">
+    <dialog class="modal-overlay native-dialog" id="db-record-modal" closedby="any">
         <div class="modal-box" style="max-width: 760px;">
             <div class="modal-header">
                 <h4 id="db-modal-title">新增数据记录</h4>
-                <button class="modal-close" onclick="closeDbRecordModal()">
+                <button type="button" class="modal-close" data-action="close-db-record" aria-label="关闭">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                 </button>
             </div>
             <div class="modal-body">
-                <form id="db-record-form" onsubmit="event.preventDefault(); saveDbRecord();">
+                <form id="db-record-form" data-submit="save-db-record">
                     <input type="hidden" id="db-record-pk" value="">
                     <div id="db-form-fields-container">
                         <!-- Dynamic fields rendered by openDbRecordModal() -->
@@ -1145,18 +1130,18 @@
                 </form>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn secondary" onclick="closeDbRecordModal()">取消</button>
-                <button type="button" class="btn primary" id="db-modal-save-btn" onclick="saveDbRecord()">保存数据记录</button>
+                <button type="button" class="btn secondary" data-action="close-db-record">取消</button>
+                <button type="button" class="btn primary" id="db-modal-save-btn" data-action="save-db-record">保存数据记录</button>
             </div>
         </div>
-    </div>
+    </dialog>
 
     <!-- Modal: DB Record Detail -->
-    <div class="modal-overlay" id="db-detail-modal" style="display: none;">
+    <dialog class="modal-overlay native-dialog" id="db-detail-modal" closedby="any">
         <div class="modal-box" style="max-width: 860px; max-height: 90vh; display: flex; flex-direction: column;">
             <div class="modal-header">
                 <h4 id="db-detail-title">数据记录详细视图</h4>
-                <button class="modal-close" onclick="closeDbDetailModal()">
+                <button type="button" class="modal-close" data-action="close-db-detail" aria-label="关闭">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                 </button>
             </div>
@@ -1164,13 +1149,13 @@
                 <!-- Populated dynamically -->
             </div>
             <div class="modal-footer" style="padding: 12px 20px; border-top: 1px solid var(--border-color); display: flex; align-items: center; justify-content: flex-end; gap: 10px;">
-                <button class="btn secondary" onclick="closeDbDetailModal()">关闭详情</button>
+                <button type="button" class="btn secondary" data-action="close-db-detail">关闭详情</button>
             </div>
         </div>
-    </div>
+    </dialog>
 
     <!-- Modal: Token Search Student -->
-    <div class="modal-overlay" id="token-search-modal" style="display: none;" onclick="if(event.target===this) closeTokenSearchModal()">
+    <dialog class="modal-overlay native-dialog" id="token-search-modal" closedby="any">
         <div class="modal-box" style="max-width: 720px; max-height: 90vh; display: flex; flex-direction: column;">
             <div class="modal-header" style="flex-shrink: 0;">
                 <div style="display: flex; align-items: center; gap: 10px;">
@@ -1181,11 +1166,11 @@
                         </svg>
                     </div>
                     <div>
-                        <h4 style="margin: 0; font-size: 1.05rem; font-weight: 700; color: var(--text-primary);">Token 智能反查学生</h4>
+                        <h4 style="margin: 0; font-size: 1.05rem; font-weight: 600; color: var(--text-primary);">Token 智能反查学生</h4>
                         <span style="font-size: 0.78rem; color: var(--text-muted); display: block; margin-top: 2px;">输入错题本 Token、家长访问链接或加密串，即刻反查学生与完整学情</span>
                     </div>
                 </div>
-                <button class="modal-close" onclick="closeTokenSearchModal()" title="关闭 (Esc)">
+                <button type="button" class="modal-close" data-action="close-token-search" title="关闭 (Esc)" aria-label="关闭">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                 </button>
             </div>
@@ -1193,20 +1178,20 @@
                 <!-- Search Input Bar -->
                 <div style="display: flex; gap: 8px; align-items: stretch; margin-bottom: 16px;">
                     <div style="position: relative; flex: 1;">
-                        <input type="text" id="token-modal-input" placeholder="粘贴 Token 或完整错题本链接 (如 elWy8pZZdB)..."
+                        <input type="text" id="token-modal-input" aria-label="输入 Token 或错题本链接" placeholder="粘贴 Token 或完整错题本链接 (如 elWy8pZZdB)..."
                                style="width: 100%; height: 42px; padding: 0 38px 0 14px; font-size: 0.92rem; border-radius: var(--radius-md); border: 1px solid var(--border-color); background: var(--bg-input); color: var(--text-primary); font-family: var(--font-mono); outline: none; box-sizing: border-box;"
-                               oninput="toggleTokenModalClearBtn()"
-                               onkeydown="if(event.key==='Enter') doSearchStudentByToken()">
-                        <button type="button" id="token-modal-clear-btn" onclick="clearTokenModalInput()" title="清空输入"
+                               data-input="token-modal-clear"
+                               >
+                        <button type="button" id="token-modal-clear-btn" data-action="clear-token-input" title="清空输入" aria-label="清空输入"
                                 style="display: none; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px;">
                             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                         </button>
                     </div>
-                    <button type="button" class="btn secondary" onclick="pasteFromClipboardToTokenSearch()" title="从剪贴板粘贴" style="padding: 0 14px; height: 42px; display: flex; align-items: center; gap: 6px; font-size: 0.86rem; flex-shrink: 0;">
+                    <button type="button" class="btn secondary" data-action="paste-token-search" title="从剪贴板粘贴" style="padding: 0 14px; height: 42px; display: flex; align-items: center; gap: 6px; font-size: 0.86rem; flex-shrink: 0;">
                         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>
                         <span>粘贴</span>
                     </button>
-                    <button type="button" class="btn primary" id="token-modal-search-btn" onclick="doSearchStudentByToken()" style="padding: 0 18px; height: 42px; display: flex; align-items: center; gap: 6px; font-size: 0.9rem; flex-shrink: 0;">
+                    <button type="button" class="btn primary" id="token-modal-search-btn" data-action="do-token-search" style="padding: 0 18px; height: 42px; display: flex; align-items: center; gap: 6px; font-size: 0.9rem; flex-shrink: 0;">
                         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                         <span>立即反查</span>
                     </button>
@@ -1229,17 +1214,17 @@
             </div>
             <div class="modal-footer" style="flex-shrink: 0; display: flex; justify-content: space-between; align-items: center;">
                 <span style="font-size: 0.76rem; color: var(--text-muted);">提示：可随时按下快捷键 <kbd style="background: var(--bg-surface); padding: 2px 5px; border-radius: 4px; border: 1px solid var(--border-color); font-family: var(--font-mono);">Ctrl + K</kbd> 唤出此窗口</span>
-                <button type="button" class="btn secondary" onclick="closeTokenSearchModal()">关闭</button>
+                <button type="button" class="btn secondary" data-action="close-token-search">关闭</button>
             </div>
         </div>
-    </div>
+    </dialog>
 
     <!-- Modal: Changelog (Create / Edit) -->
-    <div class="modal-overlay" id="changelog-modal" style="display: none;">
+    <dialog class="modal-overlay native-dialog" id="changelog-modal" closedby="any">
         <div class="modal-box" style="max-width: 640px;">
             <div class="modal-header">
                 <h4 id="cl-modal-title">新增更新日志</h4>
-                <button class="modal-close" onclick="closeChangelogModal()">
+                <button type="button" class="modal-close" data-action="close-changelog" aria-label="关闭">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                 </button>
             </div>
@@ -1247,22 +1232,22 @@
                 <input type="hidden" id="cl-id">
                 <div style="display:flex; gap: 14px; margin-bottom: 14px;">
                     <div style="flex:1;">
-                        <label style="display:block; margin-bottom:6px; font-size:0.85rem; font-weight:600; color:var(--text-secondary);">版本号 *</label>
+                        <label for="cl-version" style="display:block; margin-bottom:6px; font-size:0.85rem; font-weight:600; color:var(--text-secondary);">版本号 *</label>
                         <input type="text" id="cl-version" class="custom-input" style="width:100%; box-sizing:border-box;" placeholder="例如: v2.1.0">
                     </div>
                     <div style="flex:1;">
-                        <label style="display:block; margin-bottom:6px; font-size:0.85rem; font-weight:600; color:var(--text-secondary);">发布日期 *</label>
+                        <label for="cl-date" style="display:block; margin-bottom:6px; font-size:0.85rem; font-weight:600; color:var(--text-secondary);">发布日期 *</label>
                         <input type="date" id="cl-date" class="custom-input" style="width:100%; box-sizing:border-box;">
                     </div>
                 </div>
                 <div style="margin-bottom: 14px;">
-                    <label style="display:block; margin-bottom:6px; font-size:0.85rem; font-weight:600; color:var(--text-secondary);">更新主标题 *</label>
+                    <label for="cl-title" style="display:block; margin-bottom:6px; font-size:0.85rem; font-weight:600; color:var(--text-secondary);">更新主标题 *</label>
                     <input type="text" id="cl-title" class="custom-input" style="width:100%; box-sizing:border-box;" placeholder="例如: 教师端作业批改体验升级与数据库可视化">
                 </div>
                 <div style="margin-bottom: 14px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                        <label style="font-size:0.85rem; font-weight:600; color:var(--text-secondary);">更新明细条目</label>
-                        <button class="btn secondary" style="padding:4px 10px; font-size:0.8rem;" onclick="addChangelogItemRow()">+ 新增条目</button>
+                        <span style="font-size:0.85rem; font-weight:600; color:var(--text-secondary);">更新明细条目</span>
+                        <button type="button" class="btn secondary" style="padding:4px 10px; font-size:0.8rem;" data-action="add-changelog-row">+ 新增条目</button>
                     </div>
                     <div id="cl-items-container" style="display:flex; flex-direction:column; gap:8px; max-height:260px; overflow-y:auto; padding-right:4px;"></div>
                 </div>
@@ -1272,11 +1257,11 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn secondary" onclick="closeChangelogModal()">取消</button>
-                <button class="btn primary" onclick="saveChangelog()">保存日志内容</button>
+                <button type="button" class="btn secondary" data-action="close-changelog">取消</button>
+                <button type="button" class="btn primary" data-action="save-changelog">保存日志内容</button>
             </div>
         </div>
-    </div>
+    </dialog>
 
     <!-- JAVASCRIPT APPLICATION LOGIC -->
 
@@ -1287,27 +1272,21 @@
             <span>已选记录</span>
         </div>
         <div class="dock-actions">
-            <button type="button" class="btn danger-subtle" onclick="triggerDockBatchDelete()" style="padding: 5px 12px; font-size: 0.82rem;">
+            <button type="button" class="btn danger-subtle" data-action="dock-batch-delete" style="padding: 5px 12px; font-size: 0.82rem;">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
                     <polyline points="3 6 5 6 21 6"></polyline>
                     <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                 </svg>
                 <span>批量删除</span>
             </button>
-            <button type="button" class="btn secondary" onclick="clearAllSelections()" style="padding: 5px 12px; font-size: 0.82rem;">
+            <button type="button" class="btn secondary" data-action="clear-all-selections" style="padding: 5px 12px; font-size: 0.82rem;">
                 <span>取消选择</span>
             </button>
         </div>
     </div>
 
     <!-- JAVASCRIPT APPLICATION LOGIC -->
-    <script>
-        (function () {
-            // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261110-1';
-            document.write(`<script src="js/admin.js?v=${v}"><\/script>`);
-        })();
-    </script>
+    <script defer src="js/admin.js?v=20261114-04"></script>
 </body>
 
 </html>

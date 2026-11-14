@@ -2979,8 +2979,7 @@ function checkUnsubmittedStudents(previewMap, homeworkMap, pvLesson, hwLesson, n
     // Show suggestion if there are unsubmitted students
     if (previewUnsubmitted.length > 0 || homeworkUnsubmitted.length > 0 || noteUnsubmitted.length > 0 || classTestUnsubmitted.length > 0) {
         window.openReminderFromWarning = function(type) {
-            const d = document.getElementById('custom-dialog');
-            if (d) d.classList.remove('active');
+            closeCustomDialog();
             openReminderModal(type);
         };
 
@@ -3405,7 +3404,11 @@ function openReminderModal(type) {
         clearBtn.style.display = currentText ? 'inline-flex' : 'none';
     }
     
-    modal.style.display = 'flex';
+    if (window.DialogHelper) {
+        window.DialogHelper.open(modal, { dismissible: true });
+    } else {
+        modal.style.display = 'flex';
+    }
     setTimeout(() => {
         if (textarea) textarea.focus();
     }, 100);
@@ -3413,7 +3416,12 @@ function openReminderModal(type) {
 
 function closeReminderModal() {
     const modal = document.getElementById('reminder-modal');
-    if (modal) modal.style.display = 'none';
+    if (!modal) return;
+    if (window.DialogHelper) {
+        window.DialogHelper.close(modal);
+    } else {
+        modal.style.display = 'none';
+    }
 }
 
 function toggleReminderNamesList() {
@@ -4631,14 +4639,71 @@ window.showExcludedStudents = function() {
         }
     }
     
-    modal.style.display = 'flex';
+    if (window.DialogHelper) {
+        window.DialogHelper.open(modal, { dismissible: true });
+    } else {
+        modal.style.display = 'flex';
+    }
 };
 
+function closeExcludedModal() {
+    const excludedModal = document.getElementById('excluded-modal');
+    if (!excludedModal) return;
+    if (window.DialogHelper) {
+        window.DialogHelper.close(excludedModal);
+    } else {
+        excludedModal.style.display = 'none';
+    }
+}
+window.closeExcludedModal = closeExcludedModal;
+
 document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
+    if (e.key === 'Escape' && !window.DialogHelper) {
         const excludedModal = document.getElementById('excluded-modal');
         if (excludedModal && excludedModal.style.display !== 'none') {
             excludedModal.style.display = 'none';
         }
     }
 });
+
+(function bindViewerDelegatedEvents() {
+    const VIEWER_CLICK_ACTIONS = {
+        'global-append': () => showGlobalAppendDialog(),
+        'show-excluded': () => showExcludedStudents(),
+        'split-plus': () => showSplitPlusDialog(),
+        'zero-reminder': (_el, arg) => addZeroScoreReminder(arg),
+        'export-rank': (_el, arg) => exportRankImage(arg),
+        'export-plus-stats': () => exportPlusStats(),
+        'export-plus-pie': () => exportPlusPieImage(),
+        'save-snapshot': () => saveSnapshot(),
+        'export-doc': (_el, arg) => executeExport(arg),
+        'close-custom-dialog': () => closeCustomDialog(),
+        'close-excluded-modal': () => closeExcludedModal(),
+        'close-reminder-modal': () => closeReminderModal(),
+        'reminder-template': (_el, arg) => applyReminderTemplate(arg),
+        'clear-reminder': () => clearCurrentReminder(),
+        'save-reminder': () => saveReminderModal()
+    };
+
+    document.addEventListener('click', (e) => {
+        const target = e.target.closest('[data-action]');
+        if (!target) return;
+        const handler = VIEWER_CLICK_ACTIONS[target.dataset.action];
+        if (handler) handler(target, target.dataset.arg);
+    });
+
+    const searchInput = document.getElementById('search-input');
+    if (searchInput) {
+        searchInput.addEventListener('input', applyFiltering);
+    }
+
+    const sortSelect = document.getElementById('sort-field');
+    if (sortSelect) {
+        sortSelect.addEventListener('change', applySorting);
+    }
+
+    const reminderTextarea = document.getElementById('reminder-textarea');
+    if (reminderTextarea) {
+        reminderTextarea.addEventListener('input', () => updateReminderCharCount(reminderTextarea));
+    }
+})();

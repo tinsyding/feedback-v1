@@ -11,10 +11,9 @@
     function ensureModalDOMElements() {
         if (document.getElementById('front-auth-modal')) return;
 
-        const modalDiv = document.createElement('div');
+        const modalDiv = document.createElement('dialog');
         modalDiv.id = 'front-auth-modal';
-        modalDiv.className = 'dialog-overlay';
-        modalDiv.style.display = 'none';
+        modalDiv.className = 'dialog-overlay native-dialog';
         modalDiv.innerHTML = `
             <div class="dialog-box dialog-pad">
                 <button type="button" id="front-auth-close-btn" class="front-auth-close-btn" onclick="window.hideAuthModal()" style="display:none;" title="关闭">&times;</button>
@@ -134,8 +133,16 @@
         ensureModalDOMElements();
         const modal = document.getElementById('front-auth-modal');
         if (modal) {
-            modal.style.display = 'flex';
-            modal.classList.add('active');
+            const closeBtn = document.getElementById('front-auth-close-btn');
+            const isDismissible = Boolean(closeBtn && closeBtn.style.display !== 'none');
+            if (isDismissible) modal.setAttribute('closedby', 'any');
+            else modal.removeAttribute('closedby');
+            if (window.DialogHelper) {
+                window.DialogHelper.open(modal, { dismissible: isDismissible });
+            } else {
+                modal.style.display = 'flex';
+                modal.classList.add('active');
+            }
             setTimeout(() => {
                 const uInput = document.getElementById('front-auth-username');
                 if (uInput && !uInput.value) uInput.focus();
@@ -148,8 +155,12 @@
     function hideAuthModal() {
         const modal = document.getElementById('front-auth-modal');
         if (modal) {
-            modal.classList.remove('active');
-            modal.style.display = 'none';
+            if (window.DialogHelper) {
+                window.DialogHelper.close(modal);
+            } else {
+                modal.classList.remove('active');
+                modal.style.display = 'none';
+            }
         }
     }
     window.hideAuthModal = hideAuthModal;
@@ -326,9 +337,10 @@
     function ensureAssistantModalDOMElements() {
         if (document.getElementById('front-assistant-modal')) return;
 
-        const modalDiv = document.createElement('div');
+        const modalDiv = document.createElement('dialog');
         modalDiv.id = 'front-assistant-modal';
-        modalDiv.className = 'dialog-overlay';
+        modalDiv.className = 'dialog-overlay native-dialog';
+        modalDiv.setAttribute('closedby', 'any');
         modalDiv.innerHTML = `
             <div class="dialog-box dialog-pad xwide" style="overflow-y: auto;">
                 <div class="front-assistant-header">
@@ -466,7 +478,11 @@
         if (createdBox) createdBox.style.display = 'none';
         const modal = document.getElementById('front-assistant-modal');
         if (modal) {
-            modal.classList.add('active');
+            if (window.DialogHelper) {
+                window.DialogHelper.open(modal, { dismissible: true });
+            } else {
+                modal.classList.add('active');
+            }
             window.loadAssistantList();
         }
     };
@@ -474,7 +490,13 @@
     // 关闭助教管理弹窗
     window.closeAssistantModal = function () {
         const modal = document.getElementById('front-assistant-modal');
-        if (modal) modal.classList.remove('active');
+        if (modal) {
+            if (window.DialogHelper) {
+                window.DialogHelper.close(modal);
+            } else {
+                modal.classList.remove('active');
+            }
+        }
     };
 
     // 展开/收起新增助教表单

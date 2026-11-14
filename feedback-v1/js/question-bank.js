@@ -1,4 +1,7 @@
 // ========== Question Bank Management Logic (PHP API) ==========
+if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'js/libs/pdfjs/pdf.worker.min.js';
+}
 const API_BASE = 'api/qbank.php';
 const LOG_API = 'api/logs.php';
 
@@ -1606,7 +1609,7 @@ function renderPageGrid(containerId, thumbs, labels, kind) {
                            title="${isAuto ? '题号由 PDF 自动识别，可直接修改' : (isInherited ? '此页没有印刷题号，已沿用上一页题号；请核对是否属于同一道题' : '请手动填写此页对应的作业题号')}"
                            onwheel="this.blur()"
                            onclick="event.stopPropagation()"
-                           onkeydown="if(event.key==='Enter') this.blur(); event.stopPropagation();"
+                           onkeydown="if(!event.isComposing && event.keyCode !== 229 && event.key==='Enter') this.blur(); event.stopPropagation();"
                            onchange="onPageLabelChange('${kind}', ${i}, this.value)">
                     <button type="button" class="stepper-btn stepper-btn-plus" onclick="stepPageLabel('${kind}', ${i}, 1, event)" title="题号加 1" aria-label="增加题号">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
@@ -1660,6 +1663,44 @@ function toggleLightboxFullWidthSnap() {
 }
 window.toggleLightboxFullWidthSnap = toggleLightboxFullWidthSnap;
 
+function openNativeDialog(idOrEl, opts) {
+    const el = typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl;
+    if (!el) return null;
+    if (window.DialogHelper) {
+        return window.DialogHelper.open(el, opts);
+    }
+    el.classList.add('active');
+    return el;
+}
+
+function closeNativeDialog(idOrEl) {
+    const el = typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl;
+    if (!el) return;
+    if (window.DialogHelper) {
+        window.DialogHelper.close(el);
+    } else {
+        el.classList.remove('active');
+    }
+}
+
+function isNativeDialogOpen(idOrEl) {
+    const el = typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl;
+    if (!el) return false;
+    if (window.DialogHelper) {
+        return window.DialogHelper.isOpen(el);
+    }
+    return el.classList.contains('active');
+}
+
+function finishPageLightboxClose() {
+    if (lightboxStep4Context) {
+        lightboxStep4Context = null;
+    } else if (currentStep === 3) {
+        renderAnnotationList();
+        updateAnnotationStatus();
+    }
+}
+
 function openPageLightbox(kind, index, enterBoxMode = false) {
     lightboxStep4Context = null;
     lightboxKind = kind;
@@ -1679,7 +1720,10 @@ function openPageLightbox(kind, index, enterBoxMode = false) {
     if (!dialog) return;
     initLightboxBoxDrawingEvents();
     updateLightboxContent();
-    dialog.classList.add('active');
+    openNativeDialog(dialog, {
+        dismissible: true,
+        onAfterClose: finishPageLightboxClose
+    });
 }
 
 function openBigQuestionBoxMode(pageIndex, event, kind = 'q') {
@@ -1720,13 +1764,9 @@ function openBigQuestionBoxMode(pageIndex, event, kind = 'q') {
 window.openBigQuestionBoxMode = openBigQuestionBoxMode;
 
 function closePageLightbox() {
-    const dialog = document.getElementById('page-lightbox-dialog');
-    if (dialog) dialog.classList.remove('active');
-    if (lightboxStep4Context) {
-        lightboxStep4Context = null;
-    } else if (currentStep === 3) {
-        renderAnnotationList();
-        updateAnnotationStatus();
+    closeNativeDialog('page-lightbox-dialog');
+    if (!window.DialogHelper) {
+        finishPageLightboxClose();
     }
 }
 
@@ -2321,7 +2361,7 @@ function initLightboxBoxDrawingEvents() {
             // 框好原文后自动切入第 2 步：框选题号
             lightboxDrawTarget = 'subq';
             onBoxesMutated();
-            showToast('原文区已框选！请按顺序框选各小问题号（若原文跨页可点“1. 框选原文”继续补框）', 'success');
+            showToast('原文区已框选，请按顺序框选各小问题号（若原文跨页可点“1. 框选原文”继续补框）', 'success');
             return;
         }
 
@@ -2454,7 +2494,7 @@ function stepLightboxLabel(delta, event) {
 // Global keydown for lightbox navigation
 window.addEventListener('keydown', (e) => {
     const lightbox = document.getElementById('page-lightbox-dialog');
-    if (!lightbox || !lightbox.classList.contains('active')) return;
+    if (!isNativeDialogOpen(lightbox)) return;
     if (e.target && e.target.tagName === 'INPUT') return;
 
     if (e.key === 'ArrowLeft') {
@@ -2463,7 +2503,7 @@ window.addEventListener('keydown', (e) => {
     } else if (e.key === 'ArrowRight') {
         e.preventDefault();
         navigateLightbox(1);
-    } else if (e.key === 'Escape') {
+    } else if (e.key === 'Escape' && !window.DialogHelper) {
         e.preventDefault();
         closePageLightbox();
     } else if (e.key === '+' || e.key === '=') {
@@ -2478,7 +2518,7 @@ window.addEventListener('keydown', (e) => {
 // 题目高清切片大图预览灯箱：支持鼠标滚轮缩放 (Mouse Wheel Zoom)
 window.addEventListener('wheel', function (e) {
     const lbModal = document.getElementById('page-lightbox-dialog');
-    if (!lbModal || !lbModal.classList.contains('active')) return;
+    if (!isNativeDialogOpen(lbModal)) return;
     const lbBody = document.getElementById('lightbox-body');
     if (lbBody && (lbBody === e.target || lbBody.contains(e.target))) {
         if (e.target.tagName !== 'INPUT') {
@@ -3957,8 +3997,15 @@ function onTopicChange(index, value) {
     }
 }
 
+function supportsFieldSizing() {
+    return typeof CSS !== 'undefined'
+        && typeof CSS.supports === 'function'
+        && CSS.supports('field-sizing', 'content');
+}
+
 function autoResizeTopicTextarea(el) {
     if (!el) return;
+    if (supportsFieldSizing()) return;
     if (el.offsetParent === null && !el.matches(':focus')) {
         return;
     }
@@ -3974,6 +4021,7 @@ function autoResizeTopicTextarea(el) {
 window.autoResizeTopicTextarea = autoResizeTopicTextarea;
 
 function resizeAllTopicTextareas() {
+    if (supportsFieldSizing()) return;
     requestAnimationFrame(() => {
         const textareas = document.querySelectorAll('.question-topic-input');
         textareas.forEach(el => {
@@ -4409,7 +4457,10 @@ async function openStep4BigQuestionBoxModal(firstIndex) {
         if (lightbox) {
             initLightboxBoxDrawingEvents();
             updateLightboxContent();
-            lightbox.classList.add('active');
+            openNativeDialog(lightbox, {
+                dismissible: true,
+                onAfterClose: finishPageLightboxClose
+            });
         }
     } catch (err) {
         console.error('加载题目 PDF 供框选失败:', err);
@@ -5659,15 +5710,16 @@ function openPdfManageDialog(index, type) {
         previewBtn.className = 'btn secondary';
         previewBtn.textContent = '预览';
         previewBtn.onclick = () => {
-            document.getElementById('custom-dialog').classList.remove('active');
+            closeNativeDialog('custom-dialog');
             previewPdf(data.url, data.name || `${label} PDF`);
         };
 
         const reuploadBtn = document.createElement('button');
+        reuploadBtn.type = 'button';
         reuploadBtn.className = 'btn secondary';
         reuploadBtn.textContent = '重新上传';
         reuploadBtn.onclick = () => {
-            document.getElementById('custom-dialog').classList.remove('active');
+            closeNativeDialog('custom-dialog');
             triggerPdfUpload(index, type);
         };
 
@@ -5817,6 +5869,15 @@ function removePdf(index, type) {
 // ========== PDF Preview ==========
 let pdfPreviewUrl = '';
 
+function finishPdfPreviewClose() {
+    const frame = document.getElementById('pdf-preview-frame');
+    if (frame) frame.src = '';
+    if (pdfPreviewUrl && pdfPreviewUrl.startsWith('blob:')) {
+        try { URL.revokeObjectURL(pdfPreviewUrl); } catch (_) {}
+    }
+    pdfPreviewUrl = '';
+}
+
 function previewPdf(url, name) {
     pdfPreviewUrl = url || '';
     const dialog = document.getElementById('pdf-preview-dialog');
@@ -5828,18 +5889,17 @@ function previewPdf(url, name) {
     }
     if (titleEl) titleEl.textContent = name || 'PDF 预览';
     frame.src = pdfPreviewUrl;
-    dialog.classList.add('active');
+    openNativeDialog(dialog, {
+        dismissible: true,
+        onAfterClose: finishPdfPreviewClose
+    });
 }
 
 function closePdfPreview() {
-    const dialog = document.getElementById('pdf-preview-dialog');
-    const frame = document.getElementById('pdf-preview-frame');
-    if (dialog) dialog.classList.remove('active');
-    if (frame) frame.src = '';
-    if (pdfPreviewUrl && pdfPreviewUrl.startsWith('blob:')) {
-        try { URL.revokeObjectURL(pdfPreviewUrl); } catch (_) {}
+    closeNativeDialog('pdf-preview-dialog');
+    if (!window.DialogHelper) {
+        finishPdfPreviewClose();
     }
-    pdfPreviewUrl = '';
 }
 
 const regionPreviewBytesCache = new Map();
@@ -6540,3 +6600,114 @@ window.addEventListener('resize', () => {
         if (typeof autoResizeTopicTextarea === 'function') autoResizeTopicTextarea(el);
     });
 });
+
+(function bindQuestionBankDelegatedEvents() {
+    const QB_CLICK_ACTIONS = {
+        'history-back': (_el, _arg, e) => {
+            if (history.length > 1) {
+                e.preventDefault();
+                history.back();
+            }
+        },
+        'step-click': (_el, arg) => handleStepIndicatorClick(parseInt(arg, 10)),
+        'open-rg-studio': () => openRegionDebugStudio(),
+        'next-step-1': () => goNextFromStep1(),
+        'reset-saved-filters': () => resetSavedFilters(),
+        'select-batch-pdf': (_el, arg) => selectBatchPdf(arg),
+        'go-back': () => goBack(),
+        'next-step-2': () => goNextFromStep2(),
+        'undo-label': () => undoLastLabelChange(),
+        'next-mapping': () => goNextFromMapping(),
+        'merge-variations': () => mergeAllSameTopicVariations(),
+        'add-question': () => addQuestion(),
+        'clear-all-questions': () => clearAllQuestions(),
+        'open-tier-sync': () => openTierSyncModal(),
+        'save-questions': () => saveQuestions(),
+        'go-config-step': () => goToConfigStep(),
+        'go-home': () => goToHome(),
+        'exit-rg-studio': () => exitRegionDebugStudio(),
+        'rg-clear-draft': () => rgClearDraftPrompt(),
+        'rg-prev-stage': () => rgGoPrevStage(),
+        'rg-next-stage': () => rgGoNextStage(),
+        'rg-finish-import': () => rgFinishAndImport(),
+        'rg-load-current': () => rgLoadFromCurrentQuestions(),
+        'rg-sub-target': (_el, arg) => rgSetSubDrawTarget(arg),
+        'rg-undo-subbox': () => rgUndoSubBox(),
+        'rg-exit-submode': () => rgExitSubMode(),
+        'rg-change-page': (_el, arg) => rgChangePage(parseInt(arg, 10)),
+        'rg-toggle-interact': () => rgToggleInteractMode(),
+        'rg-toggle-twotap': () => rgToggleTwoTapMode(),
+        'rg-toggle-fullwidth-btn': () => rgToggleFullWidth(!document.getElementById('rg-fullwidth-toggle')?.checked),
+        'rg-zoom': (_el, arg) => rgZoom(parseFloat(arg)),
+        'rg-undo-region': () => rgUndoLastRegion(),
+        'rg-cancel-continue': () => rgCancelContinue(),
+        'close-pdf-preview': () => closePdfPreview(),
+        'open-pdf-new-tab': () => openPdfInNewTab(),
+        'step-lightbox-label': (_el, arg, e) => stepLightboxLabel(parseInt(arg, 10), e),
+        'toggle-lightbox-boxmode': () => toggleLightboxBoxMode(),
+        'zoom-lightbox': (_el, arg) => zoomLightboxImage(parseFloat(arg)),
+        'reset-lightbox-zoom': () => resetLightboxZoom(),
+        'close-page-lightbox': () => closePageLightbox(),
+        'lightbox-draw-target': (_el, arg) => setLightboxDrawTarget(arg),
+        'lightbox-toggle-snap': () => toggleLightboxFullWidthSnap(),
+        'lightbox-align-boxes': () => alignCurrentPageBoxes(),
+        'lightbox-undo-box': () => undoLastPageBox(),
+        'lightbox-clear-boxes': () => clearCurrentPageBoxes(),
+        'lightbox-extend-page': () => extendBigQuestionToNextPage(),
+        'lightbox-finish-boxmode': () => finishLightboxBoxMode(),
+        'navigate-lightbox': (_el, arg) => navigateLightbox(parseInt(arg, 10))
+    };
+
+    const QB_CHANGE_ACTIONS = {
+        'bank-type': () => onBankTypeChange(),
+        'qb-selector': () => onSelectorChange(),
+        'toggle-auto-cascade': (el) => toggleAutoCascade(el.checked),
+        'rg-pdf-upload': (el, arg) => rgHandlePdfUpload(arg, el),
+        'rg-toggle-fullwidth': (el) => rgToggleFullWidth(el.checked),
+        'lightbox-label': (el) => onLightboxLabelChange(el.value)
+    };
+
+    const QB_INPUT_ACTIONS = {
+        'saved-filter': () => onSavedFilterChange(),
+        'question-search': (el) => onQuestionSearch(el.value)
+    };
+
+    document.addEventListener('click', (e) => {
+        const target = e.target.closest('[data-action]');
+        if (!target) return;
+        const handler = QB_CLICK_ACTIONS[target.dataset.action];
+        if (handler) handler(target, target.dataset.arg, e);
+    });
+
+    document.addEventListener('change', (e) => {
+        const target = e.target.closest('[data-change]');
+        if (!target) return;
+        const handler = QB_CHANGE_ACTIONS[target.dataset.change];
+        if (handler) handler(target, target.dataset.arg);
+    });
+
+    document.addEventListener('input', (e) => {
+        const target = e.target.closest('[data-input]');
+        if (!target) return;
+        const handler = QB_INPUT_ACTIONS[target.dataset.input];
+        if (handler) handler(target, target.dataset.arg);
+    });
+
+    document.addEventListener('keydown', (e) => {
+        const trigger = e.target.closest('[data-trigger-input]');
+        if (trigger && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault();
+            document.getElementById(trigger.dataset.triggerInput)?.click();
+        }
+    });
+
+    const lbLabel = document.getElementById('lightbox-page-label');
+    if (lbLabel) {
+        lbLabel.addEventListener('wheel', () => lbLabel.blur(), { passive: true });
+        lbLabel.addEventListener('keydown', (e) => {
+            if (!e.isComposing && e.keyCode !== 229 && e.key === 'Enter') {
+                lbLabel.blur();
+            }
+        });
+    }
+})();

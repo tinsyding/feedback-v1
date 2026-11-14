@@ -202,29 +202,56 @@
             const rawJson = JSON.stringify(log.details, null, 2);
             const title = log.event || log.action || '日志事件详情';
 
-            const modal = document.createElement('div');
-            modal.className = 'modal-overlay';
-            modal.style.zIndex = '9999';
+            const modal = document.createElement('dialog');
+            modal.className = 'modal-overlay native-dialog';
+            modal.setAttribute('closedby', 'any');
             modal.innerHTML = `
                 <div class="modal-box" style="max-width:760px; max-height:85vh;">
                     <div class="modal-header">
                         <h4>事件详情：${escapeHtml(title)}</h4>
-                        <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">
+                        <button type="button" class="modal-close" data-close-log-modal>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                         </button>
                     </div>
                     <div class="modal-body" style="background:rgba(0,0,0,0.3); padding:16px; font-family:var(--font-mono); white-space:pre-wrap; word-break:break-all; font-size:0.88rem; line-height:1.5;">${escapeHtml(rawJson)}</div>
                     <div class="modal-footer">
-                        <button class="btn secondary" onclick="const text=this.parentElement.previousElementSibling.textContent; if(navigator.clipboard && window.isSecureContext){navigator.clipboard.writeText(text).then(()=>showToast('已复制内容到剪贴板','success'));}else{var ta=document.createElement('textarea');ta.value=text;ta.style.cssText='position:fixed;left:-9999px;';document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);showToast('已复制内容到剪贴板','success');}">
+                        <button type="button" class="btn secondary" data-copy-log-json>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path></svg>
                             复制完整 JSON
                         </button>
-                        <button class="btn primary" onclick="this.closest('.modal-overlay').remove()">关闭</button>
+                        <button type="button" class="btn primary" data-close-log-modal>关闭</button>
                     </div>
                 </div>
             `;
-            modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+            modal.querySelectorAll('[data-close-log-modal]').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    if (window.DialogHelper) window.DialogHelper.close(modal);
+                    else modal.remove();
+                });
+            });
+            const copyBtn = modal.querySelector('[data-copy-log-json]');
+            if (copyBtn) {
+                copyBtn.addEventListener('click', () => {
+                    if (navigator.clipboard && window.isSecureContext) {
+                        navigator.clipboard.writeText(rawJson).then(() => showToast('已复制内容到剪贴板', 'success'));
+                    } else {
+                        const ta = document.createElement('textarea');
+                        ta.value = rawJson;
+                        ta.style.cssText = 'position:fixed;left:-9999px;';
+                        document.body.appendChild(ta);
+                        ta.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(ta);
+                        showToast('已复制内容到剪贴板', 'success');
+                    }
+                });
+            }
             document.body.appendChild(modal);
+            if (window.DialogHelper) {
+                window.DialogHelper.open(modal, { dismissible: true, removeOnClose: true });
+            } else {
+                modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+            }
         }
 
         function renderPagination(pagination) {
@@ -384,9 +411,9 @@
 
                 return `
                     <div onclick="selectSenderClient('${escapeHtml(item.date)}', '${escapeHtml(item.client_slug)}')"
-                         style="padding:12px; border-radius:8px; margin-bottom:8px; cursor:pointer; transition:all 0.15s ease; border:1px solid ${isSelected ? 'var(--primary)' : 'var(--border-color)'}; background:${isSelected ? 'rgba(99, 102, 241, 0.12)' : 'rgba(255,255,255,0.02)'};">
+                         style="padding:12px; border-radius:8px; margin-bottom:8px; cursor:pointer; transition:border-color 0.15s ease, background-color 0.15s ease; border:1px solid ${isSelected ? 'var(--primary)' : 'var(--border-color)'}; background:${isSelected ? 'rgba(99, 102, 241, 0.12)' : 'rgba(255,255,255,0.02)'};">
                         <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; margin-bottom:4px;">
-                            <span style="font-weight:700; font-size:0.88rem; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(displayName)}">
+                            <span style="font-weight:600; font-size:0.88rem; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(displayName)}">
                                 ${escapeHtml(displayName)}
                             </span>
                             <span style="font-size:0.74rem; color:var(--text-secondary); font-family:var(--font-mono); flex-shrink:0;">${escapeHtml(item.date)}</span>
@@ -679,23 +706,34 @@
         }
 
         function openSnapshotPreviewModal(imgUrl, title) {
-            const modal = document.createElement('div');
-            modal.className = 'modal-overlay';
-            modal.style.zIndex = '9999';
+            const modal = document.createElement('dialog');
+            modal.className = 'modal-overlay native-dialog';
+            modal.setAttribute('closedby', 'any');
             modal.innerHTML = `
                 <div class="modal-box" style="max-width:90vw; max-height:90vh; width:auto;">
                     <div class="modal-header">
                         <h4>${escapeHtml(title || '现场核验截图')}</h4>
-                        <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">
+                        <button type="button" class="modal-close" data-close-snap-modal>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                         </button>
                     </div>
                     <div class="modal-body" style="padding:12px; background:#000; text-align:center; overflow:auto; max-height:78vh;">
-                        <img src="${imgUrl}" style="max-width:100%; max-height:74vh; object-fit:contain;">
+                        <img src="${imgUrl}" alt="${escapeHtml(title || '现场核验截图')}" style="max-width:100%; max-height:74vh; object-fit:contain;">
                     </div>
                 </div>
             `;
-            modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+            const closeBtn = modal.querySelector('[data-close-snap-modal]');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', () => {
+                    if (window.DialogHelper) window.DialogHelper.close(modal);
+                    else modal.remove();
+                });
+            }
             document.body.appendChild(modal);
+            if (window.DialogHelper) {
+                window.DialogHelper.open(modal, { dismissible: true, removeOnClose: true });
+            } else {
+                modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+            }
         }
 

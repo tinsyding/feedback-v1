@@ -86,7 +86,7 @@
             updateSenderFlashToggleLabel(isChecked);
             const msg = isChecked
                 ? '已开启云端 Qwen3.8-Flash 标题核验（客户端将优先云端秒验）'
-                : '已停用云端 Qwen-Flash，已强制所有客户端使用本地离线极速 OCR（免 Token 消耗）！';
+                : '已停用云端 Qwen-Flash，已强制所有客户端使用本地离线极速 OCR（免 Token 消耗）';
             await saveConfig(true, msg);
         }
 
@@ -222,8 +222,8 @@
                 if (result.success) {
                     currentConfig = result.data.config;
                     const toastMsg = isSilent
-                        ? (customSilentMsg || '系统配置已更新生效！')
-                        : '系统全局配置已成功保存并实时生效！';
+                        ? (customSilentMsg || '系统配置已更新生效')
+                        : '系统全局配置已成功保存并实时生效';
                     showToast(toastMsg, 'success');
                     if (statusEl) {
                         statusEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><polyline points="20 6 9 17 4 12"></polyline></svg> 保存成功';

@@ -89,8 +89,8 @@
     /* Typography & Transitions */
     --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-    --transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-    --transition-fast: all 0.12s ease-out;
+    --transition: color 0.2s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    --transition-fast: color 0.12s ease-out, background-color 0.12s ease-out, border-color 0.12s ease-out, box-shadow 0.12s ease-out, opacity 0.12s ease-out, transform 0.12s ease-out;
 
     /* Scrollbar Variables - Light */
     --scrollbar-track: rgba(0, 0, 0, 0.03);
@@ -322,7 +322,7 @@ button, input, select, textarea {
 
 .brand-title {
     font-size: 0.95rem;
-    font-weight: 700;
+    font-weight: 600;
     color: var(--text-primary);
     line-height: 1.2;
     letter-spacing: -0.2px;
@@ -330,7 +330,7 @@ button, input, select, textarea {
 
 .brand-badge {
     font-size: 0.65rem;
-    font-weight: 700;
+    font-weight: 600;
     color: var(--text-muted);
     letter-spacing: 0.5px;
     font-family: var(--font-mono);
@@ -471,7 +471,7 @@ button, input, select, textarea {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-weight: 700;
+    font-weight: 600;
     font-size: 0.85rem;
     flex-shrink: 0;
 }
@@ -553,9 +553,7 @@ button, input, select, textarea {
 /* Top App Bar Header */
 .main-header {
     height: 64px;
-    background: var(--header-bg);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    background: var(--bg-surface, var(--header-bg));
     border-bottom: 1px solid var(--border-color);
     padding: 0 28px;
     display: flex;
@@ -616,7 +614,7 @@ button, input, select, textarea {
 
 .header-title-block h1 {
     font-size: 1.15rem;
-    font-weight: 700;
+    font-weight: 600;
     color: var(--text-primary);
     letter-spacing: -0.2px;
 }
@@ -881,16 +879,6 @@ button, input, select, textarea {
     color: #ffffff;
 }
 
-.btn-action.retest-beta {
-    color: var(--accent);
-    border-color: var(--accent-border);
-    background: var(--accent-light);
-}
-.btn-action.retest-beta:hover {
-    background: var(--accent);
-    color: #ffffff;
-}
-
 
 .btn-action.admin-retest {
     color: #a855f7;
@@ -1128,7 +1116,7 @@ select option {
 
 .metric-data-num {
     font-size: 1.4rem;
-    font-weight: 700;
+    font-weight: 600;
     font-family: var(--font-mono);
     color: var(--text-primary);
     line-height: 1.2;
@@ -1515,7 +1503,7 @@ select option {
     height: 20px;
     border-radius: var(--radius-xs);
     font-size: 0.72rem;
-    font-weight: 700;
+    font-weight: 600;
     background: var(--primary-light);
     color: var(--primary);
     border: 1px solid var(--primary-border);
@@ -1582,8 +1570,6 @@ select option {
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
     background: var(--bg-overlay);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1627,7 +1613,7 @@ select option {
 
 .modal-header h4 {
     font-size: 1.05rem;
-    font-weight: 700;
+    font-weight: 600;
     color: var(--text-primary);
     margin: 0;
 }
@@ -1709,7 +1695,7 @@ select option {
 
 .detail-metric-card .card-val {
     font-size: 1.45rem;
-    font-weight: 700;
+    font-weight: 600;
     font-family: var(--font-mono);
     color: var(--text-primary);
 }
@@ -1851,12 +1837,41 @@ select option {
 }
 
 .zoom-value-pill {
+    appearance: none;
+    background: transparent;
+    border: 0;
     padding: 0 6px;
     font-size: 0.76rem;
     font-weight: 600;
     font-family: var(--font-mono);
     color: var(--text-secondary);
     cursor: pointer;
+}
+
+.th-sort-btn {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: inherit;
+    letter-spacing: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    justify-content: inherit;
+    text-align: inherit;
+}
+
+.th-sort-btn:focus-visible,
+.season-card-item:focus-visible,
+.zoom-value-pill:focus-visible,
+.table-zoom-hud:focus-visible {
+    outline: var(--focus-ring, 2px solid var(--primary));
+    outline-offset: 2px;
 }
 
 .table-zoom-hud {
@@ -1895,7 +1910,7 @@ select option {
 
 .hero-env-title {
     font-size: 1.15rem;
-    font-weight: 700;
+    font-weight: 600;
     color: var(--text-primary);
 }
 .hero-env-title .hl { color: var(--primary); }
@@ -1966,7 +1981,7 @@ select option {
 
 .section-titles h3 {
     font-size: 0.98rem;
-    font-weight: 700;
+    font-weight: 600;
     color: var(--text-primary);
 }
 .section-titles p {
@@ -2337,8 +2352,6 @@ select option {
     right: 0;
     bottom: 0;
     background: rgba(0, 0, 0, 0.55);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
     z-index: 998;
     opacity: 0;
     transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1);
@@ -2566,7 +2579,7 @@ select option {
     .filter-row-label {
         width: 100%;
         font-size: 0.74rem;
-        font-weight: 700;
+        font-weight: 600;
         color: var(--text-muted);
     }
     .filter-pills {
@@ -2764,4 +2777,9 @@ select option {
     font-size: 0.7rem;
     font-family: var(--font-mono);
     color: var(--text-secondary);
+}
+
+body, body.admin-body {
+    opacity: 1 !important;
+    visibility: visible !important;
 }

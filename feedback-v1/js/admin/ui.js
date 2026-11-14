@@ -71,7 +71,11 @@
                 container = document.createElement('div');
                 container.id = 'toast-container';
                 container.className = 'toast-container';
+                container.setAttribute('popover', 'manual');
                 document.body.appendChild(container);
+            }
+            if (window.DialogHelper && typeof window.DialogHelper.promoteToast === 'function') {
+                window.DialogHelper.promoteToast(container);
             }
 
             while (container.children.length >= 4) {
@@ -135,13 +139,33 @@
                     okBtn.style.color = '#fff';
                 }
 
-                if (modal) modal.style.display = 'flex';
+                if (modal) {
+                    if (window.DialogHelper) {
+                        window.DialogHelper.open(modal, {
+                            dismissible: true,
+                            onCancel: () => {
+                                if (confirmResolver) {
+                                    confirmResolver(false);
+                                    confirmResolver = null;
+                                }
+                            }
+                        });
+                    } else {
+                        modal.style.display = 'flex';
+                    }
+                }
             });
         }
 
         function resolveConfirm(result) {
             const modal = document.getElementById('confirm-modal');
-            if (modal) modal.style.display = 'none';
+            if (modal) {
+                if (window.DialogHelper) {
+                    window.DialogHelper.close(modal);
+                } else {
+                    modal.style.display = 'none';
+                }
+            }
             if (confirmResolver) {
                 confirmResolver(result);
                 confirmResolver = null;
@@ -230,7 +254,7 @@
            Modal Backdrop & Keyboard Interaction Listeners
            ======================================================== */
         document.addEventListener('click', (e) => {
-            if (e.target && e.target.classList && e.target.classList.contains('modal-overlay')) {
+            if (e.target && e.target.classList && e.target.classList.contains('modal-overlay') && e.target.tagName !== 'DIALOG') {
                 if (e.target.id === 'confirm-modal') {
                     resolveConfirm(false);
                 } else if (e.target.id === 'db-record-modal') {
@@ -253,8 +277,8 @@
                 return;
             }
 
-            if (e.key === 'Escape') {
-                const openModals = Array.from(document.querySelectorAll('.modal-overlay')).filter(m => m.style.display !== 'none' && m.style.display !== '');
+            if (e.key === 'Escape' && !window.DialogHelper) {
+                const openModals = Array.from(document.querySelectorAll('.modal-overlay')).filter(m => m.tagName !== 'DIALOG' && m.style.display !== 'none' && m.style.display !== '');
                 if (openModals.length > 0) {
                     const topModal = openModals[openModals.length - 1];
                     if (topModal.id === 'confirm-modal') {
@@ -276,26 +300,51 @@
 
 
                 /* ========================================================
-           Daytime / Light Mode Switcher Logic
+           3-State Theme Switcher Logic (Light / Dark / System)
            ======================================================== */
+        function syncAdminColorSchemeMeta(mode, effective) {
+            const metaColorScheme = document.querySelector('meta[name="color-scheme"]');
+            if (metaColorScheme) {
+                metaColorScheme.setAttribute('content', (mode === 'light' || mode === 'dark') ? mode : 'light dark');
+            }
+            const metaThemeColor = document.querySelector('meta[name="theme-color"]');
+            if (metaThemeColor && effective) {
+                metaThemeColor.setAttribute('content', effective === 'light' ? '#fafafa' : '#141415');
+            }
+        }
+
         function initTheme() {
-            const current = localStorage.getItem('admin_theme') || 'light';
-            document.documentElement.setAttribute('data-theme', current);
-            updateThemeButtonText(current);
+            if (window.ThemeManager) {
+                window.ThemeManager.syncUI();
+                return;
+            }
+            const saved = localStorage.getItem('admin_theme');
+            const effective = (saved === 'light' || saved === 'dark')
+                ? saved
+                : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+            document.documentElement.setAttribute('data-theme', effective);
+            syncAdminColorSchemeMeta(saved || 'system', effective);
+            updateThemeButtonText(saved || 'system');
         }
 
         function toggleTheme() {
+            if (window.ThemeManager) {
+                window.ThemeManager.cycleMode();
+                return;
+            }
             const current = document.documentElement.getAttribute('data-theme') || 'light';
             const next = current === 'light' ? 'dark' : 'light';
             document.documentElement.setAttribute('data-theme', next);
             localStorage.setItem('admin_theme', next);
+            syncAdminColorSchemeMeta(next, next);
             updateThemeButtonText(next);
         }
 
-        function updateThemeButtonText(theme) {
+        function updateThemeButtonText(mode) {
             const textEl = document.getElementById('theme-toggle-text');
             if (textEl) {
-                textEl.textContent = theme === 'light' ? '暗夜模式' : '日间模式';
+                const labels = { system: '跟随系统', light: '浅色模式', dark: '深色模式' };
+                textEl.textContent = labels[mode] || labels.system;
             }
         }
 

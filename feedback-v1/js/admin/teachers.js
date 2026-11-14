@@ -23,26 +23,20 @@
             const thead = document.getElementById('teacher-thead');
             if (!thead) return;
             const sortIcon = (f) => teacherSortField === f ? (teacherSortOrder === 'ASC' ? ' ▲' : ' ▼') : '';
+            const teacherSortTh = (field, label, titleText, styleAttr) => `
+                    <th class="th-sortable" style="${styleAttr}" title="${titleText}">
+                        <button type="button" class="th-sort-btn" data-action="teacher-sort" data-arg="${field}">${label}<span style="font-size: 0.72rem; color: var(--primary); margin-left: 2px;">${sortIcon(field)}</span></button>
+                    </th>`;
             thead.innerHTML = `
                 <tr>
                     <th style="width: 44px; text-align: center;">
-                        <input type="checkbox" id="teacher-select-all" onchange="toggleSelectAllTeachers(this)" style="accent-color: var(--primary); cursor: pointer;">
+                        <input type="checkbox" id="teacher-select-all" data-change="select-all-teachers" aria-label="全选教师" style="accent-color: var(--primary); cursor: pointer;">
                     </th>
-                    <th class="th-sortable" onclick="setTeacherSort('id')" style="width: 80px; cursor: pointer; user-select: none;" title="点击切换按ID正序/倒序">
-                        ID<span style="font-size: 0.72rem; color: var(--primary); margin-left: 2px;">${sortIcon('id')}</span>
-                    </th>
-                    <th class="th-sortable" onclick="setTeacherSort('username')" style="width: 140px; cursor: pointer; user-select: none;" title="点击切换按账号正序/倒序">
-                        登录账号<span style="font-size: 0.72rem; color: var(--primary); margin-left: 2px;">${sortIcon('username')}</span>
-                    </th>
-                    <th class="th-sortable" onclick="setTeacherSort('real_name')" style="width: 170px; cursor: pointer; user-select: none;" title="点击切换按姓名正序/倒序">
-                        教师姓名<span style="font-size: 0.72rem; color: var(--primary); margin-left: 2px;">${sortIcon('real_name')}</span>
-                    </th>
-                    <th class="th-sortable" onclick="setTeacherSort('status')" style="width: 110px; cursor: pointer; user-select: none;" title="点击切换按状态正序/倒序">
-                        账号状态<span style="font-size: 0.72rem; color: var(--primary); margin-left: 2px;">${sortIcon('status')}</span>
-                    </th>
-                    <th class="th-sortable" onclick="setTeacherSort('assistant_count')" style="width: 110px; text-align: center; cursor: pointer; user-select: none;" title="点击切换按助教数量正序/倒序">
-                        助教数量<span style="font-size: 0.72rem; color: var(--primary); margin-left: 2px;">${sortIcon('assistant_count')}</span>
-                    </th>
+                    ${teacherSortTh('id', 'ID', '点击切换按ID正序/倒序', 'width: 80px;')}
+                    ${teacherSortTh('username', '登录账号', '点击切换按账号正序/倒序', 'width: 140px;')}
+                    ${teacherSortTh('real_name', '教师姓名', '点击切换按姓名正序/倒序', 'width: 170px;')}
+                    ${teacherSortTh('status', '账号状态', '点击切换按状态正序/倒序', 'width: 110px;')}
+                    ${teacherSortTh('assistant_count', '助教数量', '点击切换按助教数量正序/倒序', 'width: 110px; text-align: center;')}
                     <th style="width: 80px; text-align: right;">快捷操作</th>
                 </tr>
             `;
@@ -264,7 +258,7 @@
         }
 
         async function deleteTeacherRecord(id, name) {
-            const confirmed = await showConfirm('删除教师账号', `确定要彻底删除教师「${name}」(#${id}) 吗？此操作不可逆！`, true);
+            const confirmed = await showConfirm('删除教师账号', `确定要彻底删除教师「${name}」(#${id}) 吗？此操作不可逆。`, true);
             if (!confirmed) return;
             try {
                 const res = await fetch(`${API_BASE}?action=db_delete&table=users&id=${id}`, { method: 'POST' });
@@ -285,7 +279,7 @@
         async function batchDeleteTeachers() {
             const count = teacherSelectedIds.size;
             if (count === 0) return;
-            const confirmed = await showConfirm('批量删除教师', `确定要彻底删除选中的 ${count} 位教师账号吗？此操作不可逆！`, true);
+            const confirmed = await showConfirm('批量删除教师', `确定要彻底删除选中的 ${count} 位教师账号吗？此操作不可逆。`, true);
             if (!confirmed) return;
             const ids = Array.from(teacherSelectedIds);
             try {

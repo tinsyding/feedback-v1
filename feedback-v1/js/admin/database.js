@@ -510,157 +510,145 @@
                 return `<span class="th-sort-icon">${dbSortOrder === 'ASC' ? '▲' : '▼'}</span>`;
             };
 
+            const dbCheckTh = `
+                        <th style="width: 38px; text-align: center;">
+                            <input type="checkbox" id="db-select-all" data-change="select-all-db" aria-label="全选当前表" style="accent-color: var(--primary); cursor: pointer;">
+                        </th>`;
+            const dbSortTh = (field, label, styleAttr = '') => `
+                        <th class="th-sortable ${dbSortField === field ? 'active' : ''}"${styleAttr ? ` style="${styleAttr}"` : ''}><button type="button" class="th-sort-btn" data-action="db-sort" data-arg="${field}">${label} ${sortIcon(field)}</button></th>`;
             if (dbCurrentTable === 'student_records') {
                 thead.innerHTML = `
                     <tr>
-                        <th style="width: 38px; text-align: center;">
-                            <input type="checkbox" id="db-select-all" onchange="toggleDbSelectAll(this)" style="accent-color: var(--primary); cursor: pointer;">
-                        </th>
-                        <th class="th-sortable ${dbSortField === 'student_id' ? 'active' : ''}" onclick="setDbSort('student_id')">学员 ${sortIcon('student_id')}</th>
+                        ${dbCheckTh}
+                        ${dbSortTh('student_id', '学员')}
                         <th style="width: 115px; min-width: 110px;">年级</th>
                         <th style="width: 65px;">学科</th>
                         <th style="width: 65px;">班型</th>
-                        <th class="th-sortable ${dbSortField === 'week_num' ? 'active' : ''}" onclick="setDbSort('week_num')" style="width: 105px;">周次 (巩固/预习) ${sortIcon('week_num')}</th>
-                        <th class="th-sortable ${dbSortField === 'homework_score' ? 'active' : ''}" onclick="setDbSort('homework_score')" style="width: 115px;">成绩 (巩固/预习) ${sortIcon('homework_score')}</th>
-                        <th class="th-sortable ${dbSortField === 'error_count' ? 'active' : ''}" onclick="setDbSort('error_count')" style="width: 185px;">错题题号 (巩固/预习) ${sortIcon('error_count')}</th>
+                        ${dbSortTh('week_num', '周次 (巩固/预习)', 'width: 105px;')}
+                        ${dbSortTh('homework_score', '成绩 (巩固/预习)', 'width: 115px;')}
+                        ${dbSortTh('error_count', '错题题号 (巩固/预习)', 'width: 185px;')}
                         <th style="width: 175px; max-width: 185px;">评语 (巩固/预习)</th>
-                        <th class="th-sortable ${dbSortField === 'created_by' ? 'active' : ''}" onclick="setDbSort('created_by')" style="width: 105px;">生成教师 ${sortIcon('created_by')}</th>
-                        <th class="th-sortable ${dbSortField === 'created_at' ? 'active' : ''}" onclick="setDbSort('created_at')" style="width: 120px;">录入时间 ${sortIcon('created_at')}</th>
+                        ${dbSortTh('created_by', '生成教师', 'width: 105px;')}
+                        ${dbSortTh('created_at', '录入时间', 'width: 120px;')}
                         <th style="width: 205px; text-align: right;">操作</th>
                     </tr>
                 `;
             } else if (dbCurrentTable === 'class_batches') {
                 thead.innerHTML = `
                     <tr>
-                        <th style="width: 38px; text-align: center;">
-                            <input type="checkbox" id="db-select-all" onchange="toggleDbSelectAll(this)" style="accent-color: var(--primary); cursor: pointer;">
-                        </th>
-                        <th class="th-sortable ${dbSortField === 'id' ? 'active' : ''}" onclick="setDbSort('id')" style="width: 60px;">ID ${sortIcon('id')}</th>
-                        <th class="th-sortable ${dbSortField === 'year' ? 'active' : ''}" onclick="setDbSort('year')">年份 / 季度 ${sortIcon('year')}</th>
+                        ${dbCheckTh}
+                        ${dbSortTh('id', 'ID', 'width: 60px;')}
+                        ${dbSortTh('year', '年份 / 季度')}
                         <th style="width: 115px; min-width: 110px;">年级</th>
                         <th>班型</th>
                         <th>学科</th>
                         <th>班级全称</th>
-                        <th class="th-sortable ${dbSortField === 'created_by' ? 'active' : ''}" onclick="setDbSort('created_by')" style="width: 105px;">生成教师 ${sortIcon('created_by')}</th>
-                        <th class="th-sortable ${dbSortField === 'created_at' ? 'active' : ''}" onclick="setDbSort('created_at')">创建时间 ${sortIcon('created_at')}</th>
+                        ${dbSortTh('created_by', '生成教师', 'width: 105px;')}
+                        ${dbSortTh('created_at', '创建时间')}
                         <th style="width: 120px; text-align: right;">操作</th>
                     </tr>
                 `;
             } else if (dbCurrentTable === 'retest_access_logs') {
                 thead.innerHTML = `
                     <tr>
-                        <th style="width: 38px; text-align: center;">
-                            <input type="checkbox" id="db-select-all" onchange="toggleDbSelectAll(this)" style="accent-color: var(--primary); cursor: pointer;">
-                        </th>
-                        <th class="th-sortable ${dbSortField === 'id' ? 'active' : ''}" onclick="setDbSort('id')" style="width: 60px;">ID ${sortIcon('id')}</th>
+                        ${dbCheckTh}
+                        ${dbSortTh('id', 'ID', 'width: 60px;')}
                         <th>Token</th>
                         <th>学生姓名</th>
                         <th>动作</th>
                         <th>详情</th>
                         <th>访问 IP</th>
-                        <th class="th-sortable ${dbSortField === 'created_at' ? 'active' : ''}" onclick="setDbSort('created_at')">查阅时间 ${sortIcon('created_at')}</th>
+                        ${dbSortTh('created_at', '查阅时间')}
                         <th style="width: 100px; text-align: right;">操作</th>
                     </tr>
                 `;
             } else if (dbCurrentTable === 'qbank_weeks') {
                 thead.innerHTML = `
                     <tr>
-                        <th style="width: 38px; text-align: center;">
-                            <input type="checkbox" id="db-select-all" onchange="toggleDbSelectAll(this)" style="accent-color: var(--primary); cursor: pointer;">
-                        </th>
-                        <th class="th-sortable ${dbSortField === 'id' ? 'active' : ''}" onclick="setDbSort('id')" style="width: 60px;">ID ${sortIcon('id')}</th>
-                        <th class="th-sortable ${dbSortField === 'year' ? 'active' : ''}" onclick="setDbSort('year')" style="width: 110px;">年份 / 季度 ${sortIcon('year')}</th>
+                        ${dbCheckTh}
+                        ${dbSortTh('id', 'ID', 'width: 60px;')}
+                        ${dbSortTh('year', '年份 / 季度', 'width: 110px;')}
                         <th style="width: 100px;">年级</th>
                         <th style="width: 75px;">班型</th>
                         <th style="width: 75px;">学科</th>
-                        <th class="th-sortable ${dbSortField === 'week' ? 'active' : ''}" onclick="setDbSort('week')" style="width: 85px; text-align: center;">周次 ${sortIcon('week')}</th>
-                        <th class="th-sortable ${dbSortField === 'question_count' ? 'active' : ''}" onclick="setDbSort('question_count')" style="width: 95px; text-align: center;">题目总数 ${sortIcon('question_count')}</th>
-                        <th class="th-sortable ${dbSortField === 'created_by' ? 'active' : ''}" onclick="setDbSort('created_by')" style="width: 105px;">录入教师 ${sortIcon('created_by')}</th>
-                        <th class="th-sortable ${dbSortField === 'updated_at' ? 'active' : ''}" onclick="setDbSort('updated_at')" style="width: 130px;">更新时间 ${sortIcon('updated_at')}</th>
+                        ${dbSortTh('week', '周次', 'width: 85px; text-align: center;')}
+                        ${dbSortTh('question_count', '题目总数', 'width: 95px; text-align: center;')}
+                        ${dbSortTh('created_by', '录入教师', 'width: 105px;')}
+                        ${dbSortTh('updated_at', '更新时间', 'width: 130px;')}
                         <th style="width: 140px; text-align: right;">操作</th>
                     </tr>
                 `;
             } else if (dbCurrentTable === 'qbank_questions') {
                 thead.innerHTML = `
                     <tr>
-                        <th style="width: 38px; text-align: center;">
-                            <input type="checkbox" id="db-select-all" onchange="toggleDbSelectAll(this)" style="accent-color: var(--primary); cursor: pointer;">
-                        </th>
-                        <th class="th-sortable ${dbSortField === 'id' ? 'active' : ''}" onclick="setDbSort('id')" style="width: 60px;">ID ${sortIcon('id')}</th>
-                        <th class="th-sortable ${dbSortField === 'question_num' ? 'active' : ''}" onclick="setDbSort('question_num')" style="width: 75px; text-align: center;">题号 ${sortIcon('question_num')}</th>
-                        <th class="th-sortable ${dbSortField === 'topic' ? 'active' : ''}" onclick="setDbSort('topic')">考点 / 考查知识点 ${sortIcon('topic')}</th>
+                        ${dbCheckTh}
+                        ${dbSortTh('id', 'ID', 'width: 60px;')}
+                        ${dbSortTh('question_num', '题号', 'width: 75px; text-align: center;')}
+                        ${dbSortTh('topic', '考点 / 考查知识点')}
                         <th style="width: 160px;">年级 / 学科 / 班型</th>
-                        <th class="th-sortable ${dbSortField === 'week' ? 'active' : ''}" onclick="setDbSort('week')" style="width: 75px; text-align: center;">周次 ${sortIcon('week')}</th>
-                        <th class="th-sortable ${dbSortField === 'year' ? 'active' : ''}" onclick="setDbSort('year')" style="width: 105px;">年份/学期 ${sortIcon('year')}</th>
+                        ${dbSortTh('week', '周次', 'width: 75px; text-align: center;')}
+                        ${dbSortTh('year', '年份/学期', 'width: 105px;')}
                         <th style="width: 80px; text-align: center;">题 / 解</th>
-                        <th class="th-sortable ${dbSortField === 'created_by' ? 'active' : ''}" onclick="setDbSort('created_by')" style="width: 105px;">录入教师 ${sortIcon('created_by')}</th>
-                        <th class="th-sortable ${dbSortField === 'updated_at' ? 'active' : ''}" onclick="setDbSort('updated_at')" style="width: 125px;">更新时间 ${sortIcon('updated_at')}</th>
+                        ${dbSortTh('created_by', '录入教师', 'width: 105px;')}
+                        ${dbSortTh('updated_at', '更新时间', 'width: 125px;')}
                         <th style="width: 140px; text-align: right;">操作</th>
                     </tr>
                 `;
             } else if (dbCurrentTable === 'system_logs') {
                 thead.innerHTML = `
                     <tr>
-                        <th style="width: 38px; text-align: center;">
-                            <input type="checkbox" id="db-select-all" onchange="toggleDbSelectAll(this)" style="accent-color: var(--primary); cursor: pointer;">
-                        </th>
-                        <th class="th-sortable ${dbSortField === 'id' ? 'active' : ''}" onclick="setDbSort('id')" style="width: 65px;">ID ${sortIcon('id')}</th>
-                        <th class="th-sortable ${dbSortField === 'level' ? 'active' : ''}" onclick="setDbSort('level')" style="width: 85px;">级别 ${sortIcon('level')}</th>
-                        <th class="th-sortable ${dbSortField === 'module' ? 'active' : ''}" onclick="setDbSort('module')" style="width: 90px;">模块 ${sortIcon('module')}</th>
-                        <th class="th-sortable ${dbSortField === 'event' ? 'active' : ''}" onclick="setDbSort('event')" style="width: 130px;">事件 ${sortIcon('event')}</th>
-                        <th class="th-sortable ${dbSortField === 'operator' ? 'active' : ''}" onclick="setDbSort('operator')" style="width: 100px;">操作人 ${sortIcon('operator')}</th>
+                        ${dbCheckTh}
+                        ${dbSortTh('id', 'ID', 'width: 65px;')}
+                        ${dbSortTh('level', '级别', 'width: 85px;')}
+                        ${dbSortTh('module', '模块', 'width: 90px;')}
+                        ${dbSortTh('event', '事件', 'width: 130px;')}
+                        ${dbSortTh('operator', '操作人', 'width: 100px;')}
                         <th>详细日志内容摘要</th>
                         <th style="width: 120px;">客户端 IP</th>
-                        <th class="th-sortable ${dbSortField === 'created_at' ? 'active' : ''}" onclick="setDbSort('created_at')" style="width: 130px;">记录时间 ${sortIcon('created_at')}</th>
+                        ${dbSortTh('created_at', '记录时间', 'width: 130px;')}
                         <th style="width: 100px; text-align: right;">操作</th>
                     </tr>
                 `;
             } else if (dbCurrentTable === 'admin_users') {
                 thead.innerHTML = `
                     <tr>
-                        <th style="width: 38px; text-align: center;">
-                            <input type="checkbox" id="db-select-all" onchange="toggleDbSelectAll(this)" style="accent-color: var(--primary); cursor: pointer;">
-                        </th>
-                        <th class="th-sortable ${dbSortField === 'id' ? 'active' : ''}" onclick="setDbSort('id')" style="width: 60px;">ID ${sortIcon('id')}</th>
-                        <th class="th-sortable ${dbSortField === 'username' ? 'active' : ''}" onclick="setDbSort('username')" style="width: 130px;">登录账号 ${sortIcon('username')}</th>
-                        <th class="th-sortable ${dbSortField === 'real_name' ? 'active' : ''}" onclick="setDbSort('real_name')">姓名 / 备注 ${sortIcon('real_name')}</th>
-                        <th class="th-sortable ${dbSortField === 'role' ? 'active' : ''}" onclick="setDbSort('role')" style="width: 110px;">角色权限 ${sortIcon('role')}</th>
-                        <th class="th-sortable ${dbSortField === 'status' ? 'active' : ''}" onclick="setDbSort('status')" style="width: 90px; text-align: center;">状态 ${sortIcon('status')}</th>
+                        ${dbCheckTh}
+                        ${dbSortTh('id', 'ID', 'width: 60px;')}
+                        ${dbSortTh('username', '登录账号', 'width: 130px;')}
+                        ${dbSortTh('real_name', '姓名 / 备注')}
+                        ${dbSortTh('role', '角色权限', 'width: 110px;')}
+                        ${dbSortTh('status', '状态', 'width: 90px; text-align: center;')}
                         <th style="width: 110px;">登录密码</th>
-                        <th class="th-sortable ${dbSortField === 'last_login_at' ? 'active' : ''}" onclick="setDbSort('last_login_at')" style="width: 140px;">最后登录时间 ${sortIcon('last_login_at')}</th>
+                        ${dbSortTh('last_login_at', '最后登录时间', 'width: 140px;')}
                         <th style="width: 120px;">最后登录 IP</th>
-                        <th class="th-sortable ${dbSortField === 'created_at' ? 'active' : ''}" onclick="setDbSort('created_at')" style="width: 140px;">创建时间 ${sortIcon('created_at')}</th>
+                        ${dbSortTh('created_at', '创建时间', 'width: 140px;')}
                         <th style="width: 120px; text-align: right;">操作</th>
                     </tr>
                 `;
             } else if (dbCurrentTable === 'users') {
                 thead.innerHTML = `
                     <tr>
-                        <th style="width: 38px; text-align: center;">
-                            <input type="checkbox" id="db-select-all" onchange="toggleDbSelectAll(this)" style="accent-color: var(--primary); cursor: pointer;">
-                        </th>
-                        <th class="th-sortable ${dbSortField === 'id' ? 'active' : ''}" onclick="setDbSort('id')" style="width: 60px;">ID ${sortIcon('id')}</th>
-                        <th class="th-sortable ${dbSortField === 'username' ? 'active' : ''}" onclick="setDbSort('username')" style="width: 120px;">教师账号 ${sortIcon('username')}</th>
-                        <th class="th-sortable ${dbSortField === 'real_name' ? 'active' : ''}" onclick="setDbSort('real_name')">教师姓名 ${sortIcon('real_name')}</th>
+                        ${dbCheckTh}
+                        ${dbSortTh('id', 'ID', 'width: 60px;')}
+                        ${dbSortTh('username', '教师账号', 'width: 120px;')}
+                        ${dbSortTh('real_name', '教师姓名')}
                         <th style="width: 110px; text-align: center;">名下助教</th>
-                        <th class="th-sortable ${dbSortField === 'status' ? 'active' : ''}" onclick="setDbSort('status')" style="width: 85px; text-align: center;">状态 ${sortIcon('status')}</th>
+                        ${dbSortTh('status', '状态', 'width: 85px; text-align: center;')}
                         <th style="width: 120px;">密码状态</th>
-                        <th class="th-sortable ${dbSortField === 'last_login_at' ? 'active' : ''}" onclick="setDbSort('last_login_at')" style="width: 140px;">最后登录时间 ${sortIcon('last_login_at')}</th>
+                        ${dbSortTh('last_login_at', '最后登录时间', 'width: 140px;')}
                         <th style="width: 110px;">最后登录 IP</th>
-                        <th class="th-sortable ${dbSortField === 'created_at' ? 'active' : ''}" onclick="setDbSort('created_at')" style="width: 140px;">创建时间 ${sortIcon('created_at')}</th>
+                        ${dbSortTh('created_at', '创建时间', 'width: 140px;')}
                         <th style="width: 200px; text-align: right;">操作</th>
                     </tr>
                 `;
             } else {
                 let colsHtml = `
                     <tr>
-                        <th style="width: 38px; text-align: center;">
-                            <input type="checkbox" id="db-select-all" onchange="toggleDbSelectAll(this)" style="accent-color: var(--primary); cursor: pointer;">
-                        </th>
+                        ${dbCheckTh}
                 `;
                 schema.slice(0, 7).forEach(col => {
                     const colField = col.field || col.name;
-                    colsHtml += `<th class="th-sortable ${dbSortField === colField ? 'active' : ''}" onclick="setDbSort('${colField}')">${escapeHtml(col.comment || colField)} ${sortIcon(colField)}</th>`;
+                    colsHtml += dbSortTh(colField, escapeHtml(col.comment || colField));
                 });
                 colsHtml += `<th style="width: 120px; text-align: right;">操作</th></tr>`;
                 thead.innerHTML = colsHtml;
@@ -1986,7 +1974,11 @@
                 container.innerHTML = fieldsHtml;
             }
 
-            modal.style.display = 'flex';
+            if (window.DialogHelper) {
+                window.DialogHelper.open(modal, { dismissible: true });
+            } else {
+                modal.style.display = 'flex';
+            }
         }
 
         function generateRandomToken() {
@@ -2001,7 +1993,13 @@
 
         function closeDbRecordModal() {
             const modal = document.getElementById('db-record-modal');
-            if (modal) modal.style.display = 'none';
+            if (modal) {
+                if (window.DialogHelper) {
+                    window.DialogHelper.close(modal);
+                } else {
+                    modal.style.display = 'none';
+                }
+            }
         }
 
         async function saveDbRecord() {
@@ -2223,7 +2221,7 @@
         async function deleteDbRecord(id) {
             const confirmed = await showConfirm(
                 '永久删除确认',
-                `您确定要永久删除第 ${id} 号数据记录吗？此操作将无法撤销！`,
+                `您确定要永久删除第 ${id} 号数据记录吗？此操作将无法撤销。`,
                 true
             );
             if (!confirmed) return;
@@ -2257,7 +2255,7 @@
 
             const confirmed = await showConfirm(
                 '高危操作：批量删除',
-                `注意：您当前选中了 ${count} 条记录。确定要一并永久删除吗？此操作无法撤销！`,
+                `注意：您当前选中了 ${count} 条记录。确定要一并永久删除吗？此操作无法撤销。`,
                 true
             );
             if (!confirmed) return;
@@ -2379,7 +2377,7 @@
                                             ${record.batch_code ? `
                                                 <span style="font-size: 0.74rem; background: var(--bg-subtle); border: 1px solid var(--border-color); color: var(--text-secondary); padding: 1px 7px; border-radius: 4px; display:inline-flex; align-items:center; gap:5px; font-family:var(--font-mono);" title="生成批次号: ${escapeHtml(record.batch_code)}">
                                                     <span>批次: ${escapeHtml(record.batch_code)}</span>
-                                                    <span style="color:var(--primary); cursor:pointer;" onclick="copyTextToClipboard('${escapeHtml(record.batch_code)}', '批次号已复制！')">复制</span>
+                                                    <span style="color:var(--primary); cursor:pointer;" onclick="copyTextToClipboard('${escapeHtml(record.batch_code)}', '批次号已复制')">复制</span>
                                                     <span style="color:var(--primary); cursor:pointer; font-weight:600;" onclick="closeDbDetailModal(); filterByBatchCode('${escapeHtml(record.batch_code)}')">筛选</span>
                                                 </span>
                                             ` : ''}
@@ -2408,10 +2406,6 @@
                                         <button type="button" class="btn secondary" style="padding: 6px 12px; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 5px;" onclick="openRetestStudent('${escapeHtml(record.retest_token)}')" title="打开学员/家长端错题本（需输入姓名验证）">
                                             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
                                             <span>错题本</span>
-                                        </button>
-                                        <button type="button" class="btn secondary" style="padding: 6px 12px; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 5px;" onclick="openRetestBeta('${escapeHtml(record.retest_token)}')" title="打开错题本 Beta 版（支持题号顺序重排）">
-                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
-                                            <span>错题本beta</span>
                                         </button>
                                     ` : ''}
                                     <button type="button" class="btn secondary" style="padding: 6px 11px; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 4px;" onclick="copyParentFullFeedback(currentDetailModalRecord, 'student_records')" title="复制家校完整学情反馈语">
@@ -2488,7 +2482,7 @@
                                     ` : (isPvFullScore ? `
                                         <div style="color: #10b981; font-size: 0.82rem; font-weight: 500; display:flex; align-items:center; gap:4px;">
                                             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                                            <span>预习全部正确，无薄弱错题！</span>
+                                            <span>预习全部正确，无薄弱错题</span>
                                         </div>
                                     ` : (!previewWeakPointsText ? `<span style="color:var(--text-muted); font-size:0.82rem;">（暂无预习错题记录）</span>` : ''))}
                                 </div>
@@ -2583,7 +2577,7 @@
                                     ` : (isHwFullScore ? `
                                         <div style="color: #10b981; font-size: 0.82rem; font-weight: 500; display:flex; align-items:center; gap:4px;">
                                             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                                            <span>巩固全部正确，无薄弱错题！</span>
+                                            <span>巩固全部正确，无薄弱错题</span>
                                         </div>
                                     ` : (!weakPointsText ? `<span style="color:var(--text-muted); font-size:0.82rem;">（暂无巩固错题记录）</span>` : ''))}
                                 </div>
@@ -2883,7 +2877,7 @@
                                                 <span style="display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: var(--bg-subtle); color: var(--text-muted); font-size: 0.78rem; font-weight: 700; font-family: var(--font-mono);">${aIdx + 1}</span>
                                                 <div style="display: flex; align-items: center; gap: 8px;">
                                                     <span style="font-weight: 700; font-size: 0.95rem; color: var(--text-primary);">${escapeHtml(ast.real_name || '助教')}</span>
-                                                    <span class="cell-mono" style="font-size: 0.82rem; color: var(--text-secondary); background: var(--bg-subtle); padding: 2px 7px; border-radius: 4px; border: 1px solid var(--border-subtle); cursor: pointer;" onclick="copyTextToClipboard('${escapeHtml(ast.username)}', '助教账号已复制！')" title="点击复制账号">
+                                                    <span class="cell-mono" style="font-size: 0.82rem; color: var(--text-secondary); background: var(--bg-subtle); padding: 2px 7px; border-radius: 4px; border: 1px solid var(--border-subtle); cursor: pointer;" onclick="copyTextToClipboard('${escapeHtml(ast.username)}', '助教账号已复制')" title="点击复制账号">
                                                         @${escapeHtml(ast.username || '-')}
                                                         <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" style="margin-left: 2px; vertical-align: -1px;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path></svg>
                                                     </span>
@@ -2900,7 +2894,7 @@
                                             <div style="display: flex; align-items: center; gap: 6px;">
                                                 <span style="color: var(--text-muted);">初始密码:</span>
                                                 ${pwdDisp}
-                                                ${ast.initial_password ? `<button type="button" class="btn-action" style="font-size:0.72rem; padding:1px 6px; height:20px; line-height:18px;" onclick="copyTextToClipboard('${escapeHtml(ast.initial_password)}', '初始密码已复制！')" title="复制初始密码">复制</button>` : ''}
+                                                ${ast.initial_password ? `<button type="button" class="btn-action" style="font-size:0.72rem; padding:1px 6px; height:20px; line-height:18px;" onclick="copyTextToClipboard('${escapeHtml(ast.initial_password)}', '初始密码已复制')" title="复制初始密码">复制</button>` : ''}
                                             </div>
                                             <div style="display: flex; align-items: center; gap: 16px;">
                                                 <span${ipTooltip}><span style="color: var(--text-muted);">最近登录:</span> <span class="cell-mono" style="color: var(--text-secondary);">${lastLogin}</span></span>
@@ -2919,14 +2913,14 @@
                             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px;">
                                 <div style="background: var(--bg-subtle); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
                                     <div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 3px;">教师账号 (工号)</div>
-                                    <div style="font-size: 1.1rem; font-weight: 800; color: var(--text-primary); font-family: var(--font-mono); display: flex; align-items: center; justify-content: space-between;">
+                                    <div style="font-size: 1.1rem; font-weight: 600; color: var(--text-primary); font-family: var(--font-mono); display: flex; align-items: center; justify-content: space-between;">
                                         <span>${escapeHtml(record.username || '-')}</span>
-                                        <button type="button" class="btn-action" style="font-size:0.72rem; padding:1px 6px;" onclick="copyTextToClipboard('${escapeHtml(record.username)}', '教师账号已复制！')">复制</button>
+                                        <button type="button" class="btn-action" style="font-size:0.72rem; padding:1px 6px;" onclick="copyTextToClipboard('${escapeHtml(record.username)}', '教师账号已复制')">复制</button>
                                     </div>
                                 </div>
                                 <div style="background: var(--bg-subtle); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
                                     <div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 3px;">教师姓名 / 备注</div>
-                                    <div style="font-size: 1.05rem; font-weight: 700; color: var(--text-primary);">${escapeHtml(record.real_name || '-')}</div>
+                                    <div style="font-size: 1.05rem; font-weight: 600; color: var(--text-primary);">${escapeHtml(record.real_name || '-')}</div>
                                 </div>
                                 <div style="background: var(--bg-subtle); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
                                     <div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 3px;">账号状态</div>
@@ -2934,14 +2928,14 @@
                                 </div>
                                 <div style="background: var(--bg-subtle); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
                                     <div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 3px;">初始密码</div>
-                                    <div style="font-size: 0.95rem; font-weight: 700; color: #f59e0b; font-family: var(--font-mono); display: flex; align-items: center; justify-content: space-between;">
+                                    <div style="font-size: 0.95rem; font-weight: 600; color: #f59e0b; font-family: var(--font-mono); display: flex; align-items: center; justify-content: space-between;">
                                         <span>${isTest ? '公共体验免密/0' : (record.initial_password ? escapeHtml(record.initial_password) : '<span style="color:var(--text-muted); font-size:0.82rem; font-weight:normal;">已自定义密码</span>')}</span>
-                                        ${record.initial_password ? `<button type="button" class="btn-action" style="font-size:0.72rem; padding:1px 6px;" onclick="copyTextToClipboard('${escapeHtml(record.initial_password)}', '初始密码已复制！')">复制</button>` : ''}
+                                        ${record.initial_password ? `<button type="button" class="btn-action" style="font-size:0.72rem; padding:1px 6px;" onclick="copyTextToClipboard('${escapeHtml(record.initial_password)}', '初始密码已复制')">复制</button>` : ''}
                                     </div>
                                 </div>
                                 <div style="background: rgba(59,130,246,0.08); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid rgba(59,130,246,0.25);">
                                     <div style="font-size: 0.74rem; color: #93c5fd; margin-bottom: 3px;">名下助教数量</div>
-                                    <div style="font-size: 1.25rem; font-weight: 800; color: #60a5fa; font-family: var(--font-mono);">${assistants.length} <span style="font-size:0.8rem; font-weight:normal;">人</span></div>
+                                    <div style="font-size: 1.25rem; font-weight: 600; color: #60a5fa; font-family: var(--font-mono);">${assistants.length} <span style="font-size:0.8rem; font-weight:normal;">人</span></div>
                                 </div>
                                 <div style="background: var(--bg-subtle); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
                                     <div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 3px;">最后登录时间</div>
@@ -3021,12 +3015,22 @@
                 body.innerHTML = rowsHtml;
             }
 
-            modal.style.display = 'flex';
+            if (window.DialogHelper) {
+                window.DialogHelper.open(modal, { dismissible: true });
+            } else {
+                modal.style.display = 'flex';
+            }
         }
 
         function closeDbDetailModal() {
             const modal = document.getElementById('db-detail-modal');
-            if (modal) modal.style.display = 'none';
+            if (modal) {
+                if (window.DialogHelper) {
+                    window.DialogHelper.close(modal);
+                } else {
+                    modal.style.display = 'none';
+                }
+            }
         }
 
         window.copyAssistantShareInfo = function(astName, astUname, astPwd, teacherName, teacherUname) {
@@ -3035,13 +3039,13 @@
                 ? 'https://vip.wxjifang.cn'
                 : window.location.origin;
             const text = `【极方助教账号】\n所属教师：${teacherName || teacherUname} (${teacherUname})\n助教姓名：${astName}\n登录账号：${astUname}\n初始密码：${pwdDisp}\n登录入口：${loginUrl}\n权限说明：具备学情反馈制作与错题本查阅打印权限（不可修改题库已配置题目）`;
-            copyTextToClipboard(text, `助教【${astName}】账号密码已复制到剪贴板！`);
+            copyTextToClipboard(text, `助教【${astName}】账号密码已复制到剪贴板`);
         };
 
         window.deleteAssistantFromDetail = async function(astId, astUsername, teacherId) {
             const confirmed = await showConfirm(
                 '永久删除助教确认',
-                `您确定要永久删除助教账号【${astUsername}】吗？此操作无法撤销！`,
+                `您确定要永久删除助教账号【${astUsername}】吗？此操作无法撤销。`,
                 true
             );
             if (!confirmed) return;
@@ -3092,7 +3096,7 @@
         function copyWeakPointsFromModal() {
             const el = document.getElementById('modal-weak-points-text');
             if (el && el.innerText.trim()) {
-                copyTextToClipboard(el.innerText.trim(), '巩固薄弱点归纳已复制！');
+                copyTextToClipboard(el.innerText.trim(), '巩固薄弱点归纳已复制');
             }
         }
         window.copyWeakPointsFromModal = copyWeakPointsFromModal;
@@ -3100,7 +3104,7 @@
         function copyPreviewWeakPointsFromModal() {
             const el = document.getElementById('modal-preview-weak-points-text');
             if (el && el.innerText.trim()) {
-                copyTextToClipboard(el.innerText.trim(), '预习薄弱点归纳已复制！');
+                copyTextToClipboard(el.innerText.trim(), '预习薄弱点归纳已复制');
             }
         }
         window.copyPreviewWeakPointsFromModal = copyPreviewWeakPointsFromModal;
@@ -3110,7 +3114,7 @@
             if (el) {
                 const txt = el.innerText.trim();
                 if (txt && !txt.startsWith('（暂无')) {
-                    copyTextToClipboard(txt, '巩固评语已复制！');
+                    copyTextToClipboard(txt, '巩固评语已复制');
                     return;
                 }
             }
@@ -3123,7 +3127,7 @@
             if (el) {
                 const txt = el.innerText.trim();
                 if (txt && !txt.startsWith('（暂无')) {
-                    copyTextToClipboard(txt, '预习评语已复制！');
+                    copyTextToClipboard(txt, '预习评语已复制');
                     return;
                 }
             }
@@ -3157,30 +3161,6 @@
             }
         }
 
-        async function openRetestBeta(token) {
-            if (!token) {
-                showToast('该学生暂无重测Token', 'error');
-                return;
-            }
-            try {
-                const res = await fetch(`${API_BASE}?action=get_retest_admin_url&token=${encodeURIComponent(token)}`);
-                const json = await res.json();
-                if (json.success && json.data && json.data.admin_sig && json.data.admin_ts) {
-                    const url = `retest-beta.html?token=${encodeURIComponent(token)}&admin_sig=${encodeURIComponent(json.data.admin_sig)}&admin_ts=${json.data.admin_ts}`;
-                    window.open(url, '_blank');
-                } else {
-                    window.open(`retest-beta.html?token=${encodeURIComponent(token)}`, '_blank');
-                }
-            } catch (e) {
-                window.open(`retest-beta.html?token=${encodeURIComponent(token)}`, '_blank');
-            }
-        }
-        window.openRetestBeta = openRetestBeta;
-
-        async function openRetestBetaDirect(token) {
-            return openRetestBeta(token);
-        }
-        window.openRetestBetaDirect = openRetestBetaDirect;
         window.openRetestStudent = openRetestStudent;
         window.openRetestDirect = openRetestDirect;
 
@@ -3239,7 +3219,7 @@
             }
 
             const text = `【${sName} - ${wNum}薄弱考点汇总】\n` + sections.join('\n\n');
-            copyTextToClipboard(text, '已复制学员薄弱考点内容，可直接发送给家长！');
+            copyTextToClipboard(text, '已复制学员薄弱考点内容，可直接发送给家长');
         }
 
         const COMPOUND_SURNAMES_FOR_HONORIFIC = [
@@ -3385,7 +3365,7 @@ ${weakPointsDesc}
 ${consolidationNotice}教师巩固评语：
 ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_comment).trim() : '学习态度认真，继续加油！'}${previewFeedbackBlock}${link ? `\n专属个性化错题本与微课巩固：\n${link}` : ''}`.replace(/\n{2,}/g, '\n');
 
-            copyTextToClipboard(text, '家校学情完整反馈语已复制到剪贴板！');
+            copyTextToClipboard(text, '家校学情完整反馈语已复制到剪贴板');
         }
 
         function copyTextToClipboard(text, successMsg) {
@@ -3442,25 +3422,30 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
         function showCopyFallbackModal(text, hint) {
             let modal = document.getElementById('copy-fallback-modal');
             if (!modal) {
-                modal = document.createElement('div');
+                modal = document.createElement('dialog');
                 modal.id = 'copy-fallback-modal';
-                modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
+                modal.className = 'modal-overlay native-dialog';
+                modal.setAttribute('closedby', 'any');
                 modal.innerHTML = `
                     <div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px;max-width:520px;width:100%;box-shadow:0 10px 25px rgba(0,0,0,0.5);display:flex;flex-direction:column;gap:12px;">
                         <div style="display:flex;align-items:center;justify-content:space-between;">
-                            <h4 style="margin:0;color:#f8fafc;font-size:1rem;font-weight:700;">请手动复制文本</h4>
-                            <button type="button" style="background:none;border:none;color:#94a3b8;font-size:1.2rem;cursor:pointer;" onclick="document.getElementById('copy-fallback-modal').style.display='none'">&times;</button>
+                            <h4 style="margin:0;color:#f8fafc;font-size:1rem;font-weight:600;">请手动复制文本</h4>
+                            <button type="button" style="background:none;border:none;color:#94a3b8;font-size:1.2rem;cursor:pointer;" onclick="if(window.DialogHelper)window.DialogHelper.close('copy-fallback-modal');else document.getElementById('copy-fallback-modal').style.display='none';">&times;</button>
                         </div>
                         <p style="margin:0;color:#94a3b8;font-size:0.85rem;" id="copy-fallback-hint">浏览器已自动全选文本，请按下 Ctrl+C 复制：</p>
                         <textarea id="copy-fallback-textarea" rows="8" style="width:100%;background:#0f172a;border:1px solid #334155;color:#e2e8f0;border-radius:6px;padding:10px;font-size:0.85rem;font-family:monospace;resize:vertical;outline:none;" readonly></textarea>
                         <div style="display:flex;justify-content:flex-end;gap:8px;">
-                            <button type="button" class="btn primary" onclick="const ta=document.getElementById('copy-fallback-textarea');ta.focus();ta.select();document.execCommand('copy');showToast('已复制', 'success');document.getElementById('copy-fallback-modal').style.display='none';">选中并关闭</button>
+                            <button type="button" class="btn primary" onclick="const ta=document.getElementById('copy-fallback-textarea');ta.focus();ta.select();document.execCommand('copy');showToast('已复制', 'success');if(window.DialogHelper)window.DialogHelper.close('copy-fallback-modal');else document.getElementById('copy-fallback-modal').style.display='none';">选中并关闭</button>
                         </div>
                     </div>
                 `;
                 document.body.appendChild(modal);
             }
-            modal.style.display = 'flex';
+            if (window.DialogHelper) {
+                window.DialogHelper.open(modal, { dismissible: true });
+            } else {
+                modal.style.display = 'flex';
+            }
             const ta = document.getElementById('copy-fallback-textarea');
             const hintEl = document.getElementById('copy-fallback-hint');
             if (hintEl && hint) hintEl.textContent = hint + '（已自动全选，请按 Ctrl+C 复制）：';

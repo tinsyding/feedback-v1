@@ -33,7 +33,6 @@ feedback-v1/
 ├── viewer.html             # 教师评语查看与未交提醒页
 ├── question-bank.html      # 错题本管理页
 ├── retest.html             # 学生错题巩固练习页
-├── retest-beta.html        # 旧版兼容跳转页（重定向至 retest.html）
 ├── admin.html              # 管理后台
 ├── admin-login.html        # 管理员登录页
 ├── 403.html ~ 50x.html     # 错误状态页

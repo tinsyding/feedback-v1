@@ -263,18 +263,20 @@
             if (!thead) return;
             const sortIcon = (f) => batSortField === f ? (batSortOrder === 'ASC' ? '▲' : '▼') : '';
 
+            const batSortTh = (field, label, styleAttr = '', extraClass = '') => `
+                    <th class="th-sortable${extraClass ? ' ' + extraClass : ''}"${styleAttr ? ` style="${styleAttr}"` : ''}><button type="button" class="th-sort-btn" data-action="batches-sort" data-arg="${field}">${label} ${sortIcon(field)}</button></th>`;
             thead.innerHTML = `
                 <tr>
                     <th style="width: 42px; text-align: center;">
-                        <input type="checkbox" id="bat-select-all" onchange="toggleSelectAllBatches(this.checked)" style="accent-color: var(--primary); cursor: pointer;">
+                        <input type="checkbox" id="bat-select-all" data-change="select-all-batches" aria-label="全选批次" style="accent-color: var(--primary); cursor: pointer;">
                     </th>
-                    <th class="th-sortable cell-mono" style="width: 200px;" onclick="setBatchesSort('batch_code')">批次编号 ${sortIcon('batch_code')}</th>
+                    ${batSortTh('batch_code', '批次编号', 'width: 200px;', 'cell-mono')}
                     <th style="width: 200px;">班级 / 学科</th>
-                    <th class="th-sortable" style="width: 75px; text-align: center;" onclick="setBatchesSort('week_num')">周次 ${sortIcon('week_num')}</th>
-                    <th class="th-sortable" style="width: 90px; text-align: center;" onclick="setBatchesSort('student_count')">学生数 ${sortIcon('student_count')}</th>
-                    <th class="th-sortable" style="width: 90px; text-align: center;" onclick="setBatchesSort('error_student_count')">有错题 ${sortIcon('error_student_count')}</th>
-                    <th class="th-sortable" style="width: 115px;" onclick="setBatchesSort('created_by')">责任教师 ${sortIcon('created_by')}</th>
-                    <th class="th-sortable cell-mono" style="width: 150px;" onclick="setBatchesSort('created_at')">生成时间 ${sortIcon('created_at')}</th>
+                    ${batSortTh('week_num', '周次', 'width: 75px; text-align: center;')}
+                    ${batSortTh('student_count', '学生数', 'width: 90px; text-align: center;')}
+                    ${batSortTh('error_student_count', '有错题', 'width: 90px; text-align: center;')}
+                    ${batSortTh('created_by', '责任教师', 'width: 115px;')}
+                    ${batSortTh('created_at', '生成时间', 'width: 150px;', 'cell-mono')}
                     <th style="width: 150px; text-align: right;">快捷操作</th>
                 </tr>
             `;

@@ -1,4 +1,24 @@
 // ========== Spring/Autumn & Winter/Summer Semester Upload Logic ==========
+function openNativeDialog(idOrEl, opts) {
+    const el = typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl;
+    if (!el) return null;
+    if (window.DialogHelper) {
+        return window.DialogHelper.open(el, opts);
+    }
+    el.style.display = 'flex';
+    return el;
+}
+
+function closeNativeDialog(idOrEl) {
+    const el = typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl;
+    if (!el) return;
+    if (window.DialogHelper) {
+        window.DialogHelper.close(el);
+    } else {
+        el.style.display = 'none';
+    }
+}
+
 window.defaultSeason = 'autumn';
 function isVacationSeason(season) {
     return season === 0 || season === 'summer' || season === 'winter' || season === '暑' || season === '寒';
@@ -1966,18 +1986,26 @@ function showDroppedStudentsModal(droppedPreview, droppedHomework, className) {
     }
     
     body.innerHTML = html;
-    modal.style.display = 'flex';
+    openNativeDialog(modal, {
+        dismissible: true,
+        onAfterClose: finishDroppedStudentsClose
+    });
 }
 
-function closeDroppedStudentsModal() {
-    const modal = document.getElementById('dropped-students-modal');
-    if (modal) modal.style.display = 'none';
+function finishDroppedStudentsClose() {
     droppedStudentsAcknowledged = true;
 
     if (pendingNavigationStep) {
         const step = pendingNavigationStep;
         pendingNavigationStep = null;
         goToStep(step);
+    }
+}
+
+function closeDroppedStudentsModal() {
+    closeNativeDialog('dropped-students-modal');
+    if (!window.DialogHelper) {
+        finishDroppedStudentsClose();
     }
 }
 
@@ -2058,7 +2086,10 @@ function showDuplicateStudentsModal(groups) {
     });
 
     body.innerHTML = html;
-    modal.style.display = 'flex';
+    openNativeDialog(modal, {
+        dismissible: true,
+        onAfterClose: finishDuplicateModalClose
+    });
 }
 
 window.autoSelectBestScores = function() {
@@ -2130,14 +2161,19 @@ window.confirmDuplicateChoices = function() {
     closeDuplicateModalAndContinue();
 };
 
-function closeDuplicateModalAndContinue() {
-    const modal = document.getElementById('duplicate-students-modal');
-    if (modal) modal.style.display = 'none';
+function finishDuplicateModalClose() {
     currentDuplicateGroups = [];
     if (pendingNavigationStep) {
         const step = pendingNavigationStep;
         pendingNavigationStep = null;
         goToStep(step);
+    }
+}
+
+function closeDuplicateModalAndContinue() {
+    closeNativeDialog('duplicate-students-modal');
+    if (!window.DialogHelper) {
+        finishDuplicateModalClose();
     }
 }
 
@@ -2261,7 +2297,7 @@ function showUngradedSubmissionsModal(ungradedList) {
     const escapeSafe = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
     if (!modal || !body) {
-        alert(`检测到 ${ungradedList.length} 位学生作业为【已提交】但尚未批改，请批改完成后再继续！`);
+        alert(`检测到 ${ungradedList.length} 位学生作业为【已提交】但尚未批改，请批改完成后再继续。`);
         return;
     }
 
@@ -2334,12 +2370,11 @@ function showUngradedSubmissionsModal(ungradedList) {
     `;
 
     body.innerHTML = html;
-    modal.style.display = 'flex';
+    openNativeDialog(modal, { dismissible: true });
 }
 
 function closeUngradedSubmissionsModal() {
-    const modal = document.getElementById('ungraded-submissions-modal');
-    if (modal) modal.style.display = 'none';
+    closeNativeDialog('ungraded-submissions-modal');
 }
 
 window.filterUngradedModalList = function(kw) {
@@ -2611,12 +2646,11 @@ function checkWenjuanxingNameMatches() {
     });
     
     body.innerHTML = html;
-    modal.style.display = 'flex';
+    openNativeDialog(modal, { dismissible: true });
 }
 
 function closeWjxNameModal() {
-    const modal = document.getElementById('wjx-name-modal');
-    if (modal) modal.style.display = 'none';
+    closeNativeDialog('wjx-name-modal');
 }
 
 function applyWjxNameFixes() {
@@ -3049,12 +3083,11 @@ function showCommentFormatModal(nonStandardList) {
 
     html += `</div>`;
     body.innerHTML = html;
-    modal.style.display = 'flex';
+    openNativeDialog(modal, { dismissible: true });
 }
 
 function closeCommentFormatModal() {
-    const modal = document.getElementById('comment-format-modal');
-    if (modal) modal.style.display = 'none';
+    closeNativeDialog('comment-format-modal');
 }
 
 function autoFixCommentStandardsAndGenerate() {
@@ -3240,12 +3273,11 @@ function showMissingErrorsModal(missingList) {
 
     html += `</div>`;
     body.innerHTML = html;
-    modal.style.display = 'flex';
+    openNativeDialog(modal, { dismissible: true });
 }
 
 function closeMissingErrorsModal() {
-    const modal = document.getElementById('missing-errors-modal');
-    if (modal) modal.style.display = 'none';
+    closeNativeDialog('missing-errors-modal');
 }
 
 function ignoreMissingErrorsAndContinue() {
@@ -3354,11 +3386,11 @@ function showLessonConfirmModal() {
         if (classTestRow) classTestRow.style.display = 'none';
     }
 
-    modal.style.display = 'flex';
+    openNativeDialog(modal, { dismissible: true });
 }
 
 function closeConfirmModal() {
-    document.getElementById('lesson-confirm-modal').style.display = 'none';
+    closeNativeDialog('lesson-confirm-modal');
 }
 
 function getUploadClassInfo() {
@@ -3501,7 +3533,7 @@ function showBatchOverwriteModal(options) {
             <div style="background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.3); border-radius:8px; padding:10px 12px; margin-bottom:12px; color:#fca5a5; display:flex; align-items:flex-start; gap:8px;">
                 <svg style="flex-shrink:0; width:18px; height:18px; color:#ef4444; margin-top:2px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                 <div style="flex:1;">
-                    检测到【<strong>${escapeHtml(classSummary)}</strong>】已有存档，本次上传有 <strong>${modifiedStudents.length} 位学生</strong> 的数据将发生覆盖变动！
+                    检测到【<strong>${escapeHtml(classSummary)}</strong>】已有存档，本次上传有 <strong>${modifiedStudents.length} 位学生</strong> 的数据将发生覆盖变动。
                 </div>
             </div>
 
@@ -4340,6 +4372,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const input = document.getElementById('exclusion-tag-input');
     if (input) {
         input.addEventListener('keydown', (e) => {
+            if (e.isComposing || e.keyCode === 229) return;
             if (e.key === 'Enter') {
                 e.preventDefault();
                 addExclusionTag();
@@ -4600,15 +4633,20 @@ window.previewUploadedFile = function(type, index, e) {
 
         const modal = document.getElementById('file-preview-modal');
         if (modal) {
-            modal.style.display = 'flex';
-            document.body.style.overflow = 'hidden';
+            openNativeDialog(modal, {
+                dismissible: true,
+                onAfterClose: () => {
+                    if (currentFilePreviewState && currentFilePreviewState.isEditing) {
+                        togglePreviewEditMode(false);
+                    }
+                }
+            });
         } else {
             console.error('未找到 #file-preview-modal 节点');
             showToast('预览弹窗节点异常，请刷新重试');
         }
     } catch (err) {
         console.error('预览失败:', err);
-        document.body.style.overflow = '';
         showToast('打开预览失败: ' + (err?.message || '未知错误'));
     }
 };
@@ -5290,16 +5328,12 @@ window.closeFilePreviewModal = function() {
         }
         togglePreviewEditMode(false);
     }
-    const modal = document.getElementById('file-preview-modal');
-    if (modal) {
-        modal.style.display = 'none';
-        document.body.style.overflow = '';
-    }
+    closeNativeDialog('file-preview-modal');
 };
 
-// Listen for ESC key to close preview modal or single error entry modal
+// Listen for ESC key fallback when DialogHelper is unavailable
 document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
+    if (e.key === 'Escape' && !window.DialogHelper) {
         const previewModal = document.getElementById('file-preview-modal');
         if (previewModal && previewModal.style.display !== 'none') {
             closeFilePreviewModal();
@@ -5409,19 +5443,19 @@ function openSingleErrorEntryModal() {
     }
 
     switchSeeEntryMode(seeState.mode);
-    modal.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
+    openNativeDialog(modal, {
+        dismissible: true,
+        onAfterClose: hideSeeStudentSuggest
+    });
 
     onSeeClassMetaChange();
 }
 
 function closeSingleErrorEntryModal() {
-    const modal = document.getElementById('single-error-entry-modal');
-    if (modal) {
-        modal.style.display = 'none';
-        document.body.style.overflow = '';
+    closeNativeDialog('single-error-entry-modal');
+    if (!window.DialogHelper) {
+        hideSeeStudentSuggest();
     }
-    hideSeeStudentSuggest();
 }
 
 function switchSeeEntryMode(mode) {
@@ -6406,3 +6440,101 @@ window.submitSingleErrorEntry = submitSingleErrorEntry;
 window.copySeeRetestLink = copySeeRetestLink;
 window.copySeeFeedbackText = copySeeFeedbackText;
 window.resetSeeForNextStudent = resetSeeForNextStudent;
+
+(function bindUploadDelegatedEvents() {
+    const UPLOAD_CLICK_ACTIONS = {
+        'show-changelogs': () => showAllChangelogsModal(),
+        'open-see-modal': () => openSingleErrorEntryModal(),
+        'confirm-reupload': () => confirmReupload(),
+        'select-subject': (el) => selectFeedbackSubject(el, el.dataset.subject),
+        'select-physics-source': (el) => selectPhysicsPreviewSource(el, el.dataset.source),
+        'clear-roster': () => clearRosterFile(),
+        'trigger-click': (el) => {
+            const target = el.dataset.target ? document.getElementById(el.dataset.target) : null;
+            if (target) target.click();
+        },
+        'clear-preview': () => clearPreviewFiles(),
+        'clear-homework': () => clearHomeworkFiles(),
+        'clear-note': () => clearNoteFiles(),
+        'clear-class-test': () => clearClassTestFiles(),
+        'clear-report': () => clearReportFile(),
+        'go-step': (_el, arg) => goToStep(parseInt(arg, 10)),
+        'preview-comment-source': (_el, arg) => switchPreviewCommentSource(arg),
+        'homework-comment-source': (_el, arg) => switchHomeworkCommentSource(arg),
+        'adjust-focus': (_el, arg) => adjustFocusScore(parseInt(arg, 10)),
+        'focus-comment-source': (_el, arg) => switchFocusCommentSource(arg),
+        'add-exclusion-tag': () => addExclusionTag(),
+        'export-exclusion-file': () => exportExclusionFile(),
+        'generate-feedback': () => generateFeedback(),
+        'close-confirm-modal': () => closeConfirmModal(),
+        'confirm-generate': (el) => confirmAndGenerate(el),
+        'close-wjx-modal': () => closeWjxNameModal(),
+        'apply-wjx-fixes': () => applyWjxNameFixes(),
+        'ignore-comment-format': () => ignoreCommentFormatAndGenerate(),
+        'autofix-comment-format': () => autoFixCommentStandardsAndGenerate(),
+        'close-missing-errors': () => closeMissingErrorsModal(),
+        'ignore-missing-errors': () => ignoreMissingErrorsAndContinue(),
+        'auto-select-best': () => autoSelectBestScores(),
+        'confirm-duplicate-choices': () => confirmDuplicateChoices(),
+        'close-dropped-modal': () => closeDroppedStudentsModal(),
+        'close-ungraded-modal': () => closeUngradedSubmissionsModal(),
+        'quick-edit-ungraded': () => quickEditFromUngradedModal(),
+        'preview-edit-on': () => togglePreviewEditMode(true),
+        'preview-add-row': () => addPreviewRow(),
+        'preview-save-edits': () => savePreviewEdits(),
+        'preview-cancel-edits': () => cancelPreviewEdits(),
+        'close-file-preview': () => closeFilePreviewModal(),
+        'export-preview-csv': () => exportCurrentPreviewCsv(),
+        'close-see-modal': () => closeSingleErrorEntryModal(),
+        'see-entry-mode': (el) => switchSeeEntryMode(el.dataset.mode),
+        'clear-see-errors': (_el, arg) => clearSeeErrors(arg),
+        'copy-see-link': () => copySeeRetestLink(),
+        'copy-see-feedback': () => copySeeFeedbackText(),
+        'reset-see-student': () => resetSeeForNextStudent(),
+        'submit-see-entry': (el) => submitSingleErrorEntry(el),
+        'close-custom-dialog': () => closeCustomDialog()
+    };
+
+    const UPLOAD_CHANGE_ACTIONS = {
+        'preview-metric-mode': () => onPreviewMetricModeChange(),
+        'toggle-plus': () => togglePlusConfig(),
+        'plus-selector': () => onPlusSelectorChange(),
+        'import-exclusion': (el) => importExclusionFile(el),
+        'sync-local-csv': (el) => localStorage.setItem('jf_sync_local_csv', el.checked ? '1' : '0'),
+        'see-class-meta': () => onSeeClassMetaChange(),
+        'see-week': (_el, arg) => onSeeWeekChange(arg)
+    };
+
+    const UPLOAD_INPUT_ACTIONS = {
+        'filter-preview': (el) => filterPreviewTable(el.value),
+        'see-student': (el) => onSeeStudentInput(el.value),
+        'see-student-id': () => onSeeStudentIdChange(),
+        'see-error-text': (el, arg) => onSeeErrorTextInput(arg, el.value)
+    };
+
+    document.addEventListener('click', (e) => {
+        const target = e.target.closest('[data-action]');
+        if (!target) return;
+        const handler = UPLOAD_CLICK_ACTIONS[target.dataset.action];
+        if (handler) handler(target, target.dataset.arg);
+    });
+
+    document.addEventListener('change', (e) => {
+        const target = e.target.closest('[data-change]');
+        if (!target) return;
+        const handler = UPLOAD_CHANGE_ACTIONS[target.dataset.change];
+        if (handler) handler(target, target.dataset.arg);
+    });
+
+    document.addEventListener('input', (e) => {
+        const target = e.target.closest('[data-input]');
+        if (!target) return;
+        const handler = UPLOAD_INPUT_ACTIONS[target.dataset.input];
+        if (handler) handler(target, target.dataset.arg);
+    });
+
+    const seeStudentInput = document.getElementById('see-student-name');
+    if (seeStudentInput) {
+        seeStudentInput.addEventListener('focus', onSeeStudentFocus);
+    }
+})();

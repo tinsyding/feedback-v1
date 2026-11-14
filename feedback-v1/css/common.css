@@ -38,8 +38,8 @@
     --warning-rgb: 255, 159, 10;
     --success-rgb: 48, 209, 88;
     --error-rgb: 255, 69, 58;
-    --accent-glow: rgba(var(--accent-rgb), 0.2);
-    --accent-gradient: linear-gradient(135deg, #0a84ff 0%, #3a9cff 100%);
+    --accent-glow: rgba(var(--accent-rgb), 0.14);
+    --accent-gradient: var(--accent);
     --ui-fill-weak: rgba(255, 255, 255, 0.04);
     --ui-fill-base: rgba(255, 255, 255, 0.06);
     --ui-fill-strong: rgba(255, 255, 255, 0.08);
@@ -135,8 +135,8 @@
     --warning-rgb: 255, 149, 0;
     --success-rgb: 52, 199, 89;
     --error-rgb: 255, 59, 48;
-    --accent-glow: rgba(var(--accent-rgb), 0.15);
-    --accent-gradient: linear-gradient(135deg, #007aff 0%, #3a9cff 100%);
+    --accent-glow: rgba(var(--accent-rgb), 0.12);
+    --accent-gradient: var(--accent);
     --ui-fill-weak: rgba(0, 0, 0, 0.045);
     --ui-fill-base: rgba(0, 0, 0, 0.07);
     --ui-fill-strong: rgba(0, 0, 0, 0.1);
@@ -194,11 +194,11 @@
 }
 
 [data-theme="light"] .generate-btn {
-    box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.25);
+    box-shadow: var(--shadow-sm);
 }
 
 [data-theme="light"] .generate-btn:hover:not(:disabled) {
-    box-shadow: 0 6px 16px rgba(var(--accent-rgb), 0.3);
+    box-shadow: var(--shadow-sm);
 }
 
 [data-theme="light"] kbd {
@@ -208,7 +208,7 @@
 }
 
 [data-theme="light"] .add-file-btn {
-    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.15);
+    box-shadow: var(--shadow-sm);
 }
 
 [data-theme="light"] .file-upload-item.uploaded .file-hint {
@@ -221,11 +221,11 @@
 }
 
 [data-theme="light"] .action-btn.primary {
-    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.2);
+    box-shadow: var(--shadow-xs);
 }
 
 [data-theme="light"] .sidebar-header {
-    background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.03) 0%, transparent 100%);
+    background: transparent;
 }
 
 *,
@@ -242,14 +242,12 @@ body {
 }
 
 html {
-    color-scheme: dark;
+    color-scheme: light dark;
 }
 
 body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
     background-color: var(--bg-primary);
-    background-image: radial-gradient(var(--bg-pattern-color) 1px, transparent 1px);
-    background-size: 20px 20px;
     color: var(--text-primary);
     line-height: 1.5;
     overflow: hidden;
@@ -425,10 +423,7 @@ select option:disabled,
     right: -1px;
     bottom: 0;
     width: 1px;
-    background: linear-gradient(180deg,
-            rgba(var(--accent-rgb), 0.2) 0%,
-            rgba(var(--accent-rgb), 0.05) 30%,
-            transparent 100%);
+    background: var(--border-light);
     pointer-events: none;
 }
 
@@ -438,12 +433,12 @@ select option:disabled,
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.03) 0%, transparent 100%);
+    background: transparent;
 }
 
 .app-title {
     font-size: 1.1rem;
-    font-weight: 700;
+    font-weight: 600;
     color: var(--text-primary);
     letter-spacing: -0.01em;
 }
@@ -566,7 +561,6 @@ select option:disabled,
 .file-upload-label:hover {
     background: rgba(255, 255, 255, 0.08);
     border-color: var(--border-hover);
-    transform: translateY(-1px);
     box-shadow: var(--shadow-sm);
 }
 
@@ -667,8 +661,7 @@ select option:disabled,
 }
 
 .add-file-btn:hover {
-    transform: translateY(-50%) scale(1.15);
-    box-shadow: 0 4px 16px var(--accent-glow);
+    transform: translateY(-50%);
 }
 
 .add-file-btn:active {
@@ -715,7 +708,7 @@ select option:disabled,
 .toggle-btn.active {
     background: var(--accent-primary);
     color: white;
-    box-shadow: 0 2px 6px rgba(var(--accent-rgb), 0.3);
+    box-shadow: var(--shadow-sm);
     font-weight: 600;
 }
 
@@ -854,7 +847,7 @@ select option:disabled,
 .sidebar-footer {
     padding: var(--spacing-lg) var(--spacing-lg) var(--spacing-xl);
     border-top: 1px solid var(--border-light);
-    background: linear-gradient(0deg, rgba(var(--accent-rgb), 0.03) 0%, transparent 100%);
+    background: transparent;
 }
 
 .generate-btn {
@@ -867,21 +860,20 @@ select option:disabled,
     border: none;
     border-radius: var(--radius-full);
     cursor: pointer;
-    transition: var(--transition);
+    transition: background-color 0.15s ease, opacity 0.15s ease;
     position: relative;
     overflow: hidden;
     letter-spacing: 0.02em;
-    box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.3);
+    box-shadow: var(--shadow-xs);
 }
 
 .generate-btn:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(var(--accent-rgb), 0.4);
+    box-shadow: var(--shadow-sm);
 }
 
 .generate-btn:active:not(:disabled) {
     transform: translateY(0);
-    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.3);
+    box-shadow: var(--shadow-sm);
 }
 
 .generate-btn:disabled {
@@ -930,7 +922,6 @@ kbd {
 .github-link:hover {
     color: var(--text-primary);
     opacity: 1;
-    transform: translateY(-1px);
 }
 
 .github-link svg {
@@ -991,7 +982,6 @@ kbd {
 }
 
 .comment-card:hover {
-    transform: translateY(-2px);
     box-shadow: var(--shadow-md);
 }
 
@@ -1126,7 +1116,6 @@ kbd {
 }
 
 .stat-card:hover {
-    transform: translateY(-2px);
     border-color: var(--border-hover);
     box-shadow: var(--shadow-md);
 }
@@ -1137,7 +1126,7 @@ kbd {
 
 .stat-value {
     font-size: 1.6rem;
-    font-weight: 700;
+    font-weight: 600;
     color: var(--text-primary);
     margin-bottom: var(--spacing-xs);
 }
@@ -1192,12 +1181,11 @@ kbd {
 .action-btn.primary {
     background: var(--accent-primary);
     color: white;
-    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.3);
+    box-shadow: var(--shadow-sm);
 }
 
 .action-btn.primary:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.4);
+    box-shadow: var(--shadow-sm);
 }
 
 .action-btn.primary:active {
@@ -1214,7 +1202,6 @@ kbd {
     background: var(--ui-fill-hover);
     color: var(--text-primary);
     border-color: var(--border-hover);
-    transform: translateY(-1px);
 }
 
 .action-btn.secondary:active {
@@ -1611,7 +1598,7 @@ tr.masked-row.copied-row {
 
 .focus-indicator-name {
     font-size: 0.88rem;
-    font-weight: 700;
+    font-weight: 600;
     color: var(--text-primary);
     letter-spacing: -0.01em;
 }
@@ -2047,7 +2034,6 @@ tr.masked-row.copied-row {
 }
 
 .btn:hover {
-    transform: translateY(-1px);
 }
 
 .btn:active {
@@ -2070,11 +2056,11 @@ tr.masked-row.copied-row {
     background: var(--accent-primary);
     border-color: transparent;
     color: #ffffff;
-    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.3);
+    box-shadow: var(--shadow-sm);
 }
 
 .btn.primary:hover:not(:disabled) {
-    box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.4);
+    box-shadow: var(--shadow-sm);
 }
 
 .btn.secondary {
@@ -2093,11 +2079,11 @@ tr.masked-row.copied-row {
     background: var(--error);
     border-color: transparent;
     color: #ffffff;
-    box-shadow: 0 2px 8px rgba(var(--error-rgb), 0.3);
+    box-shadow: var(--shadow-sm);
 }
 
 .btn.danger:hover:not(:disabled) {
-    box-shadow: 0 4px 12px rgba(var(--error-rgb), 0.4);
+    box-shadow: var(--shadow-sm);
 }
 
 .btn.ghost {
@@ -2550,12 +2536,11 @@ tr.masked-row.copied-row {
 .modal-btn.primary {
     background: var(--accent-primary);
     color: white;
-    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.3);
+    box-shadow: var(--shadow-sm);
 }
 
 .modal-btn.primary:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.4);
+    box-shadow: var(--shadow-sm);
 }
 
 .modal-btn.primary:active {
@@ -2810,7 +2795,7 @@ tr.masked-row.copied-row {
 
 .modal-title {
     font-size: 1.15rem;
-    font-weight: 700;
+    font-weight: 600;
     margin-bottom: 6px;
     color: var(--text-primary);
 }
@@ -2880,21 +2865,21 @@ body.page-ready {
 }
 
 .global-network-banner.offline {
-    background: linear-gradient(135deg, rgba(220, 38, 38, 0.95), rgba(185, 28, 28, 0.95));
+    background: #dc2626;
     color: #ffffff;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.18);
 }
 
 .global-network-banner.online {
-    background: linear-gradient(135deg, rgba(16, 185, 129, 0.95), rgba(5, 150, 105, 0.95));
+    background: #16a34a;
     color: #ffffff;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.18);
 }
 
 .global-network-banner.weak {
-    background: linear-gradient(135deg, rgba(217, 119, 6, 0.95), rgba(180, 83, 9, 0.95));
+    background: #d97706;
     color: #ffffff;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.18);
 }
 
 .global-network-retry-btn {
@@ -2904,15 +2889,14 @@ body.page-ready {
     padding: 3px 10px;
     border-radius: 6px;
     font-size: 0.8rem;
-    font-weight: 600;
+    font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
     margin-left: 6px;
 }
 
 .global-network-retry-btn:hover {
     background: rgba(255, 255, 255, 0.35);
-    transform: scale(1.04);
 }
 
 /* Button Loading spinner & styles (spin keyframes 定义见文件上方，此处复用，不重复定义) */

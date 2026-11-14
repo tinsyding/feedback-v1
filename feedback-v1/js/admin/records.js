@@ -519,19 +519,21 @@
             if (!thead) return;
             const sortIcon = (f) => recSortField === f ? (recSortOrder === 'ASC' ? '▲' : '▼') : '';
 
+            const recSortTh = (field, label, styleAttr = '', extraClass = '') => `
+                    <th class="th-sortable${extraClass ? ' ' + extraClass : ''} ${recSortField === field ? 'active' : ''}"${styleAttr ? ` style="${styleAttr}"` : ''}><button type="button" class="th-sort-btn" data-action="records-sort" data-arg="${field}">${label} ${sortIcon(field)}</button></th>`;
             thead.innerHTML = `
                 <tr>
                     <th style="width: 42px; text-align: center;">
-                        <input type="checkbox" id="rec-select-all" onchange="toggleSelectAllRecords(this.checked)" style="accent-color: var(--primary); cursor: pointer;">
+                        <input type="checkbox" id="rec-select-all" data-change="select-all-records" aria-label="全选记录" style="accent-color: var(--primary); cursor: pointer;">
                     </th>
-                    <th class="th-sortable ${recSortField === 'student_name' ? 'active' : ''}" style="width: 125px;" onclick="setRecordsSort('student_name')">学生姓名 ${sortIcon('student_name')}</th>
+                    ${recSortTh('student_name', '学生姓名', 'width: 125px;')}
                     <th style="width: 165px;">年级 / 班层 / 学科</th>
-                    <th class="th-sortable ${recSortField === 'week_num' ? 'active' : ''}" style="width: 110px;" onclick="setRecordsSort('week_num')">周次 (巩固/预习) ${sortIcon('week_num')}</th>
-                    <th class="th-sortable ${recSortField === 'homework_score' ? 'active' : ''}" style="width: 120px;" onclick="setRecordsSort('homework_score')">成绩 (巩固/预习) ${sortIcon('homework_score')}</th>
-                    <th class="th-sortable ${recSortField === 'error_count' ? 'active' : ''}" style="width: 185px;" onclick="setRecordsSort('error_count')">错题题号 (巩固/预习) ${sortIcon('error_count')}</th>
+                    ${recSortTh('week_num', '周次 (巩固/预习)', 'width: 110px;')}
+                    ${recSortTh('homework_score', '成绩 (巩固/预习)', 'width: 120px;')}
+                    ${recSortTh('error_count', '错题题号 (巩固/预习)', 'width: 185px;')}
                     <th style="width: 180px; max-width: 190px;">评语 (巩固/预习)</th>
-                    <th class="th-sortable ${recSortField === 'created_by' ? 'active' : ''}" style="width: 115px;" onclick="setRecordsSort('created_by')">责任教师 ${sortIcon('created_by')}</th>
-                    <th class="th-sortable cell-mono ${recSortField === 'updated_at' ? 'active' : ''}" style="width: 100px;" onclick="setRecordsSort('updated_at')">更改时间 ${sortIcon('updated_at')}</th>
+                    ${recSortTh('created_by', '责任教师', 'width: 115px;')}
+                    ${recSortTh('updated_at', '更改时间', 'width: 100px;', 'cell-mono')}
                     <th style="width: 80px; text-align: right;">快捷操作</th>
                 </tr>
             `;

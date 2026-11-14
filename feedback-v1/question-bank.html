@@ -4,47 +4,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="color-scheme" content="light dark">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>题库管理</title>
     <meta name="description" content="管理每次作业中每道题的知识点描述，用于生成针对性巩固建议">
-    <script>
-        (function () {
-            // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261114-03';
-            document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
-            document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
-            document.write(`<link rel="stylesheet" href="css/question-bank.css?v=${v}">`);
-            document.write(`<link rel="stylesheet" href="css/auth.css?v=${v}">`);
-            document.write(`<link rel="stylesheet" href="css/tokens.css?v=${v}">`);
-        })();
-    </script>
+    <script src="js/theme-boot.js?v=20261114-04"></script>
+    <link rel="stylesheet" href="css/common.css?v=20261114-04">
+    <link rel="stylesheet" href="css/upload.css?v=20261114-04">
+    <link rel="stylesheet" href="css/question-bank.css?v=20261114-04">
+    <link rel="stylesheet" href="css/auth.css?v=20261114-04">
+    <link rel="stylesheet" href="css/tokens.css?v=20261114-04">
     <!-- PDF 核心库：PDF-Lib (切片合并) + PDF.js (页面缩略图高清晰渲染) -->
-    <script src="js/libs/polyfill-at.js"></script>
-    <script src="js/libs/pdf-lib.min.js"></script>
-    <script src="js/libs/pdfjs/pdf.min.js"></script>
-    <script>
-        if (window.pdfjsLib) {
-            pdfjsLib.GlobalWorkerOptions.workerSrc = 'js/libs/pdfjs/pdf.worker.min.js';
-        }
-    </script>
+    <script defer src="js/libs/polyfill-at.js"></script>
+    <script defer src="js/libs/pdf-lib.min.js"></script>
+    <script defer src="js/libs/pdfjs/pdf.min.js"></script>
+    <script defer src="js/logger.js?v=20261114-04"></script>
+    <script defer src="js/common.js?v=20261114-04"></script>
+    <script defer src="js/auth.js?v=20261114-04"></script>
+    <script defer src="js/question-bank.js?v=20261114-04"></script>
+    <script defer src="js/region-debug.js?v=20261114-04"></script>
 </head>
 
 <body class="upload-page">
-
-    <!-- Animated background orbs -->
-    <div class="bg-orbs" aria-hidden="true">
-        <div class="orb orb-1"></div>
-        <div class="orb orb-2"></div>
-        <div class="orb orb-3"></div>
-    </div>
 
     <div class="upload-shell">
         <!-- Top navigation bar -->
         <nav class="upload-nav">
             <div class="nav-brand">
-                <a class="brand-back-btn" href="upload.html" onclick="if(history.length>1){history.back();return false;}" title="返回上一页">
+                <a class="brand-back-btn" href="upload.html" data-action="history-back" title="返回上一页">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                         stroke-linejoin="round">
                         <polyline points="15 18 9 12 15 6"></polyline>
@@ -52,29 +41,26 @@
                 </a>
             </div>
             <div class="nav-actions">
-                <label class="theme-slider-switch" title="切换主题">
-                    <input type="checkbox" id="theme-toggle-input" onchange="toggleTheme(this)">
-                    <span class="theme-slider-track">
-                        <span class="theme-slider-thumb">
-                            <svg class="thumb-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
-                                <circle cx="12" cy="12" r="5"></circle>
-                                <line x1="12" y1="1" x2="12" y2="3"></line>
-                                <line x1="12" y1="21" x2="12" y2="23"></line>
-                                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-                                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-                                <line x1="1" y1="12" x2="3" y2="12"></line>
-                                <line x1="21" y1="12" x2="23" y2="12"></line>
-                                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-                                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-                            </svg>
-                            <svg class="thumb-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
-                                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-                            </svg>
-                        </span>
-                    </span>
-                </label>
+                <div class="theme-segmented" role="group" aria-label="主题模式">
+                    <button type="button" class="theme-seg-btn" data-theme-set="light" title="浅色模式" aria-label="浅色模式" aria-pressed="false">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="12" cy="12" r="4"></circle>
+                            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+                        </svg>
+                    </button>
+                    <button type="button" class="theme-seg-btn" data-theme-set="system" title="跟随系统" aria-label="跟随系统" aria-pressed="false">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                            <line x1="8" y1="21" x2="16" y2="21"></line>
+                            <line x1="12" y1="17" x2="12" y2="21"></line>
+                        </svg>
+                    </button>
+                    <button type="button" class="theme-seg-btn" data-theme-set="dark" title="深色模式" aria-label="深色模式" aria-pressed="false">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                        </svg>
+                    </button>
+                </div>
             </div>
         </nav>
 
@@ -82,25 +68,25 @@
         <main class="upload-main">
             <!-- Step indicators -->
             <div class="step-indicators">
-                <div class="step-item active" data-step="1" onclick="handleStepIndicatorClick(1)">
-                    <div class="step-dot"><span>1</span></div>
+                <button type="button" class="step-item active" data-step="1" data-action="step-click" data-arg="1">
+                    <span class="step-dot"><span>1</span></span>
                     <span class="step-label">选择学科</span>
-                </div>
+                </button>
                 <div class="step-line"></div>
-                <div class="step-item" data-step="2" onclick="handleStepIndicatorClick(2)">
-                    <div class="step-dot"><span>2</span></div>
+                <button type="button" class="step-item" data-step="2" data-action="step-click" data-arg="2">
+                    <span class="step-dot"><span>2</span></span>
                     <span class="step-label">上传PDF</span>
-                </div>
+                </button>
                 <div class="step-line"></div>
-                <div class="step-item" data-step="3" onclick="handleStepIndicatorClick(3)">
-                    <div class="step-dot"><span>3</span></div>
+                <button type="button" class="step-item" data-step="3" data-action="step-click" data-arg="3">
+                    <span class="step-dot"><span>3</span></span>
                     <span class="step-label" id="step3-tab-label">标注题号</span>
-                </div>
+                </button>
                 <div class="step-line"></div>
-                <div class="step-item" data-step="4" onclick="handleStepIndicatorClick(4)">
-                    <div class="step-dot"><span>4</span></div>
+                <button type="button" class="step-item" data-step="4" data-action="step-click" data-arg="4">
+                    <span class="step-dot"><span>4</span></span>
                     <span class="step-label">编辑题目</span>
-                </div>
+                </button>
             </div>
 
             <!-- Step 1: 选择学科 -->
@@ -109,7 +95,7 @@
                     <div class="config-card glass-card" style="grid-column: 1 / -1;">
                         <div class="config-card-header">
                             <div class="config-card-icon"
-                                style="background: linear-gradient(135deg, #f59e0b22, #d9770622); color: #f59e0b;">
+                                style="background: rgba(245, 158, 11, 0.12); color: #f59e0b;">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                                     <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
                                     <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
@@ -120,8 +106,8 @@
                         <div class="config-card-body">
                             <div class="qb-selectors">
                                 <div class="qb-select-group">
-                                    <label>题库类型</label>
-                                    <select class="qb-select" id="qb-bank-type" onchange="onBankTypeChange()">
+                                    <label for="qb-bank-type">题库类型</label>
+                                    <select class="qb-select" id="qb-bank-type" data-change="bank-type">
                                         <option value="" selected>请选择题库类型</option>
                                         <option value="homework">课后巩固</option>
                                         <option value="preview">预习</option>
@@ -129,8 +115,8 @@
                                     </select>
                                 </div>
                                 <div class="qb-select-group" style="display: none;">
-                                    <label>年份</label>
-                                    <select class="qb-select" id="qb-year" onchange="onSelectorChange()">
+                                    <label for="qb-year">年份</label>
+                                    <select class="qb-select" id="qb-year" data-change="qb-selector">
                                         <option value="2026">2026 年</option>
                                         <option value="2025">2025 年</option>
                                         <option value="2027">2027 年</option>
@@ -138,8 +124,8 @@
                                     </select>
                                 </div>
                                 <div class="qb-select-group" style="display: none;">
-                                    <label>学期</label>
-                                    <select class="qb-select" id="qb-season" onchange="onSelectorChange()">
+                                    <label for="qb-season">学期</label>
+                                    <select class="qb-select" id="qb-season" data-change="qb-selector">
                                         <option value="春">春季</option>
                                         <option value="暑">暑假</option>
                                         <option value="秋">秋季</option>
@@ -147,8 +133,8 @@
                                     </select>
                                 </div>
                                 <div class="qb-select-group">
-                                    <label>学科</label>
-                                    <select class="qb-select" id="qb-subject" onchange="onSelectorChange()">
+                                    <label for="qb-subject">学科</label>
+                                    <select class="qb-select" id="qb-subject" data-change="qb-selector">
                                         <option value="" selected>请选择学科</option>
                                         <option value="数学">数学</option>
                                         <option value="英语">英语</option>
@@ -158,8 +144,8 @@
                                     </select>
                                 </div>
                                 <div class="qb-select-group">
-                                    <label>年级</label>
-                                    <select class="qb-select" id="qb-grade" onchange="onSelectorChange()">
+                                    <label for="qb-grade">年级</label>
+                                    <select class="qb-select" id="qb-grade" data-change="qb-selector">
                                         <option value="" selected>请选择年级</option>
                                         <option value="七年级先学">七年级先学</option>
                                         <option value="七年级">七年级</option>
@@ -171,8 +157,8 @@
                                     </select>
                                 </div>
                                 <div class="qb-select-group">
-                                    <label>班层</label>
-                                    <select class="qb-select" id="qb-tier" onchange="onSelectorChange()">
+                                    <label for="qb-tier">班层</label>
+                                    <select class="qb-select" id="qb-tier" data-change="qb-selector">
                                         <option value="" selected>请选择班层</option>
                                         <option value="U">U</option>
                                         <option value="S+">S+</option>
@@ -182,8 +168,8 @@
                                     </select>
                                 </div>
                                 <div class="qb-select-group">
-                                    <label id="qb-week-label">课后巩固专题</label>
-                                    <select class="qb-select" id="qb-week" onchange="onSelectorChange()">
+                                    <label for="qb-week" id="qb-week-label">课后巩固专题</label>
+                                    <select class="qb-select" id="qb-week" data-change="qb-selector">
                                         <option value="" selected>请选择专题</option>
                                     </select>
                                 </div>
@@ -194,8 +180,8 @@
                     <div class="qb-step-nav" style="grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
                         <span style="font-size: 0.85rem; color: var(--text-secondary);">若需上传新错题本，选好上方分类后点击下一步：</span>
                         <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                            <button type="button" class="btn secondary" id="rg-entry-btn" style="display: none;" onclick="openRegionDebugStudio()">免切题 · 整卷框题</button>
-                            <button class="btn primary" onclick="goNextFromStep1()">录入新错题本 / 下一步</button>
+                            <button type="button" class="btn secondary" id="rg-entry-btn" style="display: none;" data-action="open-rg-studio">免切题 · 整卷框题</button>
+                            <button class="btn primary" data-action="next-step-1">录入新错题本 / 下一步</button>
                         </div>
                     </div>
 
@@ -203,7 +189,7 @@
                     <div class="config-card glass-card saved-data-section" style="grid-column: 1 / -1;">
                         <div class="config-card-header">
                             <div class="config-card-icon"
-                                style="background: linear-gradient(135deg, #22c55e22, #16a34a22); color: #22c55e;">
+                                style="background: rgba(34, 197, 94, 0.12); color: #22c55e;">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                                     <path
                                         d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z">
@@ -241,9 +227,9 @@
                                                     <circle cx="11" cy="11" r="8"></circle>
                                                     <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                                                 </svg>
-                                                <input type="text" id="saved-search-input" placeholder="搜索专题/关键词..." oninput="onSavedFilterChange()">
+                                                <input type="text" id="saved-search-input" placeholder="搜索专题/关键词..." aria-label="搜索专题或关键词" data-input="saved-filter">
                                             </div>
-                                            <button type="button" class="saved-reset-btn" onclick="resetSavedFilters()" title="重置所有筛选条件">
+                                            <button type="button" class="saved-reset-btn" data-action="reset-saved-filters" title="重置所有筛选条件">
                                                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
                                                     <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
                                                     <path d="M3 3v5h5"></path>
@@ -326,7 +312,7 @@
                     <div class="config-card glass-card" style="grid-column: 1 / -1;">
                         <div class="config-card-header">
                             <div class="config-card-icon"
-                                style="background: linear-gradient(135deg, #3b82f622, #2563eb22); color: #3b82f6;">
+                                style="background: rgba(37, 99, 235, 0.12); color: #3b82f6;">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                                     <polyline points="14 2 14 8 20 8"></polyline>
@@ -343,7 +329,7 @@
                             </p>
                             <div class="qb-upload-list">
                                 <div class="qb-upload-item">
-                                    <button class="btn" onclick="selectBatchPdf('exercise')">
+                                    <button class="btn" data-action="select-batch-pdf" data-arg="exercise">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                                             <polyline points="7 10 12 15 17 10"></polyline>
@@ -354,7 +340,7 @@
                                     <span class="qb-upload-status" id="batch-exercise-status">未上传</span>
                                 </div>
                                 <div class="qb-upload-item">
-                                    <button class="btn" onclick="selectBatchPdf('answer')">
+                                    <button class="btn" data-action="select-batch-pdf" data-arg="answer">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
                                             <polyline points="22 4 12 14.01 9 11.01"></polyline>
@@ -368,8 +354,8 @@
                     </div>
 
                     <div class="qb-step-nav between" style="grid-column: 1 / -1;">
-                        <button class="btn sm" onclick="goBack()">上一步</button>
-                        <button class="btn primary" id="step2-next-btn" onclick="goNextFromStep2()" disabled>下一步</button>
+                        <button class="btn sm" data-action="go-back">上一步</button>
+                        <button class="btn primary" id="step2-next-btn" data-action="next-step-2" disabled>下一步</button>
                     </div>
                 </div>
             </section>
@@ -380,7 +366,7 @@
                     <div class="config-card glass-card" style="grid-column: 1 / -1;">
                         <div class="config-card-header">
                             <div class="config-card-icon"
-                                style="background: linear-gradient(135deg, #8b5cf622, #7c3aed22); color: #8b5cf6;">
+                                style="background: rgba(139, 92, 246, 0.12); color: #8b5cf6;">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                                     <rect x="3" y="3" width="18" height="18" rx="2"></rect>
                                     <line x1="3" y1="9" x2="21" y2="9"></line>
@@ -391,10 +377,10 @@
                             <div class="mapping-toolbar-actions">
                                 <span class="qb-auto-status" id="auto-detect-status" style="display:none;" title="系统会尝试从 PDF 每页左上角自动识别印刷题号"></span>
                                 <label class="cascade-toggle-label" id="cascade-toggle-wrap" title="开启后，修改多页题目的题号时，会自动顺延调整后续页面的题号，无需逐页手动修改">
-                                    <input type="checkbox" id="auto-cascade-numbers" checked onchange="toggleAutoCascade(this.checked)">
+                                    <input type="checkbox" id="auto-cascade-numbers" checked data-change="toggle-auto-cascade">
                                     <span>题号智能顺延</span>
                                 </label>
-                                <button type="button" class="btn sm" id="undo-cascade-btn" style="display:none;" onclick="undoLastLabelChange()" title="撤销上次题号顺延调整">
+                                <button type="button" class="btn sm" id="undo-cascade-btn" style="display:none;" data-action="undo-label" title="撤销上次题号顺延调整">
                                     ↩ 撤销顺延
                                 </button>
                                 <span class="qb-status unsaved" id="mapping-status">
@@ -429,8 +415,8 @@
                     </div>
 
                     <div class="qb-step-nav between" style="grid-column: 1 / -1;">
-                        <button class="btn sm" onclick="goBack()">上一步</button>
-                        <button class="btn primary" id="mapping-next-btn" onclick="goNextFromMapping()">完成标注并导入</button>
+                        <button class="btn sm" data-action="go-back">上一步</button>
+                        <button class="btn primary" id="mapping-next-btn" data-action="next-mapping">完成标注并导入</button>
                     </div>
                 </div>
             </section>
@@ -498,7 +484,7 @@
                                 </svg>
                                 <div class="qb-variation-hint-inner">
                                     <span id="qb-variation-hint-text"></span>
-                                    <button type="button" class="btn sm secondary qb-merge-same-topic-btn" id="qb-merge-same-topic-btn" onclick="mergeAllSameTopicVariations()" style="display: none;">
+                                    <button type="button" class="btn sm secondary qb-merge-same-topic-btn" id="qb-merge-same-topic-btn" data-action="merge-variations" style="display: none;">
                                         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
                                             <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
                                             <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
@@ -510,14 +496,14 @@
 
                             <div class="question-list-header">
                                 <div class="question-list-actions">
-                                    <button class="btn sm" onclick="addQuestion()">
+                                    <button class="btn sm" data-action="add-question">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <line x1="12" y1="5" x2="12" y2="19"></line>
                                             <line x1="5" y1="12" x2="19" y2="12"></line>
                                         </svg>
                                         添加题目
                                     </button>
-                                    <button class="btn danger sm" onclick="clearAllQuestions()">
+                                    <button class="btn danger sm" data-action="clear-all-questions">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <polyline points="3 6 5 6 21 6"></polyline>
                                             <path
@@ -533,7 +519,7 @@
                                             <circle cx="11" cy="11" r="8"></circle>
                                             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                                         </svg>
-                                        <input type="text" id="qb-search-input" placeholder="按题号、知识点或微课链接过滤..." oninput="onQuestionSearch(this.value)">
+                                        <input type="text" id="qb-search-input" placeholder="按题号、知识点或微课链接过滤..." aria-label="按题号、知识点或微课链接过滤" data-input="question-search">
                                     </div>
                                 </div>
                             </div>
@@ -544,7 +530,7 @@
                             <div class="qb-save-bar">
                                 <span class="save-info" id="save-info"></span>
                                 <div style="display: flex; gap: 10px; align-items: center;">
-                                    <button class="btn secondary" type="button" onclick="openTierSyncModal()" id="tier-sync-btn" title="将当前题目配置快速同步至其他班层">
+                                    <button class="btn secondary" type="button" data-action="open-tier-sync" id="tier-sync-btn" title="将当前题目配置快速同步至其他班层">
                                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                                             <polyline points="17 1 21 5 17 9"></polyline>
                                             <path d="M3 11V9a4 4 0 0 1 4-4h14"></path>
@@ -553,7 +539,7 @@
                                         </svg>
                                         同步其他班层
                                     </button>
-                                    <button class="btn primary" onclick="saveQuestions()" id="save-btn">
+                                    <button class="btn primary" data-action="save-questions" id="save-btn">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <path
                                                 d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z">
@@ -570,7 +556,7 @@
 
                     <div class="qb-step-nav between" style="grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
                         <div>
-                            <button class="btn sm secondary" onclick="goBack()" id="qb-step4-prev-btn" title="返回上一步（标注题号）">
+                            <button class="btn sm secondary" data-action="go-back" id="qb-step4-prev-btn" title="返回上一步（标注题号）">
                                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin-right: 4px;">
                                     <polyline points="15 18 9 12 15 6"></polyline>
                                 </svg>
@@ -578,13 +564,13 @@
                             </button>
                         </div>
                         <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                            <button class="btn sm secondary" onclick="goToConfigStep()" title="回到错题本配置（第1步学科与专题选择）">
+                            <button class="btn sm secondary" data-action="go-config-step" title="回到错题本配置（第1步学科与专题选择）">
                                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin-right: 4px;">
                                     <path d="M4 6h16M4 12h16M4 18h7"></path>
                                 </svg>
                                 回到配置
                             </button>
-                            <button class="btn sm secondary" onclick="goToHome()" title="回到教学反馈系统主工作台">
+                            <button class="btn sm secondary" data-action="go-home" title="回到教学反馈系统主工作台">
                                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin-right: 4px;">
                                     <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
                                     <polyline points="9 22 9 12 15 12 15 22"></polyline>
@@ -601,7 +587,7 @@
                 <div class="step-card rg-studio-card">
                     <div class="rg-studio-topbar">
                         <div class="rg-studio-title-group">
-                            <button type="button" class="btn sm secondary" onclick="exitRegionDebugStudio()" title="返回第 1 步配置">
+                            <button type="button" class="btn sm secondary" data-action="exit-rg-studio" title="返回第 1 步配置">
                                 <svg class="rg-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <polyline points="15 18 9 12 15 6"></polyline>
                                 </svg>
@@ -628,20 +614,20 @@
                                 </span>
                                 <span class="rg-flow-step" id="rg-step-pill-answer">3. 框选答案</span>
                             </div>
-                            <button type="button" class="btn sm secondary" id="rg-clear-draft-btn" onclick="rgClearDraftPrompt()" title="清空当前框题原卷与草稿" style="display: none;">清空草稿</button>
-                            <button type="button" class="btn secondary" id="rg-prev-stage-btn" onclick="rgGoPrevStage()" style="display: none;">
+                            <button type="button" class="btn sm secondary" id="rg-clear-draft-btn" data-action="rg-clear-draft" title="清空当前框题原卷与草稿" style="display: none;">清空草稿</button>
+                            <button type="button" class="btn secondary" id="rg-prev-stage-btn" data-action="rg-prev-stage" style="display: none;">
                                 <svg class="rg-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <polyline points="15 18 9 12 15 6"></polyline>
                                 </svg>
                                 <span class="rg-btn-label">上一步</span>
                             </button>
-                            <button type="button" class="btn primary" id="rg-next-stage-btn" onclick="rgGoNextStage()" disabled>
+                            <button type="button" class="btn primary" id="rg-next-stage-btn" data-action="rg-next-stage" disabled>
                                 <span class="rg-btn-label">开始框选题目 PDF</span>
                                 <svg class="rg-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <polyline points="9 18 15 12 9 6"></polyline>
                                 </svg>
                             </button>
-                            <button type="button" class="btn primary" id="rg-finish-btn" onclick="rgFinishAndImport()" style="display: none;">
+                            <button type="button" class="btn primary" id="rg-finish-btn" data-action="rg-finish-import" style="display: none;">
                                 <span class="rg-btn-label">完成框选并导入第 4 步</span>
                                 <svg class="rg-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <polyline points="9 18 15 12 9 6"></polyline>
@@ -653,26 +639,26 @@
                     <!-- 第 1 步：上传题目 PDF 与答案 PDF -->
                     <div class="rg-upload-gate" id="rg-upload-gate">
                         <div class="rg-upload-gate-grid">
-                            <label class="rg-upload-box" id="rg-exercise-upload-box" for="rg-exercise-file" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('rg-exercise-file')?.click();}">
+                            <label class="rg-upload-box" id="rg-exercise-upload-box" for="rg-exercise-file" tabindex="0" data-trigger-input="rg-exercise-file">
                                 <span class="rg-upload-dot exercise"></span>
                                 <div class="rg-upload-box-title">1. 上传题目原卷 PDF</div>
                                 <div class="rg-upload-box-sub" id="rg-exercise-file-label">必传 · 点击选择单栏题目原卷 PDF</div>
-                                <input type="file" id="rg-exercise-file" accept=".pdf,application/pdf" hidden onchange="rgHandlePdfUpload('exercise', this)">
+                                <input type="file" id="rg-exercise-file" accept=".pdf,application/pdf" hidden data-change="rg-pdf-upload" data-arg="exercise">
                             </label>
-                            <label class="rg-upload-box" id="rg-answer-upload-box" for="rg-answer-file" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('rg-answer-file')?.click();}">
+                            <label class="rg-upload-box" id="rg-answer-upload-box" for="rg-answer-file" tabindex="0" data-trigger-input="rg-answer-file">
                                 <span class="rg-upload-dot answer"></span>
                                 <div class="rg-upload-box-title">2. 上传答案原卷 PDF</div>
                                 <div class="rg-upload-box-sub" id="rg-answer-file-label">必传 · 点击选择答案原卷 PDF</div>
-                                <input type="file" id="rg-answer-file" accept=".pdf,application/pdf" hidden onchange="rgHandlePdfUpload('answer', this)">
+                                <input type="file" id="rg-answer-file" accept=".pdf,application/pdf" hidden data-change="rg-pdf-upload" data-arg="answer">
                             </label>
                         </div>
                         <div class="rg-upload-gate-footer">
                             <label class="rg-snap-toggle">
-                                <input type="checkbox" id="rg-fullwidth-toggle" checked onchange="rgToggleFullWidth(this.checked)">
+                                <input type="checkbox" id="rg-fullwidth-toggle" checked data-change="rg-toggle-fullwidth">
                                 <span>横向自动打满（单栏）</span>
                             </label>
                             <div class="rg-upload-gate-right">
-                                <button type="button" class="btn sm secondary" id="rg-load-existing-btn" onclick="rgLoadFromCurrentQuestions()" style="display: none;">载入当前题库已有选区</button>
+                                <button type="button" class="btn sm secondary" id="rg-load-existing-btn" data-action="rg-load-current" style="display: none;">载入当前题库已有选区</button>
                                 <span class="rg-upload-gate-tip">两份 PDF 上传完成后，先逐题框选题目，再逐题框选答案（支持本地草稿自动恢复）</span>
                             </div>
                         </div>
@@ -683,14 +669,14 @@
                         <div class="rg-submode-left">
                             <span class="rg-submode-badge" id="rg-submode-badge">大题细分模式</span>
                             <div class="rg-subtarget-switch" id="rg-subtarget-switch">
-                                <button type="button" class="rg-subtarget-btn active" id="rg-subtarget-stem" onclick="rgSetSubDrawTarget('stem')">1. 框选原文/公共题干</button>
-                                <button type="button" class="rg-subtarget-btn" id="rg-subtarget-subq" onclick="rgSetSubDrawTarget('subq')">2. 框选小问</button>
+                                <button type="button" class="rg-subtarget-btn active" id="rg-subtarget-stem" data-action="rg-sub-target" data-arg="stem">1. 框选原文/公共题干</button>
+                                <button type="button" class="rg-subtarget-btn" id="rg-subtarget-subq" data-action="rg-sub-target" data-arg="subq">2. 框选小问</button>
                             </div>
                             <span class="rg-submode-hint" id="rg-submode-hint">先用绿框框出公共原文，再切换到“框选小问”框出各小题</span>
                         </div>
                         <div class="rg-submode-actions">
-                            <button type="button" class="btn sm secondary" onclick="rgUndoSubBox()">撤销小框</button>
-                            <button type="button" class="btn sm primary" onclick="rgExitSubMode()">完成大题细分</button>
+                            <button type="button" class="btn sm secondary" data-action="rg-undo-subbox">撤销小框</button>
+                            <button type="button" class="btn sm primary" data-action="rg-exit-submode">完成大题细分</button>
                         </div>
                     </div>
 
@@ -699,18 +685,18 @@
                         <div class="rg-canvas-col">
                             <div class="rg-canvas-toolbar">
                                 <div class="rg-page-nav">
-                                    <button type="button" class="btn sm secondary" id="rg-prev-page" onclick="rgChangePage(-1)">上一页</button>
+                                    <button type="button" class="btn sm secondary" id="rg-prev-page" data-action="rg-change-page" data-arg="-1">上一页</button>
                                     <span class="rg-page-info" id="rg-page-info">0 / 0 页</span>
-                                    <button type="button" class="btn sm secondary" id="rg-next-page" onclick="rgChangePage(1)">下一页</button>
+                                    <button type="button" class="btn sm secondary" id="rg-next-page" data-action="rg-change-page" data-arg="1">下一页</button>
                                 </div>
                                 <div class="rg-zoom-controls">
-                                    <button type="button" class="btn sm secondary rg-mode-btn active" id="rg-interact-mode-btn" onclick="rgToggleInteractMode()" title="在手机上可切换：拉框模式（单指框题） / 浏览滚动（单指滑动页面）">模式: 拉框</button>
-                                    <button type="button" class="btn sm secondary rg-mode-btn" id="rg-twotap-btn" onclick="rgToggleTwoTapMode()" title="开启后只需点击两次（上边界 + 下边界）即可快速成框，适合手机端单栏操作">两点定框: 关</button>
-                                    <button type="button" class="btn sm secondary rg-mode-btn active" id="rg-fullwidth-toolbar-btn" onclick="rgToggleFullWidth(!document.getElementById('rg-fullwidth-toggle')?.checked)" title="开启时拉框自动横跨单栏整宽；双栏试卷可临时关闭">全宽: 开</button>
-                                    <button type="button" class="btn sm secondary" onclick="rgZoom(-0.15)">-</button>
+                                    <button type="button" class="btn sm secondary rg-mode-btn active" id="rg-interact-mode-btn" data-action="rg-toggle-interact" title="在手机上可切换：拉框模式（单指框题） / 浏览滚动（单指滑动页面）">模式: 拉框</button>
+                                    <button type="button" class="btn sm secondary rg-mode-btn" id="rg-twotap-btn" data-action="rg-toggle-twotap" title="开启后只需点击两次（上边界 + 下边界）即可快速成框，适合手机端单栏操作">两点定框: 关</button>
+                                    <button type="button" class="btn sm secondary rg-mode-btn active" id="rg-fullwidth-toolbar-btn" data-action="rg-toggle-fullwidth-btn" title="开启时拉框自动横跨单栏整宽；双栏试卷可临时关闭">全宽: 开</button>
+                                    <button type="button" class="btn sm secondary" data-action="rg-zoom" data-arg="-0.15">-</button>
                                     <span class="rg-zoom-val" id="rg-zoom-val">100%</span>
-                                    <button type="button" class="btn sm secondary" onclick="rgZoom(0.15)">+</button>
-                                    <button type="button" class="btn sm secondary" onclick="rgUndoLastRegion()" title="快捷键: Ctrl/Cmd + Z">撤销上一框</button>
+                                    <button type="button" class="btn sm secondary" data-action="rg-zoom" data-arg="0.15">+</button>
+                                    <button type="button" class="btn sm secondary" data-action="rg-undo-region" title="快捷键: Ctrl/Cmd + Z">撤销上一框</button>
                                     <span class="rg-shortcut-hint" title="快捷键：←/→ 翻页 · Ctrl+Z 撤销 · Delete 删除选中框 · Ctrl+滚轮 缩放 · 1/2 切换原文/小问 · Esc 退出子模式">快捷键</span>
                                 </div>
                             </div>
@@ -735,7 +721,7 @@
                             <div class="rg-missing-bar" id="rg-missing-bar" style="display: none;"></div>
                             <div class="rg-continue-banner" id="rg-continue-banner" style="display: none;">
                                 <span id="rg-continue-text">正在为第 1 题追加跨页区域：请翻页后直接拉框</span>
-                                <button type="button" class="btn sm secondary" onclick="rgCancelContinue()">取消</button>
+                                <button type="button" class="btn sm secondary" data-action="rg-cancel-continue">取消</button>
                             </div>
                             <div class="rg-list" id="rg-list">
                                 <div class="rg-list-empty">暂无框选区域</div>
@@ -748,7 +734,7 @@
     </div>
 
     <!-- Generic dialog -->
-    <div class="dialog-overlay" id="custom-dialog">
+    <dialog class="dialog-overlay native-dialog" id="custom-dialog" closedby="any" aria-labelledby="dialog-title">
         <div class="dialog-box">
             <div class="dialog-header">
                 <h3 class="dialog-title" id="dialog-title">提示</h3>
@@ -756,22 +742,22 @@
             <div class="dialog-body">
                 <div id="dialog-body"></div>
                 <div class="dialog-input-wrap" id="dialog-input-wrap">
-                    <textarea class="dialog-input" id="dialog-input" rows="3"></textarea>
+                    <textarea class="dialog-input" id="dialog-input" rows="3" aria-label="输入内容"></textarea>
                 </div>
             </div>
             <div class="dialog-footer">
-                <button class="btn secondary" id="dialog-cancel">取消</button>
-                <button class="btn primary" id="dialog-confirm">确认</button>
+                <button type="button" class="btn secondary" id="dialog-cancel">取消</button>
+                <button type="button" class="btn primary" id="dialog-confirm">确认</button>
             </div>
         </div>
-    </div>
+    </dialog>
 
     <!-- PDF preview dialog -->
-    <div class="dialog-overlay" id="pdf-preview-dialog">
+    <dialog class="dialog-overlay native-dialog" id="pdf-preview-dialog" closedby="any" aria-labelledby="pdf-preview-title">
         <div class="pdf-preview-box">
             <div class="pdf-preview-header">
                 <h3 class="dialog-title" id="pdf-preview-title">PDF 预览</h3>
-                <button class="pdf-preview-close" onclick="closePdfPreview()" title="关闭">
+                <button type="button" class="pdf-preview-close" data-action="close-pdf-preview" title="关闭" aria-label="关闭">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                         <line x1="18" y1="6" x2="6" y2="18"></line>
                         <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -782,14 +768,14 @@
                 <iframe id="pdf-preview-frame" src="" title="PDF 预览"></iframe>
             </div>
             <div class="pdf-preview-footer">
-                <button class="btn secondary" onclick="closePdfPreview()">关闭</button>
-                <button class="btn primary" onclick="openPdfInNewTab()">在新窗口打开</button>
+                <button type="button" class="btn secondary" data-action="close-pdf-preview">关闭</button>
+                <button type="button" class="btn primary" data-action="open-pdf-new-tab">在新窗口打开</button>
             </div>
         </div>
-    </div>
+    </dialog>
 
     <!-- High-Definition Page Lightbox Dialog -->
-    <div class="dialog-overlay" id="page-lightbox-dialog">
+    <dialog class="dialog-overlay native-dialog" id="page-lightbox-dialog" closedby="any" aria-labelledby="lightbox-title">
         <div class="page-lightbox-box">
             <div class="page-lightbox-header">
                 <div class="page-lightbox-title-wrap">
@@ -797,17 +783,17 @@
                     <div class="lightbox-label-editor" id="lightbox-label-editor-standard">
                         <label for="lightbox-page-label" id="lightbox-page-label-text">起始题号</label>
                         <div class="lightbox-stepper-controls">
-                            <button type="button" class="stepper-btn sm" onclick="stepLightboxLabel(-1, event)" title="题号减 1">
+                            <button type="button" class="stepper-btn sm" data-action="step-lightbox-label" data-arg="-1" title="题号减 1">
                                 <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                             </button>
-                            <input type="number" id="lightbox-page-label" min="1" step="1" onwheel="this.blur()" onkeydown="if(event.key==='Enter') this.blur()" onchange="onLightboxLabelChange(this.value)">
-                            <button type="button" class="stepper-btn sm" onclick="stepLightboxLabel(1, event)" title="题号加 1">
+                            <input type="number" id="lightbox-page-label" min="1" step="1" data-change="lightbox-label">
+                            <button type="button" class="stepper-btn sm" data-action="step-lightbox-label" data-arg="1" title="题号加 1">
                                 <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                             </button>
                         </div>
                         <span class="lightbox-group-range-pill" id="lightbox-group-range-pill" style="display: none;"></span>
                     </div>
-                    <button type="button" class="lightbox-bigq-toggle-btn" id="lightbox-bigq-toggle-btn" onclick="toggleLightboxBoxMode()" title="将本页设为大题，按顺序拉框标出各小问位置与题号">
+                    <button type="button" class="lightbox-bigq-toggle-btn" id="lightbox-bigq-toggle-btn" data-action="toggle-lightbox-boxmode" title="将本页设为大题，按顺序拉框标出各小问位置与题号">
                         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="3" y="3" width="18" height="18" rx="2"></rect>
                             <path d="M9 3v18M3 9h6M3 15h6"></path>
@@ -816,17 +802,17 @@
                     </button>
                 </div>
                 <div class="page-lightbox-controls">
-                    <button type="button" class="lightbox-btn" onclick="zoomLightboxImage(-0.25)" title="缩小 (-)">
+                    <button type="button" class="lightbox-btn" data-action="zoom-lightbox" data-arg="-0.25" title="缩小 (-)">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
                     </button>
                     <span class="lightbox-zoom-val" id="lightbox-zoom-val">100%</span>
-                    <button type="button" class="lightbox-btn" onclick="zoomLightboxImage(0.25)" title="放大 (+)">
+                    <button type="button" class="lightbox-btn" data-action="zoom-lightbox" data-arg="0.25" title="放大 (+)">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
                     </button>
-                    <button type="button" class="lightbox-btn" onclick="resetLightboxZoom()" title="适应屏幕">
+                    <button type="button" class="lightbox-btn" data-action="reset-lightbox-zoom" title="适应屏幕">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path></svg>
                     </button>
-                    <button type="button" class="pdf-preview-close" onclick="closePageLightbox()" title="关闭 (ESC)">
+                    <button type="button" class="pdf-preview-close" data-action="close-page-lightbox" title="关闭 (ESC)">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                     </button>
                 </div>
@@ -835,41 +821,41 @@
                 <div class="lightbox-boxmode-info">
                     <span class="lightbox-boxmode-dot" id="lightbox-boxmode-dot"></span>
                     <div class="lightbox-target-switch" id="lightbox-target-switch" style="display: none;">
-                        <button type="button" class="lightbox-target-btn" id="lightbox-target-stem-btn" onclick="setLightboxDrawTarget('stem')">1. 框选原文</button>
-                        <button type="button" class="lightbox-target-btn active" id="lightbox-target-subq-btn" onclick="setLightboxDrawTarget('subq')">2. 框选题号</button>
+                        <button type="button" class="lightbox-target-btn" id="lightbox-target-stem-btn" data-action="lightbox-draw-target" data-arg="stem">1. 框选原文</button>
+                        <button type="button" class="lightbox-target-btn active" id="lightbox-target-subq-btn" data-action="lightbox-draw-target" data-arg="subq">2. 框选题号</button>
                     </div>
                     <span class="lightbox-boxmode-guide" id="lightbox-boxmode-guide">按住鼠标在卷面上依次拖拽拉框，每个框自动对应一问</span>
                     <span class="lightbox-boxmode-summary" id="lightbox-boxmode-summary">尚未框选小问</span>
                 </div>
                 <div class="lightbox-boxmode-actions">
-                    <button type="button" class="btn sm secondary active" id="lightbox-fullwidth-btn" onclick="toggleLightboxFullWidthSnap()" title="单栏试卷开启后，每次拉框松手自动左右打满到页边距">
+                    <button type="button" class="btn sm secondary active" id="lightbox-fullwidth-btn" data-action="lightbox-toggle-snap" title="单栏试卷开启后，每次拉框松手自动左右打满到页边距">
                         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12h16M4 6v12M20 6v12"></path></svg>
                         <span>横向通栏: 开</span>
                     </button>
-                    <button type="button" class="btn sm secondary" id="lightbox-box-align-btn" onclick="alignCurrentPageBoxes()" disabled title="安全对齐同列框选边缘并统一相近行高（不会缩小原框或侵占相邻题）">
+                    <button type="button" class="btn sm secondary" id="lightbox-box-align-btn" data-action="lightbox-align-boxes" disabled title="安全对齐同列框选边缘并统一相近行高（不会缩小原框或侵占相邻题）">
                         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="14" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>
                         <span>对齐规整</span>
                     </button>
-                    <button type="button" class="btn sm secondary" id="lightbox-box-undo-btn" onclick="undoLastPageBox()" disabled title="撤销本页最后一个选框">
+                    <button type="button" class="btn sm secondary" id="lightbox-box-undo-btn" data-action="lightbox-undo-box" disabled title="撤销本页最后一个选框">
                         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"></path><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path></svg>
                         <span>撤销上一框</span>
                     </button>
-                    <button type="button" class="btn sm secondary" id="lightbox-box-clear-btn" onclick="clearCurrentPageBoxes()" disabled title="清空本页全部小问选框">
+                    <button type="button" class="btn sm secondary" id="lightbox-box-clear-btn" data-action="lightbox-clear-boxes" disabled title="清空本页全部小问选框">
                         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path></svg>
                         <span>清空本页</span>
                     </button>
-                    <button type="button" class="btn sm secondary" id="lightbox-box-extend-btn" onclick="extendBigQuestionToNextPage()" title="若本篇大题跨到下一页，点击将下一页并入本大题并继续拉框">
+                    <button type="button" class="btn sm secondary" id="lightbox-box-extend-btn" data-action="lightbox-extend-page" title="若本篇大题跨到下一页，点击将下一页并入本大题并继续拉框">
                         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5l7 7-7 7"></path></svg>
                         <span>下一页续框同大题</span>
                     </button>
-                    <button type="button" class="btn sm primary" onclick="finishLightboxBoxMode()">
+                    <button type="button" class="btn sm primary" data-action="lightbox-finish-boxmode">
                         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                         <span>完成框选</span>
                     </button>
                 </div>
             </div>
             <div class="page-lightbox-body" id="lightbox-body">
-                <button type="button" class="lightbox-nav-btn prev" id="lightbox-prev-btn" onclick="navigateLightbox(-1)" title="上一页 (←)">
+                <button type="button" class="lightbox-nav-btn prev" id="lightbox-prev-btn" data-action="navigate-lightbox" data-arg="-1" title="上一页 (←)">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg>
                 </button>
                 <div class="page-lightbox-viewport" id="lightbox-viewport">
@@ -878,7 +864,7 @@
                         <div class="lightbox-box-layer" id="lightbox-box-layer"></div>
                     </div>
                 </div>
-                <button type="button" class="lightbox-nav-btn next" id="lightbox-next-btn" onclick="navigateLightbox(1)" title="下一页 (→)">
+                <button type="button" class="lightbox-nav-btn next" id="lightbox-next-btn" data-action="navigate-lightbox" data-arg="1" title="下一页 (→)">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"></polyline></svg>
                 </button>
             </div>
@@ -887,21 +873,9 @@
                 <span class="lightbox-hint" id="lightbox-footer-hint">快捷键：← 上一页 | → 下一页 | ESC 退出</span>
             </div>
         </div>
-    </div>
+    </dialog>
 
-    <div class="toast-container" id="toast-container"></div>
-
-    <script>
-        (function () {
-            // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 getTime()（会杀死全部缓存）
-            const v = '20261114-03';
-            document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
-            document.write(`<script src="js/common.js?v=${v}"><\/script>`);
-            document.write(`<script src="js/auth.js?v=${v}"><\/script>`);
-            document.write(`<script src="js/question-bank.js?v=${v}"><\/script>`);
-            document.write(`<script src="js/region-debug.js?v=${v}"><\/script>`);
-        })();
-    </script>
+    <div class="toast-container" id="toast-container" popover="manual"></div>
 </body>
 
 </html>

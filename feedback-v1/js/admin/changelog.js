@@ -106,12 +106,22 @@
                 document.getElementById('cl-active').checked = false;
                 addChangelogItemRow();
             }
-            modal.style.display = 'flex';
+            if (window.DialogHelper) {
+                window.DialogHelper.open(modal, { dismissible: true });
+            } else {
+                modal.style.display = 'flex';
+            }
         }
 
         function closeChangelogModal() {
             const modal = document.getElementById('changelog-modal');
-            if (modal) modal.style.display = 'none';
+            if (modal) {
+                if (window.DialogHelper) {
+                    window.DialogHelper.close(modal);
+                } else {
+                    modal.style.display = 'none';
+                }
+            }
         }
 
         async function saveChangelog() {

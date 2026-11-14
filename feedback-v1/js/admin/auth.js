@@ -41,12 +41,22 @@
             if (pOld) pOld.value = '';
             if (pNew) pNew.value = '';
             if (pConf) pConf.value = '';
-            modal.style.display = 'flex';
+            if (window.DialogHelper) {
+                window.DialogHelper.open(modal, { dismissible: true });
+            } else {
+                modal.style.display = 'flex';
+            }
         }
 
         function closeChangePwdModal() {
             const modal = document.getElementById('change-pwd-modal');
-            if (modal) modal.style.display = 'none';
+            if (modal) {
+                if (window.DialogHelper) {
+                    window.DialogHelper.close(modal);
+                } else {
+                    modal.style.display = 'none';
+                }
+            }
         }
 
         async function submitChangePwd() {

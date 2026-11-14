@@ -66,6 +66,7 @@ window.escapeAttr = escapeAttr;
 const storagePrefix = 'jf-autofeedback:';
 
 function getPreferredTheme() {
+    if (window.ThemeManager) return window.ThemeManager.getEffectiveTheme();
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme === 'light' || savedTheme === 'dark') return savedTheme;
     return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
@@ -74,11 +75,19 @@ function getPreferredTheme() {
 function syncThemeMeta(theme) {
     const metaThemeColor = document.querySelector('meta[name="theme-color"]');
     if (metaThemeColor) {
-        metaThemeColor.setAttribute('content', theme === 'light' ? '#f6f7f9' : '#151518');
+        metaThemeColor.setAttribute('content', theme === 'light' ? '#fafafa' : '#141415');
+    }
+    const metaColorScheme = document.querySelector('meta[name="color-scheme"]');
+    if (metaColorScheme) {
+        metaColorScheme.setAttribute('content', (theme === 'light' || theme === 'dark') ? theme : 'light dark');
     }
 }
 
 function applyTheme(theme) {
+    if (window.ThemeManager && (theme === 'light' || theme === 'dark' || theme === 'system')) {
+        window.ThemeManager.setMode(theme);
+        return;
+    }
     document.documentElement.setAttribute('data-theme', theme);
     const themeCheckbox = document.getElementById('theme-toggle-input');
     if (themeCheckbox) {
@@ -88,10 +97,18 @@ function applyTheme(theme) {
 }
 
 function initTheme() {
+    if (window.ThemeManager) {
+        window.ThemeManager.syncUI();
+        return;
+    }
     applyTheme(getPreferredTheme());
 }
 
 function toggleTheme(checkbox) {
+    if (window.ThemeManager && !(checkbox && checkbox.checked !== undefined)) {
+        window.ThemeManager.cycleMode();
+        return;
+    }
     let newTheme;
     if (checkbox && checkbox.checked !== undefined) {
         newTheme = checkbox.checked ? 'light' : 'dark';
@@ -100,7 +117,9 @@ function toggleTheme(checkbox) {
         newTheme = currentTheme === 'light' ? 'dark' : 'light';
     }
     applyTheme(newTheme);
-    localStorage.setItem('theme', newTheme);
+    if (!window.ThemeManager) {
+        localStorage.setItem('theme', newTheme);
+    }
 }
 
 function setupPageTransition() {
@@ -539,7 +558,11 @@ function showToast(message, type = 'info', duration = 2800) {
         container = document.createElement('div');
         container.id = 'toast-container';
         container.className = 'toast-container';
+        container.setAttribute('popover', 'manual');
         document.body.appendChild(container);
+    }
+    if (window.DialogHelper && typeof window.DialogHelper.promoteToast === 'function') {
+        window.DialogHelper.promoteToast(container);
     }
 
     // 限制最大堆叠数量（最多 4 条，避免遮挡界面）
@@ -615,7 +638,27 @@ function showCustomDialog(options = {}) {
     } else {
         confirmBtn.classList.remove('danger');
     }
-    overlay.classList.add('active');
+    function closeDialog() {
+        if (window.DialogHelper) {
+            window.DialogHelper.close(overlay);
+        } else {
+            overlay.classList.remove('active');
+        }
+        if (boxEl) boxEl.style.maxWidth = '';
+    }
+    window.closeCustomDialog = closeDialog;
+
+    if (window.DialogHelper) {
+        window.DialogHelper.open(overlay, {
+            dismissible: true,
+            onCancel: () => {
+                if (boxEl) boxEl.style.maxWidth = '';
+                if (options.onCancel) options.onCancel();
+            }
+        });
+    } else {
+        overlay.classList.add('active');
+    }
     setTimeout(() => {
         if (options.showInput) inputEl.focus();
         else confirmBtn.focus();
@@ -624,11 +667,6 @@ function showCustomDialog(options = {}) {
     const newCancel = cancelBtn.cloneNode(true);
     confirmBtn.parentNode.replaceChild(newConfirm, confirmBtn);
     cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
-    function closeDialog() {
-        overlay.classList.remove('active');
-        if (boxEl) boxEl.style.maxWidth = '';
-    }
-    window.closeCustomDialog = closeDialog;
 
     const closeBtn = overlay.querySelector('.dialog-close-btn');
     if (closeBtn) {
@@ -652,22 +690,24 @@ function showCustomDialog(options = {}) {
         closeDialog();
         if (options.onCancel) options.onCancel();
     });
-    const overlayClickHandler = (e) => {
-        if (e.target === overlay) {
-            closeDialog();
-            if (options.onCancel) options.onCancel();
-            overlay.removeEventListener('click', overlayClickHandler);
-        }
-    };
-    overlay.addEventListener('click', overlayClickHandler);
-    const escHandler = (e) => {
-        if (e.key === 'Escape') {
-            closeDialog();
-            if (options.onCancel) options.onCancel();
-            document.removeEventListener('keydown', escHandler);
-        }
-    };
-    document.addEventListener('keydown', escHandler);
+    if (!window.DialogHelper || overlay.tagName !== 'DIALOG') {
+        const overlayClickHandler = (e) => {
+            if (e.target === overlay) {
+                closeDialog();
+                if (options.onCancel) options.onCancel();
+                overlay.removeEventListener('click', overlayClickHandler);
+            }
+        };
+        overlay.addEventListener('click', overlayClickHandler);
+        const escHandler = (e) => {
+            if (e.key === 'Escape') {
+                closeDialog();
+                if (options.onCancel) options.onCancel();
+                document.removeEventListener('keydown', escHandler);
+            }
+        };
+        document.addEventListener('keydown', escHandler);
+    }
 }
 
 /**

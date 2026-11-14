@@ -4,31 +4,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="color-scheme" content="light dark">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>反馈生成器 - 春秋季 - 上传</title>
     <meta name="description" content="上传春秋季课前预习与课后巩固数据，自动生成学生反馈报告">
-    <script>
-        (function () {
-            // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 Date.now()（会杀死全部缓存）
-            const v = '20261114-02';
-            document.write(`<link rel="stylesheet" href="css/common.css?v=${v}">`);
-            document.write(`<link rel="stylesheet" href="css/upload.css?v=${v}">`);
-            document.write(`<link rel="stylesheet" href="css/auth.css?v=${v}">`);
-            document.write(`<link rel="stylesheet" href="css/tokens.css?v=${v}">`);
-        })();
-    </script>
+    <script src="js/theme-boot.js?v=20261114-04"></script>
+    <link rel="stylesheet" href="css/common.css?v=20261114-04">
+    <link rel="stylesheet" href="css/upload.css?v=20261114-04">
+    <link rel="stylesheet" href="css/auth.css?v=20261114-04">
+    <link rel="stylesheet" href="css/tokens.css?v=20261114-04">
 </head>
 
 <body class="upload-page">
-
-    <!-- Animated background orbs -->
-    <div class="bg-orbs" aria-hidden="true">
-        <div class="orb orb-1"></div>
-        <div class="orb orb-2"></div>
-        <div class="orb orb-3"></div>
-    </div>
 
     <div class="upload-shell">
         <!-- Top navigation bar -->
@@ -46,15 +35,15 @@
                 </div>
             </div>
             <div class="nav-actions">
-                <a class="nav-link-btn" href="javascript:void(0)" onclick="showAllChangelogsModal()" title="更新日志">
+                <button type="button" class="nav-link-btn" data-action="show-changelogs" title="更新日志">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="21 8 21 21 3 21 3 8"></polyline>
                         <rect x="1" y="3" width="22" height="5"></rect>
                         <line x1="10" y1="12" x2="14" y2="12"></line>
                     </svg>
                     <span>更新日志</span>
-                </a>
-                <a class="nav-link-btn" href="javascript:void(0)" onclick="openSingleErrorEntryModal()" title="单独录入某学员预习或课后巩固错题">
+                </button>
+                <button type="button" class="nav-link-btn" data-action="open-see-modal" title="单独录入某学员预习或课后巩固错题">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
                         <circle cx="8.5" cy="7" r="4"></circle>
@@ -62,7 +51,7 @@
                         <line x1="23" y1="11" x2="17" y2="11"></line>
                     </svg>
                     <span>单人录入</span>
-                </a>
+                </button>
                 <a class="nav-link-btn" href="question-bank.html" title="错题本">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
@@ -75,7 +64,7 @@
                         <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"></path>
                     </svg>
                 </a>
-                <button class="btn primary sm" id="reupload-btn" onclick="confirmReupload()" title="重新上传" style="display:none;">
+                <button class="btn primary sm" id="reupload-btn" data-action="confirm-reupload" title="重新上传" style="display:none;">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                         <polyline points="17 8 12 3 7 8"></polyline>
@@ -83,29 +72,26 @@
                     </svg>
                     <span>重新上传</span>
                 </button>
-                <label class="theme-slider-switch" title="切换主题">
-                    <input type="checkbox" id="theme-toggle-input" onchange="toggleTheme(this)">
-                    <span class="theme-slider-track">
-                        <span class="theme-slider-thumb">
-                            <svg class="thumb-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
-                                <circle cx="12" cy="12" r="5"></circle>
-                                <line x1="12" y1="1" x2="12" y2="3"></line>
-                                <line x1="12" y1="21" x2="12" y2="23"></line>
-                                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-                                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-                                <line x1="1" y1="12" x2="3" y2="12"></line>
-                                <line x1="21" y1="12" x2="23" y2="12"></line>
-                                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-                                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-                            </svg>
-                            <svg class="thumb-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
-                                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-                            </svg>
-                        </span>
-                    </span>
-                </label>
+                <div class="theme-segmented" role="group" aria-label="主题模式">
+                    <button type="button" class="theme-seg-btn" data-theme-set="light" title="浅色模式" aria-label="浅色模式" aria-pressed="false">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="12" cy="12" r="4"></circle>
+                            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+                        </svg>
+                    </button>
+                    <button type="button" class="theme-seg-btn" data-theme-set="system" title="跟随系统" aria-label="跟随系统" aria-pressed="false">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                            <line x1="8" y1="21" x2="16" y2="21"></line>
+                            <line x1="12" y1="17" x2="12" y2="21"></line>
+                        </svg>
+                    </button>
+                    <button type="button" class="theme-seg-btn" data-theme-set="dark" title="深色模式" aria-label="深色模式" aria-pressed="false">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                        </svg>
+                    </button>
+                </div>
             </div>
         </nav>
 
@@ -151,29 +137,29 @@
                     <div class="config-card-body">
                         <div style="display: flex; flex-direction: column; gap: 6px;">
                             <div class="ui-pill-group fill" id="feedback-subject-group">
-                                <button class="ui-pill" data-subject="语文" onclick="selectFeedbackSubject(this, '语文')">
+                                <button class="ui-pill" data-subject="语文" data-action="select-subject">
                                     <span>语文</span>
                                 </button>
-                                <button class="ui-pill" data-subject="数学" onclick="selectFeedbackSubject(this, '数学')">
+                                <button class="ui-pill" data-subject="数学" data-action="select-subject">
                                     <span>数学</span>
                                 </button>
-                                <button class="ui-pill" data-subject="英语" onclick="selectFeedbackSubject(this, '英语')">
+                                <button class="ui-pill" data-subject="英语" data-action="select-subject">
                                     <span>英语</span>
                                 </button>
-                                <button class="ui-pill" data-subject="物理" onclick="selectFeedbackSubject(this, '物理')">
+                                <button class="ui-pill" data-subject="物理" data-action="select-subject">
                                     <span>物理</span>
                                 </button>
-                                <button class="ui-pill" data-subject="化学" onclick="selectFeedbackSubject(this, '化学')">
+                                <button class="ui-pill" data-subject="化学" data-action="select-subject">
                                     <span>化学</span>
                                 </button>
                             </div>
                             <div id="physics-preview-source" style="display: none; margin-top: 12px;">
                                 <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-secondary);">预习来源 <span style="color: #ef4444;">*</span></label>
                                 <div class="ui-pill-group fill" id="physics-source-group" style="margin-top: 6px;">
-                                    <button class="ui-pill" data-source="aiwenyun" onclick="selectPhysicsPreviewSource(this, 'aiwenyun')">
+                                    <button class="ui-pill" data-source="aiwenyun" data-action="select-physics-source">
                                         <span>爱问云</span>
                                     </button>
-                                    <button class="ui-pill" data-source="wenjuanxing" onclick="selectPhysicsPreviewSource(this, 'wenjuanxing')">
+                                    <button class="ui-pill" data-source="wenjuanxing" data-action="select-physics-source">
                                         <span>问卷星</span>
                                     </button>
                                 </div>
@@ -197,7 +183,7 @@
                             <h3>所有学生名单</h3>
                             <span class="card-badge optional">可选</span>
                             <a href="http://jf-alpha.com" target="_blank" style="margin-left: 10px; font-size: 0.85rem; color: #3b82f6; text-decoration: underline;">导出学生作业名单</a>
-                            <button class="icon-btn clear-btn" style="margin-left: auto; width: 32px; height: 32px;" title="清空名单文件" onclick="clearRosterFile()">
+                            <button class="icon-btn clear-btn" style="margin-left: auto; width: 32px; height: 32px;" title="清空名单文件" data-action="clear-roster">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                             </button>
                         </div>
@@ -280,13 +266,13 @@
                                 <span class="file-list-count" id="preview-file-count">已上传文件</span>
                                 <div class="file-list-actions">
                                     <button class="icon-btn add-btn" title="追加更多文件"
-                                        onclick="document.getElementById('preview-file-append').click()">
+                                        data-action="trigger-click" data-target="preview-file-append">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <line x1="12" y1="5" x2="12" y2="19"></line>
                                             <line x1="5" y1="12" x2="19" y2="12"></line>
                                         </svg>
                                     </button>
-                                    <button class="icon-btn clear-btn" title="清空所有" onclick="clearPreviewFiles()">
+                                    <button class="icon-btn clear-btn" title="清空所有" data-action="clear-preview">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <polyline points="3 6 5 6 21 6"></polyline>
                                             <path
@@ -341,13 +327,13 @@
                                 <span class="file-list-count" id="file-count">已上传文件</span>
                                 <div class="file-list-actions">
                                     <button class="icon-btn add-btn" title="追加更多文件"
-                                        onclick="document.getElementById('homework-file-append').click()">
+                                        data-action="trigger-click" data-target="homework-file-append">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <line x1="12" y1="5" x2="12" y2="19"></line>
                                             <line x1="5" y1="12" x2="19" y2="12"></line>
                                         </svg>
                                     </button>
-                                    <button class="icon-btn clear-btn" title="清空所有" onclick="clearHomeworkFiles()">
+                                    <button class="icon-btn clear-btn" title="清空所有" data-action="clear-homework">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <polyline points="3 6 5 6 21 6"></polyline>
                                             <path
@@ -401,13 +387,13 @@
                                 <span class="file-list-count" id="note-file-count">已上传文件</span>
                                 <div class="file-list-actions">
                                     <button class="icon-btn add-btn" title="追加更多文件"
-                                        onclick="document.getElementById('note-file-append').click()">
+                                        data-action="trigger-click" data-target="note-file-append">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <line x1="12" y1="5" x2="12" y2="19"></line>
                                             <line x1="5" y1="12" x2="19" y2="12"></line>
                                         </svg>
                                     </button>
-                                    <button class="icon-btn clear-btn" title="清空所有" onclick="clearNoteFiles()">
+                                    <button class="icon-btn clear-btn" title="清空所有" data-action="clear-note">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <polyline points="3 6 5 6 21 6"></polyline>
                                             <path
@@ -462,13 +448,13 @@
                                 <span class="file-list-count" id="class-test-file-count">已上传文件</span>
                                 <div class="file-list-actions">
                                     <button class="icon-btn add-btn" title="追加更多文件"
-                                        onclick="document.getElementById('class-test-file-append').click()">
+                                        data-action="trigger-click" data-target="class-test-file-append">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <line x1="12" y1="5" x2="12" y2="19"></line>
                                             <line x1="5" y1="12" x2="19" y2="12"></line>
                                         </svg>
                                     </button>
-                                    <button class="icon-btn clear-btn" title="清空所有" onclick="clearClassTestFiles()">
+                                    <button class="icon-btn clear-btn" title="清空所有" data-action="clear-class-test">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <polyline points="3 6 5 6 21 6"></polyline>
                                             <path
@@ -494,7 +480,7 @@
                             </div>
                             <div class="card-title-group" style="display: flex; align-items: center; flex-wrap: wrap; flex: 1;">
                                 <h3>统计报告</h3>
-                                <button class="icon-btn clear-btn" style="margin-left: auto; width: 32px; height: 32px;" title="清空统计报告" onclick="clearReportFile()">
+                                <button class="icon-btn clear-btn" style="margin-left: auto; width: 32px; height: 32px;" title="清空统计报告" data-action="clear-report">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                                 </button>
                             </div>
@@ -524,7 +510,7 @@
                             <div class="file-list-bar">
                                 <span class="file-list-count" id="report-file-count">已上传文件</span>
                                 <div class="file-list-actions">
-                                    <button class="icon-btn clear-btn" title="清空统计报告" onclick="clearReportFile()">
+                                    <button class="icon-btn clear-btn" title="清空统计报告" data-action="clear-report">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <polyline points="3 6 5 6 21 6"></polyline>
                                             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -540,7 +526,7 @@
 
                 <div class="step-nav">
                     <div></div>
-                    <button class="btn primary" id="next-step-1" onclick="goToStep(2)" disabled>
+                    <button class="btn primary" id="next-step-1" data-action="go-step" data-arg="2" disabled>
                         <span>下一步：配置选项</span>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="9 18 15 12 9 6"></polyline>
@@ -585,7 +571,7 @@
                         <div class="config-card-body">
                             <div class="option-cards">
                                 <label class="option-card selected">
-                                    <input type="radio" name="preview-metric-mode" value="score_rank" checked onchange="onPreviewMetricModeChange()">
+                                    <input type="radio" name="preview-metric-mode" value="score_rank" checked data-change="preview-metric-mode">
                                     <div class="option-card-content">
                                         <div class="option-icon">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -609,7 +595,7 @@
                                     </div>
                                 </label>
                                 <label class="option-card">
-                                    <input type="radio" name="preview-metric-mode" value="score_only" onchange="onPreviewMetricModeChange()">
+                                    <input type="radio" name="preview-metric-mode" value="score_only" data-change="preview-metric-mode">
                                     <div class="option-card-content">
                                         <div class="option-icon">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -633,7 +619,7 @@
                                     </div>
                                 </label>
                                 <label class="option-card">
-                                    <input type="radio" name="preview-metric-mode" value="accuracy" onchange="onPreviewMetricModeChange()">
+                                    <input type="radio" name="preview-metric-mode" value="accuracy" data-change="preview-metric-mode">
                                     <div class="option-card-content">
                                         <div class="option-icon">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -653,7 +639,7 @@
                                     </div>
                                 </label>
                                 <label class="option-card">
-                                    <input type="radio" name="preview-metric-mode" value="correct_count" onchange="onPreviewMetricModeChange()">
+                                    <input type="radio" name="preview-metric-mode" value="correct_count" data-change="preview-metric-mode">
                                     <div class="option-card-content">
                                         <div class="option-icon">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -701,7 +687,7 @@
                         <div class="config-card-body">
                             <div class="ui-pill-group fill">
                                 <button class="ui-pill active" id="preview-source-file-btn"
-                                    onclick="switchPreviewCommentSource('file')">
+                                    data-action="preview-comment-source" data-arg="file">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                                         <polyline points="14 2 14 8 20 8"></polyline>
@@ -709,7 +695,7 @@
                                     <span>爱问云评语</span>
                                 </button>
                                 <button class="ui-pill" id="preview-source-manual-btn"
-                                    onclick="switchPreviewCommentSource('manual')">
+                                    data-action="preview-comment-source" data-arg="manual">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                                         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
@@ -717,7 +703,7 @@
                                     <span>固定模板</span>
                                 </button>
                                 <button class="ui-pill" id="preview-source-merge-btn"
-                                    onclick="switchPreviewCommentSource('merge')">
+                                    data-action="preview-comment-source" data-arg="merge">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path>
                                     </svg>
@@ -786,7 +772,7 @@
                         <div class="config-card-body">
                             <div class="ui-pill-group fill">
                                 <button class="ui-pill active" id="homework-source-file-btn"
-                                    onclick="switchHomeworkCommentSource('file')">
+                                    data-action="homework-comment-source" data-arg="file">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                                         <polyline points="14 2 14 8 20 8"></polyline>
@@ -794,7 +780,7 @@
                                     <span>爱问云评语</span>
                                 </button>
                                 <button class="ui-pill" id="homework-source-manual-btn"
-                                    onclick="switchHomeworkCommentSource('manual')">
+                                    data-action="homework-comment-source" data-arg="manual">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                                         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
@@ -802,7 +788,7 @@
                                     <span>固定模板</span>
                                 </button>
                                 <button class="ui-pill" id="homework-source-merge-btn"
-                                    onclick="switchHomeworkCommentSource('merge')">
+                                    data-action="homework-comment-source" data-arg="merge">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path>
                                     </svg>
@@ -875,14 +861,14 @@
                             <div id="focus-score-adjust" style="display: none; margin-bottom: 12px;">
                                 <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                                     <span style="font-size: 0.82rem; color: var(--text-secondary); font-weight: 500;">分数调整：</span>
-                                    <button class="focus-adjust-btn focus-add-btn" id="focus-add-one-btn" onclick="adjustFocusScore(1)">
+                                    <button class="focus-adjust-btn focus-add-btn" id="focus-add-one-btn" data-action="adjust-focus" data-arg="1">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                                             <line x1="12" y1="5" x2="12" y2="19"></line>
                                             <line x1="5" y1="12" x2="19" y2="12"></line>
                                         </svg>
                                         <span>全员加一分</span>
                                     </button>
-                                    <button class="focus-adjust-btn focus-sub-btn" id="focus-sub-one-btn" onclick="adjustFocusScore(-1)">
+                                    <button class="focus-adjust-btn focus-sub-btn" id="focus-sub-one-btn" data-action="adjust-focus" data-arg="-1">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                                             <line x1="5" y1="12" x2="19" y2="12"></line>
                                         </svg>
@@ -893,7 +879,7 @@
                             </div>
                             <div class="ui-pill-group fill">
                                 <button class="ui-pill active" id="focus-source-default-btn"
-                                    onclick="switchFocusCommentSource('default')">
+                                    data-action="focus-comment-source" data-arg="default">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
                                         <polyline points="22 4 12 14.01 9 11.01"></polyline>
@@ -901,7 +887,7 @@
                                     <span>默认评语</span>
                                 </button>
                                 <button class="ui-pill" id="focus-source-custom-btn"
-                                    onclick="switchFocusCommentSource('custom')">
+                                    data-action="focus-comment-source" data-arg="custom">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                                         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
@@ -1009,7 +995,7 @@
                                     <span class="toggle-desc">开启后，将根据评语中的错题号自动生成针对性巩固建议。需先在"错题本"中录入题目数据。</span>
                                 </div>
                                 <div class="modern-switch">
-                                    <input type="checkbox" id="plus-enabled" onchange="togglePlusConfig()">
+                                    <input type="checkbox" id="plus-enabled" data-change="toggle-plus">
                                     <span class="switch-track"></span>
                                 </div>
                             </label>
@@ -1022,7 +1008,7 @@
                                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 14px; margin-bottom: 14px;">
                                         <div style="display: flex; flex-direction: column; gap: 6px;">
                                             <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-secondary);">学科</label>
-                                            <select class="modern-input custom-select" id="plus-subject" onchange="onPlusSelectorChange()">
+                                            <select class="modern-input custom-select" id="plus-subject" data-change="plus-selector">
                                                 <option value="数学">数学</option>
                                                 <option value="英语">英语</option>
                                                 <option value="物理">物理</option>
@@ -1032,7 +1018,7 @@
                                         </div>
                                         <div style="display: flex; flex-direction: column; gap: 6px;">
                                             <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-secondary);">年级</label>
-                                            <select class="modern-input custom-select" id="plus-grade" onchange="onPlusSelectorChange()">
+                                            <select class="modern-input custom-select" id="plus-grade" data-change="plus-selector">
                                                 <option value="" selected disabled>请选择年级</option>
                                                 <option value="七年级先学">七年级先学</option>
                                                 <option value="七年级">七年级</option>
@@ -1045,7 +1031,7 @@
                                         </div>
                                         <div style="display: flex; flex-direction: column; gap: 6px;">
                                             <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-secondary);">班层</label>
-                                            <select class="modern-input custom-select" id="plus-tier" onchange="onPlusSelectorChange()">
+                                            <select class="modern-input custom-select" id="plus-tier" data-change="plus-selector">
                                                 <option value="" selected disabled>请选择班层</option>
                                                 <option value="U">U</option>
                                                 <option value="S+">S+</option>
@@ -1056,13 +1042,13 @@
                                         </div>
                                         <div style="display: flex; flex-direction: column; gap: 6px;" id="plus-preview-week-container">
                                             <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-secondary);">预习专题</label>
-                                            <select class="modern-input custom-select" id="plus-preview-week" onchange="onPlusSelectorChange()">
+                                            <select class="modern-input custom-select" id="plus-preview-week" data-change="plus-selector">
                                                 <option value="">不关联预习 / 自动匹配</option>
                                             </select>
                                         </div>
                                         <div style="display: flex; flex-direction: column; gap: 6px;">
                                             <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-secondary);">课后巩固专题</label>
-                                            <select class="modern-input custom-select" id="plus-week" onchange="onPlusSelectorChange()">
+                                            <select class="modern-input custom-select" id="plus-week" data-change="plus-selector">
                                                 <option value="">不关联巩固 / 自动匹配</option>
                                             </select>
                                         </div>
@@ -1076,10 +1062,10 @@
                                         <span id="plus-data-status-text">请选择学科、班层及对应专题</span>
                                     </div>
                                     <div style="margin-top: 10px; display: flex; justify-content: flex-end; align-items: center; gap: 16px;">
-                                        <a href="javascript:void(0)" onclick="openSingleErrorEntryModal()"
-                                            style="font-size: 0.78rem; color: var(--text-secondary); text-decoration: none; font-weight: 500; transition: color 0.15s;">
+                                        <button type="button" data-action="open-see-modal"
+                                            style="appearance: none; background: transparent; border: 0; padding: 0; font: inherit; font-size: 0.78rem; color: var(--text-secondary); cursor: pointer; font-weight: 500; transition: color 0.15s;">
                                             单人错题补录
-                                        </a>
+                                        </button>
                                         <a href="question-bank.html" target="_blank"
                                             style="font-size: 0.78rem; color: var(--accent); text-decoration: none; font-weight: 500; transition: opacity 0.2s;">
                                             前往错题本录入 →
@@ -1116,7 +1102,7 @@
                                     <input type="text" class="modern-input" id="exclusion-tag-input" 
                                         placeholder="输入学号+姓名（如：12345张三），按回车添加"
                                         style="flex: 1; margin: 0; padding: 8px 12px;">
-                                    <button class="btn secondary" style="padding: 0 16px; min-width: 80px; height: 38px; border-radius: 10px;" onclick="addExclusionTag()">
+                                    <button class="btn secondary" style="padding: 0 16px; min-width: 80px; height: 38px; border-radius: 10px;" data-action="add-exclusion-tag">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;margin-right:4px;vertical-align:-2px;">
                                             <line x1="12" y1="5" x2="12" y2="19"></line>
                                             <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -1132,8 +1118,8 @@
                             <textarea class="modern-input" id="exclusion-list" rows="5"
                                 placeholder="..." style="display: none;"></textarea>
                             <div style="margin-top: 12px; display: flex; gap: 10px; justify-content: flex-end;">
-                                <input type="file" id="exclusion-file-input" accept=".txt" style="display:none;" onchange="importExclusionFile(this)">
-                                <button class="btn secondary" style="padding: 6px 14px; font-size: 0.8rem;" onclick="document.getElementById('exclusion-file-input').click()">
+                                <input type="file" id="exclusion-file-input" accept=".txt" style="display:none;" data-change="import-exclusion">
+                                <button class="btn secondary" style="padding: 6px 14px; font-size: 0.8rem;" data-action="trigger-click" data-target="exclusion-file-input">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;">
                                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                                         <polyline points="17 8 12 3 7 8"></polyline>
@@ -1141,7 +1127,7 @@
                                     </svg>
                                     <span>导入名单</span>
                                 </button>
-                                <button class="btn secondary" style="padding: 6px 14px; font-size: 0.8rem;" onclick="exportExclusionFile()">
+                                <button class="btn secondary" style="padding: 6px 14px; font-size: 0.8rem;" data-action="export-exclusion-file">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;">
                                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                                         <polyline points="7 10 12 15 17 10"></polyline>
@@ -1156,7 +1142,7 @@
 
                 <div class="step-nav">
                     <div></div>
-                    <button class="btn primary" id="generate-btn" onclick="generateFeedback()">
+                    <button class="btn primary" id="generate-btn" data-action="generate-feedback">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
                         </svg>
@@ -1170,7 +1156,7 @@
     </div>
 
     <!-- Lesson confirm modal -->
-    <div class="dialog-overlay" id="lesson-confirm-modal" style="display:none;">
+    <dialog class="dialog-overlay native-dialog" id="lesson-confirm-modal" closedby="any">
         <div class="dialog-box">
             <div class="modal-header">
                 <div class="modal-icon">
@@ -1183,35 +1169,35 @@
             </div>
             <div class="modal-body">
                 <div class="confirm-field" id="confirm-preview-row" style="display:none;">
-                    <label>预习作业周次</label>
+                    <label for="confirm-preview-lesson">预习作业周次</label>
                     <div class="confirm-input-row">
                         <input type="number" class="modern-input number-input" id="confirm-preview-lesson" min="1">
                         <span class="confirm-source-text" id="confirm-preview-source"></span>
                     </div>
                 </div>
                 <div class="confirm-field" id="confirm-homework-row">
-                    <label>课后巩固周次</label>
+                    <label for="confirm-homework-lesson">课后巩固周次</label>
                     <div class="confirm-input-row">
                         <input type="number" class="modern-input number-input" id="confirm-homework-lesson" min="1">
                         <span class="confirm-source-text" id="confirm-homework-source"></span>
                     </div>
                 </div>
                 <div class="confirm-field" id="confirm-report-row">
-                    <label>统计报告课次</label>
+                    <label for="confirm-report-lesson">统计报告课次</label>
                     <div class="confirm-input-row">
                         <input type="number" class="modern-input number-input" id="confirm-report-lesson" min="1">
                         <span class="confirm-source-text" id="confirm-report-source"></span>
                     </div>
                 </div>
                 <div class="confirm-field" id="confirm-note-row" style="display:none;">
-                    <label>笔记作业周次</label>
+                    <label for="confirm-note-lesson">笔记作业周次</label>
                     <div class="confirm-input-row">
                         <input type="number" class="modern-input number-input" id="confirm-note-lesson" min="1">
                         <span class="confirm-source-text" id="confirm-note-source"></span>
                     </div>
                 </div>
                 <div class="confirm-field" id="confirm-class-test-row" style="display:none;">
-                    <label>课堂测试周次</label>
+                    <label for="confirm-class-test-lesson">课堂测试周次</label>
                     <div class="confirm-input-row">
                         <input type="number" class="modern-input number-input" id="confirm-class-test-lesson" min="1">
                         <span class="confirm-source-text" id="confirm-class-test-source"></span>
@@ -1219,8 +1205,8 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn secondary" onclick="closeConfirmModal()">取消</button>
-                <button class="btn primary" id="confirm-generate-btn" onclick="confirmAndGenerate(this)">
+                <button type="button" class="btn secondary" data-action="close-confirm-modal">取消</button>
+                <button type="button" class="btn primary" id="confirm-generate-btn" data-action="confirm-generate">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="20 6 9 17 4 12"></polyline>
                     </svg>
@@ -1228,9 +1214,9 @@
                 </button>
             </div>
         </div>
-    </div>
+    </dialog>
     <!-- Wenjuanxing name mismatch modal -->
-    <div class="dialog-overlay" id="wjx-name-modal" style="display:none;">
+    <dialog class="dialog-overlay native-dialog" id="wjx-name-modal" closedby="any">
         <div class="dialog-box" style="max-width: 560px;">
             <div class="modal-header">
                 <div class="modal-icon">
@@ -1247,8 +1233,8 @@
                 <!-- Dynamic content -->
             </div>
             <div class="modal-footer">
-                <button class="btn secondary" onclick="closeWjxNameModal()">跳过</button>
-                <button class="btn primary" onclick="applyWjxNameFixes()">
+                <button type="button" class="btn secondary" data-action="close-wjx-modal">跳过</button>
+                <button type="button" class="btn primary" data-action="apply-wjx-fixes">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="20 6 9 17 4 12"></polyline>
                     </svg>
@@ -1256,10 +1242,10 @@
                 </button>
             </div>
         </div>
-    </div>
+    </dialog>
 
     <!-- Comment format standard warning modal -->
-    <div class="dialog-overlay" id="comment-format-modal" style="display:none;">
+    <dialog class="dialog-overlay native-dialog" id="comment-format-modal" closedby="any">
         <div class="dialog-box" style="max-width: 680px; width: 94%;">
             <div class="modal-header">
                 <div class="modal-icon">
@@ -1269,7 +1255,7 @@
                 </div>
                 <h3 class="modal-title">错题评语规范提醒</h3>
                 <p class="modal-desc" style="margin-top: 4px; line-height: 1.5;">
-                    团队标准规范：<span style="display: inline-block; padding: 2px 8px; border-radius: 4px; background: rgba(99, 102, 241, 0.12); color: #6366f1; font-weight: 700; font-family: monospace;">本次作业的错题题号为：</span><br>
+                    团队标准规范：<span style="display: inline-block; padding: 2px 8px; border-radius: 4px; background: rgba(99, 102, 241, 0.12); color: #6366f1; font-weight: 600; font-family: monospace;">本次作业的错题题号为：</span><br>
                     检测到以下评语存在字词偏差或未按标准前缀书写，请统一规范：
                 </p>
             </div>
@@ -1277,10 +1263,10 @@
                 <!-- Dynamic content -->
             </div>
             <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap;">
-                <button class="btn secondary" onclick="ignoreCommentFormatAndGenerate()" style="font-size: 0.88rem; padding: 8px 14px;">
+                <button type="button" class="btn secondary" data-action="ignore-comment-format" style="font-size: 0.88rem; padding: 8px 14px;">
                     <span>已知晓，保持原样继续</span>
                 </button>
-                <button class="btn primary" onclick="autoFixCommentStandardsAndGenerate()" style="font-size: 0.88rem; padding: 8px 18px;">
+                <button type="button" class="btn primary" data-action="autofix-comment-format" style="font-size: 0.88rem; padding: 8px 18px;">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M12 20h9"></path>
                         <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
@@ -1289,10 +1275,10 @@
                 </button>
             </div>
         </div>
-    </div>
+    </dialog>
 
     <!-- Missing error questions warning modal (开启错题本时，非满分但无错题号提示) -->
-    <div class="dialog-overlay" id="missing-errors-modal" style="display:none;" onclick="if(event.target===this) closeMissingErrorsModal()">
+    <dialog class="dialog-overlay native-dialog" id="missing-errors-modal" closedby="any">
         <div class="dialog-box" style="max-width: 680px; width: 94%;">
             <div class="modal-header">
                 <div class="modal-icon">
@@ -1312,18 +1298,18 @@
                 <!-- Dynamic content -->
             </div>
             <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap;">
-                <button class="btn secondary" onclick="closeMissingErrorsModal()" style="font-size: 0.88rem; padding: 8px 16px;">
+                <button class="btn secondary" data-action="close-missing-errors" style="font-size: 0.88rem; padding: 8px 16px;">
                     <span>返回修改评语</span>
                 </button>
-                <button class="btn primary" onclick="ignoreMissingErrorsAndContinue()" style="font-size: 0.88rem; padding: 8px 18px;">
+                <button class="btn primary" data-action="ignore-missing-errors" style="font-size: 0.88rem; padding: 8px 18px;">
                     <span>继续生成</span>
                 </button>
             </div>
         </div>
-    </div>
+    </dialog>
 
     <!-- Duplicate submissions modal -->
-    <div class="dialog-overlay" id="duplicate-students-modal" style="display:none;">
+    <dialog class="dialog-overlay native-dialog" id="duplicate-students-modal" closedby="any">
         <div class="dialog-box" style="max-width: 600px;">
             <div class="modal-header">
                 <div class="modal-icon">
@@ -1339,10 +1325,10 @@
                 <!-- Dynamic content -->
             </div>
             <div class="modal-footer" style="justify-content: space-between; flex-wrap: wrap; gap: 10px;">
-                <button class="btn secondary" onclick="autoSelectBestScores()">
+                <button type="button" class="btn secondary" data-action="auto-select-best">
                     <span>一键保留最高分</span>
                 </button>
-                <button class="btn primary" onclick="confirmDuplicateChoices()">
+                <button type="button" class="btn primary" data-action="confirm-duplicate-choices">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="20 6 9 17 4 12"></polyline>
                     </svg>
@@ -1350,10 +1336,10 @@
                 </button>
             </div>
         </div>
-    </div>
+    </dialog>
 
     <!-- Dropped students modal -->
-    <div class="dialog-overlay" id="dropped-students-modal" style="display:none;">
+    <dialog class="dialog-overlay native-dialog" id="dropped-students-modal" closedby="any">
         <div class="dialog-box" style="max-width: 560px;">
             <div class="modal-header">
                 <div class="modal-icon">
@@ -1370,7 +1356,7 @@
                 <!-- Dynamic content -->
             </div>
             <div class="modal-footer">
-                <button class="btn primary" onclick="closeDroppedStudentsModal()">
+                <button type="button" class="btn primary" data-action="close-dropped-modal">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="20 6 9 17 4 12"></polyline>
                     </svg>
@@ -1378,10 +1364,10 @@
                 </button>
             </div>
         </div>
-    </div>
+    </dialog>
 
     <!-- Ungraded Submissions Modal (交了但是没改，拦截下一步) -->
-    <div class="dialog-overlay" id="ungraded-submissions-modal" style="display:none;" onclick="if(event.target===this) closeUngradedSubmissionsModal()">
+    <dialog class="dialog-overlay native-dialog" id="ungraded-submissions-modal" closedby="any">
         <div class="dialog-box" style="max-width: 580px;">
             <div class="modal-header">
                 <div class="modal-icon">
@@ -1402,10 +1388,10 @@
             <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
                 <span style="font-size: 0.8rem; color: var(--text-tertiary);">可在教学平台批改后重试，或直接在线修改</span>
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <button class="btn secondary" type="button" onclick="closeUngradedSubmissionsModal()" style="padding: 8px 16px; font-size: 0.84rem;">
+                    <button class="btn secondary" type="button" data-action="close-ungraded-modal" style="padding: 8px 16px; font-size: 0.84rem;">
                         <span>稍后处理</span>
                     </button>
-                    <button class="btn primary" type="button" onclick="quickEditFromUngradedModal()" style="padding: 8px 18px; font-size: 0.84rem;">
+                    <button class="btn primary" type="button" data-action="quick-edit-ungraded" style="padding: 8px 18px; font-size: 0.84rem;">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;">
                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
@@ -1415,10 +1401,10 @@
                 </div>
             </div>
         </div>
-    </div>
+    </dialog>
 
     <!-- File Preview Modal (Only key columns) -->
-    <div class="dialog-overlay" id="file-preview-modal" style="display:none;" onclick="if(event.target===this) closeFilePreviewModal()">
+    <dialog class="dialog-overlay native-dialog" id="file-preview-modal" closedby="any">
         <div class="dialog-box preview-modal-card">
             <div class="modal-header preview-modal-header">
                 <div class="modal-icon">
@@ -1435,29 +1421,29 @@
                     </div>
                 </div>
                 <div class="preview-header-actions" style="display: flex; align-items: center; gap: 8px;">
-                    <button type="button" class="preview-btn-action preview-edit-mode-btn" id="preview-edit-mode-btn" onclick="togglePreviewEditMode(true)" title="开启编辑模式">
+                    <button type="button" class="preview-btn-action preview-edit-mode-btn" id="preview-edit-mode-btn" data-action="preview-edit-on" title="开启编辑模式">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                         <span>编辑数据</span>
                     </button>
                     <label class="preview-sync-csv-wrap" id="preview-sync-csv-wrap" style="display:none;" title="勾选后，点击保存修改时将提示您覆盖或另存更新后的本地 CSV 文件">
-                        <input type="checkbox" id="preview-sync-csv-checkbox" class="preview-sync-checkbox" onchange="localStorage.setItem('jf_sync_local_csv', this.checked ? '1' : '0')" />
+                        <input type="checkbox" id="preview-sync-csv-checkbox" class="preview-sync-checkbox" data-change="sync-local-csv" />
                         <span class="preview-sync-label-text">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                             同步更新本地文件
                         </span>
                     </label>
-                    <button type="button" class="preview-btn-action preview-add-row-btn" id="preview-add-row-btn" onclick="addPreviewRow()" style="display:none;" title="新增一行学生记录">
+                    <button type="button" class="preview-btn-action preview-add-row-btn" id="preview-add-row-btn" data-action="preview-add-row" style="display:none;" title="新增一行学生记录">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                         <span>添加行</span>
                     </button>
-                    <button type="button" class="preview-btn-action preview-save-btn" id="preview-save-btn" onclick="savePreviewEdits()" style="display:none;" title="保存修改并同步到内存">
+                    <button type="button" class="preview-btn-action preview-save-btn" id="preview-save-btn" data-action="preview-save-edits" style="display:none;" title="保存修改并同步到内存">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
                         <span>保存修改</span>
                     </button>
-                    <button type="button" class="preview-btn-action preview-cancel-btn" id="preview-cancel-btn" onclick="cancelPreviewEdits()" style="display:none;" title="取消修改">
+                    <button type="button" class="preview-btn-action preview-cancel-btn" id="preview-cancel-btn" data-action="preview-cancel-edits" style="display:none;" title="取消修改">
                         <span>取消</span>
                     </button>
-                    <button type="button" class="preview-close-btn" onclick="closeFilePreviewModal()" title="关闭预览">
+                    <button type="button" class="preview-close-btn" data-action="close-file-preview" title="关闭预览">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="18" y1="6" x2="6" y2="18"></line>
                             <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -1473,7 +1459,7 @@
                         <circle cx="11" cy="11" r="8"></circle>
                         <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                     </svg>
-                    <input type="text" id="file-preview-search" class="preview-search-input" placeholder="输入学生姓名搜索..." oninput="filterPreviewTable(this.value)">
+                    <input type="text" id="file-preview-search" class="preview-search-input" placeholder="输入学生姓名搜索..." data-input="filter-preview">
                 </div>
                 <div class="preview-columns-summary" id="file-preview-cols-tags">
                     <!-- Dynamic column chips -->
@@ -1502,7 +1488,7 @@
 
             <div class="modal-footer preview-modal-footer" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
                 <div class="preview-footer-left" style="display: flex; align-items: center; gap: 12px;">
-                    <button type="button" class="btn secondary" onclick="exportCurrentPreviewCsv()" style="padding: 7px 14px; font-size: 0.82rem;" title="将当前表格导出为本地 CSV 文件">
+                    <button type="button" class="btn secondary" data-action="export-preview-csv" style="padding: 7px 14px; font-size: 0.82rem;" title="将当前表格导出为本地 CSV 文件">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                             <polyline points="7 10 12 15 17 10"></polyline>
@@ -1515,16 +1501,16 @@
                     </span>
                 </div>
                 <div class="preview-footer-right" style="display: flex; align-items: center; gap: 8px;">
-                    <button type="button" class="btn primary" onclick="closeFilePreviewModal()" style="padding: 8px 20px; font-size: 0.84rem;">
+                    <button type="button" class="btn primary" data-action="close-file-preview" style="padding: 8px 20px; font-size: 0.84rem;">
                         <span>关闭预览</span>
                     </button>
                 </div>
             </div>
         </div>
-    </div>
+    </dialog>
 
     <!-- Single student error entry modal -->
-    <div class="dialog-overlay" id="single-error-entry-modal" style="display:none;" onclick="if(event.target===this) closeSingleErrorEntryModal()">
+    <dialog class="dialog-overlay native-dialog" id="single-error-entry-modal" closedby="any">
         <div class="dialog-box see-modal-box">
             <div class="modal-header see-modal-header">
                 <div class="modal-icon">
@@ -1539,7 +1525,7 @@
                     <h3 class="modal-title">单人错题录入</h3>
                     <p class="modal-desc">单独录入或更新指定学员的预习与课后巩固错题，即时生成专属错题本</p>
                 </div>
-                <button type="button" class="dialog-close-btn" onclick="closeSingleErrorEntryModal()" title="关闭" aria-label="关闭">
+                <button type="button" class="dialog-close-btn" data-action="close-see-modal" title="关闭" aria-label="关闭">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
                         <line x1="18" y1="6" x2="6" y2="18"></line>
                         <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -1553,13 +1539,13 @@
                     <div class="see-mode-bar">
                         <span class="see-field-label">录入范围</span>
                         <div class="ui-pill-group see-mode-pills" id="see-mode-group">
-                            <button type="button" class="ui-pill active" data-mode="homework" onclick="switchSeeEntryMode('homework')">
+                            <button type="button" class="ui-pill active" data-mode="homework" data-action="see-entry-mode">
                                 <span>课后巩固</span>
                             </button>
-                            <button type="button" class="ui-pill" data-mode="preview" onclick="switchSeeEntryMode('preview')">
+                            <button type="button" class="ui-pill" data-mode="preview" data-action="see-entry-mode">
                                 <span>课前预习</span>
                             </button>
-                            <button type="button" class="ui-pill" data-mode="both" onclick="switchSeeEntryMode('both')">
+                            <button type="button" class="ui-pill" data-mode="both" data-action="see-entry-mode">
                                 <span>预习与巩固</span>
                             </button>
                         </div>
@@ -1569,7 +1555,7 @@
                     <div class="see-meta-grid">
                         <div class="see-field">
                             <label class="see-field-label" for="see-subject">学科</label>
-                            <select class="modern-input custom-select" id="see-subject" onchange="onSeeClassMetaChange()">
+                            <select class="modern-input custom-select" id="see-subject" data-change="see-class-meta">
                                 <option value="数学">数学</option>
                                 <option value="物理">物理</option>
                                 <option value="英语">英语</option>
@@ -1579,7 +1565,7 @@
                         </div>
                         <div class="see-field">
                             <label class="see-field-label" for="see-grade">年级</label>
-                            <select class="modern-input custom-select" id="see-grade" onchange="onSeeClassMetaChange()">
+                            <select class="modern-input custom-select" id="see-grade" data-change="see-class-meta">
                                 <option value="" selected disabled>选择年级</option>
                                 <option value="七年级先学">七年级先学</option>
                                 <option value="七年级">七年级</option>
@@ -1592,7 +1578,7 @@
                         </div>
                         <div class="see-field">
                             <label class="see-field-label" for="see-tier">班层</label>
-                            <select class="modern-input custom-select" id="see-tier" onchange="onSeeClassMetaChange()">
+                            <select class="modern-input custom-select" id="see-tier" data-change="see-class-meta">
                                 <option value="" selected disabled>选择班层</option>
                                 <option value="U">U</option>
                                 <option value="S+">S+</option>
@@ -1614,7 +1600,7 @@
                             </div>
                             <div class="see-autocomplete-wrap">
                                 <input type="text" class="modern-input" id="see-student-name" placeholder="输入姓名或“学号+姓名”（如 12345张三）" autocomplete="off"
-                                    oninput="onSeeStudentInput(this.value)" onfocus="onSeeStudentFocus()">
+                                    data-input="see-student">
                                 <div class="see-suggest-dropdown" id="see-student-suggest" style="display:none;"></div>
                             </div>
                         </div>
@@ -1624,7 +1610,7 @@
                                 <span class="see-label-hint">选填，防重名</span>
                             </div>
                             <input type="text" class="modern-input see-mono-input" id="see-student-id" placeholder="如 12345" autocomplete="off"
-                                oninput="onSeeStudentIdChange()">
+                                data-input="see-student-id">
                         </div>
                     </div>
                     <div class="see-record-status" id="see-record-status" style="display:none;">
@@ -1638,12 +1624,12 @@
                     <div class="see-bank-header">
                         <div class="see-bank-title-wrap">
                             <span class="see-bank-title">课前预习错题</span>
-                            <select class="modern-input custom-select see-week-select" id="see-preview-week" onchange="onSeeWeekChange('preview')">
+                            <select class="modern-input custom-select see-week-select" id="see-preview-week" data-change="see-week" data-arg="preview">
                             </select>
                         </div>
                         <div class="see-bank-actions">
                             <span class="see-count-badge" id="see-pv-count-badge">0 题</span>
-                            <button type="button" class="see-clear-btn" onclick="clearSeeErrors('preview')" title="清空已选题号">清空错题</button>
+                            <button type="button" class="see-clear-btn" data-action="clear-see-errors" data-arg="preview" title="清空已选题号">清空错题</button>
                         </div>
                     </div>
                     <div class="see-qgrid-wrap" id="see-pv-qgrid-wrap">
@@ -1653,7 +1639,7 @@
                     <div class="see-input-row">
                         <input type="text" class="modern-input see-mono-input" id="see-pv-input"
                             placeholder="点击上方题号，或直接输入预习错题题号（如 1, 3, 5）"
-                            oninput="onSeeErrorTextInput('preview', this.value)">
+                            data-input="see-error-text" data-arg="preview">
                     </div>
                 </div>
 
@@ -1662,12 +1648,12 @@
                     <div class="see-bank-header">
                         <div class="see-bank-title-wrap">
                             <span class="see-bank-title">课后巩固错题</span>
-                            <select class="modern-input custom-select see-week-select" id="see-homework-week" onchange="onSeeWeekChange('homework')">
+                            <select class="modern-input custom-select see-week-select" id="see-homework-week" data-change="see-week" data-arg="homework">
                             </select>
                         </div>
                         <div class="see-bank-actions">
                             <span class="see-count-badge" id="see-hw-count-badge">0 题</span>
-                            <button type="button" class="see-clear-btn" onclick="clearSeeErrors('homework')" title="清空已选题号">清空错题</button>
+                            <button type="button" class="see-clear-btn" data-action="clear-see-errors" data-arg="homework" title="清空已选题号">清空错题</button>
                         </div>
                     </div>
                     <div class="see-qgrid-wrap" id="see-hw-qgrid-wrap">
@@ -1677,7 +1663,7 @@
                     <div class="see-input-row">
                         <input type="text" class="modern-input see-mono-input" id="see-hw-input"
                             placeholder="点击上方题号，或直接输入课后巩固错题题号（如 2, 4, 6）"
-                            oninput="onSeeErrorTextInput('homework', this.value)">
+                            data-input="see-error-text" data-arg="homework">
                     </div>
                 </div>
 
@@ -1689,14 +1675,14 @@
                             <span class="see-result-title" id="see-result-title">已保存并更新错题本</span>
                         </div>
                         <div class="see-result-actions">
-                            <button type="button" class="btn secondary see-act-btn" onclick="copySeeRetestLink()">
+                            <button type="button" class="btn secondary see-act-btn" data-action="copy-see-link">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
                                     <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
                                     <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
                                 </svg>
                                 <span>复制错题本链接</span>
                             </button>
-                            <button type="button" class="btn secondary see-act-btn" onclick="copySeeFeedbackText()">
+                            <button type="button" class="btn secondary see-act-btn" data-action="copy-see-feedback">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
                                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
@@ -1719,13 +1705,13 @@
 
             <div class="modal-footer see-modal-footer">
                 <div>
-                    <button type="button" class="btn secondary" id="see-next-student-btn" style="display:none;" onclick="resetSeeForNextStudent()">
+                    <button type="button" class="btn secondary" id="see-next-student-btn" style="display:none;" data-action="reset-see-student">
                         <span>继续录入下一位</span>
                     </button>
                 </div>
                 <div class="see-footer-right">
-                    <button type="button" class="btn secondary" onclick="closeSingleErrorEntryModal()">关闭</button>
-                    <button type="button" class="btn primary" id="see-save-btn" onclick="submitSingleErrorEntry(this)">
+                    <button type="button" class="btn secondary" data-action="close-see-modal">关闭</button>
+                    <button type="button" class="btn primary" id="see-save-btn" data-action="submit-see-entry">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="20 6 9 17 4 12"></polyline>
                         </svg>
@@ -1734,14 +1720,14 @@
                 </div>
             </div>
         </div>
-    </div>
+    </dialog>
 
     <!-- Generic dialog -->
-    <div class="dialog-overlay" id="custom-dialog" onclick="if(event.target===this)closeCustomDialog()">
+    <dialog class="dialog-overlay native-dialog" id="custom-dialog" closedby="any">
         <div class="dialog-box">
             <div class="dialog-header">
                 <h3 class="dialog-title" id="dialog-title">提示</h3>
-                <button type="button" class="dialog-close-btn" onclick="closeCustomDialog()" title="关闭">
+                <button type="button" class="dialog-close-btn" data-action="close-custom-dialog" title="关闭" aria-label="关闭">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
                         <line x1="18" y1="6" x2="6" y2="18"></line>
                         <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -1755,27 +1741,20 @@
                 </div>
             </div>
             <div class="dialog-footer">
-                <button class="btn secondary" id="dialog-cancel">取消</button>
-                <button class="btn primary" id="dialog-confirm">确认</button>
+                <button type="button" class="btn secondary" id="dialog-cancel">取消</button>
+                <button type="button" class="btn primary" id="dialog-confirm">确认</button>
             </div>
         </div>
-    </div>
+    </dialog>
 
-    <div class="toast-container" id="toast-container"></div>
+    <div class="toast-container" id="toast-container" popover="manual"></div>
 
     <!-- SheetJS for XLSX parsing (本地极速加载，彻底杜绝 CDN 网络波动) -->
-    <script src="js/libs/xlsx.full.min.js"></script>
-
-    <script>
-        (function () {
-            // 静态资源版本：发版修改前后端时统一 bump 此串；勿用 Date.now()（会杀死全部缓存）
-            const v = '20261114-02';
-            document.write(`<script src="js/logger.js?v=${v}"><\/script>`);
-            document.write(`<script src="js/common.js?v=${v}"><\/script>`);
-            document.write(`<script src="js/auth.js?v=${v}"><\/script>`);
-            document.write(`<script src="js/upload.js?v=${v}"><\/script>`);
-        })();
-    </script>
+    <script defer src="js/libs/xlsx.full.min.js"></script>
+    <script defer src="js/logger.js?v=20261114-04"></script>
+    <script defer src="js/common.js?v=20261114-04"></script>
+    <script defer src="js/auth.js?v=20261114-04"></script>
+    <script defer src="js/upload.js?v=20261114-04"></script>
 </body>
 
 </html>

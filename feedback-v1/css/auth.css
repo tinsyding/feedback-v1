@@ -64,7 +64,6 @@
 .front-auth-tip:hover {
     background: rgba(10, 132, 255, 0.16);
     border-color: rgba(10, 132, 255, 0.4);
-    transform: translateY(-1px);
 }
 
 .front-auth-tip:active {
@@ -101,7 +100,7 @@
 }
 
 .front-auth-notice-title {
-    font-weight: 700;
+    font-weight: 600;
     color: #f59e0b;
     margin-bottom: 2px;
     display: flex;
@@ -124,7 +123,7 @@
     border: 1px solid rgba(245, 158, 11, 0.4);
     color: #f59e0b;
     font-family: var(--font-mono, monospace);
-    font-weight: 700;
+    font-weight: 600;
     padding: 1px 7px;
     border-radius: 5px;
     margin: 0 2px;
@@ -345,7 +344,7 @@
 
 .front-auth-reset-title {
     font-size: 1.25rem;
-    font-weight: 700;
+    font-weight: 600;
     color: var(--text-primary, #fff);
     margin-bottom: 4px;
 }
@@ -477,7 +476,7 @@
 
 .front-assistant-title {
     font-size: 1.25rem;
-    font-weight: 700;
+    font-weight: 600;
     color: var(--text-primary, #fff);
     margin: 0;
 }
@@ -531,13 +530,12 @@
 .btn-assistant-add {
     background: var(--accent, #0a84ff);
     color: #fff;
-    box-shadow: 0 2px 8px rgba(10, 132, 255, 0.35);
+    box-shadow: var(--shadow-sm);
 }
 
 .btn-assistant-add:hover {
     background: var(--accent-hover, #0070e0);
-    box-shadow: 0 4px 12px rgba(10, 132, 255, 0.45);
-    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
 }
 
 /* Sub Form Box (Add / Edit Form) */
@@ -558,7 +556,7 @@
 
 .assistant-sub-title {
     font-size: 0.88rem;
-    font-weight: 700;
+    font-weight: 600;
     color: var(--text-primary, #fff);
     margin-bottom: 12px;
 }
@@ -655,7 +653,7 @@
     background: rgba(255, 255, 255, 0.08);
     color: var(--accent, #0a84ff);
     font-family: var(--font-mono, monospace);
-    font-weight: 700;
+    font-weight: 600;
     font-size: 0.84rem;
     border-right: 1px solid rgba(255, 255, 255, 0.1);
     user-select: none;
@@ -711,12 +709,12 @@
 .btn-sub-confirm {
     background: var(--accent, #0a84ff);
     color: #fff;
-    box-shadow: 0 2px 8px rgba(10, 132, 255, 0.3);
+    box-shadow: var(--shadow-sm);
 }
 
 .btn-sub-confirm:hover {
     background: var(--accent-hover, #0070e0);
-    box-shadow: 0 4px 12px rgba(10, 132, 255, 0.4);
+    box-shadow: var(--shadow-sm);
 }
 
 /* Assistant Cards List */
@@ -747,7 +745,6 @@
 .assistant-card:hover {
     background: rgba(255, 255, 255, 0.05);
     border-color: rgba(10, 132, 255, 0.25);
-    transform: translateY(-1px);
 }
 
 .assistant-card.disabled {
@@ -769,7 +766,7 @@
 }
 
 .assistant-name {
-    font-weight: 700;
+    font-weight: 600;
     font-size: 0.94rem;
     color: var(--text-primary, #fff);
 }
@@ -904,7 +901,7 @@
 
 .assistant-notice-title {
     font-size: 0.95rem;
-    font-weight: 700;
+    font-weight: 600;
     color: #f59e0b;
     margin-bottom: 3px;
 }
@@ -933,13 +930,12 @@
 .assistant-notice-btn:hover {
     background: #d97706;
     color: #fff;
-    transform: translateY(-1px);
 }
 
 /* Question Bank Readonly Banner & Badges */
 .qb-assistant-readonly-banner {
-    background: linear-gradient(90deg, rgba(10, 132, 255, 0.12), rgba(56, 189, 248, 0.12));
-    border: 1px solid rgba(10, 132, 255, 0.3);
+    background: rgba(37, 99, 235, 0.10);
+    border: 1px solid rgba(37, 99, 235, 0.24);
     border-radius: 12px;
     padding: 12px 18px;
     margin-bottom: 18px;
