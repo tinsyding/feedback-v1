@@ -62,7 +62,9 @@ fetch('api/public_config.php').then(r=>r.json()).then(c=>{
     };
     const sName = seasonNameMap[window.defaultSeason] || (isVacation ? '寒暑季' : '春秋季');
     const yrStr = window.semesterYear ? `${window.semesterYear}年` : '';
-    document.title = `反馈生成器 - ${yrStr}${sName} - 上传`;
+    document.title = `反馈生成器 - ${yrStr}${sName} - 上传${isSplitLayout() ? '（Beta）' : ''}`;
+    syncStep2PreviewConfig();
+    updateSplitReadinessUI();
 });
 
 let homeworkData = null;
@@ -135,6 +137,102 @@ const homeworkCommentZeroInput = document.getElementById('homework-comment-zero'
 let selectedSubject = null;
 let physicsPreviewSource = null;
 
+function isSplitLayout() {
+    return document.body?.dataset?.layout === 'split';
+}
+
+function updateSplitReadinessUI() {
+    if (!isSplitLayout()) return;
+    const badge = document.getElementById('beta-readiness-badge');
+    const hint = document.getElementById('beta-readiness-hint');
+    const generateBtn = document.getElementById('generate-btn');
+
+    const needsPhysicsSource = selectedSubject === '物理' && !isVacationSeason(window.defaultSeason);
+    let badgeText = '待选学科';
+    let hintText = '请先在左侧选择反馈学科';
+    let ready = false;
+
+    if (selectedSubject) {
+        if (needsPhysicsSource && !physicsPreviewSource) {
+            badgeText = '待选来源';
+            hintText = '请先在左侧选择物理课前预习数据来源';
+        } else if (!hasPrimaryHomeworkData()) {
+            badgeText = '待传作业';
+            hintText = `请先在左侧上传${isVacationSeason(window.defaultSeason) ? '' : '课前预习或课后巩固'}作业数据`;
+        } else {
+            badgeText = '可生成反馈';
+            hintText = '基础数据已就绪，右侧确认配置后即可生成';
+            ready = true;
+        }
+    }
+
+    if (badge) {
+        badge.textContent = badgeText;
+        badge.classList.toggle('is-ready', ready);
+        badge.classList.toggle('is-pending', !ready);
+    }
+    if (hint) {
+        hint.textContent = hintText;
+    }
+    if (generateBtn) {
+        generateBtn.dataset.ready = ready ? 'true' : 'false';
+    }
+}
+
+function syncStep2PreviewConfig() {
+    if (isVacationSeason(window.defaultSeason)) return;
+    const isWenjuanxing = physicsPreviewSource === 'wenjuanxing';
+    const pvConfig = document.getElementById('preview-total-config');
+    if (pvConfig) {
+        // Hide preview metric settings for wenjuanxing (always uses score+rank)
+        pvConfig.style.display = (previewData && !isWenjuanxing) ? '' : 'none';
+    }
+    // Handle preview comment source config for wenjuanxing
+    const pvFileBtn = document.getElementById('preview-source-file-btn');
+    const pvMergeBtn = document.getElementById('preview-source-merge-btn');
+    if (isWenjuanxing && previewData) {
+        // Hide "爱问云评语" and "爱问云评语 + 固定模板" buttons, force "固定模板"
+        if (pvFileBtn) pvFileBtn.style.display = 'none';
+        if (pvMergeBtn) pvMergeBtn.style.display = 'none';
+        previewCommentSource = 'manual';
+        switchPreviewCommentSource('manual');
+    } else {
+        // Show all source buttons
+        if (pvFileBtn) pvFileBtn.style.display = '';
+        if (pvMergeBtn) pvMergeBtn.style.display = '';
+    }
+    updatePreviewCommentFieldsRequiredState();
+}
+
+function runStep1PreflightChecks(targetStep) {
+    // 关键拦截校验：检查是否有交了但老师没改的作业（状态为【已提交】）
+    if (typeof checkUngradedSubmissions === 'function') {
+        const ungradedList = checkUngradedSubmissions();
+        if (ungradedList && ungradedList.length > 0) {
+            showUngradedSubmissionsModal(ungradedList);
+            return false;
+        }
+    }
+
+    // 重复提交拦截：同一姓名出现多行时需老师二选一（放退课确认之前，避免名单里出现重复项干扰）
+    if (typeof collectDuplicateGroups === 'function') {
+        const dupGroups = collectDuplicateGroups();
+        if (dupGroups && dupGroups.length > 0) {
+            pendingNavigationStep = targetStep;
+            showDuplicateStudentsModal(dupGroups);
+            return false;
+        }
+    }
+
+    if (rosterData && !droppedStudentsAcknowledged && (detectedDroppedStudents.preview.length > 0 || detectedDroppedStudents.homework.length > 0)) {
+        pendingNavigationStep = targetStep;
+        showDroppedStudentsModal(detectedDroppedStudents.preview, detectedDroppedStudents.homework, getScopeLabel());
+        return false;
+    }
+
+    return true;
+}
+
 function initUploadSemester() {
     setupFileInputs();
     setupDragAndDrop();
@@ -146,6 +244,8 @@ function initUploadSemester() {
     switchFocusCommentSource('default');
     generateFocusCommentFields(6);
     updateUploadCardsState(); // Disable upload cards until subject is selected
+    syncStep2PreviewConfig();
+    updateSplitReadinessUI();
 }
 
 if (document.readyState === 'loading') {
@@ -163,42 +263,34 @@ function handleUploadStepClick(n) {
 window.handleUploadStepClick = handleUploadStepClick;
 
 function confirmReupload() {
-    window.location.href = 'upload.html';
+    window.location.href = isSplitLayout() ? 'upload-beta.html' : 'upload.html';
 }
 window.confirmReupload = confirmReupload;
 
 function goToStep(step) {
+    if (isSplitLayout()) {
+        currentStep = step;
+        document.querySelectorAll('.step-panel').forEach(p => p.classList.add('active'));
+        const reuploadBtn = document.getElementById('reupload-btn');
+        if (reuploadBtn) {
+            reuploadBtn.style.display = 'inline-flex';
+        }
+        syncStep2PreviewConfig();
+        updateSplitReadinessUI();
+        if (step === 1) {
+            const step1 = document.getElementById('step-1');
+            if (step1) step1.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        return;
+    }
+
     if (step === 2) {
         if (!selectedSubject) {
             showToast('请先选择学科', 'warning');
             return;
         }
         if (!hasPrimaryHomeworkData()) return;
-        
-        // 关键拦截校验：检查是否有交了但老师没改的作业（状态为【已提交】）
-        if (typeof checkUngradedSubmissions === 'function') {
-            const ungradedList = checkUngradedSubmissions();
-            if (ungradedList && ungradedList.length > 0) {
-                showUngradedSubmissionsModal(ungradedList);
-                return;
-            }
-        }
-        
-        // 重复提交拦截：同一姓名出现多行时需老师二选一（放退课确认之前，避免名单里出现重复项干扰）
-        if (typeof collectDuplicateGroups === 'function') {
-            const dupGroups = collectDuplicateGroups();
-            if (dupGroups && dupGroups.length > 0) {
-                pendingNavigationStep = step;
-                showDuplicateStudentsModal(dupGroups);
-                return;
-            }
-        }
-
-        if (rosterData && !droppedStudentsAcknowledged && (detectedDroppedStudents.preview.length > 0 || detectedDroppedStudents.homework.length > 0)) {
-            pendingNavigationStep = step;
-            showDroppedStudentsModal(detectedDroppedStudents.preview, detectedDroppedStudents.homework, getScopeLabel());
-            return;
-        }
+        if (!runStep1PreflightChecks(step)) return;
     }
     currentStep = step;
 
@@ -232,27 +324,7 @@ function goToStep(step) {
 
     // Show/hide preview config card based on whether preview data exists
     if (step === 2) {
-        const isWenjuanxing = physicsPreviewSource === 'wenjuanxing';
-        const pvConfig = document.getElementById('preview-total-config');
-        if (pvConfig) {
-            // Hide preview metric settings for wenjuanxing (always uses score+rank)
-            pvConfig.style.display = (previewData && !isWenjuanxing) ? '' : 'none';
-        }
-        // Handle preview comment source config for wenjuanxing
-        const pvFileBtn = document.getElementById('preview-source-file-btn');
-        const pvMergeBtn = document.getElementById('preview-source-merge-btn');
-        if (isWenjuanxing && previewData) {
-            // Hide "爱问云评语" and "爱问云评语 + 固定模板" buttons, force "固定模板"
-            if (pvFileBtn) pvFileBtn.style.display = 'none';
-            if (pvMergeBtn) pvMergeBtn.style.display = 'none';
-            previewCommentSource = 'manual';
-            switchPreviewCommentSource('manual');
-        } else {
-            // Show all source buttons
-            if (pvFileBtn) pvFileBtn.style.display = '';
-            if (pvMergeBtn) pvMergeBtn.style.display = '';
-        }
-        updatePreviewCommentFieldsRequiredState();
+        syncStep2PreviewConfig();
     }
 }
 
@@ -980,6 +1052,7 @@ function updatePreviewData() {
         previewInfo.textContent = '拖拽预习作业文件或点击浏览';
         if (container) container.classList.remove('visible');
         checkNextButton();
+        syncStep2PreviewConfig();
         renderPreviewFileList();
         // Reset preview metric mode options
         resetPreviewMetricModeOptions(true);
@@ -1010,6 +1083,7 @@ function updatePreviewData() {
 
     renderPreviewFileList();
     checkNextButton();
+    syncStep2PreviewConfig();
     
     // Check if score column is all empty (only for aiwenyun data)
     if (physicsPreviewSource !== 'wenjuanxing') {
@@ -1998,7 +2072,11 @@ function finishDroppedStudentsClose() {
     if (pendingNavigationStep) {
         const step = pendingNavigationStep;
         pendingNavigationStep = null;
-        goToStep(step);
+        if (step === 'generate') {
+            generateFeedback();
+        } else {
+            goToStep(step);
+        }
     }
 }
 
@@ -2166,7 +2244,11 @@ function finishDuplicateModalClose() {
     if (pendingNavigationStep) {
         const step = pendingNavigationStep;
         pendingNavigationStep = null;
-        goToStep(step);
+        if (step === 'generate') {
+            generateFeedback();
+        } else {
+            goToStep(step);
+        }
     }
 }
 
@@ -2417,6 +2499,7 @@ window.closeUngradedSubmissionsModal = closeUngradedSubmissionsModal;
 
 // ========== Button State ==========
 function checkNextButton() {
+    updateSplitReadinessUI();
     if (!nextStep1Btn) return;
     
     const hasSubject = !!selectedSubject;
@@ -2530,7 +2613,7 @@ function selectFeedbackSubject(btn, subject) {
     }
 
     updateUploadCardsState(); // Update upload cards state (locks all cards if physics source is pending)
-    updatePreviewCommentFieldsRequiredState();
+    syncStep2PreviewConfig();
     checkNextButton();
 }
 
@@ -2570,7 +2653,7 @@ function selectPhysicsPreviewSource(btn, source) {
             showToast('已切换预习来源，已清空预习作业文件');
         }
     }
-    
+    syncStep2PreviewConfig();
     checkNextButton();
 }
 
@@ -2791,6 +2874,9 @@ function generateFeedback() {
     if (!hasPrimaryHomeworkData()) {
         showToast(`请先上传${isVacationSeason(window.defaultSeason) ? '' : '课前预习或课后巩固'}作业数据`);
         goToStep(1);
+        return;
+    }
+    if (isSplitLayout() && !runStep1PreflightChecks('generate')) {
         return;
     }
     const isWenjuanxing = physicsPreviewSource === 'wenjuanxing';

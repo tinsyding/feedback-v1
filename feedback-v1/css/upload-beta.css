@@ -1,0 +1,280 @@
+/* =====================================================
+   upload-beta.css — 单屏双栏联动布局（方案三）
+   复用 tokens.css / common.css / upload.css 主题变量
+   ===================================================== */
+
+.upload-beta-page .upload-shell {
+    max-width: min(96vw, 1760px);
+}
+
+.beta-nav-badge {
+    display: inline-flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 8px;
+    margin-left: 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--brand-500);
+    background: var(--n-2);
+    border: 1px solid var(--line-strong);
+    vertical-align: middle;
+}
+
+.beta-workspace {
+    display: grid;
+    grid-template-columns: minmax(430px, 1fr) minmax(500px, 1.15fr);
+    gap: 22px;
+    align-items: start;
+    padding-top: 22px;
+    padding-bottom: 40px;
+}
+
+.upload-beta-page .step-panel.beta-pane {
+    display: block;
+    opacity: 1;
+    transform: none;
+    background: var(--n-1);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    min-width: 0;
+}
+
+[data-theme="light"] .upload-beta-page .step-panel.beta-pane {
+    background: var(--n-0);
+}
+
+.beta-pane-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 16px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--line);
+}
+
+.beta-pane-heading {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    min-width: 0;
+}
+
+.beta-pane-index {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    flex-shrink: 0;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--brand-500);
+    background: var(--n-2);
+    border: 1px solid var(--line-strong);
+    margin-top: 1px;
+}
+
+.beta-pane-title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--text-1);
+}
+
+.beta-pane-subtitle {
+    margin: 3px 0 0;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--text-3);
+}
+
+.beta-readiness-badge {
+    display: inline-flex;
+    align-items: center;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    flex-shrink: 0;
+    border: 1px solid var(--line-strong);
+    background: var(--n-2);
+    color: var(--text-2);
+    transition: background-color var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.beta-readiness-badge.is-ready {
+    color: var(--positive);
+    border-color: var(--positive);
+    background: var(--n-1);
+}
+
+.beta-readiness-badge.is-pending {
+    color: var(--text-2);
+}
+
+/* 左侧卡片间距与内部网格 */
+.beta-pane-upload .subject-select-card,
+.beta-pane-upload .roster-card {
+    margin-bottom: 16px;
+}
+
+.beta-pane-upload .panel-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 0;
+}
+
+.beta-pane-upload .panel-grid > .report-card {
+    grid-column: 1 / -1;
+}
+
+/* 右侧配置卡片网格 */
+.beta-pane-config .config-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 0;
+}
+
+.beta-pane-config .beta-span-full {
+    grid-column: 1 / -1;
+}
+
+/* Pane 内卡片保持清晰层级 */
+.upload-beta-page .beta-pane .upload-card,
+.upload-beta-page .beta-pane .config-card {
+    margin-bottom: 0;
+}
+
+.upload-beta-page .beta-pane .subject-select-card,
+.upload-beta-page .beta-pane .roster-card {
+    margin-bottom: 16px;
+}
+
+[data-theme="dark"] .upload-beta-page .beta-pane .upload-card,
+[data-theme="dark"] .upload-beta-page .beta-pane .config-card {
+    background: var(--n-0);
+}
+
+[data-theme="light"] .upload-beta-page .beta-pane .upload-card,
+[data-theme="light"] .upload-beta-page .beta-pane .config-card {
+    background: var(--n-1);
+}
+
+/* 左侧面板头部卡片在紧凑双栏下的适配 */
+.beta-pane-upload .drop-zone {
+    padding: 18px 14px;
+}
+
+/* 底部吸底操作栏（位于右侧配置栏底部） */
+.beta-action-bar {
+    position: sticky;
+    bottom: 14px;
+    z-index: 20;
+    margin-top: 18px;
+    padding: 14px 16px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--line-strong);
+    background: var(--n-2);
+    box-shadow: var(--shadow-md);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
+[data-theme="light"] .beta-action-bar {
+    background: var(--n-1);
+}
+
+.beta-action-status {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1 1 220px;
+}
+
+.beta-action-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-3);
+}
+
+.beta-action-hint {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-1);
+    line-height: 1.4;
+}
+
+.beta-action-buttons {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.beta-action-buttons .btn-primary {
+    min-width: 148px;
+}
+
+/* 导航栏返回标准版链接 */
+.nav-link-btn.beta-switch-link {
+    border-style: dashed;
+}
+
+/* 中等宽度笔记本（1100px ~ 1380px）：外层仍保留左右双栏，内层卡片改为单列防挤压 */
+@media (max-width: 1380px) {
+    .beta-pane-upload .panel-grid,
+    .beta-pane-config .config-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* 窄屏与移动端（< 1100px）：外层退化为上下双栏 */
+@media (max-width: 1100px) {
+    .beta-workspace {
+        grid-template-columns: 1fr;
+        gap: 18px;
+    }
+
+    .beta-pane-upload .panel-grid,
+    .beta-pane-config .config-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 720px) {
+    .upload-beta-page .upload-shell {
+        max-width: 100%;
+    }
+
+    .upload-beta-page .step-panel.beta-pane {
+        padding: 14px;
+    }
+
+    .beta-pane-upload .panel-grid,
+    .beta-pane-config .config-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .beta-action-bar {
+        position: static;
+    }
+
+    .beta-action-buttons,
+    .beta-action-buttons .btn-primary {
+        width: 100%;
+    }
+}

@@ -902,8 +902,8 @@
             } else {
                 currentUser = null;
                 window.currentUser = null;
-                // 未登录用户如果在受保护页面 (upload.html / question-bank.html / viewer.html) 则直接重定向至首页登录
-                const isProtectedPage = /upload(\.html)?$|question-bank(\.html)?$|viewer(\.html)?$/.test(window.location.pathname);
+                // 未登录用户如果在受保护页面 (upload.html / upload-beta.html / question-bank.html / viewer.html) 则直接重定向至首页登录
+                const isProtectedPage = /upload(-beta)?(\.html)?$|question-bank(\.html)?$|viewer(\.html)?$/.test(window.location.pathname);
                 if (isProtectedPage) {
                     window.location.replace('index.html');
                     return false;
@@ -915,7 +915,7 @@
             }
         } catch (e) {
             console.warn('Auth check failed', e);
-            const isProtectedPage = /upload(\.html)?$|question-bank(\.html)?$|viewer(\.html)?$/.test(window.location.pathname);
+            const isProtectedPage = /upload(-beta)?(\.html)?$|question-bank(\.html)?$|viewer(\.html)?$/.test(window.location.pathname);
             if (isProtectedPage) {
                 window.location.replace('index.html');
                 return false;
