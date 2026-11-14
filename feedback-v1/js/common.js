@@ -1026,7 +1026,6 @@ function initCommon() {
         const pageName = location.pathname.split('/').pop() || 'index.html';
         const moduleMap = {
             'upload.html': 'upload',
-            'upload-beta.html': 'upload',
             'viewer.html': 'viewer',
             'admin.html': 'admin',
             'admin-login.html': 'admin',
