@@ -1534,25 +1534,16 @@
             </div>
 
             <div class="modal-body see-modal-body">
-                <!-- 1. 录入类型切换 -->
+                <!-- 1. 录入类型与班级维度选择 -->
                 <div class="see-section">
-                    <div class="see-mode-bar">
-                        <span class="see-field-label">录入范围</span>
-                        <div class="ui-pill-group see-mode-pills" id="see-mode-group">
-                            <button type="button" class="ui-pill active" data-mode="homework" data-action="see-entry-mode">
-                                <span>课后巩固</span>
-                            </button>
-                            <button type="button" class="ui-pill" data-mode="preview" data-action="see-entry-mode">
-                                <span>课前预习</span>
-                            </button>
-                            <button type="button" class="ui-pill" data-mode="both" data-action="see-entry-mode">
-                                <span>预习与巩固</span>
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- 2. 班级维度选择 -->
                     <div class="see-meta-grid">
+                        <div class="see-field">
+                            <label class="see-field-label" for="see-entry-mode">录入类型</label>
+                            <select class="modern-input custom-select" id="see-entry-mode" data-change="see-entry-mode">
+                                <option value="homework">课后巩固</option>
+                                <option value="preview">课前预习</option>
+                            </select>
+                        </div>
                         <div class="see-field">
                             <label class="see-field-label" for="see-subject">学科</label>
                             <select class="modern-input custom-select" id="see-subject" data-change="see-class-meta">
@@ -1596,13 +1587,10 @@
                         <div class="see-field see-student-name-field">
                             <div class="see-label-row">
                                 <label class="see-field-label" for="see-student-name">学员姓名 <span class="see-req">*</span></label>
-                                <span class="see-label-hint" id="see-roster-count-hint">可搜索班级历史学员或直接输入</span>
+                                <span class="see-label-hint">支持输入“学号+姓名”自动拆分</span>
                             </div>
-                            <div class="see-autocomplete-wrap">
-                                <input type="text" class="modern-input" id="see-student-name" placeholder="输入姓名或“学号+姓名”（如 12345张三）" autocomplete="off"
-                                    data-input="see-student">
-                                <div class="see-suggest-dropdown" id="see-student-suggest" style="display:none;"></div>
-                            </div>
+                            <input type="text" class="modern-input" id="see-student-name" placeholder="输入姓名或“学号+姓名”（如 12345张三）" autocomplete="off"
+                                data-input="see-student">
                         </div>
                         <div class="see-field see-student-id-field">
                             <div class="see-label-row">

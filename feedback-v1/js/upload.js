@@ -5348,8 +5348,7 @@ document.addEventListener('keydown', (e) => {
 
 // ========== 首页单人错题录入工作台 (Single Student Error Entry) ==========
 const seeState = {
-    mode: 'homework', // 'homework' | 'preview' | 'both'
-    serverRoster: [],
+    mode: 'homework', // 'homework' | 'preview'
     hwQuestions: [],
     pvQuestions: [],
     hwSelected: new Set(),
@@ -5438,14 +5437,15 @@ function openSingleErrorEntryModal() {
     }
 
     const savedMode = localStorage.getItem('jf_see_mode');
-    if (savedMode && ['homework', 'preview', 'both'].includes(savedMode)) {
+    if (savedMode && ['homework', 'preview'].includes(savedMode)) {
         seeState.mode = savedMode;
+    } else {
+        seeState.mode = 'homework';
     }
 
     switchSeeEntryMode(seeState.mode);
     openNativeDialog(modal, {
-        dismissible: true,
-        onAfterClose: hideSeeStudentSuggest
+        dismissible: true
     });
 
     onSeeClassMetaChange();
@@ -5453,27 +5453,22 @@ function openSingleErrorEntryModal() {
 
 function closeSingleErrorEntryModal() {
     closeNativeDialog('single-error-entry-modal');
-    if (!window.DialogHelper) {
-        hideSeeStudentSuggest();
-    }
 }
 
 function switchSeeEntryMode(mode) {
-    if (!['homework', 'preview', 'both'].includes(mode)) mode = 'homework';
+    if (!['homework', 'preview'].includes(mode)) mode = 'homework';
     seeState.mode = mode;
     localStorage.setItem('jf_see_mode', mode);
 
-    const group = document.getElementById('see-mode-group');
-    if (group) {
-        group.querySelectorAll('.ui-pill').forEach(btn => {
-            btn.classList.toggle('active', btn.getAttribute('data-mode') === mode);
-        });
+    const modeSel = document.getElementById('see-entry-mode');
+    if (modeSel && modeSel.value !== mode) {
+        modeSel.value = mode;
     }
 
     const hwSec = document.getElementById('see-homework-section');
     const pvSec = document.getElementById('see-preview-section');
-    if (hwSec) hwSec.style.display = (mode === 'homework' || mode === 'both') ? 'flex' : 'none';
-    if (pvSec) pvSec.style.display = (mode === 'preview' || mode === 'both') ? 'flex' : 'none';
+    if (hwSec) hwSec.style.display = mode === 'homework' ? 'flex' : 'none';
+    if (pvSec) pvSec.style.display = mode === 'preview' ? 'flex' : 'none';
 
     hideSeeResultPanel();
     scheduleSeeRecordLookup();
@@ -5489,7 +5484,6 @@ function onSeeClassMetaChange() {
     if (tier) localStorage.setItem('jf_see_tier', tier);
 
     hideSeeResultPanel();
-    loadSeeClassRoster();
     loadSeeQbank('homework');
     loadSeeQbank('preview');
     scheduleSeeRecordLookup();
@@ -5746,129 +5740,12 @@ function syncSeeErrorUI(bankType, skipInputSync) {
     }
 }
 
-async function loadSeeClassRoster() {
-    const subject = document.getElementById('see-subject')?.value || '';
-    const grade = document.getElementById('see-grade')?.value || '';
-    const tier = document.getElementById('see-tier')?.value || '';
-    const hintEl = document.getElementById('see-roster-count-hint');
-
-    if (!subject || !grade) {
-        seeState.serverRoster = [];
-        updateSeeRosterHint();
-        return;
-    }
-
-    try {
-        const payload = {
-            subject,
-            grade,
-            tier,
-            year: window.semesterYear || 2026,
-            season: window.defaultSeason || 'autumn',
-            with_roster: 1
-        };
-        const resp = await fetch('api/retest.php?action=get_student_week_record', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        const res = await resp.json();
-        if (res && res.success && Array.isArray(res.students)) {
-            seeState.serverRoster = res.students;
-        } else {
-            seeState.serverRoster = [];
-        }
-    } catch (e) {
-        seeState.serverRoster = [];
-    }
-    updateSeeRosterHint();
-}
-
-function getCombinedSeeRoster() {
-    const map = new Map();
-    const currentTier = document.getElementById('see-tier')?.value || '';
-
-    const addEntry = (id, name, tier = '') => {
-        const cleanName = String(name || '').trim();
-        const cleanId = String(id || '').trim();
-        if (!cleanName) return;
-        const key = cleanId ? `${cleanId}_${cleanName}` : cleanName;
-        if (!map.has(key)) {
-            map.set(key, { id: cleanId, name: cleanName, tier: tier || '' });
-        } else if (tier && !map.get(key).tier) {
-            map.get(key).tier = tier;
-        }
-    };
-
-    // 1. 当前页面已上传的名单或作业数据优先合并
-    if (typeof rosterData !== 'undefined' && Array.isArray(rosterData) && rosterData.length > 1) {
-        const hdr = rosterData[0].map(h => String(h || ''));
-        const nameIdx = hdr.findIndex(h => h.includes('姓名') || h.includes('学生'));
-        const idIdx = hdr.findIndex(h => h.includes('学号') || h.includes('编号') || h.includes('编码'));
-        for (let i = 1; i < rosterData.length; i++) {
-            const row = rosterData[i];
-            if (!row) continue;
-            const rawName = String(row[nameIdx >= 0 ? nameIdx : 0] || '').trim();
-            if (!rawName) continue;
-            const m = rawName.match(/^(\d+)\s*(.+)$/);
-            const sName = m ? m[2].trim() : rawName;
-            const sId = (idIdx >= 0 && row[idIdx]) ? String(row[idIdx]).trim() : (m ? m[1] : '');
-            addEntry(sId, sName, currentTier);
-        }
-    }
-
-    [typeof homeworkData !== 'undefined' ? homeworkData : null, typeof previewData !== 'undefined' ? previewData : null].forEach(dataset => {
-        if (!Array.isArray(dataset) || dataset.length <= 1) return;
-        const hdr = dataset[0].map(h => String(h || ''));
-        const nameIdx = hdr.findIndex(h => h.includes('姓名'));
-        const idIdx = hdr.findIndex(h => h.includes('学号') || h.includes('编号') || h.includes('卡号'));
-        if (nameIdx < 0) return;
-        for (let i = 1; i < dataset.length; i++) {
-            const row = dataset[i];
-            if (!row) continue;
-            const fullName = String(row[nameIdx] || '').trim();
-            if (!fullName) continue;
-            const m = fullName.match(/^(\d+)\s*(.+)$/);
-            const sName = m ? m[2].trim() : fullName;
-            const sId = (idIdx >= 0 && row[idIdx]) ? String(row[idIdx]).trim() : (m ? m[1] : '');
-            addEntry(sId, sName, currentTier);
-        }
-    });
-
-    // 2. 服务端该学科+年级历史学员名册
-    (seeState.serverRoster || []).forEach(st => {
-        addEntry(st.id, st.name, st.tier);
-    });
-
-    const list = Array.from(map.values());
-    // 当前班层学员排在前面
-    list.sort((a, b) => {
-        const aMatch = (currentTier && a.tier === currentTier) ? 1 : 0;
-        const bMatch = (currentTier && b.tier === currentTier) ? 1 : 0;
-        if (aMatch !== bMatch) return bMatch - aMatch;
-        return a.name.localeCompare(b.name, 'zh-CN');
-    });
-    return list;
-}
-
-function updateSeeRosterHint() {
-    const hintEl = document.getElementById('see-roster-count-hint');
-    if (!hintEl) return;
-    const list = getCombinedSeeRoster();
-    if (list.length > 0) {
-        hintEl.textContent = `已关联 ${list.length} 名历史学员，可输入检索`;
-    } else {
-        hintEl.textContent = '支持输入“学号+姓名”自动拆分';
-    }
-}
-
 function onSeeStudentInput(rawVal) {
     const nameInput = document.getElementById('see-student-name');
     const idInput = document.getElementById('see-student-id');
-    const val = String(rawVal || '');
 
     // 智能识别 "12345张三"、"01张三" 或 "12345 张三" 自动拆分学号与姓名
-    const trimmed = val.trim();
+    const trimmed = String(rawVal || '').trim();
     const comboMatch = trimmed.match(/^(\d+)[\s_\-–—]+([^\d\s].*)$/) || trimmed.match(/^(\d{2,})([^\d\s].*)$/);
     if (comboMatch) {
         const extractedId = comboMatch[1].trim();
@@ -5878,100 +5755,13 @@ function onSeeStudentInput(rawVal) {
     }
 
     hideSeeResultPanel();
-    renderSeeStudentSuggest(nameInput ? nameInput.value : val);
     scheduleSeeRecordLookup();
-}
-
-function onSeeStudentFocus() {
-    const nameInput = document.getElementById('see-student-name');
-    renderSeeStudentSuggest(nameInput ? nameInput.value : '');
 }
 
 function onSeeStudentIdChange() {
     hideSeeResultPanel();
     scheduleSeeRecordLookup();
 }
-
-function renderSeeStudentSuggest(keyword) {
-    const dropdown = document.getElementById('see-student-suggest');
-    if (!dropdown) return;
-
-    const list = getCombinedSeeRoster();
-    if (list.length === 0) {
-        dropdown.style.display = 'none';
-        return;
-    }
-
-    const kw = String(keyword || '').trim().toLowerCase();
-    const filtered = kw
-        ? list.filter(item => {
-            const nameMatch = item.name && item.name.toLowerCase().includes(kw);
-            const idMatch = item.id && item.id.toLowerCase().includes(kw);
-            const comboMatch = item.id && `${item.id}${item.name}`.toLowerCase().includes(kw);
-            return nameMatch || idMatch || comboMatch;
-        })
-        : list;
-
-    if (filtered.length === 0) {
-        dropdown.style.display = 'none';
-        return;
-    }
-
-    const slice = filtered.slice(0, 24);
-    dropdown.innerHTML = slice.map((item, idx) => `
-        <div class="see-suggest-item" data-idx="${idx}">
-            <div class="see-suggest-left">
-                <span class="see-suggest-name">${escapeHtml(item.name)}</span>
-                ${item.id ? `<span class="see-suggest-id">${escapeHtml(item.id)}</span>` : ''}
-            </div>
-            ${item.tier ? `<span class="see-suggest-tier">${escapeHtml(item.tier)}班</span>` : ''}
-        </div>
-    `).join('');
-
-    dropdown.querySelectorAll('.see-suggest-item').forEach(el => {
-        el.addEventListener('mousedown', (e) => {
-            e.preventDefault();
-            const idx = parseInt(el.getAttribute('data-idx'), 10);
-            const target = slice[idx];
-            if (target) {
-                selectSeeStudent(target.id, target.name, target.tier);
-            }
-        });
-    });
-
-    dropdown.style.display = 'block';
-}
-
-function hideSeeStudentSuggest() {
-    const dropdown = document.getElementById('see-student-suggest');
-    if (dropdown) dropdown.style.display = 'none';
-}
-
-function selectSeeStudent(id, name, tier) {
-    const nameInput = document.getElementById('see-student-name');
-    const idInput = document.getElementById('see-student-id');
-    const tierEl = document.getElementById('see-tier');
-
-    if (nameInput) nameInput.value = name || '';
-    if (idInput) idInput.value = id || '';
-    if (tier && tierEl && !tierEl.value) {
-        tierEl.value = tier;
-        localStorage.setItem('jf_see_tier', tier);
-        loadSeeQbank('homework');
-        loadSeeQbank('preview');
-    }
-
-    hideSeeStudentSuggest();
-    hideSeeResultPanel();
-    fetchSeeStudentRecord();
-}
-
-// 点击自动补全区域外部时收起下拉框
-document.addEventListener('mousedown', (e) => {
-    if (!e.target.closest('.see-autocomplete-wrap')) {
-        hideSeeStudentSuggest();
-    }
-});
 
 function scheduleSeeRecordLookup() {
     if (seeState.lookupTimer) {
@@ -6067,7 +5857,7 @@ async function fetchSeeStudentRecord() {
             const parts = [];
             let hasWarning = false;
 
-            if (seeState.mode === 'homework' || seeState.mode === 'both') {
+            if (seeState.mode === 'homework') {
                 if (rec.isHomeworkUnsubmitted) {
                     hasWarning = true;
                     parts.push(`巩固${numToChinese_upload(hwWeek)}：未交作业（点击上方题号补录错题，保存后自动建档）`);
@@ -6082,7 +5872,7 @@ async function fetchSeeStudentRecord() {
                 }
             }
 
-            if (seeState.mode === 'preview' || seeState.mode === 'both') {
+            if (seeState.mode === 'preview') {
                 if (rec.isPreviewUnsubmitted) {
                     hasWarning = true;
                     parts.push(`预习${numToChinese_upload(pvWeek)}：未交预习（点击上方题号补录错题）`);
@@ -6097,8 +5887,8 @@ async function fetchSeeStudentRecord() {
                 }
             }
 
-            const hasExisting = ((seeState.mode === 'homework' || seeState.mode === 'both') && rec.hasHomeworkRecord)
-                || ((seeState.mode === 'preview' || seeState.mode === 'both') && rec.hasPreviewRecord);
+            const hasExisting = (seeState.mode === 'homework' && rec.hasHomeworkRecord)
+                || (seeState.mode === 'preview' && rec.hasPreviewRecord);
 
             statusDot.className = 'see-status-dot ' + (hasWarning ? 'warning' : (hasExisting ? 'brand' : ''));
             statusText.textContent = parts.join(' · ');
@@ -6166,8 +5956,8 @@ function buildSeeFeedbackSnippet(params) {
     } = params;
 
     const lines = [];
-    const hasPv = (mode === 'preview' || mode === 'both');
-    const hasHw = (mode === 'homework' || mode === 'both');
+    const hasPv = mode === 'preview';
+    const hasHw = mode === 'homework';
 
     if (hasPv && pvErrors.length > 0) {
         const pvQMap = {};
@@ -6235,14 +6025,14 @@ async function submitSingleErrorEntry(triggerBtn) {
         return;
     }
     if (!studentName) {
-        showToast('请输入或选择学员姓名');
+        showToast('请输入学员姓名');
         document.getElementById('see-student-name')?.focus();
         return;
     }
 
     const mode = seeState.mode;
-    const hasHomeworkData = (mode === 'homework' || mode === 'both');
-    const hasPreviewData = (mode === 'preview' || mode === 'both');
+    const hasHomeworkData = mode === 'homework';
+    const hasPreviewData = mode === 'preview';
     const hwErrors = Array.from(seeState.hwSelected).sort((a, b) => a - b);
     const pvErrors = Array.from(seeState.pvSelected).sort((a, b) => a - b);
 
@@ -6354,8 +6144,7 @@ async function submitSingleErrorEntry(triggerBtn) {
                 nextBtn.style.display = 'inline-flex';
             }
 
-            // 刷新班级名册与当前学员存档状态显示
-            loadSeeClassRoster();
+            // 刷新当前学员存档状态显示
             fetchSeeStudentRecord();
             showToast(`已更新 ${studentName} 的错题本记录`, 'success');
         } catch (err) {
@@ -6426,9 +6215,7 @@ window.toggleSeeQuestionChip = toggleSeeQuestionChip;
 window.clearSeeErrors = clearSeeErrors;
 window.onSeeErrorTextInput = onSeeErrorTextInput;
 window.onSeeStudentInput = onSeeStudentInput;
-window.onSeeStudentFocus = onSeeStudentFocus;
 window.onSeeStudentIdChange = onSeeStudentIdChange;
-window.selectSeeStudent = selectSeeStudent;
 window.submitSingleErrorEntry = submitSingleErrorEntry;
 window.copySeeRetestLink = copySeeRetestLink;
 window.copySeeFeedbackText = copySeeFeedbackText;
@@ -6479,7 +6266,6 @@ window.resetSeeForNextStudent = resetSeeForNextStudent;
         'close-file-preview': () => closeFilePreviewModal(),
         'export-preview-csv': () => exportCurrentPreviewCsv(),
         'close-see-modal': () => closeSingleErrorEntryModal(),
-        'see-entry-mode': (el) => switchSeeEntryMode(el.dataset.mode),
         'clear-see-errors': (_el, arg) => clearSeeErrors(arg),
         'copy-see-link': () => copySeeRetestLink(),
         'copy-see-feedback': () => copySeeFeedbackText(),
@@ -6494,6 +6280,7 @@ window.resetSeeForNextStudent = resetSeeForNextStudent;
         'plus-selector': () => onPlusSelectorChange(),
         'import-exclusion': (el) => importExclusionFile(el),
         'sync-local-csv': (el) => localStorage.setItem('jf_sync_local_csv', el.checked ? '1' : '0'),
+        'see-entry-mode': (el) => switchSeeEntryMode(el.value),
         'see-class-meta': () => onSeeClassMetaChange(),
         'see-week': (_el, arg) => onSeeWeekChange(arg)
     };
@@ -6525,9 +6312,4 @@ window.resetSeeForNextStudent = resetSeeForNextStudent;
         const handler = UPLOAD_INPUT_ACTIONS[target.dataset.input];
         if (handler) handler(target, target.dataset.arg);
     });
-
-    const seeStudentInput = document.getElementById('see-student-name');
-    if (seeStudentInput) {
-        seeStudentInput.addEventListener('focus', onSeeStudentFocus);
-    }
 })();
