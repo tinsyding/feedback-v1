@@ -348,6 +348,7 @@
                 }
 
                 senderClientsCache = json.data.clients || [];
+                window.globalSenderControlCache = json.data.global_sender_control || {};
                 if (countBadgeEl) {
                     countBadgeEl.textContent = senderClientsCache.length > 0 ? `${senderClientsCache.length} 台归档` : '自动同步';
                 }
@@ -358,6 +359,9 @@
                     if (!currentStillExists) {
                         const first = senderClientsCache[0];
                         selectSenderClient(first.date, first.client_slug);
+                    } else if (selectedSenderKey) {
+                        const [dStr, cSlug] = selectedSenderKey.split('__');
+                        selectSenderClient(dStr, cSlug);
                     } else {
                         const [d, s] = selectedSenderKey.split('__');
                         selectSenderClient(d, s);
@@ -404,6 +408,11 @@
                 const hasErrors = Boolean(item.has_error_log);
                 const batchCount = Array.isArray(item.batches) ? item.batches.length : 0;
                 const snapCount = Array.isArray(item.snapshots) ? item.snapshots.length : 0;
+                const rt = item.runtime_state || {};
+                const cs = item.control_summary || {};
+                const isRunning = Boolean(rt.running);
+                const hasOverride = Boolean(cs.has_override);
+                const pendingCmds = Number(cs.pending_commands_count || 0);
                 const activeFilesText = Array.isArray(item.active_files) && item.active_files.length > 0
                     ? item.active_files.join(', ')
                     : '未挂载课表';
@@ -416,14 +425,17 @@
                             <span style="font-weight:600; font-size:0.88rem; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(displayName)}">
                                 ${escapeHtml(displayName)}
                             </span>
-                            <span style="font-size:0.74rem; color:var(--text-secondary); font-family:var(--font-mono); flex-shrink:0;">${escapeHtml(item.date)}</span>
+                            <span style="font-size:0.74rem; color:var(--text-secondary); font-family:var(--font-mono); flex-shrink:0;">${escapeHtml(item.app_version ? 'v' + item.app_version : item.date)}</span>
                         </div>
                         <div style="font-size:0.77rem; color:var(--text-secondary); margin-bottom:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(activeFilesText)}">
                             课表: ${escapeHtml(activeFilesText)}
                         </div>
                         <div style="display:flex; align-items:center; justify-content:space-between; font-size:0.74rem; color:var(--text-secondary); flex-wrap:wrap; gap:4px;">
                             <span>最后活跃: ${escapeHtml(lastSync.split(' ')[1] || lastSync)}</span>
-                            <div style="display:flex; gap:4px;">
+                            <div style="display:flex; gap:4px; flex-wrap:wrap;">
+                                ${isRunning ? `<span style="background:rgba(59,130,246,0.22); color:#60a5fa; padding:1px 6px; border-radius:4px; font-weight:600;">发送中 ${Number(rt.processed || 0)}/${Number(rt.total || 0)}</span>` : ''}
+                                ${hasOverride ? '<span style="background:rgba(168,85,247,0.2); color:#c084fc; padding:1px 6px; border-radius:4px; font-weight:600;">单机策略</span>' : ''}
+                                ${pendingCmds > 0 ? `<span style="background:rgba(245,158,11,0.22); color:#fbbf24; padding:1px 6px; border-radius:4px; font-weight:600;">${pendingCmds} 待执行</span>` : ''}
                                 ${hasErrors ? '<span style="background:rgba(239,68,68,0.18); color:#f87171; padding:1px 6px; border-radius:4px; font-weight:600;">含报错</span>' : ''}
                                 ${batchCount > 0 ? `<span style="background:rgba(16,185,129,0.15); color:#34d399; padding:1px 6px; border-radius:4px;">${batchCount} 批次</span>` : ''}
                                 ${snapCount > 0 ? `<span style="background:rgba(245,158,11,0.18); color:#fbbf24; padding:1px 6px; border-radius:4px;">${snapCount} 截图</span>` : ''}
@@ -452,6 +464,21 @@
             const batchesCount = Array.isArray(client.batches) ? client.batches.length : 0;
             const snapshotsCount = Array.isArray(client.snapshots) ? client.snapshots.length : 0;
             const lastSync = client.last_sync_at || client.last_seen || '-';
+            const rt = client.runtime_state || {};
+            const cs = client.control_summary || {};
+            const overrides = cs.overrides || {};
+            const overrideKeys = Object.keys(overrides);
+            const recentCmds = Array.isArray(cs.recent_commands) ? cs.recent_commands : [];
+            const cmdNameMap = {
+                stop_batch: '远程急停',
+                refresh_policy: '刷新策略',
+                clear_roi: '清空ROI',
+                sync_logs: '补传日志'
+            };
+
+            const overrideSummaryText = overrideKeys.length > 0
+                ? overrideKeys.map(k => `${k}=${overrides[k]}`).join(', ') + (cs.override_note ? `（${cs.override_note}）` : '')
+                : '继承全局默认策略';
 
             panel.innerHTML = `
                 <div style="padding:14px 18px; border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
@@ -459,14 +486,15 @@
                         <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                             <h3 style="margin:0; font-size:1rem; font-weight:700; color:var(--text-primary);">${escapeHtml(displayName)}</h3>
                             <span style="font-size:0.78rem; padding:2px 8px; border-radius:4px; background:rgba(255,255,255,0.06); color:var(--text-secondary); font-family:var(--font-mono);">日期: ${escapeHtml(client.date)}</span>
-                            <span style="font-size:0.78rem; padding:2px 8px; border-radius:4px; background:rgba(255,255,255,0.06); color:var(--text-secondary); font-family:var(--font-mono);">系统账号: ${escapeHtml(client.os_user || '-')} | IP: ${escapeHtml(client.ip || '-')}</span>
+                            <span style="font-size:0.78rem; padding:2px 8px; border-radius:4px; background:rgba(255,255,255,0.06); color:var(--text-secondary); font-family:var(--font-mono);">系统账号: ${escapeHtml(client.os_user || '-')} | IP: ${escapeHtml(client.ip || '-')}${client.app_version ? ' | v' + escapeHtml(client.app_version) : ''}</span>
+                            ${rt.running ? `<span style="font-size:0.78rem; padding:2px 8px; border-radius:4px; background:rgba(59,130,246,0.2); color:#60a5fa; font-weight:600;">运行中 ${Number(rt.processed || 0)}/${Number(rt.total || 0)} ${rt.current_name ? '(' + escapeHtml(rt.current_name) + ')' : ''}</span>` : ''}
                         </div>
                         <div style="font-size:0.8rem; color:var(--text-secondary); margin-top:6px;">
                             当前/最近课表：<b style="color:var(--text-primary);">${escapeHtml(activeFilesText)}</b>
                             <span style="margin-left:12px; opacity:0.75;">最后同步时间：${escapeHtml(lastSync)}</span>
                         </div>
                     </div>
-                    <div style="display:flex; gap:6px;">
+                    <div style="display:flex; gap:6px; flex-wrap:wrap;">
                         <button id="sender-dtab-raw" class="btn ${activeSenderDetailTab === 'raw' ? 'primary' : 'secondary'}" onclick="switchSenderDetailTab('raw')" style="padding:6px 12px; font-size:0.82rem;">
                             原始 .log 日志
                         </button>
@@ -475,6 +503,38 @@
                         </button>
                         <button id="sender-dtab-snapshots" class="btn ${activeSenderDetailTab === 'snapshots' ? 'primary' : 'secondary'}" onclick="switchSenderDetailTab('snapshots')" style="padding:6px 12px; font-size:0.82rem;">
                             核验现场截图 (${snapshotsCount})
+                        </button>
+                    </div>
+                </div>
+                <!-- 重档 · 单机云控与远程指令工具栏 -->
+                <div style="padding:10px 18px; border-bottom:1px solid var(--border-color); background:rgba(99,102,241,0.05); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                    <div style="font-size:0.79rem; color:var(--text-secondary); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                        <span style="font-weight:600; color:#818cf8;">☁ 单机云控:</span>
+                        <span style="font-family:var(--font-mono); color:var(--text-primary);">${escapeHtml(overrideSummaryText)}</span>
+                        ${recentCmds.slice(0, 2).map(cmd => {
+                            const done = Boolean(cmd.acked_at);
+                            const label = cmdNameMap[cmd.type] || cmd.type;
+                            const badgeStyle = done
+                                ? 'background:rgba(16,185,129,0.15); color:#34d399;'
+                                : 'background:rgba(245,158,11,0.2); color:#fbbf24;';
+                            return `<span style="font-size:0.73rem; padding:1px 7px; border-radius:4px; ${badgeStyle}" title="${escapeHtml((cmd.created_at || '') + ' ' + (cmd.ack_message || ''))}">${escapeHtml(label)}: ${done ? '已执行' : '待送达'}</span>`;
+                        }).join('')}
+                    </div>
+                    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                        <button class="btn danger-subtle" onclick="sendSenderRemoteCommand('${escapeHtml(client.client_slug)}', 'stop_batch')" style="padding:5px 10px; font-size:0.79rem;" title="向该电脑下发远程急停指令（最多2~12秒内送达，安全停下并保留断点）">
+                            ⏹ 远程急停
+                        </button>
+                        <button class="btn secondary" onclick="openSenderClientOverrideModal('${escapeHtml(client.client_slug)}', '${escapeHtml(displayName)}')" style="padding:5px 10px; font-size:0.79rem;">
+                            ⚙ 单机策略覆盖
+                        </button>
+                        <button class="btn secondary" onclick="sendSenderRemoteCommand('${escapeHtml(client.client_slug)}', 'refresh_policy')" style="padding:5px 10px; font-size:0.79rem;" title="通知客户端立即刷新云控策略">
+                            ↻ 同步策略
+                        </button>
+                        <button class="btn secondary" onclick="sendSenderRemoteCommand('${escapeHtml(client.client_slug)}', 'clear_roi')" style="padding:5px 10px; font-size:0.79rem;" title="重置该电脑保存的企微窗口 ROI 校准坐标">
+                            清空视野ROI
+                        </button>
+                        <button class="btn secondary" onclick="sendSenderRemoteCommand('${escapeHtml(client.client_slug)}', 'sync_logs')" style="padding:5px 10px; font-size:0.79rem;" title="要求客户端立即补传本地未同步的 .log 文件">
+                            补传日志
                         </button>
                     </div>
                 </div>
@@ -734,6 +794,218 @@
                 window.DialogHelper.open(modal, { dismissible: true, removeOnClose: true });
             } else {
                 modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+            }
+        }
+
+        async function sendSenderRemoteCommand(clientSlug, cmdType) {
+            const labels = {
+                stop_batch: '远程急停（立即安全暂停该电脑当前的发送批次并保留断点）',
+                refresh_policy: '通知该电脑立即刷新云控策略',
+                clear_roi: '清除该电脑本地的企微视野 ROI 校准缓存（下次发送前将重新标定）',
+                sync_logs: '触发该电脑立即补传本地未上传的 .log 日志'
+            };
+            const desc = labels[cmdType] || cmdType;
+            if (cmdType === 'stop_batch' || cmdType === 'clear_roi') {
+                const ok = await showConfirmModal(`确认下发指令：${desc}？`);
+                if (!ok) return;
+            }
+            try {
+                const res = await fetch(`${LOG_API}?action=sender_client_command`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        client_slug: clientSlug,
+                        type: cmdType,
+                        params: cmdType === 'stop_batch' ? { reason: '管理员在后台日志页下发远程急停' } : {}
+                    })
+                });
+                const json = await res.json();
+                if (!json.success) {
+                    showToast(json.error || '下发远程指令失败', 'error');
+                    return;
+                }
+                showToast(`远程指令 [${desc}] 已入队，将在下次心跳/同步时送达客户端`, 'success');
+                loadSenderClients();
+            } catch (err) {
+                showToast('下发远程指令失败: ' + err.message, 'error');
+            }
+        }
+
+        async function openSenderClientOverrideModal(clientSlug, displayName) {
+            try {
+                const res = await fetch(`${LOG_API}?action=sender_client_control&client=${encodeURIComponent(clientSlug)}`);
+                const json = await res.json();
+                if (!json.success) {
+                    showToast(json.error || '读取单机策略失败', 'error');
+                    return;
+                }
+                const globalPol = json.data.global || {};
+                const cc = json.data.client_control || {};
+                const ov = cc.overrides || {};
+
+                const modal = document.createElement('dialog');
+                modal.className = 'modal-overlay native-dialog';
+                modal.setAttribute('closedby', 'any');
+                modal.innerHTML = `
+                    <div class="modal-box" style="max-width:620px; width:94vw;">
+                        <div class="modal-header">
+                            <h4>单机云控策略覆盖 · ${escapeHtml(displayName || clientSlug)}</h4>
+                            <button type="button" class="modal-close" data-close-ov-modal>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                            </button>
+                        </div>
+                        <div class="modal-body" style="padding:16px 20px; display:flex; flex-direction:column; gap:12px; max-height:74vh; overflow-y:auto;">
+                            <div style="font-size:0.8rem; color:var(--text-secondary); background:rgba(255,255,255,0.03); padding:8px 12px; border-radius:6px;">
+                                当前全局默认: <code>verifyMode=${escapeHtml(globalPol.verifyMode || 'auto')}</code>, <code>searchWait=${escapeHtml(String(globalPol.searchWait ?? 1.5))}s</code>, <code>enterWait=${escapeHtml(String(globalPol.enterWait ?? 1.2))}s</code>。留空/选“继承全局”表示跟随全局设置。
+                            </div>
+                            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px;">
+                                <div>
+                                    <label style="display:block; font-size:0.8rem; color:var(--text-secondary); margin-bottom:4px;">服务访问锁</label>
+                                    <select id="ov-service-enabled" class="custom-select" style="width:100%;">
+                                        <option value="" ${ov.senderServiceEnabled === undefined ? 'selected' : ''}>继承全局</option>
+                                        <option value="1" ${ov.senderServiceEnabled === true ? 'selected' : ''}>允许本机发送</option>
+                                        <option value="0" ${ov.senderServiceEnabled === false ? 'selected' : ''}>锁定禁止本机发送</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display:block; font-size:0.8rem; color:var(--text-secondary); margin-bottom:4px;">标题核验模式</label>
+                                    <select id="ov-verify-mode" class="custom-select" style="width:100%;">
+                                        <option value="" ${!ov.verifyMode ? 'selected' : ''}>继承全局</option>
+                                        <option value="auto" ${ov.verifyMode === 'auto' ? 'selected' : ''}>auto · 智能阶梯</option>
+                                        <option value="local" ${ov.verifyMode === 'local' ? 'selected' : ''}>local · 纯本地OCR</option>
+                                        <option value="api" ${ov.verifyMode === 'api' ? 'selected' : ''}>api · 纯云端API</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display:block; font-size:0.8rem; color:var(--text-secondary); margin-bottom:4px;">后台家长留言分析</label>
+                                    <select id="ov-enable-reply" class="custom-select" style="width:100%;">
+                                        <option value="" ${ov.enableReplyAnalysis === undefined ? 'selected' : ''}>继承全局</option>
+                                        <option value="1" ${ov.enableReplyAnalysis === true ? 'selected' : ''}>开启 Qwen-Max</option>
+                                        <option value="0" ${ov.enableReplyAnalysis === false ? 'selected' : ''}>关闭（省Token）</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display:block; font-size:0.8rem; color:var(--text-secondary); margin-bottom:4px;">核验截图上传</label>
+                                    <select id="ov-snapshot-policy" class="custom-select" style="width:100%;">
+                                        <option value="" ${!ov.snapshotPolicy ? 'selected' : ''}>继承全局</option>
+                                        <option value="errors_only" ${ov.snapshotPolicy === 'errors_only' ? 'selected' : ''}>仅失败/拦截上传</option>
+                                        <option value="always" ${ov.snapshotPolicy === 'always' ? 'selected' : ''}>每次均上传（排查）</option>
+                                        <option value="off" ${ov.snapshotPolicy === 'off' ? 'selected' : ''}>关闭上传</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:10px;">
+                                <div>
+                                    <label style="display:block; font-size:0.76rem; color:var(--text-muted); margin-bottom:4px;">searchWait (s)</label>
+                                    <input type="number" step="0.1" min="0.4" max="8" id="ov-search-wait" value="${ov.searchWait ?? ''}" placeholder="继承(${globalPol.searchWait ?? 1.5})">
+                                </div>
+                                <div>
+                                    <label style="display:block; font-size:0.76rem; color:var(--text-muted); margin-bottom:4px;">enterWait (s)</label>
+                                    <input type="number" step="0.1" min="0.4" max="8" id="ov-enter-wait" value="${ov.enterWait ?? ''}" placeholder="继承(${globalPol.enterWait ?? 1.2})">
+                                </div>
+                                <div>
+                                    <label style="display:block; font-size:0.76rem; color:var(--text-muted); margin-bottom:4px;">间隔最小 (s)</label>
+                                    <input type="number" step="0.1" min="0" max="30" id="ov-gap-min" value="${ov.studentGapMin ?? ''}" placeholder="继承">
+                                </div>
+                                <div>
+                                    <label style="display:block; font-size:0.76rem; color:var(--text-muted); margin-bottom:4px;">间隔最大 (s)</label>
+                                    <input type="number" step="0.1" min="0" max="30" id="ov-gap-max" value="${ov.studentGapMax ?? ''}" placeholder="继承">
+                                </div>
+                            </div>
+                            <div>
+                                <label style="display:block; font-size:0.8rem; color:var(--text-secondary); margin-bottom:4px;">定向发送端提醒公告 (仅该电脑可见，留空继承全局)</label>
+                                <input type="text" id="ov-notice-msg" maxlength="400" value="${escapeHtml(ov.noticeMessage || '')}" placeholder="例如：您的企微较卡，已为您自动放慢搜索等待至 2.2 秒">
+                            </div>
+                            <div>
+                                <label style="display:block; font-size:0.8rem; color:var(--text-secondary); margin-bottom:4px;">管理员调参备注 (仅后台留痕)</label>
+                                <input type="text" id="ov-note" maxlength="200" value="${escapeHtml(cc.note || '')}" placeholder="例如：临时为该老师打开全量截图排查企微切窗问题">
+                            </div>
+                        </div>
+                        <div class="modal-footer" style="display:flex; justify-content:space-between; gap:10px; padding:12px 20px; border-top:1px solid var(--border-color);">
+                            <button type="button" class="btn danger-subtle" id="ov-clear-btn">清空覆盖（恢复继承全局）</button>
+                            <div style="display:flex; gap:8px;">
+                                <button type="button" class="btn secondary" data-close-ov-modal>取消</button>
+                                <button type="button" class="btn primary" id="ov-save-btn">保存单机策略</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                const closeFn = () => {
+                    if (window.DialogHelper) window.DialogHelper.close(modal);
+                    else modal.remove();
+                };
+                modal.querySelectorAll('[data-close-ov-modal]').forEach(btn => btn.addEventListener('click', closeFn));
+
+                modal.querySelector('#ov-clear-btn')?.addEventListener('click', async () => {
+                    const r = await fetch(`${LOG_API}?action=sender_client_override`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ client_slug: clientSlug, clear: true })
+                    });
+                    const j = await r.json();
+                    if (j.success) {
+                        showToast('已清空单机策略覆盖，恢复继承全局', 'success');
+                        closeFn();
+                        loadSenderClients();
+                    } else {
+                        showToast(j.error || '操作失败', 'error');
+                    }
+                });
+
+                modal.querySelector('#ov-save-btn')?.addEventListener('click', async () => {
+                    const overrides = {};
+                    const svcVal = modal.querySelector('#ov-service-enabled')?.value;
+                    if (svcVal === '1') overrides.senderServiceEnabled = true;
+                    else if (svcVal === '0') overrides.senderServiceEnabled = false;
+
+                    const vmVal = modal.querySelector('#ov-verify-mode')?.value;
+                    if (vmVal) overrides.verifyMode = vmVal;
+
+                    const repVal = modal.querySelector('#ov-enable-reply')?.value;
+                    if (repVal === '1') overrides.enableReplyAnalysis = true;
+                    else if (repVal === '0') overrides.enableReplyAnalysis = false;
+
+                    const spVal = modal.querySelector('#ov-snapshot-policy')?.value;
+                    if (spVal) overrides.snapshotPolicy = spVal;
+
+                    const bindNum = (sel, key) => {
+                        const raw = modal.querySelector(sel)?.value?.trim();
+                        if (raw !== '' && !Number.isNaN(parseFloat(raw))) overrides[key] = parseFloat(raw);
+                    };
+                    bindNum('#ov-search-wait', 'searchWait');
+                    bindNum('#ov-enter-wait', 'enterWait');
+                    bindNum('#ov-gap-min', 'studentGapMin');
+                    bindNum('#ov-gap-max', 'studentGapMax');
+
+                    const nmVal = modal.querySelector('#ov-notice-msg')?.value?.trim();
+                    if (nmVal) overrides.noticeMessage = nmVal;
+
+                    const noteVal = modal.querySelector('#ov-note')?.value?.trim() || '';
+
+                    const r = await fetch(`${LOG_API}?action=sender_client_override`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ client_slug: clientSlug, overrides, note: noteVal })
+                    });
+                    const j = await r.json();
+                    if (j.success) {
+                        showToast('单机云控策略已保存，将在下次心跳/同步生效', 'success');
+                        closeFn();
+                        loadSenderClients();
+                    } else {
+                        showToast(j.error || '保存失败', 'error');
+                    }
+                });
+
+                document.body.appendChild(modal);
+                if (window.DialogHelper) {
+                    window.DialogHelper.open(modal, { dismissible: true, removeOnClose: true });
+                } else {
+                    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+                }
+            } catch (err) {
+                showToast('打开单机云控弹窗失败: ' + err.message, 'error');
             }
         }
 

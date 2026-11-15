@@ -195,6 +195,8 @@
         const ADMIN_CHANGE_ACTIONS = {
             'retest-qr-toggle': () => onRetestQrToggleChange(),
             'sender-flash-toggle': () => onSenderFlashToggleChange(),
+            'sc-verify-mode': () => onSenderVerifyModeChange(),
+            'sc-service-toggle': () => onSenderServiceToggleChange(),
             'records-per-page': (el) => changeRecordsPerPage(el.value),
             'select-all-records': (el) => toggleSelectAllRecords(el.checked),
             'batches-per-page': (el) => changeBatchesPerPage(el.value),

@@ -58,7 +58,7 @@ def get_web_ui_html_path() -> str:
 class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
     """处理 WebUI 静态资源与 REST API 请求。"""
 
-    server_version = "JiFangFeedbackWeb/2.0.2"
+    server_version = "JiFangFeedbackWeb/2.0.3"
 
     def log_message(self, format, *args):
         # 静默常规 HTTP 请求，避免终端滚屏刷屏
@@ -457,6 +457,12 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
         # 7. 停止发送
         if path == "/api/stop":
             res = self.controller.stop_send()
+            self._send_json(res)
+            return
+
+        # 7.5 立即刷新云控策略与远程指令
+        if path == "/api/cloud_control/refresh":
+            res = self.controller.refresh_cloud_control()
             self._send_json(res)
             return
 

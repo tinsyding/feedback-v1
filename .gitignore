@@ -94,6 +94,10 @@ env/
 # Feedback-v1 specific data
 feedback-v1/data/logs/*
 !feedback-v1/data/logs/.gitkeep
+feedback-v1/data/sender_logs/*
+!feedback-v1/data/sender_logs/.gitkeep
+feedback-v1/data/sender_control/*
+!feedback-v1/data/sender_control/.gitkeep
 feedback-v1/data/temp/*
 !feedback-v1/data/temp/.gitkeep
 

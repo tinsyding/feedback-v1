@@ -21,8 +21,10 @@ from typing import Dict, List, Optional, Tuple
 
 try:
     from sender_py.store import default_storage_base_dir, open_folder_or_file
+    from sender_py.cloud_control import CONTROL_PULL_PATH, get_cloud_control_manager
 except ModuleNotFoundError:
     from store import default_storage_base_dir, open_folder_or_file
+    from cloud_control import CONTROL_PULL_PATH, get_cloud_control_manager
 
 
 _LOG_LOCK = threading.RLock()
@@ -31,7 +33,7 @@ _CONFIG_LOCK = threading.RLock()
 SYNC_LOG_PATH = "/api/logs.php?action=sender_sync"
 SYNC_SNAPSHOT_PATH = "/api/logs.php?action=sender_snapshot"
 DEFAULT_SERVER_URL = "https://feedback.wxjifang.cn"
-APP_VERSION_STR = "2.0.2"
+APP_VERSION_STR = "2.0.3"
 
 
 def get_logs_dir(base_dir: Optional[str] = None) -> str:
@@ -235,11 +237,25 @@ def _post_json_to_server(server: str, path: str, payload: dict, timeout: float =
     return None
 
 
+def _apply_cloud_control_response(res: Optional[dict], sent_acks: Optional[list] = None) -> bool:
+    """消费服务端返回的 cloud_control 策略/指令载荷并确认已送达的回执。"""
+    if not (isinstance(res, dict) and res.get("success")):
+        return False
+    mgr = get_cloud_control_manager()
+    if sent_acks:
+        mgr.confirm_acks_sent(sent_acks)
+    data = res.get("data")
+    if isinstance(data, dict) and isinstance(data.get("cloud_control"), dict):
+        mgr.apply_server_payload(data["cloud_control"])
+    return True
+
+
 class CloudLogSyncer:
     """后台非阻塞云端日志同步器。"""
 
     BATCH_SIZE = 20
     FLUSH_INTERVAL = 2.0
+    HEARTBEAT_INTERVAL = 12.0
     MAX_QUEUE_SIZE = 2000
     MAX_CHUNK_BYTES = 45000
 
@@ -250,6 +266,7 @@ class CloudLogSyncer:
         self.active_files: List[str] = []
         self.teacher_note: str = ""
         self.base_dir: Optional[str] = None
+        self.runtime_state: Optional[dict] = None
 
         self._queue: queue.Queue = queue.Queue(maxsize=self.MAX_QUEUE_SIZE)
         self._lock = threading.RLock()
@@ -266,6 +283,7 @@ class CloudLogSyncer:
         teacher_note: Optional[str] = None,
         base_dir: Optional[str] = None,
         enabled: Optional[bool] = None,
+        runtime_state: Optional[dict] = None,
     ):
         with self._lock:
             if server is not None:
@@ -278,6 +296,8 @@ class CloudLogSyncer:
                 self.teacher_note = str(teacher_note).strip()
             if base_dir is not None:
                 self.base_dir = base_dir
+            if runtime_state is not None:
+                self.runtime_state = dict(runtime_state) if isinstance(runtime_state, dict) else None
             if enabled is not None:
                 self.enabled = bool(enabled)
             if self.enabled:
@@ -329,6 +349,7 @@ class CloudLogSyncer:
     def _run_loop(self):
         buffer_entries: List[dict] = []
         last_flush = time.monotonic()
+        last_heartbeat = time.monotonic() - self.HEARTBEAT_INTERVAL  # 启动后尽快拉取一次云控
 
         while True:
             timeout = max(0.1, self.FLUSH_INTERVAL - (time.monotonic() - last_flush))
@@ -338,7 +359,8 @@ class CloudLogSyncer:
                 if kind == "entry":
                     buffer_entries.append(payload)
                     if len(buffer_entries) >= self.BATCH_SIZE:
-                        self._send_entries(buffer_entries)
+                        if self._send_entries(buffer_entries):
+                            last_heartbeat = time.monotonic()
                         buffer_entries = []
                         last_flush = time.monotonic()
                 elif kind == "batch_summary":
@@ -346,24 +368,31 @@ class CloudLogSyncer:
                         self._send_entries(buffer_entries)
                         buffer_entries = []
                         last_flush = time.monotonic()
-                    self._send_batch_summary(payload)
+                    if self._send_batch_summary(payload):
+                        last_heartbeat = time.monotonic()
                 elif kind == "history_sync":
                     if buffer_entries:
                         self._send_entries(buffer_entries)
                         buffer_entries = []
                         last_flush = time.monotonic()
                     sync_unsynced_log_files(base_dir=payload, server=self.server, token=self.token)
+                    last_heartbeat = time.monotonic()
                 elif kind == "flush_signal":
                     if buffer_entries:
-                        self._send_entries(buffer_entries)
+                        if self._send_entries(buffer_entries):
+                            last_heartbeat = time.monotonic()
                         buffer_entries = []
                         last_flush = time.monotonic()
                     if isinstance(payload, threading.Event):
                         payload.set()
             except queue.Empty:
                 if buffer_entries:
-                    self._send_entries(buffer_entries)
+                    if self._send_entries(buffer_entries):
+                        last_heartbeat = time.monotonic()
                     buffer_entries = []
+                elif (time.monotonic() - last_heartbeat) >= self.HEARTBEAT_INTERVAL:
+                    self._send_heartbeat()
+                    last_heartbeat = time.monotonic()
                 last_flush = time.monotonic()
             except Exception:
                 buffer_entries = []
@@ -376,13 +405,40 @@ class CloudLogSyncer:
         with self._lock:
             active_files = list(self.active_files)
             server = self.server
-        return {
+            runtime_state = dict(self.runtime_state) if isinstance(self.runtime_state, dict) else None
+        acks = get_cloud_control_manager().peek_pending_acks()
+        payload = {
             "token": tok,
             "client": ident,
             "active_files": active_files,
             "_server": server,
             "_base_dir": eff_base,
+            "_acks": acks,
         }
+        if acks:
+            payload["ack_commands"] = acks
+        if runtime_state is not None:
+            payload["runtime_state"] = runtime_state
+        return payload
+
+    def _send_heartbeat(self) -> bool:
+        common = self._build_common_payload()
+        server = common.pop("_server")
+        common.pop("_base_dir", None)
+        acks = common.pop("_acks", [])
+
+        payload = {
+            **common,
+            "sync_mode": "heartbeat",
+            "date_str": datetime.datetime.now().strftime("%Y-%m-%d"),
+        }
+        res = _post_json_to_server(server, SYNC_LOG_PATH, payload, timeout=6.0)
+        ok = _apply_cloud_control_response(res, sent_acks=acks)
+        with self._lock:
+            self._last_sync_ok = ok
+            if ok:
+                self._last_sync_time = datetime.datetime.now().strftime("%H:%M:%S")
+        return ok
 
     def _send_entries(self, entries: List[dict]) -> bool:
         if not entries:
@@ -391,6 +447,7 @@ class CloudLogSyncer:
         common = self._build_common_payload(base_dir)
         server = common.pop("_server")
         eff_base = common.pop("_base_dir")
+        acks = common.pop("_acks", [])
 
         clean_entries = []
         dates_touched = set()
@@ -407,7 +464,7 @@ class CloudLogSyncer:
             "entries": clean_entries,
         }
         res = _post_json_to_server(server, SYNC_LOG_PATH, payload, timeout=8.0)
-        ok = bool(res and res.get("success"))
+        ok = _apply_cloud_control_response(res, sent_acks=acks)
         with self._lock:
             self._last_sync_ok = ok
             if ok:
@@ -423,6 +480,7 @@ class CloudLogSyncer:
         common = self._build_common_payload(summary.get("_base_dir"))
         server = common.pop("_server")
         common.pop("_base_dir", None)
+        acks = common.pop("_acks", [])
 
         clean_summary = dict(summary)
         clean_summary.pop("_base_dir", None)
@@ -433,7 +491,7 @@ class CloudLogSyncer:
             "batch_summary": clean_summary,
         }
         res = _post_json_to_server(server, SYNC_LOG_PATH, payload, timeout=10.0)
-        ok = bool(res and res.get("success"))
+        ok = _apply_cloud_control_response(res, sent_acks=acks)
         with self._lock:
             self._last_sync_ok = ok
             if ok:
@@ -461,6 +519,7 @@ def update_log_context(
     teacher_note: Optional[str] = None,
     base_dir: Optional[str] = None,
     enabled: Optional[bool] = None,
+    runtime_state: Optional[dict] = None,
 ):
     """更新云端日志同步器的上下文配置。"""
     _SYNCER.update_context(
@@ -470,7 +529,48 @@ def update_log_context(
         teacher_note=teacher_note,
         base_dir=base_dir,
         enabled=enabled,
+        runtime_state=runtime_state,
     )
+
+
+def pull_cloud_control(
+    server: Optional[str] = None,
+    token: Optional[str] = None,
+    base_dir: Optional[str] = None,
+    runtime_state: Optional[dict] = None,
+    timeout: float = 4.0,
+) -> Optional[dict]:
+    """主动从服务端拉取最新有效云控策略及待执行远程指令。"""
+    eff_server = (server or _SYNCER.server or DEFAULT_SERVER_URL).strip().rstrip("/")
+    eff_token = _resolve_token(token if token is not None else _SYNCER.token)
+    eff_base = base_dir or _SYNCER.base_dir
+    ident = get_client_identity(eff_base)
+    mgr = get_cloud_control_manager()
+    acks = mgr.peek_pending_acks()
+    with _SYNCER._lock:
+        active_files = list(_SYNCER.active_files)
+        eff_runtime = runtime_state if runtime_state is not None else (
+            dict(_SYNCER.runtime_state) if isinstance(_SYNCER.runtime_state, dict) else None
+        )
+
+    payload = {
+        "token": eff_token,
+        "client": ident,
+        "active_files": active_files,
+    }
+    if acks:
+        payload["ack_commands"] = acks
+    if eff_runtime is not None:
+        payload["runtime_state"] = eff_runtime
+
+    res = _post_json_to_server(eff_server, CONTROL_PULL_PATH, payload, timeout=timeout)
+    if _apply_cloud_control_response(res, sent_acks=acks):
+        with _SYNCER._lock:
+            _SYNCER._last_sync_ok = True
+            _SYNCER._last_sync_time = datetime.datetime.now().strftime("%H:%M:%S")
+        return res.get("data", {}).get("cloud_control")
+    mgr.mark_sync_error("云控策略拉取超时或网络不可达")
+    return None
 
 
 def get_cloud_sync_status() -> dict:
@@ -605,7 +705,7 @@ def sync_unsynced_log_files(
                         "content": chunk_text,
                     }
                     res = _post_json_to_server(eff_server, SYNC_LOG_PATH, payload, timeout=10.0)
-                    if not (res and res.get("success")):
+                    if not _apply_cloud_control_response(res):
                         file_ok = False
                         break
                     cur_offset += len(raw_bytes)

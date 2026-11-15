@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "2.0.2"
+APP_VERSION = "2.0.3"
 
 
 def asset_path(filename: str) -> str:
@@ -683,7 +683,8 @@ def rescue_option1_fuzzy_match(judgment: dict, target_id: str, target_name: str)
 
 def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
                     token=None, fast_title_only: bool = False,
-                    verify_mode: str = "auto", cand: int = 1) -> tuple:
+                    verify_mode: str = "auto", cand: int = 1,
+                    snapshot_policy: str = None) -> tuple:
     """整窗截图→裁 title/chat_tail→判定。
 
     verify_mode:
@@ -783,7 +784,7 @@ def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
                     "local_res": local_res if 'local_res' in locals() else None,
                     "judgment": judgment,
                 }
-                snap_info = save_candidate_snapshot(img, roi, title_img, target_id, target_name, cand=cand, diag_info=diag_meta)
+                snap_info = save_candidate_snapshot(img, roi, title_img, target_id, target_name, cand=cand, diag_info=diag_meta, snapshot_policy=snapshot_policy)
                 judgment["_diag"] = {
                     "snapshot": snap_info,
                     "local_res": local_res if 'local_res' in locals() else None,
@@ -811,7 +812,7 @@ def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
             except ModuleNotFoundError:
                 from debug_utils import save_candidate_snapshot
             diag_meta = {"title_abs": title_abs, "roi": roi, "rect": rect, "judgment": judgment}
-            snap_info = save_candidate_snapshot(img, roi, title_img, target_id, target_name, cand=cand, diag_info=diag_meta)
+            snap_info = save_candidate_snapshot(img, roi, title_img, target_id, target_name, cand=cand, diag_info=diag_meta, snapshot_policy=snapshot_policy)
             judgment["_diag"] = {"snapshot": snap_info, "local_res": judgment, "title_abs": title_abs}
         except Exception:
             pass
@@ -833,7 +834,7 @@ def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
                     except ModuleNotFoundError:
                         from debug_utils import save_candidate_snapshot
                     diag_meta = {"title_abs": title_abs, "roi": roi, "rect": rect, "judgment": local_res}
-                    snap_info = save_candidate_snapshot(img, roi, title_img, target_id, target_name, cand=cand, diag_info=diag_meta)
+                    snap_info = save_candidate_snapshot(img, roi, title_img, target_id, target_name, cand=cand, diag_info=diag_meta, snapshot_policy=snapshot_policy)
                     local_res["_diag"] = {"snapshot": snap_info, "local_res": local_res, "title_abs": title_abs}
                 except Exception:
                     pass
@@ -846,7 +847,7 @@ def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
         except ModuleNotFoundError:
             from debug_utils import save_candidate_snapshot
         diag_meta = {"title_abs": title_abs, "roi": roi, "rect": rect, "judgment": judgment}
-        snap_info = save_candidate_snapshot(img, roi, title_img, target_id, target_name, cand=cand, diag_info=diag_meta)
+        snap_info = save_candidate_snapshot(img, roi, title_img, target_id, target_name, cand=cand, diag_info=diag_meta, snapshot_policy=snapshot_policy)
         judgment["_diag"] = {"snapshot": snap_info, "local_res": None, "title_abs": title_abs}
     except Exception:
         pass
@@ -887,7 +888,8 @@ def _images_visually_same(img_a, img_b, diff_threshold: float = 0.8) -> bool:
 
 def send_student(item: dict, server: str, token=None, config_path: str = None,
                  parent=None, log=print, should_stop=None, reply_analyzer=None,
-                 verify_mode: str = "auto") -> dict:
+                 verify_mode: str = "auto", search_wait: float = 1.5, enter_wait: float = 1.2,
+                 enable_reply_analysis: bool = True, snapshot_policy: str = None) -> dict:
     """单个学生全流程：最多 3 候选机械 1→2→3。返回 {result, notes, ...}（notes 供待回名单）。"""
     try:
         from sender_py import window_utils as wu
@@ -957,7 +959,9 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         prev_title_img = _capture_title_crop(rect, roi)
         log(f"  └ 正在通过企业微信快捷键 (Ctrl+F) 聚焦搜索候选 {cand}/{MAX_CANDIDATES}...")
         stop_kw = {"should_stop": should_stop} if should_stop is not None else {}
-        entered = search_and_enter(name, cand, **stop_kw)
+        eff_sw = float(search_wait or 1.5)
+        eff_ew = float(enter_wait or 1.2)
+        entered = search_and_enter(name, cand, search_wait=eff_sw, enter_wait=eff_ew, **stop_kw)
         if should_stop is not None and should_stop():
             log(f"[{name}] 收到停止请求，候选 {cand} 未发送")
             return {"result": "stopped", "reason": "用户停止", "notes": notes}
@@ -972,7 +976,13 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
             if not _interruptible_sleep(0.25, should_stop):
                 log(f"[{name}] 收到停止请求，候选 {cand} 未发送")
                 return {"result": "stopped", "reason": "用户停止", "notes": notes}
-            entered = search_and_enter(name, cand, search_wait=1.8, enter_wait=1.3, **stop_kw)
+            entered = search_and_enter(
+                name,
+                cand,
+                search_wait=round(max(1.8, eff_sw + 0.3), 2),
+                enter_wait=round(max(1.3, eff_ew + 0.1), 2),
+                **stop_kw,
+            )
             if should_stop is not None and should_stop():
                 log(f"[{name}] 收到停止请求，候选 {cand} 未发送")
                 return {"result": "stopped", "reason": "用户停止", "notes": notes}
@@ -1015,7 +1025,7 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
                 time.sleep(0.25)
             if not settled:
                 log(f"  ⚠ 候选 {cand}：回车后标题栏仍与切换前一致，疑似尚未切入目标会话，放慢重搜一次...")
-                entered = search_and_enter(name, cand, search_wait=2.2, enter_wait=1.5, **stop_kw)
+                entered = search_and_enter(name, cand, search_wait=max(2.2, eff_sw + 0.6), enter_wait=max(1.5, eff_ew + 0.3), **stop_kw)
                 if should_stop is not None and should_stop():
                     log(f"  └ 收到停止请求，候选 {cand} 未发送")
                     return {"result": "stopped", "reason": "用户停止", "notes": notes}
@@ -1042,15 +1052,15 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
                 rect = fresh_rect
         except Exception:
             pass
-        if reply_analyzer is not None:
+        if reply_analyzer is not None or not enable_reply_analysis:
             judgment, chat_title, err, chat_img = judge_candidate(
                 rect, roi, sid, sname, server, token, fast_title_only=True,
-                verify_mode=verify_mode, cand=cand
+                verify_mode=verify_mode, cand=cand, snapshot_policy=snapshot_policy
             )
         else:
             judgment, chat_title, err = judge_candidate(
                 rect, roi, sid, sname, server, token, verify_mode=verify_mode,
-                cand=cand
+                cand=cand, snapshot_policy=snapshot_policy
             )
             chat_img = None
             if entered and should_record(chat_title, judgment):
@@ -1094,9 +1104,11 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
             if should_stop is not None and should_stop():
                 log(f"  └ 收到停止请求，候选 {cand} 未发送")
                 return {"result": "stopped", "reason": "用户停止", "notes": notes}
-            if reply_analyzer is not None and chat_img is not None:
+            if enable_reply_analysis and reply_analyzer is not None and chat_img is not None:
                 reply_analyzer.submit(name, cand, sid, sname, chat_title, True, chat_img)
                 log("  └ 已将聊天区截图投递至后台分析家长留言，立即开始发送反馈话术...")
+            elif not enable_reply_analysis:
+                log("  └ 云控已关闭后台家长留言分析，跳过 Qwen3.8-Max 识别，立即开始发送...")
             ok, why = paste_and_send(message)
             if ok:
                 log(f"  ✓ [{name}] 反馈话术已成功粘贴并回车发送！")

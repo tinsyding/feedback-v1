@@ -398,6 +398,131 @@
                             </div>
                         </div>
 
+                        <!-- 发送器全局云控（轻档策略 + 节拍/版本门禁） -->
+                        <div class="glass-card settings-section-card" style="padding: 20px 22px; margin-top: 14px;">
+                            <div class="section-header" style="margin-bottom: 16px;">
+                                <div class="section-icon blue">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+                                    </svg>
+                                </div>
+                                <div class="section-titles" style="flex: 1;">
+                                    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                                        <h3 style="font-size: 1.05rem; margin: 0;">发送器全局云控策略</h3>
+                                        <span id="sc-version-badge" style="font-size:0.75rem; padding:2px 8px; border-radius:999px; background:rgba(99,102,241,0.14); color:#818cf8; font-family:var(--font-mono);">v1</span>
+                                        <span id="sc-service-badge" class="badge-status status-badge active">服务开放</span>
+                                    </div>
+                                    <p style="margin: 4px 0 0 0; font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4;">
+                                        统一管控全员老师端 <code>sender_py</code> 的核验模式、后台留言分析、版本门禁、全员公告与企微防风控节奏（支持在日志页针对单机覆盖）。
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div style="display: flex; flex-direction: column; gap: 14px;">
+                                <!-- 1. 服务总开关 & 留言分析开关 -->
+                                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:12px;">
+                                    <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border:1px solid var(--border-color); border-radius:8px; background:rgba(255,255,255,0.02);">
+                                        <div>
+                                            <div style="font-size:0.86rem; font-weight:600; color:var(--text-primary);">允许全员客户端发送</div>
+                                            <div style="font-size:0.75rem; color:var(--text-muted);">关闭后全局锁定维护，禁止启动发送</div>
+                                        </div>
+                                        <label class="switch-control" title="开启/暂停全员发送服务">
+                                            <input type="checkbox" id="sc-service-enabled" data-change="sc-service-toggle" checked>
+                                            <span class="switch-slider"></span>
+                                        </label>
+                                    </div>
+                                    <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border:1px solid var(--border-color); border-radius:8px; background:rgba(255,255,255,0.02);">
+                                        <div>
+                                            <div style="font-size:0.86rem; font-weight:600; color:var(--text-primary);">后台家长留言分析 (Qwen-Max)</div>
+                                            <div style="font-size:0.75rem; color:var(--text-muted);">关闭后跳过后台 Max 识图，零 Token 消耗</div>
+                                        </div>
+                                        <label class="switch-control" title="开启/关闭发送前聊天区家长留言异步分析">
+                                            <input type="checkbox" id="sc-enable-reply" checked>
+                                            <span class="switch-slider"></span>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <!-- 2. 核验模式 / 现场快照策略 / 最低版本门禁 -->
+                                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px;">
+                                    <div>
+                                        <label style="display:block; font-size:0.84rem; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">标题核验默认策略</label>
+                                        <select id="sc-verify-mode" class="custom-select" style="width:100%;" data-change="sc-verify-mode">
+                                            <option value="auto">auto · 智能阶梯 (本地OCR优先 + Flash兜底)</option>
+                                            <option value="local">local · 纯本地OCR (绝不调Flash，免Token)</option>
+                                            <option value="api">api · 纯云端API (不走本地OCR)</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label style="display:block; font-size:0.84rem; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">核验截图上传策略</label>
+                                        <select id="sc-snapshot-policy" class="custom-select" style="width:100%;">
+                                            <option value="errors_only">errors_only · 仅失败/拦截上传 (默认)</option>
+                                            <option value="always">always · 每次候选均上传 (全量排障)</option>
+                                            <option value="off">off · 仅存本机不上传 (最省流量)</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label style="display:block; font-size:0.84rem; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">最低允许客户端版本</label>
+                                        <input type="text" id="sc-min-version" placeholder="留空不限制，如 2.0.3" style="font-family:var(--font-mono); font-size:0.85rem;">
+                                    </div>
+                                    <div>
+                                        <label style="display:block; font-size:0.84rem; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">低于最低版本动作</label>
+                                        <select id="sc-min-version-action" class="custom-select" style="width:100%;">
+                                            <option value="block">block · 强制拦截并提示更新</option>
+                                            <option value="warn">warn · 仅黄牌提醒，仍允许发送</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <!-- 3. 更新包地址与全员公告 -->
+                                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:12px;">
+                                    <div>
+                                        <label style="display:block; font-size:0.84rem; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">新版本下载地址 (可选)</label>
+                                        <input type="text" id="sc-update-url" placeholder="https://.../release 或 网盘链接" style="font-family:var(--font-mono); font-size:0.84rem;">
+                                    </div>
+                                    <div>
+                                        <label style="display:block; font-size:0.84rem; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">老师端顶部公告 / 维护提示</label>
+                                        <input type="text" id="sc-notice-message" maxlength="400" placeholder="留空则不显示横幅，填写后老师打开程序可见" style="font-size:0.85rem;">
+                                    </div>
+                                </div>
+
+                                <!-- 4. 企微防风控节奏参数 -->
+                                <div style="border-top:1px solid var(--border-color); padding-top:12px;">
+                                    <div style="font-size:0.84rem; font-weight:600; color:var(--text-secondary); margin-bottom:8px;">搜索切窗与防风控节奏参数（秒 / 人数）</div>
+                                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(135px, 1fr)); gap:10px;">
+                                        <div>
+                                            <label style="display:block; font-size:0.76rem; color:var(--text-muted); margin-bottom:4px;">搜人后等待 (searchWait)</label>
+                                            <input type="number" id="sc-search-wait" step="0.1" min="0.4" max="8" value="1.5" style="font-family:var(--font-mono); font-size:0.84rem;">
+                                        </div>
+                                        <div>
+                                            <label style="display:block; font-size:0.76rem; color:var(--text-muted); margin-bottom:4px;">回车进聊等待 (enterWait)</label>
+                                            <input type="number" id="sc-enter-wait" step="0.1" min="0.4" max="8" value="1.2" style="font-family:var(--font-mono); font-size:0.84rem;">
+                                        </div>
+                                        <div>
+                                            <label style="display:block; font-size:0.76rem; color:var(--text-muted); margin-bottom:4px;">人际最小间隔 (s)</label>
+                                            <input type="number" id="sc-gap-min" step="0.1" min="0" max="30" value="0.5" style="font-family:var(--font-mono); font-size:0.84rem;">
+                                        </div>
+                                        <div>
+                                            <label style="display:block; font-size:0.76rem; color:var(--text-muted); margin-bottom:4px;">人际最大间隔 (s)</label>
+                                            <input type="number" id="sc-gap-max" step="0.1" min="0" max="30" value="1.0" style="font-family:var(--font-mono); font-size:0.84rem;">
+                                        </div>
+                                        <div>
+                                            <label style="display:block; font-size:0.76rem; color:var(--text-muted); margin-bottom:4px;">每N人大停顿 (人)</label>
+                                            <input type="number" id="sc-break-every" step="1" min="1" max="200" value="15" style="font-family:var(--font-mono); font-size:0.84rem;">
+                                        </div>
+                                        <div>
+                                            <label style="display:block; font-size:0.76rem; color:var(--text-muted); margin-bottom:4px;">大停顿最短 (s)</label>
+                                            <input type="number" id="sc-break-min" step="0.5" min="0" max="60" value="2.0" style="font-family:var(--font-mono); font-size:0.84rem;">
+                                        </div>
+                                        <div>
+                                            <label style="display:block; font-size:0.76rem; color:var(--text-muted); margin-bottom:4px;">大停顿最长 (s)</label>
+                                            <input type="number" id="sc-break-max" step="0.5" min="0" max="60" value="3.0" style="font-family:var(--font-mono); font-size:0.84rem;">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- 大语言模型 (AI 视觉接口) 配置 -->
                         <div class="glass-card settings-section-card" style="padding: 20px 22px; margin-top: 14px;">
                             <div class="section-header" style="margin-bottom: 16px;">
@@ -1286,7 +1411,7 @@
     </div>
 
     <!-- JAVASCRIPT APPLICATION LOGIC -->
-    <script defer src="js/admin.js?v=20261115-01"></script>
+    <script defer src="js/admin.js?v=20261116-01"></script>
 </body>
 
 </html>

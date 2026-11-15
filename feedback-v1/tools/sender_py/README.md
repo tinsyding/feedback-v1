@@ -38,6 +38,7 @@ feedback-v1/tools/sender_py/
 ├── web_server.py          # 标准库 REST API 与 SSE 实时事件流服务
 ├── web_controller.py      # Web 端状态管理、文件去重与任务控制
 ├── web_ui.html            # Web 控制面板前端页面（原生 JS/CSS，主线界面）
+├── cloud_control.py       # 轻重两档云控客户端（全局策略拉取、版本/维护门禁与单机远程指令）
 ├── sender.py              # Tkinter 桌面版（已冻结不再更新，保留兼容参考）
 ├── local_ocr.py           # 本地双层 OCR（winocr + RapidOCR）
 ├── benchmark.py           # 多引擎识别基准评测模块（零发送、并发比对、CSV 导出）
@@ -53,7 +54,7 @@ feedback-v1/tools/sender_py/
 ├── utils.py               # 输入解析（JSON 数组与 HTML 网页快照）
 ├── verify_stage2_win.py   # Windows 截图验证脚本
 ├── verify_stage4_win.py   # Windows ROI 校准验证脚本
-└── tests/                 # 单元测试集（95 项）
+└── tests/                 # 单元测试集（132 项）
 ```
 
 配套文件：
@@ -269,7 +270,7 @@ cd feedback-v1/tools
 PYTHONPATH=. python3 -m unittest discover -s sender_py/tests -v
 ```
 
-共 95 项测试，涵盖输入解析、HTML 快照提取、去重、ROI 比例与几何反推、双层本地 OCR、姓名容错与群聊拦截、基准评测模块、云端返回判定矩阵、候选切换、全局键盘钩子、窗口拉回、Web 控制器与本地归档等逻辑。
+共 132 项测试，涵盖输入解析、HTML 快照提取、去重、ROI 比例与几何反推、双层本地 OCR、姓名容错与群聊拦截、基准评测模块、轻重两档云控与远程指令、云端返回判定矩阵、候选切换、全局键盘钩子、窗口拉回、Web 控制器与本地归档等逻辑。
 
 Windows 真机回归建议覆盖：
 1. 首次自动校准、保存及重启复用；
@@ -293,7 +294,7 @@ Windows 真机回归建议覆盖：
 | 2. Nuitka 编译版 | ZIP 压缩包（原生二进制目录） | 转译为 C++ 编译为本地机器码 | 极低 | 杀软策略严格的机房或终端 | `build_nuitka.bat` |
 | 3. 单文件版 (`--onefile`) | 单个 `.exe` 文件 | 启动时自解压至 `AppData\Local\Temp` | 较高（易触发启发式拦截） | 临时单文件拷贝测试 | `build_onefile.bat` |
 
-本地可运行 `tools/sender_py/build_all.bat` 选择打包模式；推送 `sender-*` tag（如 `sender-v2.0.2`）或手动触发 GitHub Actions 工作流时会自动构建并发布 **Nuitka 原生机器码单文件版**（`JiFangFeedbackWeb-nuitka-onefile-windows-x64.exe`）与 **普通绿色文件夹压缩包版**（`JiFangFeedbackWeb-onedir-windows-x64.zip`）。GitHub Releases 已停止收录 Tkinter 桌面版产物。
+本地可运行 `tools/sender_py/build_all.bat` 选择打包模式；推送 `sender-*` tag（如 `sender-v2.0.3`）或手动触发 GitHub Actions 工作流时会自动构建并发布 **Nuitka 原生机器码单文件版**（`JiFangFeedbackWeb-nuitka-onefile-windows-x64.exe`）与 **普通绿色文件夹压缩包版**（`JiFangFeedbackWeb-onedir-windows-x64.zip`）。GitHub Releases 已停止收录 Tkinter 桌面版产物。
 
 ## 13. 已知限制
 

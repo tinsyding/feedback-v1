@@ -572,7 +572,7 @@
     <div class="brand" onclick="onBrandBadgeClick()" style="cursor:pointer;" title="极方每周反馈程序">
       <img src="/favicon.ico" class="logo-badge" alt="极方每周反馈" style="object-fit:contain; background:transparent; box-shadow:none;" onerror="this.outerHTML='<div class=\'logo-badge\'>极</div>'">
       <div class="brand-title">极方每周反馈程序</div>
-      <div class="brand-badge">Web版 v2.0.2</div>
+      <div class="brand-badge">Web版 v2.0.3</div>
     </div>
     <div class="nav-actions">
       <div style="display:inline-flex; align-items:center; gap:5px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; padding:3px 8px;" title="可选：填写您的姓名备注，方便管理员在云端日志中识别您的电脑（失焦或回车自动保存）">
@@ -612,9 +612,13 @@
     </section>
 
     <!-- 运行环境贴士 -->
-    <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:9px 14px; margin-bottom:12px; font-size:12px; color:#1e40af; display:flex; align-items:center; gap:8px;">
+    <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:9px 14px; margin-bottom:12px; font-size:12px; color:#1e40af; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
       <span><strong>温馨提示</strong>：发送与评测过程中，请勿将企业微信窗口拖出屏幕边缘（藏在边角），且任务开始后请勿随意改动企微窗口大小，以免遮挡或影响图像识别精准度。</span>
+      <span id="cloudPolicyBadge" style="font-size:11px; background:#fff; color:#1d4ed8; border:1px solid #93c5fd; border-radius:999px; padding:2px 9px; white-space:nowrap; font-weight:600; cursor:pointer;" onclick="refreshCloudControlNow()" title="点击立即从服务端同步最新云控策略">云控策略: 同步中...</span>
     </div>
+
+    <!-- 云控公告 / 版本门禁 / 维护锁定横幅（由服务端下发，空时自动隐藏） -->
+    <div id="cloudControlBanner" style="display:none; border-radius:8px; padding:10px 14px; margin-bottom:12px; font-size:13px; line-height:1.5; border:1px solid #fcd34d; background:#fffbeb; color:#92400e;"></div>
 
     <!-- 2. 控制与筛选工具栏 -->
     <section class="card toolbar">
@@ -1480,6 +1484,102 @@
       };
     }
 
+    async function refreshCloudControlNow() {
+      try {
+        showToast("正在从云端同步最新策略...");
+        const res = await fetch("/api/cloud_control/refresh", { method: "POST" });
+        const data = await res.json();
+        await fetchState();
+        if (data && data.success) {
+          showToast("云控策略已同步");
+        } else {
+          showToast("云端暂不可达，已沿用当前策略");
+        }
+      } catch (e) {
+        showToast("刷新云控策略失败");
+      }
+    }
+
+    function escapeHtmlInline(str) {
+      return String(str || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function renderCloudControlBanner() {
+      const badge = document.getElementById("cloudPolicyBadge");
+      const banner = document.getElementById("cloudControlBanner");
+      const cc = appState.cloud_control || {};
+      const pol = cc.policy || {};
+      const gate = cc.start_gate || {};
+
+      if (badge) {
+        const vmMap = { auto: "智能核验", local: "纯本地OCR", api: "仅云端API" };
+        const vmText = vmMap[pol.verifyMode] || "智能核验";
+        const replyText = pol.enableReplyAnalysis === false ? " · 已关Max分析" : "";
+        const overrideTag = cc.has_client_override ? " · 单机策略" : "";
+        if (pol.senderServiceEnabled === false) {
+          badge.innerText = "⛔ 云控维护暂停中";
+          badge.style.background = "#fef2f2";
+          badge.style.color = "#b91c1c";
+          badge.style.borderColor = "#fecaca";
+        } else if (cc.synced) {
+          badge.innerText = `☁ ${vmText}${replyText}${overrideTag}`;
+          badge.style.background = cc.has_client_override ? "#fffbeb" : "#f0fdf4";
+          badge.style.color = cc.has_client_override ? "#b45309" : "#15803d";
+          badge.style.borderColor = cc.has_client_override ? "#fde68a" : "#bbf7d0";
+        } else {
+          badge.innerText = `☁ ${vmText} (默认)`;
+        }
+      }
+
+      if (!banner) return;
+      const lines = [];
+      let level = "info"; // info | warn | block
+
+      if (pol.senderServiceEnabled === false) {
+        level = "block";
+        lines.push(`<strong>⛔ 发送服务已由管理员暂停：</strong>${escapeHtmlInline(gate.block_reason || "当前处于云控维护锁定状态，暂停新建发送任务。")}`);
+      } else if (gate.allowed === false && gate.block_reason) {
+        level = "block";
+        lines.push(`<strong>⛔ 版本受限：</strong>${escapeHtmlInline(gate.block_reason).replace(/\n+/g, "<br>")}`);
+      } else if (gate.warning) {
+        level = "warn";
+        lines.push(`<strong>⚠ 版本提示：</strong>${escapeHtmlInline(gate.warning)}`);
+      }
+
+      const notice = (pol.noticeMessage || "").trim();
+      if (notice) {
+        if (level === "info") level = "warn";
+        lines.push(`<strong>📢 管理员公告：</strong>${escapeHtmlInline(notice).replace(/\n/g, "<br>")}`);
+      }
+
+      if (gate.update_url) {
+        const safeUrl = escapeHtmlInline(gate.update_url);
+        lines.push(`<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color:inherit; font-weight:700; text-decoration:underline;">点击下载新版程序 &rarr;</a>`);
+      }
+
+      if (lines.length === 0) {
+        banner.style.display = "none";
+        banner.innerHTML = "";
+        return;
+      }
+
+      if (level === "block") {
+        banner.style.background = "#fef2f2";
+        banner.style.borderColor = "#fecaca";
+        banner.style.color = "#991b1b";
+      } else {
+        banner.style.background = "#fffbeb";
+        banner.style.borderColor = "#fde68a";
+        banner.style.color = "#92400e";
+      }
+      banner.innerHTML = lines.join("<div style='margin-top:4px;'></div>");
+      banner.style.display = "block";
+    }
+
     // 渲染主界面
     function renderUI() {
       // 1. 文件池
@@ -1544,6 +1644,9 @@
         const lastTime = cs.last_sync_time ? ` · 最近同步 ${cs.last_sync_time}` : "";
         syncBadge.innerText = `云端自动同步中 (${disp}${lastTime})`;
       }
+
+      // 2.6 云控策略与公告横幅渲染
+      renderCloudControlBanner();
 
       // 3. 表格渲染
       renderTable();

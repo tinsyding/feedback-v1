@@ -19,15 +19,16 @@ try:
     from sender_py.reply_notes import actionable, dedupe_add
     from sender_py.roi_manager import default_config_path, save_roi, signature_key, validate_rel
     from sender_py.sender import (
-        AsyncReplyAnalyzer, archive_key_for_input, load_feedback_inputs,
+        APP_VERSION, AsyncReplyAnalyzer, archive_key_for_input, load_feedback_inputs,
         open_sample_chat_for_calibration, safe_copy, send_student, summarize_status_counts
     )
     from sender_py.store import HistoryManager, SentFilesManager
     from sender_py.utils import parse_student_identifier
     from sender_py.window_utils import GlobalEscWatcher
+    from sender_py.cloud_control import get_cloud_control_manager
     from sender_py.file_logger import (
         cleanup_old_logs, write_log, open_logs_dir, list_log_files, read_log_file,
-        update_log_context, sync_batch_summary, flush_cloud_logs,
+        update_log_context, sync_batch_summary, flush_cloud_logs, pull_cloud_control,
         get_client_identity, get_teacher_note, set_teacher_note, get_cloud_sync_status,
         _SYNCER,
     )
@@ -39,11 +40,15 @@ except ModuleNotFoundError:
     from reply_notes import actionable, dedupe_add
     from roi_manager import default_config_path, save_roi, signature_key, validate_rel
     from sender import (
-        AsyncReplyAnalyzer, archive_key_for_input, load_feedback_inputs,
+        APP_VERSION, AsyncReplyAnalyzer, archive_key_for_input, load_feedback_inputs,
         open_sample_chat_for_calibration, safe_copy, send_student, summarize_status_counts
     )
     from store import HistoryManager, SentFilesManager
     from utils import parse_student_identifier
+    try:
+        from cloud_control import get_cloud_control_manager
+    except Exception:
+        get_cloud_control_manager = None
     try:
         from window_utils import GlobalEscWatcher
     except Exception:
@@ -51,7 +56,7 @@ except ModuleNotFoundError:
     try:
         from file_logger import (
             cleanup_old_logs, write_log, open_logs_dir, list_log_files, read_log_file,
-            update_log_context, sync_batch_summary, flush_cloud_logs,
+            update_log_context, sync_batch_summary, flush_cloud_logs, pull_cloud_control,
             get_client_identity, get_teacher_note, set_teacher_note, get_cloud_sync_status,
             _SYNCER,
         )
@@ -64,6 +69,7 @@ except ModuleNotFoundError:
         update_log_context = lambda **kwargs: None
         sync_batch_summary = lambda *args, **kwargs: None
         flush_cloud_logs = lambda timeout=2.5: None
+        pull_cloud_control = lambda **kwargs: None
         get_client_identity = lambda base_dir=None: {}
         get_teacher_note = lambda base_dir=None: ""
         set_teacher_note = lambda note, base_dir=None: str(note or "")
@@ -128,9 +134,14 @@ class WebController:
         except Exception:
             pass
 
-        # 初始化云端日志自动同步（单元测试环境未显式开启时不对外发网路请求）
+        # 初始化云端日志自动同步与云控策略拉取（单元测试环境未显式开启时不对外发网络请求）
         if enable_cloud_sync is None:
             enable_cloud_sync = ("unittest" not in sys.modules) and (os.environ.get("SENDER_DISABLE_CLOUD_LOG") != "1")
+        self._cloud_sync_enabled = bool(enable_cloud_sync)
+        self._cloud_control = get_cloud_control_manager() if get_cloud_control_manager is not None else None
+        if self._cloud_control is not None:
+            self._cloud_control.set_command_handler(self._handle_cloud_command)
+            self._cloud_control.set_policy_change_handler(lambda _pol: self._notify_state_change())
         try:
             update_log_context(
                 server=self.server,
@@ -138,11 +149,94 @@ class WebController:
                 active_files=[],
                 teacher_note=get_teacher_note(),
                 enabled=bool(enable_cloud_sync),
+                runtime_state=self._build_runtime_state_payload(),
             )
             if enable_cloud_sync and _SYNCER is not None:
                 _SYNCER.trigger_history_sync()
+                threading.Thread(
+                    target=lambda: pull_cloud_control(server=self.server, token=self.token, timeout=3.0),
+                    name="CloudControlBootPull",
+                    daemon=True,
+                ).start()
         except Exception:
             pass
+
+    def _build_runtime_state_payload(self) -> dict:
+        pol = self._cloud_control.get_policy() if self._cloud_control is not None else {}
+        return {
+            "running": bool(self._running),
+            "processed": int(self.progress.get("processed", 0)),
+            "total": int(self.progress.get("total", 0)),
+            "current_name": str(self.progress.get("current_name", "")),
+            "verify_mode": str(pol.get("verifyMode", "auto")),
+            "policy_version": int(pol.get("policyVersion", 1)),
+        }
+
+    def _sync_runtime_context(self):
+        try:
+            update_log_context(runtime_state=self._build_runtime_state_payload())
+        except Exception:
+            pass
+
+    def refresh_cloud_control(self, timeout: float = 3.0) -> dict:
+        if not self._cloud_sync_enabled:
+            return {
+                "success": True,
+                "cloud_control": self._cloud_control.get_snapshot_state(APP_VERSION) if self._cloud_control else {},
+            }
+        res = pull_cloud_control(
+            server=self.server,
+            token=self.token,
+            runtime_state=self._build_runtime_state_payload(),
+            timeout=timeout,
+        )
+        self._notify_state_change()
+        return {
+            "success": bool(res is not None),
+            "cloud_control": self._cloud_control.get_snapshot_state(APP_VERSION) if self._cloud_control else {},
+        }
+
+    def _handle_cloud_command(self, cmd: dict) -> dict:
+        cmd_type = str(cmd.get("type") or "").strip().lower()
+        params = cmd.get("params") if isinstance(cmd.get("params"), dict) else {}
+        reason = str(params.get("reason") or "管理员从后台触发").strip()
+
+        if cmd_type == "stop_batch":
+            was_running = bool(self._running or self.benchmark_state.get("running"))
+            self._stop_requested = True
+            self._benchmark_stop_requested = True
+            if was_running:
+                self.emit(f"⏹ [云控指令] 收到管理员远程急停信号（{reason}），正在安全停止并保持断点...")
+            else:
+                self.emit(f"ℹ [云控指令] 收到管理员远程急停信号（当前未在发送中）")
+            self._notify_state_change()
+            return {"success": True, "message": "已执行远程急停" if was_running else "当前无运行中任务，已置位停止标记"}
+
+        if cmd_type == "refresh_policy":
+            self.emit("☁ [云控指令] 管理员通知刷新云控策略，最新策略已同步生效。")
+            self._notify_state_change()
+            return {"success": True, "message": "云控策略已刷新"}
+
+        if cmd_type == "clear_roi":
+            cfg_path = default_config_path()
+            removed = False
+            try:
+                if os.path.isfile(cfg_path):
+                    os.remove(cfg_path)
+                    removed = True
+            except Exception as exc:
+                return {"success": False, "message": f"清理 ROI 文件失败: {exc}"}
+            self.emit("☁ [云控指令] 管理员已远程重置本机企微视野校准缓存（下次发送前将重新自动标定）。")
+            self._notify_state_change()
+            return {"success": True, "message": "已清理 ROI 缓存" if removed else "本机暂无 ROI 缓存"}
+
+        if cmd_type == "sync_logs":
+            if self._cloud_sync_enabled and _SYNCER is not None:
+                _SYNCER.trigger_history_sync()
+            self.emit("☁ [云控指令] 已触发全量日志补传同步。")
+            return {"success": True, "message": "已触发日志补传"}
+
+        return {"success": False, "message": f"未知云控指令: {cmd_type}"}
 
     def _start_esc_watcher(self):
         self._stop_esc_watcher()
@@ -368,9 +462,31 @@ class WebController:
     # ================= 发送流程控制 =================
 
     def start_send(self, target_ids: list = None) -> dict:
-        """开始批量执行发送任务（含 3 秒安全倒计时缓冲与断点续发）。"""
+        """开始批量执行发送任务（含云控门禁检查、3 秒安全倒计时缓冲与断点续发）。"""
         if self._running:
             return {"success": False, "message": "发送任务已在运行中"}
+
+        # 开跑前先尝试拉取最新云控策略，确保停服锁/最低版本门禁/核验策略即时生效
+        if self._cloud_sync_enabled:
+            try:
+                pull_cloud_control(
+                    server=self.server,
+                    token=self.token,
+                    runtime_state=self._build_runtime_state_payload(),
+                    timeout=2.5,
+                )
+            except Exception:
+                pass
+
+        if self._cloud_control is not None:
+            gate = self._cloud_control.evaluate_start_gate(APP_VERSION)
+            if not gate.get("allowed", True):
+                reason = gate.get("block_reason") or "云控策略禁止启动发送"
+                self.emit(f"⛔ [云控拦截] {reason.replace(chr(10), ' ')}", level="WARNING")
+                self._notify_state_change()
+                return {"success": False, "message": reason, "update_url": gate.get("update_url", "")}
+            if gate.get("warning"):
+                self.emit(f"⚠ [版本提醒] {gate['warning']}", level="WARNING")
 
         with self._lock:
             if target_ids is not None:
@@ -514,6 +630,28 @@ class WebController:
                     stopped = True
                     break
 
+                cur_policy = self._cloud_control.get_policy() if self._cloud_control is not None else {}
+                if cur_policy and not cur_policy.get("senderServiceEnabled", True):
+                    self.emit("⛔ [云控停服] 管理员在发送过程中启用了全局暂停/单机锁定，已安全暂停并保持断点！", level="WARNING")
+                    self._stop_requested = True
+                    stopped = True
+                    break
+
+                eff_verify_mode = str(cur_policy.get("verifyMode") or "auto")
+                eff_enable_reply = bool(cur_policy.get("enableReplyAnalysis", True))
+                eff_snapshot_policy = str(cur_policy.get("snapshotPolicy") or "errors_only")
+                eff_search_wait = float(cur_policy.get("searchWait", 1.5))
+                eff_enter_wait = float(cur_policy.get("enterWait", 1.2))
+                eff_break_every = max(1, int(cur_policy.get("batchBreakEvery", BATCH_BREAK_EVERY)))
+                eff_break_gap = (
+                    float(cur_policy.get("batchBreakMin", BATCH_BREAK_GAP[0])),
+                    float(cur_policy.get("batchBreakMax", BATCH_BREAK_GAP[1])),
+                )
+                eff_student_gap = (
+                    float(cur_policy.get("studentGapMin", STUDENT_GAP[0])),
+                    float(cur_policy.get("studentGapMax", STUDENT_GAP[1])),
+                )
+
                 name = item.get("studentName", "")
                 sid = item.get("sid", "")
                 msg_len = len(item.get("message", ""))
@@ -527,6 +665,7 @@ class WebController:
                     item["_status"] = "发送中"
                     self.progress["current_name"] = name
                     self.progress["step_text"] = f"正在发送：{name} ({processed + 1}/{selected_count})"
+                self._sync_runtime_context()
                 self._notify_state_change()
 
                 self.emit(f"▶ 正在处理 [{processed + 1}/{selected_count}]: {name} (学号: {sid}) | 话术字数: {msg_len} 字")
@@ -536,8 +675,12 @@ class WebController:
                         item, self.server, self.token, config_path=config_path,
                         parent=None, log=self.emit,
                         should_stop=lambda: self._stop_requested,
-                        reply_analyzer=self._reply_analyzer,
-                        verify_mode="auto"
+                        reply_analyzer=self._reply_analyzer if eff_enable_reply else None,
+                        verify_mode=eff_verify_mode,
+                        search_wait=eff_search_wait,
+                        enter_wait=eff_enter_wait,
+                        enable_reply_analysis=eff_enable_reply,
+                        snapshot_policy=eff_snapshot_policy,
                     )
                 except Exception as exc:
                     res = {"result": "error", "reason": f"异常: {exc}", "notes": []}
@@ -584,22 +727,23 @@ class WebController:
                 else:
                     self.emit(f"  ✗ [{name}] 状态更新：发送失败（{reason}）")
 
+                self._sync_runtime_context()
                 self._notify_state_change()
 
                 if result == "stopped" or self._stop_requested:
                     stopped = True
                     break
 
-                # 防风控延迟控制：每 15 人大停顿 2~3 秒；其余学员停顿 0.5~1.0 秒
+                # 防风控延迟控制：读取云控每 N 人大停顿与学员间隔参数（默认每 15 人停 2~3 秒，其余停 0.5~1.0 秒）
                 if processed < selected_count and not self._stop_requested:
-                    if processed % BATCH_BREAK_EVERY == 0:
-                        break_gap = random.uniform(*BATCH_BREAK_GAP)
+                    if processed % eff_break_every == 0:
+                        break_gap = random.uniform(*eff_break_gap)
                         self.emit(f"  已连续处理 {processed} 人，执行防风控停顿 {break_gap:.1f} 秒（按ESC可停止）...")
                         if not self._interruptible_pause(break_gap):
                             stopped = True
                             break
                     else:
-                        gap = random.uniform(*STUDENT_GAP)
+                        gap = random.uniform(*eff_student_gap)
                         self.emit(f"  随机停顿 {gap:.1f} 秒，模拟人工打字节奏...")
                         if not self._interruptible_pause(gap):
                             stopped = True
@@ -654,6 +798,7 @@ class WebController:
             else:
                 self.progress["step_text"] = "发送完成"
 
+        self._sync_runtime_context()
         self._record_sent_files_summary()
 
         counts = summarize_status_counts(it.get("_status", "") for it in self.items)
@@ -865,6 +1010,8 @@ class WebController:
                 "teacher_note": ident.get("teacher_note", ""),
                 "client_identity": ident,
                 "cloud_sync": sync_status,
+                "app_version": APP_VERSION,
+                "cloud_control": self._cloud_control.get_snapshot_state(APP_VERSION) if self._cloud_control else {},
             }
 
     def _notify_state_change(self):

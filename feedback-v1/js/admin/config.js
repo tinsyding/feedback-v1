@@ -84,10 +84,46 @@
             const flashToggle = document.getElementById('sender-flash-toggle');
             const isChecked = flashToggle ? flashToggle.checked : true;
             updateSenderFlashToggleLabel(isChecked);
+            const vmSelect = document.getElementById('sc-verify-mode');
+            if (vmSelect) {
+                vmSelect.value = isChecked ? 'auto' : 'local';
+            }
             const msg = isChecked
-                ? '已开启云端 Qwen3.8-Flash 标题核验（客户端将优先云端秒验）'
+                ? '已开启云端 Qwen3.8-Flash 标题核验（客户端将优先本地 + Flash 兜底）'
                 : '已停用云端 Qwen-Flash，已强制所有客户端使用本地离线极速 OCR（免 Token 消耗）';
             await saveConfig(true, msg);
+        }
+
+        function updateSenderServiceBadge(enabled) {
+            const badge = document.getElementById('sc-service-badge');
+            if (!badge) return;
+            if (enabled) {
+                badge.textContent = '服务开放';
+                badge.style.background = 'rgba(16, 185, 129, 0.15)';
+                badge.style.color = '#10b981';
+                badge.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+            } else {
+                badge.textContent = '已锁定暂停';
+                badge.style.background = 'rgba(239, 68, 68, 0.14)';
+                badge.style.color = '#ef4444';
+                badge.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+            }
+        }
+
+        function onSenderVerifyModeChange() {
+            const vmSelect = document.getElementById('sc-verify-mode');
+            const vm = vmSelect ? vmSelect.value : 'auto';
+            const flashEnabled = vm !== 'local';
+            const flashToggle = document.getElementById('sender-flash-toggle');
+            if (flashToggle) {
+                flashToggle.checked = flashEnabled;
+                updateSenderFlashToggleLabel(flashEnabled);
+            }
+        }
+
+        function onSenderServiceToggleChange() {
+            const svcToggle = document.getElementById('sc-service-enabled');
+            updateSenderServiceBadge(svcToggle ? svcToggle.checked : true);
         }
 
         function updateConfigUI() {
@@ -110,12 +146,49 @@
             }
 
             // Qwen3.8-Flash 标题核验开关 (disableQwenFlashTitle 为 true 代表关闭)
-            const flashEnabled = currentConfig.disableQwenFlashTitle !== true;
+            const sc = currentConfig.senderControl || {};
+            const verifyMode = sc.verifyMode || (currentConfig.disableQwenFlashTitle ? 'local' : 'auto');
+            const flashEnabled = verifyMode !== 'local';
             const flashToggle = document.getElementById('sender-flash-toggle');
             if (flashToggle) {
                 flashToggle.checked = flashEnabled;
                 updateSenderFlashToggleLabel(flashEnabled);
             }
+
+            // 发送器全局云控回显
+            const scVerBadge = document.getElementById('sc-version-badge');
+            if (scVerBadge) scVerBadge.textContent = `v${sc.policyVersion || 1}${sc.updatedAt ? ' · ' + sc.updatedAt.split(' ')[1] : ''}`;
+            const svcEnabled = sc.senderServiceEnabled !== false;
+            const svcEl = document.getElementById('sc-service-enabled');
+            if (svcEl) svcEl.checked = svcEnabled;
+            updateSenderServiceBadge(svcEnabled);
+
+            const replyEl = document.getElementById('sc-enable-reply');
+            if (replyEl) replyEl.checked = sc.enableReplyAnalysis !== false;
+            const vmEl = document.getElementById('sc-verify-mode');
+            if (vmEl) vmEl.value = verifyMode;
+            const spEl = document.getElementById('sc-snapshot-policy');
+            if (spEl) spEl.value = sc.snapshotPolicy || 'errors_only';
+            const minVerEl = document.getElementById('sc-min-version');
+            if (minVerEl) minVerEl.value = sc.minSenderVersion || '';
+            const minActEl = document.getElementById('sc-min-version-action');
+            if (minActEl) minActEl.value = sc.minVersionAction || 'block';
+            const upUrlEl = document.getElementById('sc-update-url');
+            if (upUrlEl) upUrlEl.value = sc.updateUrl || '';
+            const noticeEl = document.getElementById('sc-notice-message');
+            if (noticeEl) noticeEl.value = sc.noticeMessage || '';
+
+            const setNumVal = (id, val, fallback) => {
+                const el = document.getElementById(id);
+                if (el) el.value = (val !== undefined && val !== null && val !== '') ? val : fallback;
+            };
+            setNumVal('sc-search-wait', sc.searchWait, 1.5);
+            setNumVal('sc-enter-wait', sc.enterWait, 1.2);
+            setNumVal('sc-gap-min', sc.studentGapMin, 0.5);
+            setNumVal('sc-gap-max', sc.studentGapMax, 1.0);
+            setNumVal('sc-break-every', sc.batchBreakEvery, 15);
+            setNumVal('sc-break-min', sc.batchBreakMin, 2.0);
+            setNumVal('sc-break-max', sc.batchBreakMax, 3.0);
 
             // 大模型配置回显
             const apiKeyInput = document.getElementById('ai-api-key');
@@ -181,7 +254,16 @@
             const qrEnabled = qrToggle ? qrToggle.checked : true;
             const flashToggle = document.getElementById('sender-flash-toggle');
             const flashEnabled = flashToggle ? flashToggle.checked : true;
+            const vmEl = document.getElementById('sc-verify-mode');
+            const verifyMode = vmEl ? vmEl.value : (flashEnabled ? 'auto' : 'local');
             const statusEl = document.getElementById('save-status');
+
+            const readNum = (id, fallback) => {
+                const el = document.getElementById(id);
+                if (!el) return fallback;
+                const v = parseFloat(el.value);
+                return Number.isFinite(v) ? v : fallback;
+            };
 
             const config = {
                 semesterYear: year,
@@ -189,7 +271,24 @@
                 semesterWeeks: weeks,
                 forceIntegerScores: true,
                 retestQrCodeEnabled: qrEnabled,
-                disableQwenFlashTitle: !flashEnabled
+                disableQwenFlashTitle: verifyMode === 'local',
+                senderControl: {
+                    senderServiceEnabled: document.getElementById('sc-service-enabled') ? document.getElementById('sc-service-enabled').checked : true,
+                    verifyMode: verifyMode,
+                    enableReplyAnalysis: document.getElementById('sc-enable-reply') ? document.getElementById('sc-enable-reply').checked : true,
+                    snapshotPolicy: document.getElementById('sc-snapshot-policy')?.value || 'errors_only',
+                    minSenderVersion: (document.getElementById('sc-min-version')?.value || '').trim(),
+                    minVersionAction: document.getElementById('sc-min-version-action')?.value || 'block',
+                    updateUrl: (document.getElementById('sc-update-url')?.value || '').trim(),
+                    noticeMessage: (document.getElementById('sc-notice-message')?.value || '').trim(),
+                    searchWait: readNum('sc-search-wait', 1.5),
+                    enterWait: readNum('sc-enter-wait', 1.2),
+                    studentGapMin: readNum('sc-gap-min', 0.5),
+                    studentGapMax: readNum('sc-gap-max', 1.0),
+                    batchBreakEvery: Math.round(readNum('sc-break-every', 15)),
+                    batchBreakMin: readNum('sc-break-min', 2.0),
+                    batchBreakMax: readNum('sc-break-max', 3.0)
+                }
             };
 
             const apiKeyInput = document.getElementById('ai-api-key');
@@ -221,6 +320,7 @@
                 const result = await response.json();
                 if (result.success) {
                     currentConfig = result.data.config;
+                    updateConfigUI();
                     const toastMsg = isSilent
                         ? (customSilentMsg || '系统配置已更新生效')
                         : '系统全局配置已成功保存并实时生效';

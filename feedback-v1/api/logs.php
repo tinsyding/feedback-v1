@@ -15,6 +15,8 @@ require_once __DIR__ . '/bootstrap.php';
 
 require_once __DIR__ . '/db.php';
 
+require_once __DIR__ . '/sender_control_helper.php';
+
 $logDir = __DIR__ . '/../data/logs';
 if (!is_dir($logDir)) {
     @mkdir($logDir, 0755, true);
@@ -71,7 +73,19 @@ function sanitizeSenderDate(string $date): string {
     return date('Y-m-d');
 }
 
-function updateSenderClientMeta(string $clientDir, array $clientInfo, array $activeFiles, string $ip): array {
+function verifySameOriginAdminPost(): void {
+    $host = strtolower(preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST'] ?? ''));
+    $originHost = isset($_SERVER['HTTP_ORIGIN']) && $_SERVER['HTTP_ORIGIN'] !== ''
+        ? strtolower((string)parse_url($_SERVER['HTTP_ORIGIN'], PHP_URL_HOST)) : '';
+    $refererHost = isset($_SERVER['HTTP_REFERER']) && $_SERVER['HTTP_REFERER'] !== ''
+        ? strtolower((string)parse_url($_SERVER['HTTP_REFERER'], PHP_URL_HOST)) : '';
+    if (($originHost !== '' && !hash_equals($host, $originHost)) ||
+        ($originHost === '' && $refererHost !== '' && !hash_equals($host, $refererHost))) {
+        sendResponse(false, null, '跨站请求已拦截（Origin 校验失败）', 403);
+    }
+}
+
+function updateSenderClientMeta(string $clientDir, array $clientInfo, array $activeFiles, string $ip, ?array $runtimeState = null): array {
     $metaFile = $clientDir . '/meta.json';
     $existing = [];
     if (is_file($metaFile)) {
@@ -94,6 +108,19 @@ function updateSenderClientMeta(string $clientDir, array $clientInfo, array $act
         $mergedFiles = array_slice($mergedFiles, -20);
     }
 
+    $mergedRuntime = is_array($existing['runtime_state'] ?? null) ? $existing['runtime_state'] : [];
+    if (is_array($runtimeState)) {
+        $mergedRuntime = [
+            'running' => !empty($runtimeState['running']),
+            'processed' => max(0, (int)($runtimeState['processed'] ?? 0)),
+            'total' => max(0, (int)($runtimeState['total'] ?? 0)),
+            'current_name' => substr(trim((string)($runtimeState['current_name'] ?? '')), 0, 60),
+            'verify_mode' => substr(trim((string)($runtimeState['verify_mode'] ?? '')), 0, 20),
+            'policy_version' => max(0, (int)($runtimeState['policy_version'] ?? 0)),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ];
+    }
+
     $meta = array_merge($existing, [
         'client_id' => (string)($clientInfo['client_id'] ?? ($existing['client_id'] ?? '')),
         'client_slug' => basename($clientDir),
@@ -106,6 +133,7 @@ function updateSenderClientMeta(string $clientDir, array $clientInfo, array $act
         'app_version' => (string)($clientInfo['app_version'] ?? ($existing['app_version'] ?? '')),
         'ip' => $ip,
         'active_files' => $mergedFiles,
+        'runtime_state' => $mergedRuntime,
         'last_sync_at' => date('Y-m-d H:i:s'),
         'last_sync_ts' => time(),
     ]);
@@ -466,13 +494,33 @@ try {
                 $clientInfo = is_array($input['client'] ?? null) ? $input['client'] : [];
                 $clientSlug = sanitizeSenderSlug((string)($clientInfo['client_slug'] ?? ($clientInfo['hostname'] ?? 'unknown_pc')));
                 $activeFiles = is_array($input['active_files'] ?? null) ? $input['active_files'] : [];
+                $runtimeState = is_array($input['runtime_state'] ?? null) ? $input['runtime_state'] : null;
+                $ackCommands = is_array($input['ack_commands'] ?? null) ? $input['ack_commands'] : [];
                 $syncMode = (string)($input['sync_mode'] ?? 'realtime');
+
+                if (!empty($ackCommands)) {
+                    acknowledgeClientCommands($clientSlug, $ackCommands);
+                }
 
                 if (mt_rand(1, 30) === 1) {
                     cleanupOldSenderLogs($senderLogDir, LOG_RETENTION_DAYS);
                 }
 
-                if ($syncMode === 'chunk') {
+                if ($syncMode === 'heartbeat') {
+                    $dateStr = sanitizeSenderDate((string)($input['date_str'] ?? date('Y-m-d')));
+                    $clientDir = $senderLogDir . '/' . $dateStr . '/' . $clientSlug;
+                    if (!is_dir($clientDir)) {
+                        @mkdir($clientDir, 0755, true);
+                    }
+                    updateSenderClientMeta($clientDir, $clientInfo, $activeFiles, $serverIP, $runtimeState);
+                    $cloudControl = buildEffectiveSenderControl($clientSlug);
+                    sendResponse(true, [
+                        'mode' => 'heartbeat',
+                        'client_slug' => $clientSlug,
+                        'cloud_control' => $cloudControl,
+                    ]);
+
+                } elseif ($syncMode === 'chunk') {
                     $dateStr = sanitizeSenderDate((string)($input['date_str'] ?? date('Y-m-d')));
                     $logType = (($input['log_type'] ?? 'sender') === 'error') ? 'error' : 'sender';
                     $offset = max(0, (int)($input['offset'] ?? 0));
@@ -482,7 +530,7 @@ try {
                     if (!is_dir($clientDir)) {
                         @mkdir($clientDir, 0755, true);
                     }
-                    $meta = updateSenderClientMeta($clientDir, $clientInfo, $activeFiles, $serverIP);
+                    $meta = updateSenderClientMeta($clientDir, $clientInfo, $activeFiles, $serverIP, $runtimeState);
 
                     $targetFile = $clientDir . '/' . $logType . '_' . $dateStr . '.log';
                     if ($content !== '') {
@@ -518,6 +566,7 @@ try {
                         'date' => $dateStr,
                         'client_slug' => $clientSlug,
                         'size' => is_file($targetFile) ? (int)@filesize($targetFile) : 0,
+                        'cloud_control' => buildEffectiveSenderControl($clientSlug),
                     ]);
 
                 } elseif ($syncMode === 'batch_summary') {
@@ -527,7 +576,7 @@ try {
                     if (!is_dir($clientDir)) {
                         @mkdir($clientDir, 0755, true);
                     }
-                    $meta = updateSenderClientMeta($clientDir, $clientInfo, $summary['files'] ?? $activeFiles, $serverIP);
+                    $meta = updateSenderClientMeta($clientDir, $clientInfo, $summary['files'] ?? $activeFiles, $serverIP, $runtimeState);
 
                     $batchesFile = $clientDir . '/batches.jsonl';
                     @file_put_contents($batchesFile, json_encode($summary, JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND | LOCK_EX);
@@ -560,7 +609,11 @@ try {
                         'teacher_note' => $meta['teacher_note'],
                     ]);
 
-                    sendResponse(true, ['mode' => 'batch_summary', 'client_slug' => $clientSlug]);
+                    sendResponse(true, [
+                        'mode' => 'batch_summary',
+                        'client_slug' => $clientSlug,
+                        'cloud_control' => buildEffectiveSenderControl($clientSlug),
+                    ]);
 
                 } else {
                     // realtime 模式：同时追加 .log 原文件 + 写入 system_logs 审计表
@@ -584,6 +637,15 @@ try {
                     $metaCache = [];
                     $savedCount = 0;
 
+                    if (empty($entries)) {
+                        $dateStr = sanitizeSenderDate((string)($input['date_str'] ?? date('Y-m-d')));
+                        $cDir = $senderLogDir . '/' . $dateStr . '/' . $clientSlug;
+                        if (!is_dir($cDir)) {
+                            @mkdir($cDir, 0755, true);
+                        }
+                        updateSenderClientMeta($cDir, $clientInfo, $activeFiles, $serverIP, $runtimeState);
+                    }
+
                     foreach ($entries as $entry) {
                         if (!is_array($entry)) continue;
                         $dateStr = sanitizeSenderDate((string)($entry['date_str'] ?? date('Y-m-d')));
@@ -594,7 +656,7 @@ try {
                             }
                             $metaCache[$dateStr] = [
                                 'dir' => $cDir,
-                                'meta' => updateSenderClientMeta($cDir, $clientInfo, $activeFiles, $serverIP),
+                                'meta' => updateSenderClientMeta($cDir, $clientInfo, $activeFiles, $serverIP, $runtimeState),
                             ];
                         }
                         $curMeta = $metaCache[$dateStr]['meta'];
@@ -693,7 +755,11 @@ try {
                         @file_put_contents($logDir . '/' . $dStr . '.jsonl', $buf, FILE_APPEND | LOCK_EX);
                     }
 
-                    sendResponse(true, ['count' => $savedCount, 'client_slug' => $clientSlug]);
+                    sendResponse(true, [
+                        'count' => $savedCount,
+                        'client_slug' => $clientSlug,
+                        'cloud_control' => buildEffectiveSenderControl($clientSlug),
+                    ]);
                 }
 
             } elseif ($action === 'sender_snapshot') {
@@ -761,6 +827,110 @@ try {
                 ]);
 
                 sendResponse(true, ['prefix' => $safePrefix, 'date' => $dateStr, 'client_slug' => $clientSlug]);
+
+            } elseif ($action === 'sender_control_pull') {
+                $rawInput = file_get_contents('php://input');
+                $input = json_decode($rawInput, true);
+                if (!is_array($input)) {
+                    $input = [];
+                }
+                $token = (string)($input['token'] ?? ($_POST['token'] ?? ''));
+                if (!verifySenderApiToken($token)) {
+                    sendResponse(false, null, '发送器鉴权失败', 200);
+                }
+                $serverIP = getClientIP();
+                $clientInfo = is_array($input['client'] ?? null) ? $input['client'] : [];
+                $rawSlug = (string)($clientInfo['client_slug'] ?? ($input['client_slug'] ?? ($clientInfo['hostname'] ?? 'unknown_pc')));
+                $clientSlug = sanitizeSenderSlug($rawSlug);
+                $activeFiles = is_array($input['active_files'] ?? null) ? $input['active_files'] : [];
+                $runtimeState = is_array($input['runtime_state'] ?? null) ? $input['runtime_state'] : null;
+                $ackCommands = is_array($input['ack_commands'] ?? null) ? $input['ack_commands'] : [];
+
+                if (!empty($ackCommands)) {
+                    acknowledgeClientCommands($clientSlug, $ackCommands);
+                }
+                if (!empty($clientInfo)) {
+                    $dateStr = date('Y-m-d');
+                    $clientDir = $senderLogDir . '/' . $dateStr . '/' . $clientSlug;
+                    if (!is_dir($clientDir)) {
+                        @mkdir($clientDir, 0755, true);
+                    }
+                    updateSenderClientMeta($clientDir, $clientInfo, $activeFiles, $serverIP, $runtimeState);
+                }
+                sendResponse(true, [
+                    'client_slug' => $clientSlug,
+                    'cloud_control' => buildEffectiveSenderControl($clientSlug),
+                ]);
+
+            } elseif ($action === 'sender_client_override') {
+                verifySameOriginAdminPost();
+                requireAdmin();
+                $input = json_decode(file_get_contents('php://input'), true);
+                if (!is_array($input)) {
+                    sendResponse(false, null, '无效的请求载荷', 400);
+                }
+                $clientSlug = trim((string)($input['client_slug'] ?? ''));
+                if ($clientSlug === '') {
+                    sendResponse(false, null, '缺少 client_slug', 400);
+                }
+                $clearAll = !empty($input['clear']);
+                $overrides = $clearAll ? [] : (is_array($input['overrides'] ?? null) ? $input['overrides'] : []);
+                $note = $clearAll ? '' : (string)($input['note'] ?? '');
+                $state = setClientControlOverrides($clientSlug, $overrides, $note);
+
+                recordServerLog('action', 'admin', 'sender_client_override', [
+                    'client_slug' => $state['client_slug'],
+                    'clear' => $clearAll,
+                    'overrides' => $state['overrides'],
+                    'note' => $state['note'],
+                    'message' => $clearAll
+                        ? "已清空发送器 [{$state['client_slug']}] 的单机云控覆盖（恢复继承全局）"
+                        : "已更新发送器 [{$state['client_slug']}] 的单机云控覆盖策略",
+                ]);
+
+                sendResponse(true, [
+                    'client_slug' => $state['client_slug'],
+                    'control' => $state,
+                    'summary' => summarizeClientControlForAdmin($state['client_slug']),
+                ]);
+
+            } elseif ($action === 'sender_client_command') {
+                verifySameOriginAdminPost();
+                requireAdmin();
+                $input = json_decode(file_get_contents('php://input'), true);
+                if (!is_array($input)) {
+                    sendResponse(false, null, '无效的请求载荷', 400);
+                }
+                $clientSlug = trim((string)($input['client_slug'] ?? ''));
+                $cmdType = trim((string)($input['type'] ?? ''));
+                $params = is_array($input['params'] ?? null) ? $input['params'] : [];
+                if ($clientSlug === '' || $cmdType === '') {
+                    sendResponse(false, null, '缺少 client_slug 或指令类型', 400);
+                }
+                $operator = trim((string)($_SESSION['username'] ?? ($_SESSION['admin_username'] ?? 'admin'))) ?: 'admin';
+                $cmd = enqueueClientRemoteCommand($clientSlug, $cmdType, $params, $operator);
+                if ($cmd === null) {
+                    sendResponse(false, null, '不支持的远程指令类型: ' . htmlspecialchars($cmdType), 400);
+                }
+
+                $cmdLabels = [
+                    'stop_batch' => '远程急停（暂停发送并保持断点）',
+                    'refresh_policy' => '立即拉取最新云控策略',
+                    'clear_roi' => '清除本机视野校准缓存',
+                    'sync_logs' => '立即补传本地日志',
+                ];
+                recordServerLog('action', 'admin', 'sender_client_command', [
+                    'client_slug' => $clientSlug,
+                    'cmd_id' => $cmd['cmd_id'],
+                    'type' => $cmd['type'],
+                    'params' => $cmd['params'],
+                    'message' => sprintf('管理员向 [%s] 下发远程指令：%s', $clientSlug, $cmdLabels[$cmd['type']] ?? $cmd['type']),
+                ]);
+
+                sendResponse(true, [
+                    'command' => $cmd,
+                    'summary' => summarizeClientControlForAdmin($clientSlug),
+                ]);
 
             } else {
                 sendResponse(false, null, '未知操作', 400);
@@ -1009,6 +1179,8 @@ try {
                             'ip' => $meta['ip'] ?? '',
                             'app_version' => $meta['app_version'] ?? '',
                             'active_files' => $meta['active_files'] ?? [],
+                            'runtime_state' => is_array($meta['runtime_state'] ?? null) ? $meta['runtime_state'] : [],
+                            'control_summary' => summarizeClientControlForAdmin($cSlug),
                             'last_sync_at' => $meta['last_sync_at'] ?? '',
                             'last_sync_ts' => (int)($meta['last_sync_ts'] ?? (@filemtime($cDir) ?: 0)),
                             'has_sender_log' => $senderSize > 0,
@@ -1026,6 +1198,31 @@ try {
                 sendResponse(true, [
                     'dates' => $availableDates,
                     'clients' => $clientsList,
+                    'global_sender_control' => loadGlobalSenderControl(),
+                ]);
+
+            } elseif ($action === 'sender_client_control') {
+                requireAdmin();
+                $clientSlug = trim((string)($_GET['client'] ?? ''));
+                if ($clientSlug === '') {
+                    sendResponse(false, null, '缺少 client 参数', 400);
+                }
+                sendResponse(true, [
+                    'client_slug' => sanitizeControlSlug($clientSlug),
+                    'global' => loadGlobalSenderControl(),
+                    'client_control' => loadClientControlState($clientSlug),
+                    'summary' => summarizeClientControlForAdmin($clientSlug),
+                ]);
+
+            } elseif ($action === 'sender_control_pull') {
+                $token = (string)($_GET['token'] ?? ($_SERVER['HTTP_X_SENDER_TOKEN'] ?? ''));
+                if (!verifySenderApiToken($token)) {
+                    sendResponse(false, null, '发送器鉴权失败', 200);
+                }
+                $clientSlug = sanitizeSenderSlug((string)($_GET['client_slug'] ?? 'unknown_pc'));
+                sendResponse(true, [
+                    'client_slug' => $clientSlug,
+                    'cloud_control' => buildEffectiveSenderControl($clientSlug),
                 ]);
 
             } elseif ($action === 'sender_log_file') {

@@ -3,6 +3,8 @@
  * Admin Config 动作处理: config
  */
 
+require_once dirname(__DIR__) . '/sender_control_helper.php';
+
 switch ($action) {
         case 'config':
             requireAdmin();
@@ -33,6 +35,10 @@ switch ($action) {
                 if (!isset($config['identifyFastModel'])) {
                     $config['identifyFastModel'] = getenv('IDENTIFY_FAST_MODEL') ?: ($localKeys['identifyFastModel'] ?? 'qwen3.8-flash');
                 }
+                $config['senderControl'] = normalizeGlobalSenderControl(
+                    is_array($config['senderControl'] ?? null) ? $config['senderControl'] : [],
+                    $config
+                );
 
                 sendResponse(true, $config);
                 
@@ -73,6 +79,31 @@ switch ($action) {
                 }
                 if (isset($input['disableQwenFlashTitle'])) {
                     $config['disableQwenFlashTitle'] = (bool)$input['disableQwenFlashTitle'];
+                }
+                if (isset($input['senderControl']) && is_array($input['senderControl'])) {
+                    $prevControl = normalizeGlobalSenderControl(
+                        is_array($config['senderControl'] ?? null) ? $config['senderControl'] : [],
+                        $config
+                    );
+                    $mergedRaw = array_merge($prevControl, $input['senderControl']);
+                    // 若调用方只改了 disableQwenFlashTitle 未显式改 senderControl.verifyMode，则同步联动
+                    if (isset($input['disableQwenFlashTitle']) && !isset($input['senderControl']['verifyMode'])) {
+                        $mergedRaw['verifyMode'] = !empty($input['disableQwenFlashTitle']) ? 'local' : 'auto';
+                    }
+                    $normalizedControl = normalizeGlobalSenderControl($mergedRaw, $config);
+                    $normalizedControl['policyVersion'] = ((int)($prevControl['policyVersion'] ?? 1)) + 1;
+                    $normalizedControl['updatedAt'] = date('Y-m-d H:i:s');
+                    $config['senderControl'] = $normalizedControl;
+                    $config['disableQwenFlashTitle'] = ($normalizedControl['verifyMode'] === 'local');
+                } elseif (isset($input['disableQwenFlashTitle'])) {
+                    $prevControl = normalizeGlobalSenderControl(
+                        is_array($config['senderControl'] ?? null) ? $config['senderControl'] : [],
+                        $config
+                    );
+                    $prevControl['verifyMode'] = !empty($input['disableQwenFlashTitle']) ? 'local' : 'auto';
+                    $prevControl['policyVersion'] = ((int)($prevControl['policyVersion'] ?? 1)) + 1;
+                    $prevControl['updatedAt'] = date('Y-m-d H:i:s');
+                    $config['senderControl'] = $prevControl;
                 }
                 if (isset($input['dashscopeApiKey'])) {
                     $config['dashscopeApiKey'] = trim((string)$input['dashscopeApiKey']);

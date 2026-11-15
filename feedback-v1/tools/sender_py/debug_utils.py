@@ -47,7 +47,8 @@ def _cleanup_old_snapshots(debug_dir: str, max_files: int = 120):
 
 
 def save_candidate_snapshot(full_img, roi: dict, title_img, target_id: str,
-                            target_name: str, cand: int = 1, diag_info: dict = None) -> dict:
+                            target_name: str, cand: int = 1, diag_info: dict = None,
+                            snapshot_policy: str = None) -> dict:
     """保存当前候选人的核验现场截图及元数据。"""
     debug_dir = get_debug_dir()
     ts = time.strftime("%Y%m%d_%H%M%S")
@@ -141,20 +142,32 @@ def save_candidate_snapshot(full_img, roi: dict, title_img, target_id: str,
 
         _cleanup_old_snapshots(debug_dir)
 
-        # 4. 当核验未通过（matched != True）或触发群聊拦截（is_group == True）时，异步同步现场快照至服务端
+        # 4. 按云控快照策略决定是否异步同步现场快照至服务端
         try:
-            judgment = (diag_info or {}).get("judgment") if isinstance(diag_info, dict) else None
-            is_failed_or_blocked = False
-            if isinstance(judgment, dict):
-                if judgment.get("matched") is not True or judgment.get("is_group") is True:
-                    is_failed_or_blocked = True
-            if is_failed_or_blocked:
-                _trigger_async_snapshot_upload(
-                    prefix=prefix,
-                    meta=meta,
-                    title_path=saved_info.get("title_path"),
-                    annotated_path=saved_info.get("annotated_path"),
-                )
+            eff_policy = (snapshot_policy or "").strip().lower()
+            if not eff_policy:
+                try:
+                    try:
+                        from sender_py.cloud_control import get_cloud_control_manager
+                    except ModuleNotFoundError:
+                        from cloud_control import get_cloud_control_manager
+                    eff_policy = get_cloud_control_manager().get_snapshot_policy()
+                except Exception:
+                    eff_policy = "errors_only"
+
+            if eff_policy != "off":
+                judgment = (diag_info or {}).get("judgment") if isinstance(diag_info, dict) else None
+                should_upload = (eff_policy == "always")
+                if not should_upload and isinstance(judgment, dict):
+                    if judgment.get("matched") is not True or judgment.get("is_group") is True:
+                        should_upload = True
+                if should_upload:
+                    _trigger_async_snapshot_upload(
+                        prefix=prefix,
+                        meta=meta,
+                        title_path=saved_info.get("title_path"),
+                        annotated_path=saved_info.get("annotated_path"),
+                    )
         except Exception:
             pass
     except Exception as exc:
