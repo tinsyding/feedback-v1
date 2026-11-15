@@ -970,6 +970,70 @@ class TestStage6(unittest.TestCase):
         self.assertEqual(res2["result"], "sent")
         self.assertEqual(mock_search_fast.call_count, 1)
 
+    def test_search_and_enter_interrupts_on_should_stop(self):
+        """搜索等待期间收到停止信号时应立即中止，不再发送 Enter。"""
+        stop_flag = {"val": False}
+        pressed_keys = []
+
+        def fake_tap_keys(*vks):
+            # 在 Ctrl+V 粘贴后模拟用户触发停止
+            if wu.VK_V in vks:
+                stop_flag["val"] = True
+            return True
+
+        with mock.patch.object(wu, "find_and_activate_wecom", return_value=True), \
+             mock.patch.object(wu, "tap_keys", side_effect=fake_tap_keys), \
+             mock.patch.object(wu, "tap_key", side_effect=lambda vk: pressed_keys.append(vk) or True), \
+             mock.patch.object(wu, "is_foreground_wecom", return_value=True), \
+             mock.patch("sender_py.sender.safe_copy", return_value=True), \
+             mock.patch("sender_py.sender.time.sleep", return_value=None):
+            entered = search_and_enter(
+                "55165朴奕欣", 1,
+                search_wait=1.5,
+                should_stop=lambda: stop_flag["val"],
+            )
+        self.assertFalse(entered)
+        self.assertNotIn(wu.VK_RETURN, pressed_keys)
+
+    def test_judge_candidate_local_ocr_fast_pass_label(self):
+        """auto 模式下本地 OCR 首发命中不调用云端 API，且日志区分极速核验与 API 异常降级。"""
+        from sender_py import capture, vision_api
+        from sender_py.local_ocr import set_ocr_hook_for_testing
+
+        class _StubImg:
+            def __init__(self, w=400, h=300):
+                self.size = (w, h)
+
+            def crop(self, box):
+                return _StubImg(100, 50)
+
+        roi = {"title": (0.2, 0.0, 0.8, 0.1), "input": (0.2, 0.8, 0.8, 0.2), "chat": (0.2, 0.1, 0.8, 0.7)}
+        item = {"sid": "35882", "sname": "胡诚洋", "studentName": "35882胡诚洋", "message": "测试"}
+        logs = []
+        set_ocr_hook_for_testing(lambda img: "35882胡诚洋")
+        try:
+            with mock.patch.object(wu, "find_and_activate_wecom", return_value=True), \
+                 mock.patch.object(wu, "ensure_fully_visible", return_value=(True, (0, 0, 400, 300))), \
+                 mock.patch.object(wu, "get_dpi_scale", return_value=1.0), \
+                 mock.patch.object(wu, "get_wecom_rect", return_value=(0, 0, 400, 300)), \
+                 mock.patch.object(wu, "find_wecom_search_tab_wnd", return_value=None), \
+                 mock.patch("sender_py.sender.ensure_roi", return_value=roi), \
+                 mock.patch("sender_py.sender._capture_title_crop", return_value=None), \
+                 mock.patch("sender_py.sender.search_and_enter", return_value=True), \
+                 mock.patch.object(capture, "capture_wecom_window", return_value=_StubImg()), \
+                 mock.patch.object(vision_api, "identify_title") as mock_api, \
+                 mock.patch("sender_py.sender.paste_and_send", return_value=(True, "已发送")), \
+                 mock.patch("sender_py.sender.time.sleep", return_value=None):
+                res = send_student(item, "https://mock.server", log=logs.append, reply_analyzer=mock.MagicMock())
+        finally:
+            set_ocr_hook_for_testing(None)
+
+        mock_api.assert_not_called()
+        self.assertEqual(res["result"], "sent")
+        log_text = "\n".join(logs)
+        self.assertIn("采用本地 OCR 极速核验", log_text)
+        self.assertNotIn("采用本地 OCR 备用通道核验", log_text)
+
 
 if __name__ == "__main__":
     unittest.main()

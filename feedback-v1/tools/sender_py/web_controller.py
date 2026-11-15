@@ -611,8 +611,34 @@ class WebController:
         finally:
             self._finish_run(stopped=stopped, selected_ids=selected_ids)
 
+    def _wait_and_drain_reply_analyzer(self, timeout: float = 4.0):
+        """等待在途后台留言分析任务短暂收尾并排空事件队列。"""
+        analyzer = self._reply_analyzer
+        if analyzer is not None:
+            deadline = time.monotonic() + max(0.0, timeout)
+            while time.monotonic() < deadline:
+                self._drain_reply_events()
+                try:
+                    if analyzer.pending_count <= 0:
+                        break
+                except Exception:
+                    break
+                time.sleep(0.1)
+        self._drain_reply_events()
+
     def _finish_run(self, stopped: bool, selected_ids: set):
         self._stop_esc_watcher()
+        analyzer = self._reply_analyzer
+        try:
+            has_pending = analyzer is not None and analyzer.pending_count > 0
+        except Exception:
+            has_pending = False
+        if has_pending:
+            with self._lock:
+                self.progress["step_text"] = "正在收尾后台留言分析..."
+            self._notify_state_change()
+        self._wait_and_drain_reply_analyzer(timeout=2.5 if stopped else 4.5)
+
         with self._lock:
             self._running = False
             self.progress["running"] = False
@@ -632,12 +658,22 @@ class WebController:
 
         counts = summarize_status_counts(it.get("_status", "") for it in self.items)
         title = "⏹ 已暂停" if stopped else "本批发送结束"
-        summary_msg = (
-            f"{title}（共 {len(self.items)} 人）："
-            f"成功 {counts['已发送']}，失败 {counts['发送失败']}，"
-            f"拦截 {counts['已拦截']}，未匹配 {counts['未匹配']}，"
-            f"跳过 {counts['已跳过']}"
-        )
+        if stopped:
+            pending_count = sum(1 for it in self.items if it.get("_status") in ("待发送", "发送中"))
+            explicit_skipped = max(0, counts["已跳过"] - pending_count)
+            summary_msg = (
+                f"{title}（共 {len(self.items)} 人）："
+                f"成功 {counts['已发送']}，失败 {counts['发送失败']}，"
+                f"拦截 {counts['已拦截']}，未匹配 {counts['未匹配']}，"
+                f"跳过 {explicit_skipped}，待发 {pending_count}"
+            )
+        else:
+            summary_msg = (
+                f"{title}（共 {len(self.items)} 人）："
+                f"成功 {counts['已发送']}，失败 {counts['发送失败']}，"
+                f"拦截 {counts['已拦截']}，未匹配 {counts['未匹配']}，"
+                f"跳过 {counts['已跳过']}"
+            )
         self.emit(summary_msg)
         try:
             sync_batch_summary(self.items, input_paths=self.input_paths, stopped=stopped)

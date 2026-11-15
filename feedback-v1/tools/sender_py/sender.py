@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.0.2"
 
 
 def asset_path(filename: str) -> str:
@@ -225,12 +225,30 @@ def safe_copy(text: str, retries: int = 5) -> bool:
     return False
 
 
+def _interruptible_sleep(seconds: float, should_stop=None) -> bool:
+    """可响应停止请求的分段等待；完成返回 True，被停止中断返回 False。"""
+    if seconds <= 0:
+        return not (should_stop is not None and should_stop())
+    if should_stop is None:
+        time.sleep(seconds)
+        return True
+    deadline = time.monotonic() + seconds
+    while True:
+        if should_stop():
+            return False
+        rem = deadline - time.monotonic()
+        if rem <= 0:
+            return True
+        time.sleep(min(0.05, rem))
+
+
 def search_and_enter(
     name: str,
     candidate_index: int = 1,
     down_first: bool = None,
     search_wait: float = 1.5,
     enter_wait: float = 1.2,
+    should_stop=None,
 ) -> bool:
     """搜人进会话：第 candidate_index 个结果。Ctrl+F 聚焦→全选→Backspace 清空→粘贴→等结果→Down 定位→回车进会话。
 
@@ -243,27 +261,39 @@ def search_and_enter(
         from sender_py import window_utils as wu
     except ModuleNotFoundError:
         import window_utils as wu
+    if should_stop is not None and should_stop():
+        return False
     if not wu.find_and_activate_wecom():
         return False
-    time.sleep(0.2)
+    if not _interruptible_sleep(0.2, should_stop):
+        return False
     wu.tap_keys(wu.VK_CONTROL, wu.VK_F)
-    time.sleep(0.25)
+    if not _interruptible_sleep(0.25, should_stop):
+        return False
     wu.tap_keys(wu.VK_CONTROL, wu.VK_A)
-    time.sleep(0.12)
+    if not _interruptible_sleep(0.12, should_stop):
+        return False
     wu.tap_key(0x08)  # Backspace：清掉搜索框残留，防粘贴追加
-    time.sleep(0.15)
+    if not _interruptible_sleep(0.15, should_stop):
+        return False
     if not safe_copy(name):
         return False
-    time.sleep(0.05)
+    if not _interruptible_sleep(0.05, should_stop):
+        return False
     wu.tap_keys(wu.VK_CONTROL, wu.VK_V)
-    time.sleep(search_wait)  # 等搜索结果列表刷新；先 Down 选中候选，最后再 Enter
+    if not _interruptible_sleep(search_wait, should_stop):  # 等搜索结果列表刷新；先 Down 选中候选，最后再 Enter
+        return False
     for action in candidate_search_plan(candidate_index, down_first=down_first):
+        if should_stop is not None and should_stop():
+            return False
         if action == "down":
             wu.tap_key(wu.VK_DOWN)
-            time.sleep(0.22)
+            if not _interruptible_sleep(0.22, should_stop):
+                return False
         else:
             wu.tap_key(wu.VK_RETURN)
-            time.sleep(enter_wait)  # 等会话切换渲染完再截图
+            if not _interruptible_sleep(enter_wait, should_stop):  # 等会话切换渲染完再截图
+                return False
     return wu.is_foreground_wecom()
 
 
@@ -926,7 +956,11 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
             return {"result": "stopped", "reason": "用户停止", "notes": notes}
         prev_title_img = _capture_title_crop(rect, roi)
         log(f"  └ 正在通过企业微信快捷键 (Ctrl+F) 聚焦搜索候选 {cand}/{MAX_CANDIDATES}...")
-        entered = search_and_enter(name, cand)
+        stop_kw = {"should_stop": should_stop} if should_stop is not None else {}
+        entered = search_and_enter(name, cand, **stop_kw)
+        if should_stop is not None and should_stop():
+            log(f"[{name}] 收到停止请求，候选 {cand} 未发送")
+            return {"result": "stopped", "reason": "用户停止", "notes": notes}
         if _check_and_handle_search_tab():
             return {"result": "unmatched", "reason": "未找到学生（弹出全局搜索窗口）", "notes": notes}
         if not entered:
@@ -935,8 +969,13 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
                 return {"result": "stopped", "reason": "用户停止", "notes": notes}
             log(f"  ⚠ 候选 {cand}：企微失焦或按键进入会话未成功，重新激活后重试一次...")
             wu.find_and_activate_wecom()
-            time.sleep(0.25)
-            entered = search_and_enter(name, cand, search_wait=1.8, enter_wait=1.3)
+            if not _interruptible_sleep(0.25, should_stop):
+                log(f"[{name}] 收到停止请求，候选 {cand} 未发送")
+                return {"result": "stopped", "reason": "用户停止", "notes": notes}
+            entered = search_and_enter(name, cand, search_wait=1.8, enter_wait=1.3, **stop_kw)
+            if should_stop is not None and should_stop():
+                log(f"[{name}] 收到停止请求，候选 {cand} 未发送")
+                return {"result": "stopped", "reason": "用户停止", "notes": notes}
             if _check_and_handle_search_tab():
                 return {"result": "unmatched", "reason": "未找到学生（弹出全局搜索窗口）", "notes": notes}
             if not entered:
@@ -976,14 +1015,19 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
                 time.sleep(0.25)
             if not settled:
                 log(f"  ⚠ 候选 {cand}：回车后标题栏仍与切换前一致，疑似尚未切入目标会话，放慢重搜一次...")
-                entered = search_and_enter(name, cand, search_wait=2.2, enter_wait=1.5)
+                entered = search_and_enter(name, cand, search_wait=2.2, enter_wait=1.5, **stop_kw)
+                if should_stop is not None and should_stop():
+                    log(f"  └ 收到停止请求，候选 {cand} 未发送")
+                    return {"result": "stopped", "reason": "用户停止", "notes": notes}
                 if _check_and_handle_search_tab():
                     return {"result": "unmatched", "reason": "未找到学生（弹出全局搜索窗口）", "notes": notes}
                 if not entered:
                     log(f"  └ 候选 {cand}：慢速重搜后企微仍未在前台，跳过本轮截图核验")
                     _paced(CANDIDATE_GAP)
                     continue
-                time.sleep(0.3)
+                if not _interruptible_sleep(0.3, should_stop):
+                    log(f"  └ 收到停止请求，候选 {cand} 未发送")
+                    return {"result": "stopped", "reason": "用户停止", "notes": notes}
                 if _check_and_handle_search_tab():
                     return {"result": "unmatched", "reason": "未找到学生（弹出全局搜索窗口）", "notes": notes}
         if should_stop is not None and should_stop():
@@ -1032,11 +1076,18 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
             continue
         if judgment and "方案1容错放行" in str(judgment.get("reason", "")):
             log(f"  方案1智能容错生效：{judgment.get('reason')}")
-        elif judgment and ("[备选方案: 本地OCR]" in str(judgment.get("reason", "")) or "[本地OCR模式]" in str(judgment.get("reason", "")) or "[强制本地OCR]" in str(judgment.get("reason", ""))):
-            if "[强制本地OCR]" in str(judgment.get("reason", "")):
-                log(f"  └ 管理员已开启强制本地OCR：{judgment.get('reason')}")
+        elif judgment and (
+            "[备选方案: 本地OCR]" in str(judgment.get("reason", ""))
+            or "[本地OCR模式]" in str(judgment.get("reason", ""))
+            or "[强制本地OCR]" in str(judgment.get("reason", ""))
+        ):
+            reason_str = str(judgment.get("reason", ""))
+            if "[强制本地OCR]" in reason_str:
+                log(f"  └ 管理员已开启强制本地OCR：{reason_str}")
+            elif "[备选方案: 本地OCR]" in reason_str and "API异常" not in reason_str:
+                log(f"  └ 采用本地 OCR 极速核验：{reason_str}")
             else:
-                log(f"  └ 采用本地 OCR 备用通道核验：{judgment.get('reason')}")
+                log(f"  └ 采用本地 OCR 备用通道核验：{reason_str}")
         decision = decide_action(judgment)
         if decision["action"] == "send":
             log(f"  ✓ 候选 {cand} 核验通过 (窗口标题: [{chat_title or '未知'}])，符合发送条件")

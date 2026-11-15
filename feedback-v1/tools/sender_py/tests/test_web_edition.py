@@ -498,6 +498,55 @@ class TestWebEdition(unittest.TestCase):
                 remaining = [f for f in os.listdir(td) if not f.startswith("latest_")]
                 self.assertLessEqual(len(remaining), 5)
 
+    def test_finish_run_drains_reply_analyzer_and_formats_paused_summary(self):
+        """结束收尾应先等待排空后台留言分析，并把暂停未发人数拆分为 跳过/待发。"""
+        with tempfile.TemporaryDirectory() as td:
+            ctrl = WebController()
+            ctrl.sent_files = SentFilesManager(base_dir=td)
+            ctrl.items = [
+                {"_id": "1", "studentName": "A", "_status": "已发送", "_selected": False},
+                {"_id": "2", "studentName": "B", "_status": "待发送", "_selected": True},
+                {"_id": "3", "studentName": "C", "_status": "已跳过", "_selected": False},
+            ]
+
+            class FakeAnalyzer:
+                def __init__(self, controller):
+                    self.pending_count = 1
+                    self._ctrl = controller
+                    self._polled = 0
+
+                def check_and_finish(self):
+                    self._polled += 1
+                    if self._polled >= 2 and self.pending_count > 0:
+                        self._ctrl._reply_event_queue.put(("note", {
+                            "student": "A",
+                            "needs_reply": True,
+                            "verdict": "需回复",
+                            "last_message": "老师请问",
+                        }, {}))
+                        self.pending_count = 0
+
+            fake_analyzer = FakeAnalyzer(ctrl)
+            ctrl._reply_analyzer = fake_analyzer
+
+            orig_drain = ctrl._drain_reply_events
+
+            def _stepping_drain():
+                fake_analyzer.check_and_finish()
+                orig_drain()
+
+            with mock.patch.object(ctrl, "_drain_reply_events", side_effect=_stepping_drain), \
+                 mock.patch.object(ctrl, "_stop_esc_watcher"), \
+                 mock.patch("sender_py.web_controller.sync_batch_summary"), \
+                 mock.patch("sender_py.web_controller.flush_cloud_logs"):
+                ctrl._finish_run(stopped=True, selected_ids={"1", "2"})
+
+            self.assertEqual(len(ctrl.reply_notes), 1)
+            self.assertEqual(ctrl.reply_notes[0]["student"], "A")
+            logs_joined = "\n".join(ctrl.get_logs())
+            self.assertIn("后台留言分析：需回复", logs_joined)
+            self.assertIn("跳过 1，待发 1", logs_joined)
+
 
 if __name__ == "__main__":
     unittest.main()

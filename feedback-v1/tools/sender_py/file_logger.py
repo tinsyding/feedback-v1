@@ -12,6 +12,7 @@ import json
 import os
 import platform
 import queue
+import re
 import socket
 import threading
 import time
@@ -30,7 +31,7 @@ _CONFIG_LOCK = threading.RLock()
 SYNC_LOG_PATH = "/api/logs.php?action=sender_sync"
 SYNC_SNAPSHOT_PATH = "/api/logs.php?action=sender_snapshot"
 DEFAULT_SERVER_URL = "https://feedback.wxjifang.cn"
-APP_VERSION_STR = "2.0.1"
+APP_VERSION_STR = "2.0.2"
 
 
 def get_logs_dir(base_dir: Optional[str] = None) -> str:
@@ -133,6 +134,16 @@ def get_client_identity(base_dir: Optional[str] = None) -> dict:
 def detect_log_level(msg: str) -> str:
     """根据日志消息关键字与图标智能识别级别。"""
     msg_str = str(msg)
+    if "本批发送结束" in msg_str or "已暂停（共" in msg_str:
+        fail_m = re.search(r"失败\s*(\d+)", msg_str)
+        block_m = re.search(r"拦截\s*(\d+)", msg_str)
+        unmatch_m = re.search(r"未匹配\s*(\d+)", msg_str)
+        if fail_m and int(fail_m.group(1)) > 0:
+            return "ERROR"
+        if (block_m and int(block_m.group(1)) > 0) or (unmatch_m and int(unmatch_m.group(1)) > 0):
+            return "WARNING"
+        return "INFO"
+
     error_keywords = ("❌", "✗", "[ERROR]", "[CRITICAL]", "错误", "失败", "异常", "Traceback", "Exception")
     for kw in error_keywords:
         if kw in msg_str:

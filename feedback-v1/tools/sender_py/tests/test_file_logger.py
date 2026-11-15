@@ -171,6 +171,25 @@ class TestFileLogger(unittest.TestCase):
         finally:
             file_logger._post_json_to_server = orig_post
 
+    def test_detect_log_level_summary_lines(self):
+        """批次结束/暂停汇总行在 失败 0 时应判为 INFO，不污染 error_*.log。"""
+        self.assertEqual(
+            file_logger.detect_log_level("本批发送结束（共 27 人）：成功 27，失败 0，拦截 0，未匹配 0，跳过 0"),
+            "INFO",
+        )
+        self.assertEqual(
+            file_logger.detect_log_level("⏹ 已暂停（共 27 人）：成功 2，失败 0，拦截 0，未匹配 0，跳过 1，待发 24"),
+            "INFO",
+        )
+        self.assertEqual(
+            file_logger.detect_log_level("本批发送结束（共 27 人）：成功 25，失败 0，拦截 1，未匹配 1，跳过 0"),
+            "WARNING",
+        )
+        self.assertEqual(
+            file_logger.detect_log_level("本批发送结束（共 27 人）：成功 26，失败 1，拦截 0，未匹配 0，跳过 0"),
+            "ERROR",
+        )
+
     def test_sync_batch_summary_and_realtime_syncer(self):
         captured = []
 
@@ -203,6 +222,25 @@ class TestFileLogger(unittest.TestCase):
                 self.assertNotIn("text", st)
         finally:
             file_logger._post_json_to_server = orig_post
+
+    def test_detect_log_level_summary_lines(self):
+        """批次结束/暂停汇总行在 失败 0 时应判为 INFO，不污染 error_*.log。"""
+        self.assertEqual(
+            file_logger.detect_log_level("本批发送结束（共 27 人）：成功 27，失败 0，拦截 0，未匹配 0，跳过 0"),
+            "INFO",
+        )
+        self.assertEqual(
+            file_logger.detect_log_level("⏹ 已暂停（共 27 人）：成功 2，失败 0，拦截 0，未匹配 0，跳过 1，待发 24"),
+            "INFO",
+        )
+        self.assertEqual(
+            file_logger.detect_log_level("本批发送结束（共 27 人）：成功 25，失败 0，拦截 1，未匹配 1，跳过 0"),
+            "WARNING",
+        )
+        self.assertEqual(
+            file_logger.detect_log_level("本批发送结束（共 27 人）：成功 26，失败 1，拦截 0，未匹配 0，跳过 0"),
+            "ERROR",
+        )
 
 
 if __name__ == "__main__":
