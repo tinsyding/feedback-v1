@@ -2374,10 +2374,6 @@
                 const pvScoreVal = (record.preview_score !== null && record.preview_score !== undefined && record.preview_score !== '') ? parseFloat(record.preview_score) : null;
                 const isPvFullScore = (pvScoreVal !== null && pvScoreVal >= 100) || /全对|满分|零失误|无错题/i.test(previewCommentText);
 
-                // 来源文件分类：预习来源文件 vs 巩固来源文件
-                const previewSrcFiles = srcList.filter(f => /预习|preview/i.test(f));
-                const hwSrcFiles = srcList.filter(f => /巩固|课后|homework/i.test(f) || (!/预习|preview/i.test(f) && previewSrcFiles.length > 0));
-
                 body.innerHTML = `
                     <div style="display: flex; flex-direction: column; gap: 14px;">
                         <!-- 1. 顶部学员名片横幅 (Hero Card) -->
@@ -2443,7 +2439,7 @@
                             </div>
                         </div>
 
-                        <!-- 2. 中间两列：左列为预习（分数、薄弱点、评语、文件来源）；第二列为巩固 -->
+                        <!-- 2. 中间两列：左列为预习（分数、薄弱点、评语）；第二列为巩固 -->
                         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; align-items: start;">
                             <!-- 左列：课前预习 -->
                             <div style="display: flex; flex-direction: column; gap: 12px; background: rgba(245,158,11,0.03); border: 1px solid rgba(245,158,11,0.22); border-radius: var(--radius-md); padding: 14px;">
@@ -2521,22 +2517,6 @@
                                         ` : ''}
                                     </div>
                                     <div id="modal-preview-comment-text" style="font-size: 0.84rem; color: var(--text-primary); line-height: 1.5; white-space: pre-wrap; background: var(--bg-subtle); border-radius: var(--radius-sm); padding: 8px 12px; border: 1px solid var(--border-color); flex: 1; min-height: 50px;">${escapeHtml((previewCommentText || '').trim() || '（暂无课前预习评语）')}</div>
-                                </div>
-
-                                <!-- 预习文件来源 -->
-                                <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 14px;">
-                                    <div style="font-size: 0.82rem; font-weight: 700; color: #f59e0b; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 6px;">
-                                        <span style="display: inline-flex; align-items: center; gap: 6px;">
-                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
-                                            <span>预习文件来源</span>
-                                        </span>
-                                        ${previewSrcFiles.length > 0 ? `<span style="font-size: 0.72rem; font-weight: 400; color: var(--text-muted);">点击文件名下载原件</span>` : ''}
-                                    </div>
-                                    ${previewSrcFiles.length > 0 ? `
-                                        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-                                            ${previewSrcFiles.map(fn => renderSourceFileChip(fn, { recordId: record.id, batchCode: record.batch_code || '', variant: 'preview' })).join('')}
-                                        </div>
-                                    ` : `<span style="color: var(--text-muted); font-size: 0.78rem;">（未匹配到独立预习文件，可能为合并录入）</span>`}
                                 </div>
                             </div>
 
@@ -2616,22 +2596,6 @@
                                         ` : ''}
                                     </div>
                                     <div id="modal-comment-text" style="font-size: 0.84rem; color: var(--text-primary); line-height: 1.5; white-space: pre-wrap; background: var(--bg-subtle); border-radius: var(--radius-sm); padding: 8px 12px; border: 1px solid var(--border-color); flex: 1; min-height: 50px;">${escapeHtml((commentText || '').trim() || '（暂无课后巩固评语）')}</div>
-                                </div>
-
-                                <!-- 巩固文件来源 -->
-                                <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 14px;">
-                                    <div style="font-size: 0.82rem; font-weight: 700; color: #38bdf8; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 6px;">
-                                        <span style="display: inline-flex; align-items: center; gap: 6px;">
-                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
-                                            <span>巩固文件来源</span>
-                                        </span>
-                                        ${hwSrcFiles.length > 0 ? `<span style="font-size: 0.72rem; font-weight: 400; color: var(--text-muted);">点击文件名下载原件</span>` : ''}
-                                    </div>
-                                    ${hwSrcFiles.length > 0 ? `
-                                        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-                                            ${hwSrcFiles.map(fn => renderSourceFileChip(fn, { recordId: record.id, batchCode: record.batch_code || '', variant: 'homework' })).join('')}
-                                        </div>
-                                    ` : `<span style="color: var(--text-muted); font-size: 0.78rem;">（未匹配到独立巩固文件）</span>`}
                                 </div>
                             </div>
                         </div>
