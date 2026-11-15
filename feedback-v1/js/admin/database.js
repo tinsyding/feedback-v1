@@ -3310,7 +3310,10 @@
                 return;
             }
 
-            const baseDomain = (window.location.hostname === 'vip.wxjifang.cn' || window.location.hostname === 'wxjifang.cn') ? window.location.origin : 'https://vip.wxjifang.cn';
+            const host = window.location.hostname;
+            const baseDomain = (host === 'feedbackbackup.wxjifang.cn' || host === 'vipbackup.wxjifang.cn')
+                ? 'https://vipbackup.wxjifang.cn'
+                : ((host === 'vip.wxjifang.cn' || host === 'wxjifang.cn') ? window.location.origin : 'https://vip.wxjifang.cn');
             const link = r.retest_token ? `${baseDomain}/retest.html?token=${encodeURIComponent(r.retest_token)}` : '';
 
             let errs = [];

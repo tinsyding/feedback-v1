@@ -6110,14 +6110,7 @@ async function fetchSeeStudentRecord() {
 }
 
 function getSeeRetestBaseUrl() {
-    const host = window.location.hostname;
-    if (host === 'localhost' || host === '127.0.0.1') {
-        return `${window.location.origin}${window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/'))}/retest.html`;
-    }
-    if (/feedback(backup|test)\.wxjifang\.cn$/.test(host)) {
-        return `https://${host}/retest.html`;
-    }
-    return 'https://vip.wxjifang.cn/retest.html';
+    return getRetestBaseUrl();
 }
 
 function getSeeVariationNotice(studentName, weekNum) {

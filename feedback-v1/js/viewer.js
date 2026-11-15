@@ -8,17 +8,7 @@ function hideViewerLoadingScreen() {
     }, 350);
 }
 
-// 错题本基础链接：生产站默认走 vip.wxjifang.cn，预览/测试站（feedbackbackup / feedbacktest）自适应走当前站点
-function getRetestBaseUrl() {
-    const host = window.location.hostname;
-    if (host === 'localhost' || host === '127.0.0.1') {
-        return `${window.location.origin}${window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/'))}/retest.html`;
-    }
-    if (/feedback(backup|test)\.wxjifang\.cn$/.test(host)) {
-        return `https://${host}/retest.html`;
-    }
-    return 'https://vip.wxjifang.cn/retest.html';
-}
+// 错题本基础链接解析函数统一由 common.js 的 getRetestBaseUrl() 提供
 
 // ========== Spring/Autumn Semester Viewer Logic ==========
 window.defaultSeason = 'autumn';

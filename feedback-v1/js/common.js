@@ -1561,4 +1561,26 @@ window.extractWenjuanxingQuestionColumns = extractWenjuanxingQuestionColumns;
 window.getWenjuanxingBenchmark = getWenjuanxingBenchmark;
 window.parseWenjuanxingBenchmarkAndErrors = parseWenjuanxingBenchmarkAndErrors;
 
+/**
+ * 解析学生错题巩固链接基础地址：
+ * - 本地开发走当前目录 retest.html
+ * - 备份站 (feedbackbackup / vipbackup) 统一指向 https://vipbackup.wxjifang.cn/retest.html
+ * - 测试站 (feedbacktest) 自适应走当前域名 retest.html
+ * - 生产站默认走 https://vip.wxjifang.cn/retest.html
+ */
+function getRetestBaseUrl() {
+    const host = window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') {
+        return `${window.location.origin}${window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/'))}/retest.html`;
+    }
+    if (/^(feedback|vip)backup\.wxjifang\.cn$/.test(host)) {
+        return 'https://vipbackup.wxjifang.cn/retest.html';
+    }
+    if (/feedbacktest\.wxjifang\.cn$/.test(host)) {
+        return `https://${host}/retest.html`;
+    }
+    return 'https://vip.wxjifang.cn/retest.html';
+}
+window.getRetestBaseUrl = getRetestBaseUrl;
+
 

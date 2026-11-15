@@ -1,7 +1,7 @@
 /**
  * ============================================================================
  * 极方管理后台 (Admin Console) 前端运行脚本 - 生产环境合并包
- * 自动生成时间: 2026-11-15 02:01:22
+ * 自动生成时间: 2026-11-15 18:16:15
  * 源码模块目录: js/admin/
  * 请勿直接手动修改此文件，开发时请修改 js/admin/ 中的子模块并执行本打包脚本。
  * ============================================================================
@@ -6600,7 +6600,10 @@
                 return;
             }
 
-            const baseDomain = (window.location.hostname === 'vip.wxjifang.cn' || window.location.hostname === 'wxjifang.cn') ? window.location.origin : 'https://vip.wxjifang.cn';
+            const host = window.location.hostname;
+            const baseDomain = (host === 'feedbackbackup.wxjifang.cn' || host === 'vipbackup.wxjifang.cn')
+                ? 'https://vipbackup.wxjifang.cn'
+                : ((host === 'vip.wxjifang.cn' || host === 'wxjifang.cn') ? window.location.origin : 'https://vip.wxjifang.cn');
             const link = r.retest_token ? `${baseDomain}/retest.html?token=${encodeURIComponent(r.retest_token)}` : '';
 
             let errs = [];
