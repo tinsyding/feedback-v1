@@ -4762,21 +4762,6 @@ function renderQuestionList() {
                     </div>
                     ${isAssistant ? '' : `
                     <div class="big-question-header-actions">
-                        ${(canUseRegionDebug() && firstQ.questionMeta && firstQ.questionMeta.mode === 'region_crop') ? `
-                        <button type="button" class="big-question-action-btn" onclick="rgEditQuestionRegionFromStep4(${firstIdx})" title="回到整卷框选录题工作台调整此大题的框选区域">
-                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                            </svg>
-                            <span>调整整卷框选</span>
-                        </button>` : ''}
-                        <button type="button" class="big-question-action-btn" onclick="openStep4BigQuestionBoxModal(${firstIdx})" title="在高清大图上预览或微调每道小问的框选位置">
-                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
-                                <rect x="3" y="3" width="18" height="18" rx="2" stroke-dasharray="4 2"></rect>
-                                <circle cx="9" cy="9" r="1.5"></circle>
-                            </svg>
-                            <span>预览 / 调整框选</span>
-                        </button>
                         <button type="button" class="big-question-action-btn" onclick="toggleBigGroupSubTopics('${escapeHtml(groupKey)}')" title="展开或收起各小问独立知识点设置">
                             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
                                 <line x1="8" y1="6" x2="21" y2="6"></line>
@@ -4787,9 +4772,6 @@ function renderQuestionList() {
                                 <line x1="3" y1="18" x2="3.01" y2="18"></line>
                             </svg>
                             <span>${isDrawerOpen ? '收起小问考点' : '按小问细分考点'}</span>
-                        </button>
-                        <button type="button" class="big-question-action-btn" onclick="ungroupBigQuestion(${firstIdx})" title="取消大题模式，恢复为普通单题">
-                            <span>拆回单题</span>
                         </button>
                     </div>`}
                 </div>
@@ -4935,13 +4917,6 @@ function renderQuestionList() {
                 </div>
                 ${isAssistant ? '' : `
                 <div class="question-actions">
-                    ${(canUseRegionDebug() && q.questionMeta && q.questionMeta.mode === 'region_crop') ? `
-                    <button class="question-action-btn" onclick="rgEditQuestionRegionFromStep4(${originalIndex})" title="回到整卷框选录题工作台调整此题框选">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                        </svg>
-                    </button>` : ''}
                     <button class="question-action-btn question-remove-btn" onclick="removeQuestion(${originalIndex})" title="删除此题">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -4978,7 +4953,6 @@ function renderQuestionList() {
             const topicPlaceholder = isPreviewBank
                 ? '输入知识点 (选填，留空则错题本仅显示题号)...'
                 : '输入知识点 (必填)...';
-            const canConvertBigQ = Boolean(q.exercisePdf && q.exercisePdf.url);
             item.innerHTML = `
                 <div class="question-id-tags">
                     ${idTagHtml}
@@ -5001,20 +4975,6 @@ function renderQuestionList() {
                 </div>
                 ${isAssistant ? '' : `
                 <div class="question-actions">
-                    ${(canUseRegionDebug() && q.questionMeta && q.questionMeta.mode === 'region_crop') ? `
-                    <button class="question-action-btn" onclick="rgEditQuestionRegionFromStep4(${originalIndex})" title="回到整卷框选录题工作台调整此题框选">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                        </svg>
-                    </button>` : ''}
-                    ${canConvertBigQ ? `
-                    <button class="question-action-btn" onclick="openStep4BigQuestionBoxModal(${originalIndex})" title="设为大题并框选各小问位置">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="3" y="3" width="18" height="18" rx="2" stroke-dasharray="4 2"></rect>
-                            <path d="M9 12h6M12 9v6"></path>
-                        </svg>
-                    </button>` : ''}
                     <button class="question-action-btn question-remove-btn" onclick="removeQuestion(${originalIndex})" title="删除此题">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="18" y1="6" x2="6" y2="18"></line>
