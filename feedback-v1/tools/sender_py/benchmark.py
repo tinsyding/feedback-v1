@@ -82,12 +82,20 @@ def evaluate_title_image_all_engines(
     results: Dict[str, Dict[str, Any]] = {}
     proc_img = _preprocess_title_img(title_img) if title_img else None
 
-    # 1. Qwen3.8-Flash (云端快速视觉大模型)
+    # 1. 云端视觉大模型 (Qwen3.8-Flash / 后台指定 benchmarkModel)
     t0 = time.perf_counter()
     try:
+        try:
+            from sender_py.cloud_control import get_cloud_control_manager
+        except ModuleNotFoundError:
+            from cloud_control import get_cloud_control_manager
+        if not get_cloud_control_manager().is_benchmark_model_enabled():
+            raise RuntimeError("ADMIN_DISABLED_BENCHMARK_MODEL: 云控已关闭基准评测大模型")
         if title_img is None:
             raise ValueError("标题截图为空")
-        res = vision_api.identify_title(title_img, sid, sname, server, token, timeout=20)
+        res = vision_api.identify_title(
+            title_img, sid, sname, server, token, timeout=20, purpose="benchmark"
+        )
         t_ms = round((time.perf_counter() - t0) * 1000)
         judgment = rescue_option1_fuzzy_match(res, sid, sname)
         results["qwen_flash"] = {
@@ -101,12 +109,15 @@ def evaluate_title_image_all_engines(
     except Exception as exc:
         t_ms = round((time.perf_counter() - t0) * 1000)
         err_msg = str(exc)
-        is_disabled = "ADMIN_FORCED_LOCAL_OCR" in err_msg
+        is_disabled = (
+            "ADMIN_FORCED_LOCAL_OCR" in err_msg
+            or "ADMIN_DISABLED_BENCHMARK_MODEL" in err_msg
+        )
         results["qwen_flash"] = {
             "name": "Qwen3.8-Flash",
             "status": "disabled" if is_disabled else "error",
             "matched": False,
-            "text": "云端已停用(强制本地OCR)" if is_disabled else f"调用失败: {exc}",
+            "text": "云端已停用(后台关闭基准评测大模型)" if "ADMIN_DISABLED_BENCHMARK_MODEL" in err_msg else ("云端已停用(强制本地OCR)" if is_disabled else f"调用失败: {exc}"),
             "reason": err_msg,
             "latency_ms": t_ms,
         }

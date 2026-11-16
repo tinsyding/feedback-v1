@@ -232,6 +232,57 @@ class CloudControlUnitTest(unittest.TestCase):
             ))
             self.assertEqual(mgr.peek_pending_acks(), [])
 
+    def test_stage1_calibration_and_stage4_benchmark_gates(self):
+        from sender_py import benchmark, vision_api
+        mgr = CloudControlManager()
+        mgr.apply_server_payload({
+            "effective_policy": {
+                **DEFAULT_CLOUD_POLICY,
+                "enableAutoCalibration": False,
+                "enableBenchmarkModel": False,
+            }
+        })
+        self.assertFalse(mgr.is_auto_calibration_enabled())
+        self.assertFalse(mgr.is_benchmark_model_enabled())
+
+        # Stage 4: benchmark skips cloud LLM call cleanly when disabled
+        with patch("sender_py.cloud_control.get_cloud_control_manager", return_value=mgr), \
+             patch.object(vision_api, "identify_title") as mock_id, \
+             patch.object(benchmark, "_get_rapidocr_engine", return_value=None):
+            res, _, _ = benchmark.evaluate_title_image_all_engines(
+                "dummy_img", "001", "张三", "https://example.com"
+            )
+            self.assertEqual(res["qwen_flash"]["status"], "disabled")
+            self.assertIn("关闭基准评测大模型", res["qwen_flash"]["text"])
+            mock_id.assert_not_called()
+
+        # Stage 4: benchmark passes purpose="benchmark" when enabled
+        mgr.apply_server_payload({"effective_policy": {**DEFAULT_CLOUD_POLICY, "enableBenchmarkModel": True}})
+        with patch("sender_py.cloud_control.get_cloud_control_manager", return_value=mgr), \
+             patch.object(vision_api, "identify_title", return_value={"matched": True, "is_group": False, "detected_title": "001张三"}) as mock_id, \
+             patch.object(benchmark, "_get_rapidocr_engine", return_value=None):
+            res, _, _ = benchmark.evaluate_title_image_all_engines(
+                "dummy_img", "001", "张三", "https://example.com"
+            )
+            self.assertEqual(res["qwen_flash"]["status"], "ok")
+            self.assertEqual(mock_id.call_args.kwargs.get("purpose"), "benchmark")
+
+        # Stage 1: WebController run_calibration skips calibrate_roi when disabled
+        with patch("sender_py.web_controller.get_cloud_control_manager", return_value=mgr), \
+             patch("sender_py.window_utils.find_and_activate_wecom", return_value=True), \
+             patch("sender_py.window_utils.restore_and_center_wecom", return_value=(True, (0, 0, 800, 600))), \
+             patch("sender_py.window_utils.get_dpi_scale", return_value=1.0), \
+             patch("sender_py.window_utils.get_wecom_rect", return_value=(0, 0, 800, 600)), \
+             patch("sender_py.sender.open_sample_chat_for_calibration"), \
+             patch("sender_py.capture.capture_wecom_window", return_value="dummy_win"), \
+             patch("sender_py.vision_api.calibrate_roi") as mock_cal:
+            mgr.apply_server_payload({"effective_policy": {**DEFAULT_CLOUD_POLICY, "enableAutoCalibration": False}})
+            ctrl = WebController()
+            out = ctrl.run_calibration()
+            self.assertFalse(out["success"])
+            self.assertIn("手动框选", out["message"])
+            mock_cal.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

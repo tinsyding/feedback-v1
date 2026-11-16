@@ -35,6 +35,12 @@ switch ($action) {
                 if (!isset($config['identifyFastModel'])) {
                     $config['identifyFastModel'] = getenv('IDENTIFY_FAST_MODEL') ?: ($localKeys['identifyFastModel'] ?? 'qwen3.8-flash');
                 }
+                if (!isset($config['calibrateModel']) || trim((string)$config['calibrateModel']) === '') {
+                    $config['calibrateModel'] = $config['identifyModel'] ?: 'qwen3.8-max';
+                }
+                if (!isset($config['benchmarkModel']) || trim((string)$config['benchmarkModel']) === '') {
+                    $config['benchmarkModel'] = $config['identifyFastModel'] ?: 'qwen3.8-flash';
+                }
                 $config['senderControl'] = normalizeGlobalSenderControl(
                     is_array($config['senderControl'] ?? null) ? $config['senderControl'] : [],
                     $config
@@ -117,9 +123,15 @@ switch ($action) {
                 if (isset($input['identifyFastModel'])) {
                     $config['identifyFastModel'] = trim((string)$input['identifyFastModel']);
                 }
+                if (isset($input['calibrateModel'])) {
+                    $config['calibrateModel'] = trim((string)$input['calibrateModel']);
+                }
+                if (isset($input['benchmarkModel'])) {
+                    $config['benchmarkModel'] = trim((string)$input['benchmarkModel']);
+                }
                 
                 // Keep comment
-                $config['_comment'] = "defaultSeason: spring/summer/autumn/winter (春/暑/秋/寒). semesterYear: 当前学年. semesterWeeks: 学期总周/次数. retestQuestionSpacing: 错题本拼页题目间隙(pt). retestQrCodeEnabled: 下载PDF是否包含视频讲解二维码. disableQwenFlashTitle: 是否停用云端Qwen-Flash标题核验(强制本地OCR). dashscopeApiKey / identifyApiBase / identifyModel / identifyFastModel: 大语言模型视觉接口配置.";
+                $config['_comment'] = "defaultSeason: spring/summer/autumn/winter (春/暑/秋/寒). semesterYear: 当前学年. semesterWeeks: 学期总周/次数. retestQuestionSpacing: 错题本拼页题目间隙(pt). retestQrCodeEnabled: 下载PDF是否包含视频讲解二维码. disableQwenFlashTitle: 与senderControl.verifyMode=local联动兼容字段. dashscopeApiKey / identifyApiBase / calibrateModel / identifyFastModel / identifyModel / benchmarkModel: 四环节大语言模型视觉配置.";
                 
                 // Save
                 $result = file_put_contents($configFile, json_encode($config, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));

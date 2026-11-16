@@ -127,7 +127,8 @@ def identify(title_img, chat_tail_img, target_id: str, target_name: str,
 
 
 def identify_title(title_img, target_id: str, target_name: str,
-                   server: str, token=None, timeout: int = 35) -> dict:
+                   server: str, token=None, timeout: int = 35,
+                   purpose: str = "") -> dict:
     """快速同步通道（方案 A）：仅上传极小的标题栏截图，秒级核验会话身份与是否群聊。"""
     try:
         import io
@@ -144,15 +145,19 @@ def identify_title(title_img, target_id: str, target_name: str,
     buf = io.BytesIO()
     title_img.save(buf, format="PNG")
 
+    form_data = {
+        "mode": "title",
+        "target_id": target_id or "",
+        "target_name": target_name or "",
+        "token": tok,
+    }
+    if purpose:
+        form_data["purpose"] = str(purpose).strip()[:24]
+
     try:
         resp = requests.post(
             server + IDENTIFY_PATH,
-            data={
-                "mode": "title",
-                "target_id": target_id or "",
-                "target_name": target_name or "",
-                "token": tok,
-            },
+            data=form_data,
             files={
                 "image_title": ("title.png", buf.getvalue(), "image/png"),
             },

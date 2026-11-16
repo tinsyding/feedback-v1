@@ -377,27 +377,6 @@
                             </div>
                         </div>
 
-                        <!-- 企微标题核验 (Qwen3.8-Flash) 开关 -->
-                        <div class="glass-card settings-section-card" style="padding: 16px 20px; margin-top: 14px;">
-                            <div class="setting-row" style="align-items: center;">
-                                <div class="setting-info-block" style="flex: 1; padding-right: 20px;">
-                                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
-                                        <h4 style="margin: 0; font-size: 0.96rem; font-weight: 600; color: var(--text-primary);">企业微信标题核验 (Qwen3.8-Flash)</h4>
-                                        <span id="sender-flash-status-badge" class="badge-status status-badge active">云端 Flash 开启</span>
-                                    </div>
-                                    <p class="setting-desc" style="margin: 0; font-size: 0.82rem; color: var(--text-secondary); line-height: 1.45;">
-                                        关闭后将停用云端 Qwen3.8-Flash，强制所有发送器客户端使用本地极速 OCR（10~15ms 零延迟且免 Token 消耗）。后台家长留言分析（Qwen3.8-Max）保持正常开启。
-                                    </p>
-                                </div>
-                                <div style="display: flex; align-items: center; gap: 12px; flex-shrink: 0;">
-                                    <label class="switch-control" title="切换是否使用云端 Qwen3.8-Flash 标题核验（关闭则强制客户端使用本地OCR）">
-                                        <input type="checkbox" id="sender-flash-toggle" data-change="sender-flash-toggle">
-                                        <span class="switch-slider"></span>
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-
                         <!-- 发送器全局云控（轻档策略 + 节拍/版本门禁） -->
                         <div class="glass-card settings-section-card" style="padding: 20px 22px; margin-top: 14px;">
                             <div class="section-header" style="margin-bottom: 16px;">
@@ -413,13 +392,13 @@
                                         <span id="sc-service-badge" class="badge-status status-badge active">服务开放</span>
                                     </div>
                                     <p style="margin: 4px 0 0 0; font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4;">
-                                        统一管控全员老师端 <code>sender_py</code> 的核验模式、后台留言分析、版本门禁、全员公告与企微防风控节奏（支持在日志页针对单机覆盖）。
+                                        统一管控全员老师端 <code>sender_py</code> 的服务开关、版本门禁、全员公告与企微防风控节奏（支持在日志页针对单机覆盖；四环节大模型开关与模型选择请在下方配置）。
                                     </p>
                                 </div>
                             </div>
 
                             <div style="display: flex; flex-direction: column; gap: 14px;">
-                                <!-- 1. 服务总开关 & 留言分析开关 -->
+                                <!-- 1. 服务总开关 & 现场快照策略 -->
                                 <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:12px;">
                                     <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border:1px solid var(--border-color); border-radius:8px; background:rgba(255,255,255,0.02);">
                                         <div>
@@ -431,28 +410,6 @@
                                             <span class="switch-slider"></span>
                                         </label>
                                     </div>
-                                    <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border:1px solid var(--border-color); border-radius:8px; background:rgba(255,255,255,0.02);">
-                                        <div>
-                                            <div style="font-size:0.86rem; font-weight:600; color:var(--text-primary);">后台家长留言分析 (Qwen-Max)</div>
-                                            <div style="font-size:0.75rem; color:var(--text-muted);">关闭后跳过后台 Max 识图，零 Token 消耗</div>
-                                        </div>
-                                        <label class="switch-control" title="开启/关闭发送前聊天区家长留言异步分析">
-                                            <input type="checkbox" id="sc-enable-reply" checked>
-                                            <span class="switch-slider"></span>
-                                        </label>
-                                    </div>
-                                </div>
-
-                                <!-- 2. 核验模式 / 现场快照策略 / 最低版本门禁 -->
-                                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px;">
-                                    <div>
-                                        <label style="display:block; font-size:0.84rem; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">标题核验默认策略</label>
-                                        <select id="sc-verify-mode" class="custom-select" style="width:100%;" data-change="sc-verify-mode">
-                                            <option value="auto">auto · 智能阶梯 (本地OCR优先 + Flash兜底)</option>
-                                            <option value="local">local · 纯本地OCR (绝不调Flash，免Token)</option>
-                                            <option value="api">api · 纯云端API (不走本地OCR)</option>
-                                        </select>
-                                    </div>
                                     <div>
                                         <label style="display:block; font-size:0.84rem; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">核验截图上传策略</label>
                                         <select id="sc-snapshot-policy" class="custom-select" style="width:100%;">
@@ -461,9 +418,13 @@
                                             <option value="off">off · 仅存本机不上传 (最省流量)</option>
                                         </select>
                                     </div>
+                                </div>
+
+                                <!-- 2. 最低版本门禁 -->
+                                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px;">
                                     <div>
                                         <label style="display:block; font-size:0.84rem; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">最低允许客户端版本</label>
-                                        <input type="text" id="sc-min-version" placeholder="留空不限制，如 2.0.3" style="font-family:var(--font-mono); font-size:0.85rem;">
+                                        <input type="text" id="sc-min-version" placeholder="留空不限制，如 2.0.4" style="font-family:var(--font-mono); font-size:0.85rem;">
                                     </div>
                                     <div>
                                         <label style="display:block; font-size:0.84rem; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">低于最低版本动作</label>
@@ -535,63 +496,134 @@
                                     </svg>
                                 </div>
                                 <div class="section-titles" style="flex: 1;">
-                                    <h3 style="font-size: 1.05rem; margin: 0 0 4px 0;">大语言模型 (AI 视觉接口) 配置</h3>
+                                    <h3 style="font-size: 1.05rem; margin: 0 0 4px 0;">大语言模型 (AI 视觉接口) 与四环节独立管控</h3>
                                     <p style="margin: 0; font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4;">
-                                        配置企业微信反馈发送器的云端视觉大模型服务。支持 DashScope (阿里云百炼) 及兼容 OpenAI 协议的第三方 API。
+                                        统一配置视觉大模型密钥、API 地址，并精细控制自动反馈工具 4 个环节分别是否调用大模型及所选模型（关闭环节将强制客户端走本地路径或跳过，不消耗 Token）。
                                     </p>
                                 </div>
                             </div>
 
                             <div style="display: flex; flex-direction: column; gap: 14px;">
-                                <!-- 1. API Key -->
-                                <div>
-                                    <label style="display: block; font-size: 0.86rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px;">
-                                        API Key (私密密钥)
-                                    </label>
-                                    <div style="position: relative; display: flex; align-items: center;">
-                                        <input type="password" id="ai-api-key" placeholder="例如 sk-ws-..." style="padding-right: 42px; font-family: var(--font-mono); font-size: 0.85rem;">
-                                        <button type="button" id="ai-key-toggle-btn" data-action="toggle-api-key" title="显示/隐藏密钥" style="position: absolute; right: 8px; background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; display: flex; align-items: center; justify-content: center;">
-                                            <svg id="ai-key-eye-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
-                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                                                <circle cx="12" cy="12" r="3"></circle>
-                                            </svg>
-                                        </button>
-                                    </div>
-                                    <span style="display: block; font-size: 0.76rem; color: var(--text-muted); margin-top: 4px;">
-                                        百炼控制台获取的 API-Key。保存后仅供服务端调用，公网不可下载。
-                                    </span>
-                                </div>
-
-                                <!-- 2. Base URL -->
-                                <div>
-                                    <label style="display: block; font-size: 0.86rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px;">
-                                        API 端点 (Base URL)
-                                    </label>
-                                    <input type="text" id="ai-api-base" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions" style="font-family: var(--font-mono); font-size: 0.85rem;">
-                                    <span style="display: block; font-size: 0.76rem; color: var(--text-muted); margin-top: 4px;">
-                                        兼容 OpenAI chat/completions 规范的地址。若不以 /chat/completions 结尾，系统会自动补齐。
-                                    </span>
-                                </div>
-
-                                <!-- 3. 双模型设定 Grid -->
-                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
+                                <!-- 1 & 2. API Key & Base URL -->
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px;">
                                     <div>
                                         <label style="display: block; font-size: 0.86rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px;">
-                                            主视觉模型 (全窗标定与深度分析)
+                                            API Key (私密密钥)
                                         </label>
-                                        <input type="text" id="ai-model" placeholder="qwen3.8-max" style="font-family: var(--font-mono); font-size: 0.85rem;">
+                                        <div style="position: relative; display: flex; align-items: center;">
+                                            <input type="password" id="ai-api-key" placeholder="例如 sk-ws-..." style="padding-right: 42px; font-family: var(--font-mono); font-size: 0.85rem;">
+                                            <button type="button" id="ai-key-toggle-btn" data-action="toggle-api-key" title="显示/隐藏密钥" style="position: absolute; right: 8px; background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px; display: flex; align-items: center; justify-content: center;">
+                                                <svg id="ai-key-eye-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                                    <circle cx="12" cy="12" r="3"></circle>
+                                                </svg>
+                                            </button>
+                                        </div>
                                         <span style="display: block; font-size: 0.76rem; color: var(--text-muted); margin-top: 4px;">
-                                            用于窗口 ROI 自动标定与家长尾部消息分析，默认 <code>qwen3.8-max</code>。
+                                            百炼控制台获取的 API-Key。保存后仅供服务端调用，公网不可下载。
                                         </span>
                                     </div>
                                     <div>
                                         <label style="display: block; font-size: 0.86rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px;">
-                                            快速核验模型 (企微标题秒验)
+                                            API 端点 (Base URL)
                                         </label>
-                                        <input type="text" id="ai-fast-model" placeholder="qwen3.8-flash" style="font-family: var(--font-mono); font-size: 0.85rem;">
+                                        <input type="text" id="ai-api-base" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions" style="font-family: var(--font-mono); font-size: 0.85rem;">
                                         <span style="display: block; font-size: 0.76rem; color: var(--text-muted); margin-top: 4px;">
-                                            用于会话标题栏极速校验，默认 <code>qwen3.8-flash</code>。
+                                            兼容 OpenAI chat/completions 地址（支持 DashScope 及第三方中转）。
                                         </span>
+                                    </div>
+                                </div>
+
+                                <!-- 3. 四大调用环节独立开关与模型选择 -->
+                                <div style="border: 1px solid var(--border-color); border-radius: 10px; padding: 14px; background: rgba(255,255,255,0.015); display: flex; flex-direction: column; gap: 12px;">
+                                    <div style="font-size: 0.86rem; font-weight: 700; color: var(--text-primary);">四环节大模型开关与模型指定</div>
+
+                                    <!-- 环节 1：自动窗口校准 -->
+                                    <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.12);">
+                                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                                            <div>
+                                                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                                    <span style="font-size: 0.88rem; font-weight: 600; color: var(--text-primary);">1. 自动窗口校准 (ROI 标定)</span>
+                                                    <span id="stage1-cal-badge" class="badge-status status-badge active" style="font-size: 0.72rem;">AI 校准开启</span>
+                                                </div>
+                                                <div style="font-size: 0.76rem; color: var(--text-muted); margin-top: 2px;">
+                                                    仅首次或更换窗口分辨率时触发 1 次；关闭后客户端直接弹出手动框选画板。
+                                                </div>
+                                            </div>
+                                            <label class="switch-control" title="开启/关闭 AI 自动窗口校准">
+                                                <input type="checkbox" id="sc-enable-calibration" data-change="sc-stage-toggle" checked>
+                                                <span class="switch-slider"></span>
+                                            </label>
+                                        </div>
+                                        <div>
+                                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px;">校准使用模型</label>
+                                            <input type="text" id="ai-calibration-model" placeholder="qwen3.8-max" style="font-family: var(--font-mono); font-size: 0.84rem;">
+                                        </div>
+                                    </div>
+
+                                    <!-- 环节 2：聊天标题栏核验 -->
+                                    <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.12);">
+                                        <div>
+                                            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;">
+                                                <span style="font-size: 0.88rem; font-weight: 600; color: var(--text-primary);">2. 标题栏身份核验 (发送前门禁)</span>
+                                                <span id="stage2-title-badge" class="badge-status status-badge active" style="font-size: 0.72rem;">本地优先 + 模型兜底</span>
+                                            </div>
+                                            <select id="sc-verify-mode" class="custom-select" style="width: 100%; font-size: 0.82rem;" data-change="sc-stage-toggle">
+                                                <option value="auto">auto · 本地 OCR (winocr+RapidOCR) 优先，失败时调用模型兜底</option>
+                                                <option value="local">local · 完全禁用大模型，仅本地 OCR 核验（10~15ms，0 Token）</option>
+                                                <option value="api">api · 跳过本地 OCR，直接调用云端大模型核验</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px;">标题核验使用模型</label>
+                                            <input type="text" id="ai-fast-model" placeholder="qwen3.8-flash" style="font-family: var(--font-mono); font-size: 0.84rem;">
+                                        </div>
+                                    </div>
+
+                                    <!-- 环节 3：家长留言后台分析 -->
+                                    <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.12);">
+                                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                                            <div>
+                                                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                                    <span style="font-size: 0.88rem; font-weight: 600; color: var(--text-primary);">3. 家长留言后台分析 (生成待回名单)</span>
+                                                    <span id="stage3-reply-badge" class="badge-status status-badge active" style="font-size: 0.72rem;">AI 分析开启</span>
+                                                </div>
+                                                <div style="font-size: 0.76rem; color: var(--text-muted); margin-top: 2px;">
+                                                    每位已发送学生后台异步识图 1 次；关闭后不调大模型、不生成待回列表（最省额度）。
+                                                </div>
+                                            </div>
+                                            <label class="switch-control" title="开启/关闭后台家长留言分析">
+                                                <input type="checkbox" id="sc-enable-reply" data-change="sc-stage-toggle" checked>
+                                                <span class="switch-slider"></span>
+                                            </label>
+                                        </div>
+                                        <div>
+                                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px;">留言分析使用模型</label>
+                                            <input type="text" id="ai-model" placeholder="qwen3.8-max" style="font-family: var(--font-mono); font-size: 0.84rem;">
+                                        </div>
+                                    </div>
+
+                                    <!-- 环节 4：多引擎识别基准评测 -->
+                                    <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.12);">
+                                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                                            <div>
+                                                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                                    <span style="font-size: 0.88rem; font-weight: 600; color: var(--text-primary);">4. 多引擎基准评测 (Dry-Run 诊断)</span>
+                                                    <span id="stage4-bm-badge" class="badge-status status-badge active" style="font-size: 0.72rem;">评测大模型开启</span>
+                                                </div>
+                                                <div style="font-size: 0.76rem; color: var(--text-muted); margin-top: 2px;">
+                                                    仅老师手动运行“基准评测”对比准确率时使用；关闭后仅评测 winocr 与 RapidOCR。
+                                                </div>
+                                            </div>
+                                            <label class="switch-control" title="开启/关闭基准评测云端大模型对比">
+                                                <input type="checkbox" id="sc-enable-benchmark" data-change="sc-stage-toggle" checked>
+                                                <span class="switch-slider"></span>
+                                            </label>
+                                        </div>
+                                        <div>
+                                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px;">基准评测使用模型</label>
+                                            <input type="text" id="ai-benchmark-model" placeholder="qwen3.8-flash" style="font-family: var(--font-mono); font-size: 0.84rem;">
+                                        </div>
                                     </div>
                                 </div>
 
@@ -1411,7 +1443,7 @@
     </div>
 
     <!-- JAVASCRIPT APPLICATION LOGIC -->
-    <script defer src="js/admin.js?v=20261116-01"></script>
+    <script defer src="js/admin.js?v=20261116-02"></script>
 </body>
 
 </html>

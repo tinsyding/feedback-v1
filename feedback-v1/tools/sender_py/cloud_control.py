@@ -23,8 +23,10 @@ VALID_VERSION_ACTIONS = ("block", "warn")
 DEFAULT_CLOUD_POLICY: Dict[str, Any] = {
     "policyVersion": 1,
     "senderServiceEnabled": True,
+    "enableAutoCalibration": True,
     "verifyMode": "auto",
     "enableReplyAnalysis": True,
+    "enableBenchmarkModel": True,
     "snapshotPolicy": "errors_only",
     "minSenderVersion": "",
     "minVersionAction": "block",
@@ -110,12 +112,16 @@ def normalize_policy(raw: Optional[dict]) -> Dict[str, Any]:
     out["policyVersion"] = _clamp_int(src.get("policyVersion"), 1, 10**9, 1)
     if "senderServiceEnabled" in src:
         out["senderServiceEnabled"] = bool(src.get("senderServiceEnabled"))
+    if "enableAutoCalibration" in src:
+        out["enableAutoCalibration"] = bool(src.get("enableAutoCalibration"))
 
     vm = str(src.get("verifyMode") or out["verifyMode"]).strip().lower()
     out["verifyMode"] = vm if vm in VALID_VERIFY_MODES else "auto"
 
     if "enableReplyAnalysis" in src:
         out["enableReplyAnalysis"] = bool(src.get("enableReplyAnalysis"))
+    if "enableBenchmarkModel" in src:
+        out["enableBenchmarkModel"] = bool(src.get("enableBenchmarkModel"))
 
     sp = str(src.get("snapshotPolicy") or out["snapshotPolicy"]).strip().lower()
     out["snapshotPolicy"] = sp if sp in VALID_SNAPSHOT_POLICIES else "errors_only"
@@ -182,6 +188,14 @@ class CloudControlManager:
     def get_snapshot_policy(self) -> str:
         with self._lock:
             return str(self._policy.get("snapshotPolicy") or "errors_only")
+
+    def is_auto_calibration_enabled(self) -> bool:
+        with self._lock:
+            return bool(self._policy.get("enableAutoCalibration", True))
+
+    def is_benchmark_model_enabled(self) -> bool:
+        with self._lock:
+            return bool(self._policy.get("enableBenchmarkModel", True))
 
     def mark_sync_error(self, error_msg: str):
         with self._lock:

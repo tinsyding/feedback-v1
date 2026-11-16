@@ -10,8 +10,10 @@
     "senderControl": {
         "policyVersion": 1,
         "senderServiceEnabled": true,
+        "enableAutoCalibration": true,
         "verifyMode": "auto",
         "enableReplyAnalysis": true,
+        "enableBenchmarkModel": true,
         "snapshotPolicy": "errors_only",
         "minSenderVersion": "",
         "minVersionAction": "block",
@@ -28,6 +30,8 @@
     },
     "dashscopeApiKey": "",
     "identifyApiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    "calibrateModel": "qwen3.8-max",
+    "identifyFastModel": "qwen3.8-flash",
     "identifyModel": "qwen3.8-max",
-    "identifyFastModel": "qwen3.8-flash"
+    "benchmarkModel": "qwen3.8-flash"
 }

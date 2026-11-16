@@ -880,8 +880,24 @@
                                     <label style="display:block; font-size:0.8rem; color:var(--text-secondary); margin-bottom:4px;">后台家长留言分析</label>
                                     <select id="ov-enable-reply" class="custom-select" style="width:100%;">
                                         <option value="" ${ov.enableReplyAnalysis === undefined ? 'selected' : ''}>继承全局</option>
-                                        <option value="1" ${ov.enableReplyAnalysis === true ? 'selected' : ''}>开启 Qwen-Max</option>
+                                        <option value="1" ${ov.enableReplyAnalysis === true ? 'selected' : ''}>开启云端分析</option>
                                         <option value="0" ${ov.enableReplyAnalysis === false ? 'selected' : ''}>关闭（省Token）</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display:block; font-size:0.8rem; color:var(--text-secondary); margin-bottom:4px;">AI 自动窗口校准</label>
+                                    <select id="ov-enable-cal" class="custom-select" style="width:100%;">
+                                        <option value="" ${ov.enableAutoCalibration === undefined ? 'selected' : ''}>继承全局</option>
+                                        <option value="1" ${ov.enableAutoCalibration === true ? 'selected' : ''}>允许 AI 校准</option>
+                                        <option value="0" ${ov.enableAutoCalibration === false ? 'selected' : ''}>关闭（仅手动框选）</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display:block; font-size:0.8rem; color:var(--text-secondary); margin-bottom:4px;">基准评测大模型</label>
+                                    <select id="ov-enable-bm" class="custom-select" style="width:100%;">
+                                        <option value="" ${ov.enableBenchmarkModel === undefined ? 'selected' : ''}>继承全局</option>
+                                        <option value="1" ${ov.enableBenchmarkModel === true ? 'selected' : ''}>允许对比大模型</option>
+                                        <option value="0" ${ov.enableBenchmarkModel === false ? 'selected' : ''}>关闭（仅本地OCR）</option>
                                     </select>
                                 </div>
                                 <div>
@@ -965,6 +981,14 @@
                     const repVal = modal.querySelector('#ov-enable-reply')?.value;
                     if (repVal === '1') overrides.enableReplyAnalysis = true;
                     else if (repVal === '0') overrides.enableReplyAnalysis = false;
+
+                    const calVal = modal.querySelector('#ov-enable-cal')?.value;
+                    if (calVal === '1') overrides.enableAutoCalibration = true;
+                    else if (calVal === '0') overrides.enableAutoCalibration = false;
+
+                    const bmVal = modal.querySelector('#ov-enable-bm')?.value;
+                    if (bmVal === '1') overrides.enableBenchmarkModel = true;
+                    else if (bmVal === '0') overrides.enableBenchmarkModel = false;
 
                     const spVal = modal.querySelector('#ov-snapshot-policy')?.value;
                     if (spVal) overrides.snapshotPolicy = spVal;

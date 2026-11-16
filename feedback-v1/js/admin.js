@@ -1,7 +1,7 @@
 /**
  * ============================================================================
  * 极方管理后台 (Admin Console) 前端运行脚本 - 生产环境合并包
- * 自动生成时间: 2026-11-16 01:49:24
+ * 自动生成时间: 2026-11-16 16:12:41
  * 源码模块目录: js/admin/
  * 请勿直接手动修改此文件，开发时请修改 js/admin/ 中的子模块并执行本打包脚本。
  * ============================================================================
@@ -668,37 +668,6 @@
             await saveConfig(true, msg);
         }
 
-        function updateSenderFlashToggleLabel(enabled) {
-            const badge = document.getElementById('sender-flash-status-badge');
-            if (badge) {
-                if (enabled) {
-                    badge.textContent = '云端 Flash 开启';
-                    badge.style.background = 'rgba(16, 185, 129, 0.15)';
-                    badge.style.color = '#10b981';
-                    badge.style.borderColor = 'rgba(16, 185, 129, 0.3)';
-                } else {
-                    badge.textContent = '已禁用 · 强制本地 OCR';
-                    badge.style.background = 'rgba(245, 158, 11, 0.15)';
-                    badge.style.color = '#f59e0b';
-                    badge.style.borderColor = 'rgba(245, 158, 11, 0.3)';
-                }
-            }
-        }
-
-        async function onSenderFlashToggleChange() {
-            const flashToggle = document.getElementById('sender-flash-toggle');
-            const isChecked = flashToggle ? flashToggle.checked : true;
-            updateSenderFlashToggleLabel(isChecked);
-            const vmSelect = document.getElementById('sc-verify-mode');
-            if (vmSelect) {
-                vmSelect.value = isChecked ? 'auto' : 'local';
-            }
-            const msg = isChecked
-                ? '已开启云端 Qwen3.8-Flash 标题核验（客户端将优先本地 + Flash 兜底）'
-                : '已停用云端 Qwen-Flash，已强制所有客户端使用本地离线极速 OCR（免 Token 消耗）';
-            await saveConfig(true, msg);
-        }
-
         function updateSenderServiceBadge(enabled) {
             const badge = document.getElementById('sc-service-badge');
             if (!badge) return;
@@ -715,15 +684,49 @@
             }
         }
 
-        function onSenderVerifyModeChange() {
-            const vmSelect = document.getElementById('sc-verify-mode');
-            const vm = vmSelect ? vmSelect.value : 'auto';
-            const flashEnabled = vm !== 'local';
-            const flashToggle = document.getElementById('sender-flash-toggle');
-            if (flashToggle) {
-                flashToggle.checked = flashEnabled;
-                updateSenderFlashToggleLabel(flashEnabled);
+        function setStageBadgeState(badgeId, enabled, onText, offText, offAmber = true) {
+            const badge = document.getElementById(badgeId);
+            if (!badge) return;
+            if (enabled) {
+                badge.textContent = onText;
+                badge.style.background = 'rgba(16, 185, 129, 0.15)';
+                badge.style.color = '#10b981';
+                badge.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+            } else {
+                badge.textContent = offText;
+                badge.style.background = offAmber ? 'rgba(245, 158, 11, 0.15)' : 'rgba(239, 68, 68, 0.14)';
+                badge.style.color = offAmber ? '#f59e0b' : '#ef4444';
+                badge.style.borderColor = offAmber ? 'rgba(245, 158, 11, 0.3)' : 'rgba(239, 68, 68, 0.3)';
             }
+        }
+
+        function updateAllStageBadges() {
+            const calOn = document.getElementById('sc-enable-calibration')?.checked !== false;
+            setStageBadgeState('stage1-cal-badge', calOn, 'AI 校准开启', '已禁用 · 仅手动框选');
+            const calInput = document.getElementById('ai-calibration-model');
+            if (calInput) calInput.style.opacity = calOn ? '1' : '0.5';
+
+            const vm = document.getElementById('sc-verify-mode')?.value || 'auto';
+            const titleText = vm === 'local'
+                ? '已禁用 · 纯本地OCR'
+                : (vm === 'api' ? '纯云端模型' : '本地优先 + 模型兜底');
+            setStageBadgeState('stage2-title-badge', vm !== 'local', titleText, '已禁用 · 纯本地OCR');
+            const fastInput = document.getElementById('ai-fast-model');
+            if (fastInput) fastInput.style.opacity = vm !== 'local' ? '1' : '0.5';
+
+            const replyOn = document.getElementById('sc-enable-reply')?.checked !== false;
+            setStageBadgeState('stage3-reply-badge', replyOn, 'AI 分析开启', '已关闭 · 0 Token');
+            const maxInput = document.getElementById('ai-model');
+            if (maxInput) maxInput.style.opacity = replyOn ? '1' : '0.5';
+
+            const bmOn = document.getElementById('sc-enable-benchmark')?.checked !== false;
+            setStageBadgeState('stage4-bm-badge', bmOn, '评测大模型开启', '已禁用 · 仅测本地OCR');
+            const bmInput = document.getElementById('ai-benchmark-model');
+            if (bmInput) bmInput.style.opacity = bmOn ? '1' : '0.5';
+        }
+
+        function onSenderStageToggleChange() {
+            updateAllStageBadges();
         }
 
         function onSenderServiceToggleChange() {
@@ -750,17 +753,9 @@
                 updateRetestQrToggleLabel(qrEnabled);
             }
 
-            // Qwen3.8-Flash 标题核验开关 (disableQwenFlashTitle 为 true 代表关闭)
+            // 发送器全局云控 & 四环节模型开关回显
             const sc = currentConfig.senderControl || {};
             const verifyMode = sc.verifyMode || (currentConfig.disableQwenFlashTitle ? 'local' : 'auto');
-            const flashEnabled = verifyMode !== 'local';
-            const flashToggle = document.getElementById('sender-flash-toggle');
-            if (flashToggle) {
-                flashToggle.checked = flashEnabled;
-                updateSenderFlashToggleLabel(flashEnabled);
-            }
-
-            // 发送器全局云控回显
             const scVerBadge = document.getElementById('sc-version-badge');
             if (scVerBadge) scVerBadge.textContent = `v${sc.policyVersion || 1}${sc.updatedAt ? ' · ' + sc.updatedAt.split(' ')[1] : ''}`;
             const svcEnabled = sc.senderServiceEnabled !== false;
@@ -768,10 +763,14 @@
             if (svcEl) svcEl.checked = svcEnabled;
             updateSenderServiceBadge(svcEnabled);
 
-            const replyEl = document.getElementById('sc-enable-reply');
-            if (replyEl) replyEl.checked = sc.enableReplyAnalysis !== false;
+            const calEl = document.getElementById('sc-enable-calibration');
+            if (calEl) calEl.checked = sc.enableAutoCalibration !== false;
             const vmEl = document.getElementById('sc-verify-mode');
             if (vmEl) vmEl.value = verifyMode;
+            const replyEl = document.getElementById('sc-enable-reply');
+            if (replyEl) replyEl.checked = sc.enableReplyAnalysis !== false;
+            const bmEl = document.getElementById('sc-enable-benchmark');
+            if (bmEl) bmEl.checked = sc.enableBenchmarkModel !== false;
             const spEl = document.getElementById('sc-snapshot-policy');
             if (spEl) spEl.value = sc.snapshotPolicy || 'errors_only';
             const minVerEl = document.getElementById('sc-min-version');
@@ -802,11 +801,19 @@
             const apiBaseInput = document.getElementById('ai-api-base');
             if (apiBaseInput) apiBaseInput.value = currentConfig.identifyApiBase || '';
 
-            const modelInput = document.getElementById('ai-model');
-            if (modelInput) modelInput.value = currentConfig.identifyModel || '';
+            const calModelInput = document.getElementById('ai-calibration-model');
+            if (calModelInput) calModelInput.value = currentConfig.calibrateModel || currentConfig.identifyModel || 'qwen3.8-max';
 
             const fastModelInput = document.getElementById('ai-fast-model');
-            if (fastModelInput) fastModelInput.value = currentConfig.identifyFastModel || '';
+            if (fastModelInput) fastModelInput.value = currentConfig.identifyFastModel || 'qwen3.8-flash';
+
+            const modelInput = document.getElementById('ai-model');
+            if (modelInput) modelInput.value = currentConfig.identifyModel || 'qwen3.8-max';
+
+            const bmModelInput = document.getElementById('ai-benchmark-model');
+            if (bmModelInput) bmModelInput.value = currentConfig.benchmarkModel || currentConfig.identifyFastModel || 'qwen3.8-flash';
+
+            updateAllStageBadges();
 
             ['spring', 'summer', 'autumn', 'winter'].forEach(s => {
                 const card = document.getElementById(`season-${s}`);
@@ -857,10 +864,8 @@
             const weeks = parseInt(document.getElementById('semester-weeks').value) || 14;
             const qrToggle = document.getElementById('retest-qrcode-toggle');
             const qrEnabled = qrToggle ? qrToggle.checked : true;
-            const flashToggle = document.getElementById('sender-flash-toggle');
-            const flashEnabled = flashToggle ? flashToggle.checked : true;
             const vmEl = document.getElementById('sc-verify-mode');
-            const verifyMode = vmEl ? vmEl.value : (flashEnabled ? 'auto' : 'local');
+            const verifyMode = vmEl ? vmEl.value : 'auto';
             const statusEl = document.getElementById('save-status');
 
             const readNum = (id, fallback) => {
@@ -879,8 +884,10 @@
                 disableQwenFlashTitle: verifyMode === 'local',
                 senderControl: {
                     senderServiceEnabled: document.getElementById('sc-service-enabled') ? document.getElementById('sc-service-enabled').checked : true,
+                    enableAutoCalibration: document.getElementById('sc-enable-calibration') ? document.getElementById('sc-enable-calibration').checked : true,
                     verifyMode: verifyMode,
                     enableReplyAnalysis: document.getElementById('sc-enable-reply') ? document.getElementById('sc-enable-reply').checked : true,
+                    enableBenchmarkModel: document.getElementById('sc-enable-benchmark') ? document.getElementById('sc-enable-benchmark').checked : true,
                     snapshotPolicy: document.getElementById('sc-snapshot-policy')?.value || 'errors_only',
                     minSenderVersion: (document.getElementById('sc-min-version')?.value || '').trim(),
                     minVersionAction: document.getElementById('sc-min-version-action')?.value || 'block',
@@ -898,13 +905,17 @@
 
             const apiKeyInput = document.getElementById('ai-api-key');
             const apiBaseInput = document.getElementById('ai-api-base');
-            const modelInput = document.getElementById('ai-model');
+            const calModelInput = document.getElementById('ai-calibration-model');
             const fastModelInput = document.getElementById('ai-fast-model');
+            const modelInput = document.getElementById('ai-model');
+            const bmModelInput = document.getElementById('ai-benchmark-model');
 
             if (apiKeyInput) config.dashscopeApiKey = apiKeyInput.value.trim();
             if (apiBaseInput) config.identifyApiBase = apiBaseInput.value.trim();
-            if (modelInput) config.identifyModel = modelInput.value.trim();
+            if (calModelInput) config.calibrateModel = calModelInput.value.trim();
             if (fastModelInput) config.identifyFastModel = fastModelInput.value.trim();
+            if (modelInput) config.identifyModel = modelInput.value.trim();
+            if (bmModelInput) config.benchmarkModel = bmModelInput.value.trim();
 
             if (currentConfig && currentConfig.retestQuestionSpacing) {
                 config.retestQuestionSpacing = currentConfig.retestQuestionSpacing;
@@ -1057,7 +1068,8 @@
         }
 
         window.onRetestQrToggleChange = onRetestQrToggleChange;
-        window.onSenderFlashToggleChange = onSenderFlashToggleChange;
+        window.onSenderStageToggleChange = onSenderStageToggleChange;
+        window.onSenderServiceToggleChange = onSenderServiceToggleChange;
         window.toggleApiKeyVisibility = toggleApiKeyVisibility;
         window.testAiConnection = testAiConnection;
 
@@ -1949,8 +1961,24 @@
                                     <label style="display:block; font-size:0.8rem; color:var(--text-secondary); margin-bottom:4px;">后台家长留言分析</label>
                                     <select id="ov-enable-reply" class="custom-select" style="width:100%;">
                                         <option value="" ${ov.enableReplyAnalysis === undefined ? 'selected' : ''}>继承全局</option>
-                                        <option value="1" ${ov.enableReplyAnalysis === true ? 'selected' : ''}>开启 Qwen-Max</option>
+                                        <option value="1" ${ov.enableReplyAnalysis === true ? 'selected' : ''}>开启云端分析</option>
                                         <option value="0" ${ov.enableReplyAnalysis === false ? 'selected' : ''}>关闭（省Token）</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display:block; font-size:0.8rem; color:var(--text-secondary); margin-bottom:4px;">AI 自动窗口校准</label>
+                                    <select id="ov-enable-cal" class="custom-select" style="width:100%;">
+                                        <option value="" ${ov.enableAutoCalibration === undefined ? 'selected' : ''}>继承全局</option>
+                                        <option value="1" ${ov.enableAutoCalibration === true ? 'selected' : ''}>允许 AI 校准</option>
+                                        <option value="0" ${ov.enableAutoCalibration === false ? 'selected' : ''}>关闭（仅手动框选）</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display:block; font-size:0.8rem; color:var(--text-secondary); margin-bottom:4px;">基准评测大模型</label>
+                                    <select id="ov-enable-bm" class="custom-select" style="width:100%;">
+                                        <option value="" ${ov.enableBenchmarkModel === undefined ? 'selected' : ''}>继承全局</option>
+                                        <option value="1" ${ov.enableBenchmarkModel === true ? 'selected' : ''}>允许对比大模型</option>
+                                        <option value="0" ${ov.enableBenchmarkModel === false ? 'selected' : ''}>关闭（仅本地OCR）</option>
                                     </select>
                                 </div>
                                 <div>
@@ -2034,6 +2062,14 @@
                     const repVal = modal.querySelector('#ov-enable-reply')?.value;
                     if (repVal === '1') overrides.enableReplyAnalysis = true;
                     else if (repVal === '0') overrides.enableReplyAnalysis = false;
+
+                    const calVal = modal.querySelector('#ov-enable-cal')?.value;
+                    if (calVal === '1') overrides.enableAutoCalibration = true;
+                    else if (calVal === '0') overrides.enableAutoCalibration = false;
+
+                    const bmVal = modal.querySelector('#ov-enable-bm')?.value;
+                    if (bmVal === '1') overrides.enableBenchmarkModel = true;
+                    else if (bmVal === '0') overrides.enableBenchmarkModel = false;
 
                     const spVal = modal.querySelector('#ov-snapshot-policy')?.value;
                     if (spVal) overrides.snapshotPolicy = spVal;
@@ -8100,8 +8136,7 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
 
         const ADMIN_CHANGE_ACTIONS = {
             'retest-qr-toggle': () => onRetestQrToggleChange(),
-            'sender-flash-toggle': () => onSenderFlashToggleChange(),
-            'sc-verify-mode': () => onSenderVerifyModeChange(),
+            'sc-stage-toggle': () => onSenderStageToggleChange(),
             'sc-service-toggle': () => onSenderServiceToggleChange(),
             'records-per-page': (el) => changeRecordsPerPage(el.value),
             'select-all-records': (el) => toggleSelectAllRecords(el.checked),

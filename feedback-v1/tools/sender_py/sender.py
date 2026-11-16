@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "2.0.3"
+APP_VERSION = "2.0.4"
 
 
 def asset_path(filename: str) -> str:
@@ -533,19 +533,32 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
             loading.close()
         return None
 
-    # 1. 优先调用 Qwen3.8-Max 多模态旗舰模型智能自动框选
+    # 1. 优先调用云端多模态模型智能自动框选（若云控允许）
     ai_roi = None
+    auto_cal_enabled = True
     try:
         try:
-            from sender_py.vision_api import calibrate_roi
+            from sender_py.cloud_control import get_cloud_control_manager
         except ModuleNotFoundError:
-            from vision_api import calibrate_roi
-        log("正在使用 Qwen3.8-Max 多模态模型自动识别企微窗口区域...")
-        if loading:
-            loading.set_status("正在使用 AI 智能分析视野区域...", "正在使用 Qwen3.8-Max 模型自动框选")
-        ai_roi = calibrate_roi(img, server=server or "https://feedback.wxjifang.cn", token=token)
-    except Exception as exc:
-        log(f"AI 自动识别网络异常：{exc}")
+            from cloud_control import get_cloud_control_manager
+        auto_cal_enabled = get_cloud_control_manager().is_auto_calibration_enabled()
+    except Exception:
+        auto_cal_enabled = True
+
+    if auto_cal_enabled:
+        try:
+            try:
+                from sender_py.vision_api import calibrate_roi
+            except ModuleNotFoundError:
+                from vision_api import calibrate_roi
+            log("正在使用云端多模态模型自动识别企微窗口区域...")
+            if loading:
+                loading.set_status("正在使用 AI 智能分析视野区域...", "正在使用多模态大模型自动框选")
+            ai_roi = calibrate_roi(img, server=server or "https://feedback.wxjifang.cn", token=token)
+        except Exception as exc:
+            log(f"AI 自动识别网络异常：{exc}")
+    else:
+        log("云控策略已关闭 AI 自动窗口校准，直接弹出手动框选窗口...")
 
     if ai_roi and isinstance(ai_roi, dict) and all(k in ai_roi for k in ("title", "input", "chat")):
         if all(validate_rel(ai_roi[k]) for k in ("title", "input", "chat")):

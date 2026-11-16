@@ -26,6 +26,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/sender_control_helper.php';
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     sendResponse(false, null, '仅支持 POST', 405);
@@ -85,6 +86,7 @@ $mode = _clip_text($_POST['mode'] ?? 'full', 16);
 if (!in_array($mode, ['full', 'title', 'reply'], true)) {
     $mode = 'full';
 }
+$purpose = strtolower(_clip_text($_POST['purpose'] ?? '', 24));
 $detectedTitleIn = _clip_text($_POST['detected_title'] ?? '', 128);
 
 if ($targetId === '' && $targetName === '') {
@@ -97,11 +99,25 @@ $cfgJson = file_exists($cfgFile) ? @json_decode(file_get_contents($cfgFile), tru
 if (!is_array($cfgJson)) {
     $cfgJson = [];
 }
+$sc = normalizeGlobalSenderControl(is_array($cfgJson['senderControl'] ?? null) ? $cfgJson['senderControl'] : [], $cfgJson);
 
-// ---- 标题核验模式控制：若管理员已停用 Qwen3.8-Flash，强制客户端转走本地离线 OCR ----
-if ($mode === 'title') {
-    if (!empty($cfgJson['disableQwenFlashTitle'])) {
-        sendResponse(false, null, 'ADMIN_FORCED_LOCAL_OCR: 管理员已开启强制本地OCR核验，云端Flash通道已停用', 200);
+// ---- 各环节大模型服务端准入拦截 ----
+if ($mode === 'title' && $purpose === 'benchmark') {
+    if (empty($sc['enableBenchmarkModel'])) {
+        sendResponse(false, null, 'ADMIN_DISABLED_BENCHMARK_MODEL: 管理员已停用基准评测云端大模型', 200);
+    }
+} elseif ($mode === 'title') {
+    if (!empty($cfgJson['disableQwenFlashTitle']) || ($sc['verifyMode'] ?? 'auto') === 'local') {
+        sendResponse(false, null, 'ADMIN_FORCED_LOCAL_OCR: 管理员已开启强制本地OCR核验，云端标题核验模型已停用', 200);
+    }
+} elseif ($mode === 'reply') {
+    if (empty($sc['enableReplyAnalysis'])) {
+        sendResponse(false, null, 'ADMIN_DISABLED_REPLY_ANALYSIS: 管理员已关闭后台家长留言分析大模型', 200);
+    }
+} else {
+    // 传统 full 双图模式同时覆盖标题核验，受本地模式门禁约束
+    if (!empty($cfgJson['disableQwenFlashTitle']) || ($sc['verifyMode'] ?? 'auto') === 'local') {
+        sendResponse(false, null, 'ADMIN_FORCED_LOCAL_OCR: 管理员已开启强制本地OCR核验，云端全图核验已停用', 200);
     }
 }
 
@@ -138,11 +154,15 @@ if ($apiBase === '') {
 } elseif (substr($apiBase, -17) !== '/chat/completions') {
     $apiBase = rtrim($apiBase, '/') . '/chat/completions';
 }
-// 场景 3、4 默认使用 qwen3.8-max；场景 2 (title) 默认使用 qwen3.8-flash
+// 按环节选择模型：reply/full 用 identifyModel (默认 qwen3.8-max)；title 用 identifyFastModel (默认 qwen3.8-flash)；benchmark 优先用 benchmarkModel
 $model = trim((string)($cfgJson['identifyModel'] ?? '')) ?: (getenv('IDENTIFY_MODEL') ?: ($localKeys['identifyModel'] ?? '') ?: 'qwen3.8-max');
 if ($mode === 'title') {
     $fastModel = trim((string)($cfgJson['identifyFastModel'] ?? '')) ?: (getenv('IDENTIFY_FAST_MODEL') ?: ($localKeys['identifyFastModel'] ?? '') ?: 'qwen3.8-flash');
-    $model = $fastModel;
+    if ($purpose === 'benchmark') {
+        $model = trim((string)($cfgJson['benchmarkModel'] ?? '')) ?: $fastModel;
+    } else {
+        $model = $fastModel;
+    }
 }
 if (!function_exists('curl_init')) {
     sendResponse(false, null, '服务端缺少 curl 扩展', 200);

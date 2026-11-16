@@ -80,10 +80,15 @@ if ($imgW < 300 || $imgH < 200) {
 }
 
 // 视觉模型配置（config.json 优先，环境变量次之，secret_key.local.php 兜底）
+require_once __DIR__ . '/sender_control_helper.php';
 $cfgFile = __DIR__ . '/../config.json';
 $cfgJson = file_exists($cfgFile) ? @json_decode(file_get_contents($cfgFile), true) : [];
 if (!is_array($cfgJson)) {
     $cfgJson = [];
+}
+$sc = normalizeGlobalSenderControl(is_array($cfgJson['senderControl'] ?? null) ? $cfgJson['senderControl'] : [], $cfgJson);
+if (empty($sc['enableAutoCalibration'])) {
+    sendResponse(false, null, 'ADMIN_DISABLED_AUTO_CALIBRATION: 管理员已关闭 AI 自动窗口校准，请改用本地手动框选', 200);
 }
 $keys = require __DIR__ . '/secret_key.php';
 $localKeys = is_array($keys) ? $keys : [];
@@ -97,8 +102,10 @@ if ($apiBase === '') {
 } elseif (substr($apiBase, -17) !== '/chat/completions') {
     $apiBase = rtrim($apiBase, '/') . '/chat/completions';
 }
-// 场景 1 默认使用 Qwen 旗舰多模态模型 qwen3.8-max
-$model = trim((string)($cfgJson['identifyModel'] ?? '')) ?: (getenv('IDENTIFY_MODEL') ?: ($localKeys['identifyModel'] ?? '') ?: 'qwen3.8-max');
+// 环节 1：自动窗口校准（优先读 calibrateModel，缺失回退 identifyModel -> qwen3.8-max）
+$model = trim((string)($cfgJson['calibrateModel'] ?? ''))
+    ?: trim((string)($cfgJson['identifyModel'] ?? ''))
+    ?: (getenv('IDENTIFY_MODEL') ?: ($localKeys['identifyModel'] ?? '') ?: 'qwen3.8-max');
 
 if (!function_exists('curl_init')) {
     sendResponse(false, null, '服务端缺少 curl 扩展', 200);

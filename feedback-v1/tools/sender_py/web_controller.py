@@ -905,7 +905,12 @@ class WebController:
             if img is None:
                 return {"success": False, "message": "未能捕获企业微信画面，请确认企微窗口未被遮挡。"}
 
-            self.emit("  └ 正在通过 Qwen3.8-Max 多模态模型自动智能框选...")
+            if self._cloud_control is not None and not self._cloud_control.is_auto_calibration_enabled():
+                msg = "云控策略已关闭 AI 自动窗口校准，请点击【手动框选视野】完成框选。"
+                self.emit(f"ℹ️ {msg}")
+                return {"success": False, "message": msg}
+
+            self.emit("  └ 正在通过云端多模态大模型自动智能框选...")
             ai_roi = calibrate_roi(img, server=self.server, token=self.token)
 
             if ai_roi and isinstance(ai_roi, dict) and all(k in ai_roi for k in ("title", "input", "chat")):

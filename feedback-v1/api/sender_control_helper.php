@@ -25,8 +25,10 @@ function getDefaultSenderControlPolicy(): array {
     return [
         'policyVersion' => 1,
         'senderServiceEnabled' => true,
+        'enableAutoCalibration' => true,
         'verifyMode' => 'auto',
         'enableReplyAnalysis' => true,
+        'enableBenchmarkModel' => true,
         'snapshotPolicy' => 'errors_only',
         'minSenderVersion' => '',
         'minVersionAction' => 'block',
@@ -90,6 +92,9 @@ function normalizeGlobalSenderControl(array $raw = [], array $rootConfig = []): 
     if (array_key_exists('senderServiceEnabled', $raw)) {
         $out['senderServiceEnabled'] = (bool)$raw['senderServiceEnabled'];
     }
+    if (array_key_exists('enableAutoCalibration', $raw)) {
+        $out['enableAutoCalibration'] = (bool)$raw['enableAutoCalibration'];
+    }
 
     // verifyMode 优先读 senderControl.verifyMode，缺失时按 disableQwenFlashTitle 派生
     $verifyMode = strtolower(trim((string)($raw['verifyMode'] ?? '')));
@@ -100,6 +105,9 @@ function normalizeGlobalSenderControl(array $raw = [], array $rootConfig = []): 
 
     if (array_key_exists('enableReplyAnalysis', $raw)) {
         $out['enableReplyAnalysis'] = (bool)$raw['enableReplyAnalysis'];
+    }
+    if (array_key_exists('enableBenchmarkModel', $raw)) {
+        $out['enableBenchmarkModel'] = (bool)$raw['enableBenchmarkModel'];
     }
 
     $snap = strtolower(trim((string)($raw['snapshotPolicy'] ?? $defaults['snapshotPolicy'])));
@@ -167,6 +175,9 @@ function normalizeClientOverrides(array $raw): array {
     if (array_key_exists('senderServiceEnabled', $raw) && $raw['senderServiceEnabled'] !== null && $raw['senderServiceEnabled'] !== '') {
         $out['senderServiceEnabled'] = (bool)$raw['senderServiceEnabled'];
     }
+    if (array_key_exists('enableAutoCalibration', $raw) && $raw['enableAutoCalibration'] !== null && $raw['enableAutoCalibration'] !== '') {
+        $out['enableAutoCalibration'] = (bool)$raw['enableAutoCalibration'];
+    }
     if (isset($raw['verifyMode'])) {
         $vm = strtolower(trim((string)$raw['verifyMode']));
         if (in_array($vm, SENDER_CONTROL_VERIFY_MODES, true)) {
@@ -175,6 +186,9 @@ function normalizeClientOverrides(array $raw): array {
     }
     if (array_key_exists('enableReplyAnalysis', $raw) && $raw['enableReplyAnalysis'] !== null && $raw['enableReplyAnalysis'] !== '') {
         $out['enableReplyAnalysis'] = (bool)$raw['enableReplyAnalysis'];
+    }
+    if (array_key_exists('enableBenchmarkModel', $raw) && $raw['enableBenchmarkModel'] !== null && $raw['enableBenchmarkModel'] !== '') {
+        $out['enableBenchmarkModel'] = (bool)$raw['enableBenchmarkModel'];
     }
     if (isset($raw['snapshotPolicy'])) {
         $sp = strtolower(trim((string)$raw['snapshotPolicy']));
