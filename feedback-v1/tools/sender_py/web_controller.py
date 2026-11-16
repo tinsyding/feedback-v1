@@ -624,6 +624,7 @@ class WebController:
         sidebar_checked = False
         sidebar_stop_reason = ""
         config_path = default_config_path()
+        roi_cache = {}
 
         try:
             for item in self.items:
@@ -686,6 +687,7 @@ class WebController:
                         enable_reply_analysis=eff_enable_reply,
                         snapshot_policy=eff_snapshot_policy,
                         check_sidebar=(not sidebar_checked),
+                        roi_cache=roi_cache,
                     )
                 except Exception as exc:
                     res = {"result": "error", "reason": f"异常: {exc}", "notes": []}
@@ -1158,6 +1160,7 @@ class WebController:
 
             records = []
             config_path = default_config_path()
+            roi_cache = {}
 
             for idx, item in enumerate(items_to_run, 1):
                 if self._benchmark_stop_requested:
@@ -1182,6 +1185,7 @@ class WebController:
                     config_path=config_path,
                     log=self.emit,
                     should_stop=lambda: self._benchmark_stop_requested,
+                    roi_cache=roi_cache,
                 )
 
                 if res.get("record"):

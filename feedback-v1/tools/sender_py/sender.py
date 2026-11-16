@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "2.0.5"
+APP_VERSION = "2.0.6"
 
 
 def asset_path(filename: str) -> str:
@@ -465,13 +465,46 @@ def open_sample_chat_for_calibration(sample_name: str = None, log=print) -> bool
     return True
 
 
+def _load_session_roi(session_cache, sig_key: str):
+    """仅从当次发送的内存会话缓存读取 ROI，绝不命中本地持久化 roi_config.json 缓存。"""
+    if not isinstance(session_cache, dict):
+        return None
+    entry = session_cache.get(sig_key)
+    if (
+        isinstance(entry, dict)
+        and all(k in entry for k in ("title", "input", "chat"))
+        and all(validate_rel(entry[k]) for k in ("title", "input", "chat"))
+    ):
+        return {
+            "title": tuple(entry["title"]),
+            "input": tuple(entry["input"]),
+            "chat": tuple(entry["chat"]),
+        }
+    return None
+
+
+def _store_session_roi(session_cache, sig_key: str, roi: dict):
+    """将本次校准成功的 ROI 写入当次发送的内存会话缓存。"""
+    if isinstance(session_cache, dict) and isinstance(roi, dict):
+        session_cache[sig_key] = {
+            "title": tuple(roi["title"]),
+            "input": tuple(roi["input"]),
+            "chat": tuple(roi["chat"]),
+        }
+
+
 def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
-               token=None, log=print, force: bool = False, sample_name: str = None):
-    """每个候选处理前检查窗口签名；变了先校准再截图。优先 AI 自动框选，失败优雅回退手动校准。返回 rel roi 或 None（放弃）。"""
+               token=None, log=print, force: bool = False, sample_name: str = None,
+               session_cache: dict = None, skip_sample_chat: bool = False):
+    """获取当前窗口 ROI：已关闭本地持久化缓存命中，仅在当次发送会话缓存(session_cache)内按窗口签名复用；
+    未命中或签名变化时立即重校准（优先 AI 自动框选，失败优雅回退手动校准）。返回 rel roi 或 None（放弃）。
+    """
     config_path = config_path or default_config_path()
     key = signature_key(rect[2], rect[3], scale)
-    if not force and not needs_calibration(config_path, key):
-        return load_roi(config_path, key)
+    if not force:
+        cached = _load_session_roi(session_cache, key)
+        if cached is not None:
+            return cached
 
     loading = None
     if parent and hasattr(parent, "winfo_exists"):
@@ -503,20 +536,23 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
             rect = fresh
             scale = wu.get_dpi_scale()
             key = signature_key(rect[2], rect[3], scale)
-            if not force and not needs_calibration(config_path, key):
-                if loading:
-                    loading.close()
-                return load_roi(config_path, key)
+            if not force:
+                cached = _load_session_roi(session_cache, key)
+                if cached is not None:
+                    if loading:
+                        loading.close()
+                    return cached
     except Exception:
         pass
 
     # 预先检索并进入一个聊天会话，确保企业微信右侧界面处于打开聊天的状态
-    try:
-        if loading:
-            loading.set_status("正在打开聊天窗口...", "正在预先唤起会话以确保右侧界面完整...")
-        open_sample_chat_for_calibration(sample_name, log=log)
-    except Exception as exc:
-        log(f"预打开会话提示（可忽略）：{exc}")
+    if not skip_sample_chat:
+        try:
+            if loading:
+                loading.set_status("正在打开聊天窗口...", "正在预先唤起会话以确保右侧界面完整...")
+            open_sample_chat_for_calibration(sample_name, log=log)
+        except Exception as exc:
+            log(f"预打开会话提示（可忽略）：{exc}")
 
     try:
         fresh = wu.get_wecom_rect()
@@ -524,6 +560,12 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
             rect = fresh
             scale = wu.get_dpi_scale()
             key = signature_key(rect[2], rect[3], scale)
+            if not force:
+                cached = _load_session_roi(session_cache, key)
+                if cached is not None:
+                    if loading:
+                        loading.close()
+                    return cached
     except Exception:
         pass
 
@@ -564,9 +606,11 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
         if all(validate_rel(ai_roi[k]) for k in ("title", "input", "chat")):
             log(f"✓ Qwen3.8-Max 自动框选成功（{ai_roi.get('reason', '')}），已自动生效！")
             save_roi(config_path, key, ai_roi["title"], ai_roi["input"], ai_roi["chat"])
+            res_roi = {"title": tuple(ai_roi["title"]), "input": tuple(ai_roi["input"]), "chat": tuple(ai_roi["chat"])}
+            _store_session_roi(session_cache, key, res_roi)
             if loading:
                 loading.close()
-            return {"title": tuple(ai_roi["title"]), "input": tuple(ai_roi["input"]), "chat": tuple(ai_roi["chat"])}
+            return res_roi
         else:
             log("AI 识别坐标超出有效范围，正在回退至手动校准...")
     else:
@@ -580,7 +624,9 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
     if roi is None:
         return None
     save_roi(config_path, key, roi["title"], roi["input"], roi["chat"])
-    return {"title": tuple(roi["title"]), "input": tuple(roi["input"]), "chat": tuple(roi["chat"])}
+    res_roi = {"title": tuple(roi["title"]), "input": tuple(roi["input"]), "chat": tuple(roi["chat"])}
+    _store_session_roi(session_cache, key, res_roi)
+    return res_roi
 
 
 class AsyncReplyAnalyzer:
@@ -938,7 +984,7 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
                  parent=None, log=print, should_stop=None, reply_analyzer=None,
                  verify_mode: str = "auto", search_wait: float = 1.5, enter_wait: float = 1.2,
                  enable_reply_analysis: bool = True, snapshot_policy: str = None,
-                 check_sidebar: bool = False) -> dict:
+                 check_sidebar: bool = False, roi_cache: dict = None) -> dict:
     """单个学生全流程：最多 3 候选机械 1→2→3。返回 {result, notes, ...}（notes 供待回名单）。"""
     try:
         from sender_py import window_utils as wu
@@ -947,6 +993,7 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
     name, sid, sname, message = item["studentName"], item["sid"], item["sname"], item["message"]
     notes = []
     sidebar_checked_here = False
+    eff_roi_cache = roi_cache if isinstance(roi_cache, dict) else {}
 
     # 清理之前可能遗留的企业微信“全局搜索”弹窗
     old_search = wu.find_wecom_search_tab_wnd()
@@ -992,7 +1039,10 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         if not rect:
             return {"result": "error", "reason": "找不到企微窗口", "notes": notes}
         scale = wu.get_dpi_scale()
-        roi = ensure_roi(parent, rect, scale, config_path, server=server, token=token, log=log, sample_name=name)
+        roi = ensure_roi(
+            parent, rect, scale, config_path, server=server, token=token,
+            log=log, sample_name=name, session_cache=eff_roi_cache,
+        )
         if roi is None:
             log("⏹ 视野校准已放弃，安全中止后续发送任务。")
             return {"result": "stopped", "reason": "ROI 校准未完成", "notes": notes}
@@ -1001,8 +1051,10 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
             fresh_rect = wu.get_wecom_rect()
             if fresh_rect and fresh_rect[2] >= 200 and fresh_rect[3] >= 150:
                 rect = fresh_rect
+                scale = wu.get_dpi_scale()
         except Exception:
             pass
+        roi_sig = signature_key(rect[2], rect[3], scale)
         if should_stop is not None and should_stop():
             log(f"[{name}] 收到停止请求，候选{cand}未发送")
             return {"result": "stopped", "reason": "用户停止", "notes": notes}
@@ -1095,11 +1147,28 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
             return {"result": "stopped", "reason": "用户停止", "notes": notes}
         if _check_and_handle_search_tab():
             return {"result": "unmatched", "reason": "未找到学生（弹出全局搜索窗口）", "notes": notes}
-        # 截图核验前再次确认最新窗口矩形
+        # 截图核验前再次确认最新窗口矩形；若切入会话导致窗口尺寸变化（如弹出右侧边栏撑宽窗口），立即按新尺寸重校 ROI
         try:
             fresh_rect = wu.get_wecom_rect()
             if fresh_rect and fresh_rect[2] >= 200 and fresh_rect[3] >= 150:
                 rect = fresh_rect
+                post_scale = wu.get_dpi_scale()
+                post_sig = signature_key(rect[2], rect[3], post_scale)
+                if post_sig != roi_sig:
+                    log(f"  ℹ 进入会话后企微窗口尺寸变化 ({roi_sig} -> {post_sig})，正在按当前窗口重新校准 ROI...")
+                    new_roi = ensure_roi(
+                        parent, rect, post_scale, config_path, server=server, token=token,
+                        log=log, sample_name=name, session_cache=eff_roi_cache, skip_sample_chat=True,
+                    )
+                    if new_roi is None:
+                        log("⏹ 视野校准已放弃，安全中止后续发送任务。")
+                        return {"result": "stopped", "reason": "ROI 校准未完成", "notes": notes}
+                    roi = new_roi
+                    fresh_after = wu.get_wecom_rect()
+                    if fresh_after and fresh_after[2] >= 200 and fresh_after[3] >= 150:
+                        rect = fresh_after
+                        post_scale = wu.get_dpi_scale()
+                    roi_sig = signature_key(rect[2], rect[3], post_scale)
         except Exception:
             pass
         if reply_analyzer is not None or not enable_reply_analysis:
@@ -3111,6 +3180,7 @@ class SenderApp:
         def worker():
             try:
                 config_path = default_config_path()
+                roi_cache = {}
                 for idx, item in enumerate(selected_items, 1):
                     if stopped[0]:
                         break
@@ -3130,7 +3200,8 @@ class SenderApp:
                         item, self.server, getattr(self, "token", None),
                         config_path=config_path,
                         log=log_fn,
-                        should_stop=lambda: stopped[0]
+                        should_stop=lambda: stopped[0],
+                        roi_cache=roi_cache
                     )
                     if res.get("record"):
                         records.append(res["record"])
@@ -3315,6 +3386,7 @@ class SenderApp:
         stopped = False
         sidebar_checked = False
         sidebar_stop_reason = ""
+        roi_cache = {}
         self.emit("=================== 开始执行发送任务 ===================")
         self.emit(f"📋 任务概览：本次计划发送 {effective_count} 人（名单总计 {len(self.items)} 人）")
         self.emit("🔍 标题核验：Qwen3.8-Max 云端多模态大模型优先，网络异常自动降级本地 OCR")
@@ -3368,7 +3440,8 @@ class SenderApp:
                         log=self.emit, should_stop=self._poll_stop,
                         reply_analyzer=self._reply_analyzer,
                         verify_mode=verify_mode,
-                        check_sidebar=(not sidebar_checked))
+                        check_sidebar=(not sidebar_checked),
+                        roi_cache=roi_cache)
                 except Exception as exc:
                     res = {"result": "error", "reason": f"程序异常：{exc}", "notes": []}
                 if res.get("sidebar_checked"):

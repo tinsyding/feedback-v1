@@ -1116,6 +1116,101 @@ class TestStage6(unittest.TestCase):
         self.assertTrue(res_ok["sidebar_checked"])
         mock_paste_ok.assert_called_once()
 
+    def test_ensure_roi_never_hits_disk_cache_and_uses_session_cache_only(self):
+        """关闭本地 roi_config.json 持久化缓存命中：即使磁盘已有同签名缓存，新批次仍须重新校准；同一会话缓存内可复用。"""
+        import os
+        import tempfile
+        from sender_py import capture, roi_manager, vision_api
+
+        stale_roi = {"title": [0.9, 0.0, 0.1, 0.1], "input": [0.9, 0.8, 0.1, 0.2], "chat": [0.9, 0.1, 0.1, 0.7]}
+        fresh_ai_roi = {"title": [0.3, 0.0, 0.5, 0.1], "input": [0.3, 0.7, 0.5, 0.3], "chat": [0.3, 0.1, 0.5, 0.6], "reason": "ok"}
+
+        with tempfile.TemporaryDirectory() as td:
+            cfg_path = os.path.join(td, "roi_config.json")
+            roi_manager.save_roi(cfg_path, "1232x812@1.000", stale_roi["title"], stale_roi["input"], stale_roi["chat"])
+
+            batch1_cache = {}
+            with mock.patch.object(wu, "find_and_activate_wecom", return_value=True), \
+                 mock.patch.object(wu, "restore_and_center_wecom", return_value=(True, (0, 0, 1232, 812))), \
+                 mock.patch.object(wu, "get_wecom_rect", return_value=(0, 0, 1232, 812)), \
+                 mock.patch.object(wu, "get_dpi_scale", return_value=1.0), \
+                 mock.patch("sender_py.sender.open_sample_chat_for_calibration", return_value=True) as mock_open, \
+                 mock.patch.object(capture, "capture_wecom_window", return_value=object()), \
+                 mock.patch.object(vision_api, "calibrate_roi", return_value=fresh_ai_roi) as mock_cal, \
+                 mock.patch("sender_py.sender.time.sleep", return_value=None):
+                # 1. 新批次即使磁盘有同签名缓存，也绝不命中，必须重校准
+                r1 = ensure_roi(
+                    None, (0, 0, 1232, 812), 1.0, cfg_path,
+                    server="https://mock.server", log=[].append,
+                    sample_name="90001张三", session_cache=batch1_cache,
+                )
+                self.assertEqual(r1["title"], tuple(fresh_ai_roi["title"]))
+                self.assertEqual(mock_open.call_count, 1)
+                self.assertEqual(mock_cal.call_count, 1)
+
+                # 2. 同一批次内同签名可复用 session_cache
+                r2 = ensure_roi(
+                    None, (0, 0, 1232, 812), 1.0, cfg_path,
+                    server="https://mock.server", log=[].append,
+                    sample_name="80001李四", session_cache=batch1_cache,
+                )
+                self.assertEqual(r2["title"], tuple(fresh_ai_roi["title"]))
+                self.assertEqual(mock_open.call_count, 1)
+                self.assertEqual(mock_cal.call_count, 1)
+
+                # 3. 下一批次换新 session_cache 时再次重新校准，不命中上一批次结果
+                batch2_cache = {}
+                r3 = ensure_roi(
+                    None, (0, 0, 1232, 812), 1.0, cfg_path,
+                    server="https://mock.server", log=[].append,
+                    sample_name="90001张三", session_cache=batch2_cache,
+                )
+                self.assertEqual(r3["title"], tuple(fresh_ai_roi["title"]))
+                self.assertEqual(mock_open.call_count, 2)
+                self.assertEqual(mock_cal.call_count, 2)
+
+    def test_send_student_recalibrates_roi_when_window_resizes_after_search(self):
+        """进入会话后若企微窗口尺寸变化（例如弹出侧边栏撑宽窗口），须按新尺寸重校 ROI 后再核验，从而正常触发侧边栏检测。"""
+        item = {"sid": "90001", "sname": "张三", "studentName": "90001张三", "message": "反馈话术"}
+        roi_narrow = {"title": (0.304, 0.0, 0.696, 0.097), "input": (0.304, 0.71, 0.696, 0.29), "chat": (0.304, 0.097, 0.696, 0.613)}
+        roi_wide = {"title": (0.225, 0.0, 0.505, 0.09), "input": (0.225, 0.7, 0.505, 0.28), "chat": (0.225, 0.09, 0.505, 0.61)}
+        logs = []
+
+        # ensure_fully_visible 返回 1232x812；进入会话后 get_wecom_rect 变为 1683x812（侧边栏撑宽）
+        rect_seq = [
+            (694, 314, 1232, 812),  # ensure_roi 后刷新
+            (694, 314, 1683, 812),  # search_and_enter 后截图前检测尺寸变化
+            (694, 314, 1683, 812),  # 重校 ROI 后再次刷新
+        ]
+
+        with mock.patch.object(wu, "find_and_activate_wecom", return_value=True), \
+             mock.patch.object(wu, "ensure_fully_visible", return_value=(True, (694, 314, 1232, 812))), \
+             mock.patch.object(wu, "get_dpi_scale", return_value=1.0), \
+             mock.patch.object(wu, "get_wecom_rect", side_effect=rect_seq), \
+             mock.patch.object(wu, "find_wecom_search_tab_wnd", return_value=None), \
+             mock.patch("sender_py.sender.ensure_roi", side_effect=[roi_narrow, roi_wide]) as mock_roi, \
+             mock.patch("sender_py.sender._capture_title_crop", return_value=None), \
+             mock.patch("sender_py.sender.search_and_enter", return_value=True), \
+             mock.patch("sender_py.sender.judge_candidate", return_value=(
+                 {"matched": True, "is_group": False, "detected_title": "90001张三"},
+                 "90001张三", None,
+             )) as mock_judge, \
+             mock.patch("sender_py.sender.check_wecom_sidebar", return_value={
+                 "checked": True, "has_sidebar": True, "sidebar_title": "学员详情", "reason": "右侧展开学员详情",
+             }) as mock_sb, \
+             mock.patch("sender_py.sender.time.sleep", return_value=None):
+            res = send_student(
+                item, "https://mock.server", log=logs.append, check_sidebar=True, roi_cache={},
+            )
+
+        self.assertEqual(mock_roi.call_count, 2)
+        self.assertFalse(mock_roi.call_args_list[0].kwargs.get("skip_sample_chat", False))
+        self.assertTrue(mock_roi.call_args_list[1].kwargs.get("skip_sample_chat", False))
+        self.assertEqual(mock_judge.call_args.args[0], (694, 314, 1683, 812))
+        self.assertEqual(mock_judge.call_args.args[1], roi_wide)
+        self.assertEqual(res["result"], "sidebar_open")
+        mock_sb.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

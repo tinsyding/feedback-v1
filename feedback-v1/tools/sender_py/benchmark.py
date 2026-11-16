@@ -218,6 +218,7 @@ def benchmark_single_student(
     config_path: Optional[str] = None,
     log=print,
     should_stop=None,
+    roi_cache: Optional[dict] = None,
 ) -> dict:
     """对单个学生执行全仿真搜索、截图与多引擎横向比对。
     
@@ -249,7 +250,11 @@ def benchmark_single_student(
         return {"success": False, "reason": "未找到企业微信窗口", "record": None}
 
     scale = wu.get_dpi_scale()
-    roi = ensure_roi(None, rect, scale, config_path, server=server, token=token, log=log, sample_name=name)
+    eff_roi_cache = roi_cache if isinstance(roi_cache, dict) else {}
+    roi = ensure_roi(
+        None, rect, scale, config_path, server=server, token=token,
+        log=log, sample_name=name, session_cache=eff_roi_cache,
+    )
     if not roi:
         return {"success": False, "reason": "ROI 校准未完成", "record": None}
 
