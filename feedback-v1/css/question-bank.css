@@ -24,6 +24,14 @@
     }
 }
 
+@media (max-width: 768px) {
+    .upload-page .upload-shell {
+        max-width: 100% !important;
+        width: 100% !important;
+        padding: 14px 12px max(24px, env(safe-area-inset-bottom)) !important;
+    }
+}
+
 .qb-selectors {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -4992,5 +5000,101 @@ span.rg-card-num-wrap {
     .rg-focus-sidebar {
         border-left: none;
         border-top: 1px solid var(--border-subtle);
+    }
+}
+
+@media (max-width: 640px) {
+    .saved-search-actions {
+        width: 100%;
+    }
+
+    .saved-search-actions .ui-search {
+        flex: 1;
+        width: auto;
+        min-width: 0;
+    }
+
+    .saved-data-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .question-list-header {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .question-filter-wrapper {
+        width: 100%;
+    }
+
+    .question-filter-wrapper .ui-search {
+        width: 100%;
+    }
+
+    .qb-save-bar {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .qb-save-bar > div {
+        width: 100%;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+    }
+
+    .rg-zoom-controls {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .rg-shortcut-hint {
+        display: none;
+    }
+
+    .page-lightbox-box {
+        width: 96vw;
+        height: 92dvh;
+    }
+
+    .page-lightbox-header {
+        flex-wrap: wrap;
+        padding: 10px 12px;
+        gap: 8px;
+    }
+
+    .page-lightbox-title-wrap {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+}
+
+@media (max-width: 480px) {
+    .question-pdf-actions {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+        flex-wrap: wrap;
+    }
+
+    .question-main-fields {
+        min-width: 0;
+    }
+
+    .question-video-input-wrap {
+        min-width: 0;
+    }
+
+    .question-field-label {
+        min-width: 48px;
+        text-align: left;
+    }
+
+    .qb-step-nav {
+        align-items: stretch !important;
+    }
+
+    .qb-step-nav > div {
+        width: 100%;
+        justify-content: flex-end;
     }
 }

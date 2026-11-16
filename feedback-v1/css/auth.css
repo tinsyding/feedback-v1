@@ -254,12 +254,36 @@
     font-weight: 600;
     color: var(--text-primary, #f0f0f2);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    max-width: 100%;
+}
+
+.nav-user-identity,
+.nav-user-ops {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.nav-user-name {
+    font-family: var(--font-mono, inherit);
+    white-space: nowrap;
+}
+
+.nav-user-badge .badge-role-teacher,
+.nav-user-badge .badge-role-assistant,
+.nav-user-badge .btn-nav-logout,
+.nav-user-badge .btn-nav-reset-pwd,
+.nav-user-badge .btn-nav-assistant-mgr {
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .nav-user-badge .user-avatar-icon {
     width: 14px;
     height: 14px;
     color: var(--accent, #0a84ff);
+    flex-shrink: 0;
 }
 
 .nav-user-badge .btn-nav-logout {
@@ -1046,4 +1070,77 @@
     background: #ffffff;
     border: 1px solid #e2e8f0;
 }
+
+/* Mobile Responsive Overrides for Auth & Assistant UI */
+@media (max-width: 768px) {
+    .nav-user-badge {
+        width: 100%;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 6px 10px;
+        padding: 8px 12px;
+        border-radius: 12px;
+    }
+
+    .nav-user-ops {
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-left: auto;
+    }
+
+    .nav-user-badge .btn-nav-logout,
+    .nav-user-badge .btn-nav-reset-pwd,
+    .nav-user-badge .btn-nav-assistant-mgr {
+        margin-left: 0;
+        padding: 4px 8px;
+        font-size: 0.78rem;
+    }
+
+    .assistant-upload-notice {
+        flex-wrap: wrap;
+        padding: 12px 14px;
+        gap: 10px;
+    }
+
+    .assistant-notice-btn {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+@media (max-width: 560px) {
+    .front-assistant-toolbar {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .front-assistant-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+
+    .assistant-card {
+        flex-direction: column;
+        align-items: stretch;
+        padding: 12px;
+        gap: 10px;
+    }
+
+    .assistant-card-ops {
+        justify-content: flex-end;
+        flex-wrap: wrap;
+    }
+
+    .assistant-btn-copy,
+    .assistant-btn-edit,
+    .assistant-btn-del {
+        min-height: 32px;
+        padding: 5px 12px;
+    }
+
+    .assistant-form-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
 

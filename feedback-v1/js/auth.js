@@ -294,6 +294,18 @@
             `;
         }
 
+        const badgeInnerHtml = `
+            <span class="nav-user-identity">
+                <svg class="user-avatar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="12" cy="7" r="4"></circle>
+                </svg>
+                ${roleBadgeHtml}
+                <span class="nav-user-name">${escapeHtml(displayName)}</span>
+            </span>
+            <span class="nav-user-ops">${actionBtnsHtml}</span>
+        `;
+
         if (navActions) {
             let badge = document.getElementById('nav-user-badge');
             if (!badge) {
@@ -302,15 +314,7 @@
                 badge.className = 'nav-user-badge';
                 navActions.insertBefore(badge, navActions.firstChild);
             }
-            badge.innerHTML = `
-                <svg class="user-avatar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                    <circle cx="12" cy="7" r="4"></circle>
-                </svg>
-                ${roleBadgeHtml}
-                <span style="font-family: var(--font-mono, inherit);">${displayName}</span>
-                ${actionBtnsHtml}
-            `;
+            badge.innerHTML = badgeInnerHtml;
         }
 
         // Fallback for index.html or pages without .nav-actions
@@ -323,17 +327,7 @@
                 topBar.style.cssText = 'display: flex; justify-content: flex-end; width: 100%; max-width: 900px; margin: 0 auto 16px; padding: 0 10px;';
                 homeShell.insertBefore(topBar, homeShell.firstChild);
             }
-            topBar.innerHTML = `
-                <div class="nav-user-badge" id="nav-user-badge">
-                    <svg class="user-avatar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                        <circle cx="12" cy="7" r="4"></circle>
-                    </svg>
-                    ${roleBadgeHtml}
-                    <span style="font-family: var(--font-mono, inherit);">${displayName}</span>
-                    ${actionBtnsHtml}
-                </div>
-            `;
+            topBar.innerHTML = `<div class="nav-user-badge" id="nav-user-badge">${badgeInnerHtml}</div>`;
         }
     }
 
