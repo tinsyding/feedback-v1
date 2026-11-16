@@ -284,15 +284,15 @@ async function initQuestionBank() {
         });
 }
 
-function isRegionDebugAdminUser(user) {
+function canUseRegionDebug(user) {
     user = user || window.currentUser;
-    if (!user) return false;
-    return Boolean(user.is_admin) || user.role === 'admin' || user.role === 'super_admin';
+    // 助教账号仅具备只读查看权限，其余登录角色（教师/管理员）均开放整卷框题
+    return !(user && user.role === 'assistant');
 }
-window.isRegionDebugAdminUser = isRegionDebugAdminUser;
+window.canUseRegionDebug = canUseRegionDebug;
 
-function applyRegionDebugAdminVisibility(user) {
-    const allowed = isRegionDebugAdminUser(user);
+function applyRegionDebugVisibility(user) {
+    const allowed = canUseRegionDebug(user);
     const entryBtn = document.getElementById('rg-entry-btn');
     if (entryBtn) {
         entryBtn.style.display = allowed ? 'inline-flex' : 'none';
@@ -307,12 +307,12 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
         initQuestionBank();
         applyAssistantReadOnlyModeIfNeed();
-        applyRegionDebugAdminVisibility();
+        applyRegionDebugVisibility();
     });
 } else {
     initQuestionBank();
     applyAssistantReadOnlyModeIfNeed();
-    applyRegionDebugAdminVisibility();
+    applyRegionDebugVisibility();
 }
 
 // 助教只读模式适配
@@ -359,7 +359,7 @@ function applyAssistantReadOnlyModeIfNeed(user) {
 
 window.addEventListener('authChecked', (e) => {
     applyAssistantReadOnlyModeIfNeed(e.detail);
-    applyRegionDebugAdminVisibility(e.detail);
+    applyRegionDebugVisibility(e.detail);
     if (typeof applySavedDataFilter === 'function' && allSavedDataList.length > 0) {
         applySavedDataFilter();
     }
@@ -594,7 +594,7 @@ function goBack() {
     // Step 4 回退到 Step 3 前检查是否有未保存修改
     if (currentStep === 4 && isDirty) {
         const targetStep = window.rgImportedActive ? 'debug' : (currentStep - 1);
-        const backDesc = window.rgImportedActive ? '返回整卷框题工作台（重新导入时将按题号保留已填知识点与微课链接）' : '返回上一步（标注题号）';
+        const backDesc = window.rgImportedActive ? '返回整卷框选录题工作台（重新导入时将按题号保留已填知识点与微课链接）' : '返回上一步（标注题号）';
         showCustomDialog({
             title: window.rgImportedActive ? '返回修改框选' : '未保存的更改',
             body: window.rgImportedActive ? `确定要${backDesc}吗？` : `当前题目与知识点配置尚未保存，确定要${backDesc}吗？`,
@@ -4762,8 +4762,8 @@ function renderQuestionList() {
                     </div>
                     ${isAssistant ? '' : `
                     <div class="big-question-header-actions">
-                        ${(isRegionDebugAdminUser() && firstQ.questionMeta && firstQ.questionMeta.mode === 'region_crop') ? `
-                        <button type="button" class="big-question-action-btn" onclick="rgEditQuestionRegionFromStep4(${firstIdx})" title="回到整卷框题工作台调整此大题的框选区域">
+                        ${(canUseRegionDebug() && firstQ.questionMeta && firstQ.questionMeta.mode === 'region_crop') ? `
+                        <button type="button" class="big-question-action-btn" onclick="rgEditQuestionRegionFromStep4(${firstIdx})" title="回到整卷框选录题工作台调整此大题的框选区域">
                             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
@@ -4935,8 +4935,8 @@ function renderQuestionList() {
                 </div>
                 ${isAssistant ? '' : `
                 <div class="question-actions">
-                    ${(isRegionDebugAdminUser() && q.questionMeta && q.questionMeta.mode === 'region_crop') ? `
-                    <button class="question-action-btn" onclick="rgEditQuestionRegionFromStep4(${originalIndex})" title="回到整卷框题工作台调整此题框选">
+                    ${(canUseRegionDebug() && q.questionMeta && q.questionMeta.mode === 'region_crop') ? `
+                    <button class="question-action-btn" onclick="rgEditQuestionRegionFromStep4(${originalIndex})" title="回到整卷框选录题工作台调整此题框选">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
@@ -5001,8 +5001,8 @@ function renderQuestionList() {
                 </div>
                 ${isAssistant ? '' : `
                 <div class="question-actions">
-                    ${(isRegionDebugAdminUser() && q.questionMeta && q.questionMeta.mode === 'region_crop') ? `
-                    <button class="question-action-btn" onclick="rgEditQuestionRegionFromStep4(${originalIndex})" title="回到整卷框题工作台调整此题框选">
+                    ${(canUseRegionDebug() && q.questionMeta && q.questionMeta.mode === 'region_crop') ? `
+                    <button class="question-action-btn" onclick="rgEditQuestionRegionFromStep4(${originalIndex})" title="回到整卷框选录题工作台调整此题框选">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>

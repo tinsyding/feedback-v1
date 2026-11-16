@@ -23,8 +23,8 @@
     <script defer src="js/logger.js?v=20261114-04"></script>
     <script defer src="js/common.js?v=20261114-04"></script>
     <script defer src="js/auth.js?v=20261114-08"></script>
-    <script defer src="js/question-bank.js?v=20261116-05"></script>
-    <script defer src="js/region-debug.js?v=20261116-05"></script>
+    <script defer src="js/question-bank.js?v=20261117-02"></script>
+    <script defer src="js/region-debug.js?v=20261117-01"></script>
 </head>
 
 <body class="upload-page">
@@ -180,7 +180,7 @@
                     <div class="qb-step-nav" style="grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
                         <span style="font-size: 0.85rem; color: var(--text-secondary);">若需上传新错题本，选好上方分类后点击下一步：</span>
                         <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                            <button type="button" class="btn secondary" id="rg-entry-btn" style="display: none;" data-action="open-rg-studio">免切题 · 整卷框题</button>
+                            <button type="button" class="btn secondary" id="rg-entry-btn" data-action="open-rg-studio">整卷框选录题</button>
                             <button class="btn primary" data-action="next-step-1">录入新错题本 / 下一步</button>
                         </div>
                     </div>
@@ -585,7 +585,7 @@
             <!-- Debug: Whole-Paper Region-Crop Studio (免切题整卷框题) -->
             <section id="step-debug" class="step-panel">
                 <div class="step-card rg-studio-card">
-                    <aside class="rg-studio-topbar" aria-label="整卷框题工作台导航与步骤">
+                    <aside class="rg-studio-topbar" aria-label="整卷框选录题工作台导航与步骤">
                         <div class="rg-studio-title-group">
                             <button type="button" class="btn sm secondary rg-back-home-btn" data-action="exit-rg-studio" title="返回第 1 步配置">
                                 <svg class="rg-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -594,7 +594,7 @@
                                 <span>返回首页</span>
                             </button>
                             <div class="rg-studio-heading-block">
-                                <h2 class="step-heading" style="margin: 0;">整卷框题工作台</h2>
+                                <h2 class="step-heading" style="margin: 0;">整卷框选录题工作台</h2>
                                 <div class="rg-context-line" id="rg-context-line">未选择分类</div>
                             </div>
                         </div>

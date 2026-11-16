@@ -1122,11 +1122,11 @@
     }
 
     function hasRegionDebugPermission() {
-        if (typeof window.isRegionDebugAdminUser === 'function') {
-            return window.isRegionDebugAdminUser();
+        if (typeof window.canUseRegionDebug === 'function') {
+            return window.canUseRegionDebug();
         }
         const u = window.currentUser;
-        return Boolean(u && (u.is_admin || u.role === 'admin' || u.role === 'super_admin'));
+        return !(u && u.role === 'assistant');
     }
 
     function hasSavedRegionCropInCurrentQuestions() {
@@ -1310,7 +1310,7 @@
 
     window.rgLoadFromCurrentQuestions = async function (focusQuestion = null) {
         if (!hasRegionDebugPermission()) {
-            showToast('整卷框题仅限管理员使用', 'warn');
+            showToast('助教账号仅具备查看权限，无法录入或上传题目', 'warn');
             return false;
         }
         if (!hasSavedRegionCropInCurrentQuestions()) {
@@ -1407,10 +1407,6 @@
 
     window.openRegionDebugStudio = async function (opts = {}) {
         if (!hasRegionDebugPermission()) {
-            showToast('整卷框题仅限管理员使用', 'warn');
-            return;
-        }
-        if (window.currentUser && window.currentUser.role === 'assistant') {
             showToast('助教账号仅具备查看权限，无法录入或上传题目', 'warn');
             return;
         }
@@ -1470,7 +1466,7 @@
 
     window.rgEditQuestionRegionFromStep4 = async function (index) {
         if (!hasRegionDebugPermission()) {
-            showToast('整卷框题仅限管理员使用', 'warn');
+            showToast('助教账号仅具备查看权限，无法录入或上传题目', 'warn');
             return;
         }
         const q = Array.isArray(currentQuestions) ? currentQuestions[index] : null;
@@ -2767,7 +2763,7 @@
 
     window.rgFinishAndImport = async function () {
         if (!hasRegionDebugPermission()) {
-            showToast('整卷框题仅限管理员使用', 'warn');
+            showToast('助教账号仅具备查看权限，无法录入或上传题目', 'warn');
             return;
         }
         const exItems = rgState.exercise.items;
