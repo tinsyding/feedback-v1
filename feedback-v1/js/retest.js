@@ -2460,26 +2460,48 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
             const drawErrorBoxHighlight = async (page, { ebX, ebBottomY, ebW, ebH, ebTopY, ebNum, isCompactTag, boxX, sliceTopY }) => {
                 try {
-                    // 方案四：极简无框，仅在错题小问左侧边距空白处印轻量「×题号」细圈徽标
-                    const tagSpec = generateErrorBoxTagPng(ebNum, true, true);
-                    if (!tagSpec || !tagSpec.dataUrl) return;
-                    const tagImg = await embedPngCached(tagSpec.dataUrl);
-                    if (!tagImg) return;
-
-                    const inLeftMargin = (ebX <= boxX + 26);
-                    const tagX = inLeftMargin
-                        ? Math.max(3, boxX - tagSpec.widthPt - 2.5)
-                        : Math.max(boxX + 4, ebX - tagSpec.widthPt - 2.5);
-                    const tagY = Math.min(
-                        sliceTopY - tagSpec.heightPt,
-                        Math.max(ebBottomY, ebTopY - tagSpec.heightPt - 1)
-                    );
-                    page.drawImage(tagImg, {
-                        x: tagX,
-                        y: tagY,
-                        width: tagSpec.widthPt,
-                        height: tagSpec.heightPt
+                    // 方案三：极淡半透明底纹 + 0.8pt 柔和灰虚线框 + 轻量白底细描边角标
+                    page.drawRectangle({
+                        x: ebX,
+                        y: ebBottomY,
+                        width: ebW,
+                        height: ebH,
+                        color: PDFLib.rgb(0.95, 0.72, 0.40),
+                        opacity: 0.07
                     });
+
+                    page.drawRectangle({
+                        x: ebX,
+                        y: ebBottomY,
+                        width: ebW,
+                        height: ebH,
+                        borderColor: PDFLib.rgb(0.38, 0.43, 0.52),
+                        borderWidth: 0.8,
+                        borderDashArray: [3, 2.2]
+                    });
+
+                    if (ebNum) {
+                        const tagSpec = generateErrorBoxTagPng(ebNum, isCompactTag, false);
+                        if (tagSpec && tagSpec.dataUrl) {
+                            const tagImg = await embedPngCached(tagSpec.dataUrl);
+                            if (tagImg) {
+                                const preferAboveY = ebTopY + 0.5;
+                                const canPlaceAbove = (preferAboveY + tagSpec.heightPt <= sliceTopY + 3);
+                                const tagX = canPlaceAbove
+                                    ? Math.max(boxX + 4, ebX)
+                                    : Math.max(boxX + 4, ebX + 2);
+                                const tagY = canPlaceAbove
+                                    ? preferAboveY
+                                    : Math.max(ebBottomY + 1, ebTopY - tagSpec.heightPt - 1);
+                                page.drawImage(tagImg, {
+                                    x: tagX,
+                                    y: tagY,
+                                    width: tagSpec.widthPt,
+                                    height: tagSpec.heightPt
+                                });
+                            }
+                        }
+                    }
                 } catch (ebErr) {
                     console.warn('Draw error box failed:', ebErr);
                 }
