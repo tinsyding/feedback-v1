@@ -1426,24 +1426,24 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         return out;
     }
 
-    // 大题小问页内错题角标缓存（高对比黑底白字「错题 X」或紧凑纯数字「X」，专为黑白激光打印优化）
+    // 大题小问页内错题角标缓存（白底深灰细描边轻量小标牌，黑白激光打印依然清晰且不抢题干）
     const errorBoxTagCache = {};
     function generateErrorBoxTagPng(qNum, compact = false) {
         const text = compact ? String(qNum) : ('错题 ' + qNum);
-        const cacheKey = (compact ? 'C_' : 'F_') + text;
+        const cacheKey = (compact ? 'C2_' : 'F2_') + text;
         if (errorBoxTagCache[cacheKey]) return errorBoxTagCache[cacheKey];
         try {
             const K = 3;
             const testCanvas = document.createElement('canvas');
             const testCtx = testCanvas.getContext('2d');
-            const fontSizePt = compact ? 7.5 : 8.5;
-            const font = '700 ' + Math.round(fontSizePt * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+            const fontSizePt = compact ? 7.2 : 8.0;
+            const font = '600 ' + Math.round(fontSizePt * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
             testCtx.font = font;
             const tw = testCtx.measureText(text).width;
             const wPt = compact
                 ? Math.max(13, Math.ceil((tw / K) + 6))
-                : Math.max(28, Math.ceil((tw / K) + 10));
-            const hPt = compact ? 11 : 13;
+                : Math.max(26, Math.ceil((tw / K) + 9));
+            const hPt = compact ? 10.5 : 12;
             const wpx = Math.round(wPt * K);
             const hpx = Math.round(hPt * K);
 
@@ -1452,19 +1452,19 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             canvas.height = hpx;
             const ctx = canvas.getContext('2d');
 
-            // 白色外描边光晕（防止压在原卷黑色边框线上看不清）+ 纯深黑实心底色
-            questionTopicBadgeRoundRect(ctx, 0.5 * K, 0.5 * K, wpx - 1 * K, hpx - 1 * K, (compact ? 2 : 2.5) * K);
-            ctx.fillStyle = '#0f172a';
+            // 白色实底 + 柔和深灰细描边，视觉轻量克制
+            questionTopicBadgeRoundRect(ctx, 0.6 * K, 0.6 * K, wpx - 1.2 * K, hpx - 1.2 * K, (compact ? 2 : 2.5) * K);
+            ctx.fillStyle = '#ffffff';
             ctx.fill();
-            ctx.lineWidth = 1 * K;
-            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 0.85 * K;
+            ctx.strokeStyle = '#475569';
             ctx.stroke();
 
             ctx.font = font;
-            ctx.fillStyle = '#ffffff';
+            ctx.fillStyle = '#1e293b';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(text, wpx / 2, hpx / 2 + 0.5 * K);
+            ctx.fillText(text, wpx / 2, hpx / 2 + 0.4 * K);
 
             const dataUrl = canvas.toDataURL('image/png');
             canvas.width = 0;
@@ -2459,25 +2459,31 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
             const drawErrorBoxHighlight = async (page, { ebX, ebBottomY, ebW, ebH, ebTopY, ebNum, isCompactTag, boxX, sliceTopY }) => {
                 try {
-                    // 白色外衬底描边（防止与原卷表格线或文字粘连）
-                    page.drawRectangle({
-                        x: ebX - 0.8,
-                        y: ebBottomY - 0.8,
-                        width: ebW + 1.6,
-                        height: ebH + 1.6,
+                    // 四角 L 形取景框：只在四角绘制细折角，中间边线留空不抢题干视觉
+                    const armX = Math.min(9, Math.max(4, ebW * 0.18));
+                    const armY = Math.min(8, Math.max(4, ebH * 0.25));
+                    const cornerSvgPath = [
+                        `M 0 ${armY} V 0 H ${armX}`,
+                        `M ${ebW - armX} 0 H ${ebW} V ${armY}`,
+                        `M ${ebW} ${ebH - armY} V ${ebH} H ${ebW - armX}`,
+                        `M ${armX} ${ebH} H 0 V ${ebH - armY}`
+                    ].join(' ');
+
+                    // 轻微白色衬底，防止四角折线压到原卷表格线或字符笔画时粘连
+                    page.drawSvgPath(cornerSvgPath, {
+                        x: ebX,
+                        y: ebTopY,
                         borderColor: PDFLib.rgb(1, 1, 1),
-                        borderWidth: 2.6,
-                        borderOpacity: 0.9
+                        borderWidth: 2.0,
+                        borderOpacity: 0.85
                     });
 
-                    // 高对比深墨色实线框（黑白激光打印依然 100% 锐利醒目）
-                    page.drawRectangle({
+                    // 细锐深灰墨色四角折线
+                    page.drawSvgPath(cornerSvgPath, {
                         x: ebX,
-                        y: ebBottomY,
-                        width: ebW,
-                        height: ebH,
-                        borderColor: PDFLib.rgb(0.06, 0.09, 0.16),
-                        borderWidth: 1.6
+                        y: ebTopY,
+                        borderColor: PDFLib.rgb(0.24, 0.28, 0.36),
+                        borderWidth: 1.05
                     });
 
                     if (ebNum) {
@@ -2485,11 +2491,14 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                         if (tagSpec && tagSpec.dataUrl) {
                             const tagImg = await embedPngCached(tagSpec.dataUrl);
                             if (tagImg) {
-                                const tagX = Math.max(boxX + 4, ebX - 1);
-                                const preferAboveY = ebTopY + 0.5;
-                                const tagY = (preferAboveY + tagSpec.heightPt <= sliceTopY + 3)
+                                const preferAboveY = ebTopY + 1;
+                                const canPlaceAbove = (preferAboveY + tagSpec.heightPt <= sliceTopY + 3);
+                                const tagX = canPlaceAbove
+                                    ? Math.max(boxX + 4, ebX)
+                                    : Math.max(boxX + 4, ebX + armX + 2);
+                                const tagY = canPlaceAbove
                                     ? preferAboveY
-                                    : Math.max(ebBottomY, ebTopY - tagSpec.heightPt + 1);
+                                    : Math.max(ebBottomY + 1, ebTopY - tagSpec.heightPt - 1);
                                 page.drawImage(tagImg, {
                                     x: tagX,
                                     y: tagY,
