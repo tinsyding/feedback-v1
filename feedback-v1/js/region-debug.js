@@ -355,7 +355,10 @@
 
         const finishPointer = (e) => {
             if (rgState.resize && rgState.resize.pointerId === e.pointerId) {
+                const resizedItemId = rgState.resize.itemId;
                 rgState.resize = null;
+                const resizedItem = getTabState().items.find(x => x.id === resizedItemId);
+                if (resizedItem && resizedItem.isBig) syncAutoStemBoxes(resizedItem);
                 renderAllRg();
                 scheduleDraftSave();
                 return;
@@ -456,11 +459,6 @@
                     rgUndoSubBox();
                     return;
                 }
-                if (e.key === '1' || e.key === '2') {
-                    e.preventDefault();
-                    rgSetSubDrawTarget(e.key === '1' ? 'stem' : 'subq');
-                    return;
-                }
                 if (e.key === 'Escape') {
                     e.preventDefault();
                     if (rgState.focusTwoTapStart) {
@@ -530,7 +528,7 @@
     function onBoxDrawn(tab, rectObj) {
         const tabState = getTabState(tab);
 
-        // 1. 大题内部细分模式（先原文后小问）
+        // 1. 大题内部细分模式（直接框选小问，公共原文自动由大题上界至首小问上界判定）
         if (rgState.subMode && rgState.subMode.tab === tab) {
             const parentItem = tabState.items.find(it => it.id === rgState.subMode.itemId);
             if (!parentItem) {
@@ -538,17 +536,13 @@
                 renderAllRg();
                 return;
             }
-            if (rgState.subMode.target === 'stem') {
-                parentItem.stemBoxes = parentItem.stemBoxes || [];
-                parentItem.stemBoxes.push(rectObj);
-            } else {
-                parentItem.subqBoxes = parentItem.subqBoxes || [];
-                const baseNum = parseInt(parentItem.label, 10) || 1;
-                const nextSubNum = parentItem.subqBoxes.length === 0
-                    ? baseNum
-                    : (Math.max(...parentItem.subqBoxes.map(b => parseInt(b.num, 10) || baseNum)) + 1);
-                parentItem.subqBoxes.push({ ...rectObj, num: nextSubNum, customNum: false });
-            }
+            parentItem.subqBoxes = parentItem.subqBoxes || [];
+            const baseNum = parseInt(parentItem.label, 10) || 1;
+            const nextSubNum = parentItem.subqBoxes.length === 0
+                ? baseNum
+                : (Math.max(...parentItem.subqBoxes.map(b => parseInt(b.num, 10) || baseNum)) + 1);
+            parentItem.subqBoxes.push({ ...rectObj, num: nextSubNum, customNum: false });
+            syncAutoStemBoxes(parentItem);
             renderAllRg();
             scheduleDraftSave();
             return;
@@ -560,6 +554,7 @@
             rgState.continueTargetId = null;
             if (targetItem) {
                 targetItem.regions.push(rectObj);
+                if (targetItem.isBig) syncAutoStemBoxes(targetItem);
                 rgState.selectedId = targetItem.id;
                 renderAllRg();
                 scheduleDraftSave();
@@ -782,7 +777,7 @@
                 (it.stemBoxes || []).forEach((sb, sIdx) => {
                     if (sb.pageOffset !== pageOffset) return;
                     const div = document.createElement('div');
-                    div.className = `rg-box stem ${rgState.selectedId === it.id ? 'active' : ''}`;
+                    div.className = `rg-box stem auto-stem ${rgState.selectedId === it.id ? 'active' : ''}`;
                     div.style.left = (sb.x * 100) + '%';
                     div.style.top = (sb.y * 100) + '%';
                     div.style.width = (sb.w * 100) + '%';
@@ -790,29 +785,8 @@
 
                     const tag = document.createElement('span');
                     tag.className = 'rg-box-tag';
-                    tag.textContent = `原文${sIdx + 1}`;
+                    tag.textContent = (it.stemBoxes || []).length > 1 ? `自动原文${sIdx + 1}` : '自动原文';
                     div.appendChild(tag);
-
-                    appendResizeHandles(div, 'stem', it.id, sb);
-
-                    const delBtn = document.createElement('button');
-                    delBtn.type = 'button';
-                    delBtn.className = 'rg-box-del';
-                    delBtn.title = '删除此原文框';
-                    delBtn.textContent = '×';
-                    delBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
-                    delBtn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        rgDeleteSubBox(it.id, 'stem', sIdx);
-                    });
-                    div.appendChild(delBtn);
-
-                    div.addEventListener('pointerdown', (e) => e.stopPropagation());
-                    div.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        rgState.selectedId = it.id;
-                        renderAllRg();
-                    });
                     layer.appendChild(div);
                 });
                 (it.subqBoxes || []).forEach((qb, qIdx) => {
@@ -986,13 +960,11 @@
             let bigDetailHtml = '';
             if (it.isBig) {
                 const stemGroups = groupStemBoxes(it.stemBoxes);
-                const stemChips = stemGroups.map((sg, gIdx) => {
+                const stemChips = stemGroups.map((sg) => {
                     const pLabels = Array.from(new Set(sg.boxes.map(b => 'P' + ((b.pageOffset || 0) + 1)))).join('~');
-                    const firstIdx = sg.indices[0];
                     return `
-                        <span class="rg-subq-chip stem-chip" title="${escapeHtmlRg(pLabels)}">
-                            <span>原文${gIdx + 1}${sg.boxes.length > 1 ? `(${escapeHtmlRg(pLabels)})` : ''}</span>
-                            <button type="button" class="rg-subq-del-btn" onclick="event.stopPropagation(); rgDeleteSubBox('${it.id}', 'stem', ${firstIdx})" title="删除原文框">×</button>
+                        <span class="rg-subq-chip stem-chip" title="大题上界至第 1 小问上界自动判定 (${escapeHtmlRg(pLabels)})">
+                            <span>自动原文${sg.boxes.length > 1 ? `(${escapeHtmlRg(pLabels)})` : ''}</span>
                         </span>
                     `;
                 }).join('');
@@ -1007,7 +979,7 @@
                     </span>
                 `).join('');
                 bigDetailHtml = `
-                    <div class="rg-card-submeta">大题 · 原文 ${stemGroups.length} / 小问 ${(it.subqBoxes || []).length}</div>
+                    <div class="rg-card-submeta">大题 · ${stemGroups.length > 0 ? '自动原文 · ' : ''}小问 ${(it.subqBoxes || []).length}</div>
                     ${(stemChips || subqChips) ? `<div class="rg-subq-list">${stemChips}${subqChips}</div>` : ''}
                 `;
             }
@@ -1072,8 +1044,6 @@
     }
 
     function renderSubModeBar() {
-        const stemBtn = document.getElementById('rg-subtarget-stem');
-        const subqBtn = document.getElementById('rg-subtarget-subq');
         const hint = document.getElementById('rg-submode-hint');
         const titleEl = document.getElementById('rg-focus-title');
         const startInp = document.getElementById('rg-focus-start-input');
@@ -1100,15 +1070,16 @@
             twoTapBtn.classList.toggle('active', Boolean(rgState.twoTapMode));
             twoTapBtn.textContent = rgState.twoTapMode ? '两点定框: 开' : '两点定框: 关';
         }
-        if (stemBtn) stemBtn.classList.toggle('active', rgState.subMode.target === 'stem');
-        if (subqBtn) {
-            subqBtn.classList.toggle('active', rgState.subMode.target === 'subq');
-            subqBtn.classList.toggle('subq', rgState.subMode.target === 'subq');
-        }
         if (hint) {
-            hint.textContent = rgState.subMode.target === 'stem'
-                ? '当前：绿虚线框选公共原文/题干（跨页可一笔框完，框好后自动切至小问）'
-                : '当前：红框依次框出各小问（自动递增，按 1 可切回补框原文）';
+            const subqCount = Array.isArray(it.subqBoxes) ? it.subqBoxes.length : 0;
+            const hasStem = Array.isArray(it.stemBoxes) && it.stemBoxes.length > 0;
+            if (subqCount === 0) {
+                hint.textContent = '直接红框框选各小问（大题上界至第 1 小问上界将自动判定为公共原文）';
+            } else if (hasStem) {
+                hint.textContent = '继续红框框选后续小问 · 绿虚线为自动识别的公共原文（随第 1 小问上界自动联动）';
+            } else {
+                hint.textContent = '继续红框框选后续小问（当前第 1 小问紧贴大题顶部，未切分公共原文）';
+            }
         }
         renderFocusSidebar();
         renderFocusSliceOverlays();
@@ -1724,15 +1695,9 @@
         const tabState = getTabState();
         const it = tabState.items.find(x => x.id === itemId);
         if (!it) return;
-        if (kind === 'stem' && Array.isArray(it.stemBoxes)) {
-            const target = it.stemBoxes[idx];
-            if (target && target.linkId) {
-                it.stemBoxes = it.stemBoxes.filter(sb => sb.linkId !== target.linkId);
-            } else {
-                it.stemBoxes.splice(idx, 1);
-            }
-        } else if (kind === 'subq' && Array.isArray(it.subqBoxes)) {
+        if (kind === 'subq' && Array.isArray(it.subqBoxes)) {
             it.subqBoxes.splice(idx, 1);
+            syncAutoStemBoxes(it);
         }
         renderAllRg();
         scheduleDraftSave();
@@ -1744,6 +1709,7 @@
         if (!it) return;
         if (Array.isArray(it.regions) && it.regions.length > 1) {
             it.regions.splice(regionIdx, 1);
+            if (it.isBig) syncAutoStemBoxes(it);
             renderAllRg();
             scheduleDraftSave();
             return;
@@ -1909,6 +1875,63 @@
         });
     }
 
+    function syncAutoStemBoxes(it) {
+        if (!it || !it.isBig) return [];
+        const regions = Array.isArray(it.regions) ? it.regions : [];
+        const subqs = Array.isArray(it.subqBoxes) ? it.subqBoxes : [];
+        if (regions.length === 0 || subqs.length === 0) {
+            it.stemBoxes = [];
+            return it.stemBoxes;
+        }
+        const sortedRegions = [...regions].sort((a, b) =>
+            ((parseInt(a.pageOffset, 10) || 0) - (parseInt(b.pageOffset, 10) || 0))
+            || ((Number(a.y) || 0) - (Number(b.y) || 0))
+        );
+        const sortedSubqs = [...subqs].sort((a, b) =>
+            ((parseInt(a.pageOffset, 10) || 0) - (parseInt(b.pageOffset, 10) || 0))
+            || ((Number(a.y) || 0) - (Number(b.y) || 0))
+        );
+        const firstSub = sortedSubqs[0];
+        const subPage = parseInt(firstSub.pageOffset, 10) || 0;
+        const subTop = Number(firstSub.y) || 0;
+
+        const stems = [];
+        for (const rg of sortedRegions) {
+            const rgPage = parseInt(rg.pageOffset, 10) || 0;
+            const rgTop = Number(rg.y) || 0;
+            const rgBot = rgTop + (Number(rg.h) || 0);
+            if (rgPage < subPage) {
+                if ((Number(rg.h) || 0) >= 0.008) {
+                    stems.push({
+                        pageOffset: rgPage,
+                        x: round4(rg.x),
+                        y: round4(rgTop),
+                        w: round4(rg.w),
+                        h: round4(rg.h)
+                    });
+                }
+            } else if (rgPage === subPage) {
+                const cutBot = Math.min(rgBot, subTop);
+                const h = cutBot - rgTop;
+                if (h >= 0.008) {
+                    stems.push({
+                        pageOffset: rgPage,
+                        x: round4(rg.x),
+                        y: round4(rgTop),
+                        w: round4(rg.w),
+                        h: round4(h)
+                    });
+                }
+            }
+        }
+        if (stems.length > 1) {
+            const linkId = `stem_auto_${it.id}`;
+            stems.forEach(s => { s.linkId = linkId; });
+        }
+        it.stemBoxes = stems;
+        return it.stemBoxes;
+    }
+
     function groupStemBoxes(stemBoxes) {
         const groups = [];
         const linkMap = new Map();
@@ -2008,42 +2031,28 @@
         const rects = splitStitchRangeToRects(y0Px, y1Px, rgState.focusStitch);
         if (rects.length === 0) return;
 
-        if (rgState.subMode.target === 'stem') {
-            it.stemBoxes = it.stemBoxes || [];
-            const wasEmpty = it.stemBoxes.length === 0;
-            if (rects.length > 1) {
-                const linkId = `stem_${Date.now()}_${rgState.nextSeq++}`;
-                rects.forEach(r => it.stemBoxes.push({ ...r, linkId }));
-            } else {
-                it.stemBoxes.push(rects[0]);
-            }
-            if (wasEmpty) {
-                rgState.subMode.target = 'subq';
-                showToast('原文已框选，已自动切换为「2. 框选小问」', 'info');
-            }
-        } else {
-            // 小问模式：若不慎拖跨页缝，归属垂直交集最大的一页，避免产生重复题号
-            let bestRect = rects[0];
-            if (rects.length > 1) {
-                let bestScore = -1;
-                rects.forEach((r) => {
-                    const sIdx = findBestSliceForBox(r, rgState.focusStitch.slices);
-                    const s = sIdx >= 0 ? rgState.focusStitch.slices[sIdx] : null;
-                    const pxH = s ? (r.h / Math.max(0.001, s.crop.h)) * s.logicalH : r.h;
-                    if (pxH > bestScore) {
-                        bestScore = pxH;
-                        bestRect = r;
-                    }
-                });
-                showToast('小问已归属占比更大的一页', 'info');
-            }
-            it.subqBoxes = it.subqBoxes || [];
-            const baseNum = parseInt(it.label, 10) || 1;
-            const nextSubNum = it.subqBoxes.length === 0
-                ? baseNum
-                : (Math.max(...it.subqBoxes.map(b => parseInt(b.num, 10) || baseNum)) + 1);
-            it.subqBoxes.push({ ...bestRect, num: nextSubNum, customNum: false });
+        // 小问模式：若不慎拖跨页缝，归属垂直交集最大的一页，避免产生重复题号
+        let bestRect = rects[0];
+        if (rects.length > 1) {
+            let bestScore = -1;
+            rects.forEach((r) => {
+                const sIdx = findBestSliceForBox(r, rgState.focusStitch.slices);
+                const s = sIdx >= 0 ? rgState.focusStitch.slices[sIdx] : null;
+                const pxH = s ? (r.h / Math.max(0.001, s.crop.h)) * s.logicalH : r.h;
+                if (pxH > bestScore) {
+                    bestScore = pxH;
+                    bestRect = r;
+                }
+            });
+            showToast('小问已归属占比更大的一页', 'info');
         }
+        it.subqBoxes = it.subqBoxes || [];
+        const baseNum = parseInt(it.label, 10) || 1;
+        const nextSubNum = it.subqBoxes.length === 0
+            ? baseNum
+            : (Math.max(...it.subqBoxes.map(b => parseInt(b.num, 10) || baseNum)) + 1);
+        it.subqBoxes.push({ ...bestRect, num: nextSubNum, customNum: false });
+        syncAutoStemBoxes(it);
         renderAllRg();
         scheduleDraftSave();
     }
@@ -2078,21 +2087,19 @@
         const stemGroups = groupStemBoxes(it.stemBoxes);
         const subqs = it.subqBoxes || [];
         if (summaryEl) {
-            summaryEl.textContent = `原文 ${stemGroups.length} 块 · 小问 ${subqs.length} 题`;
+            summaryEl.textContent = `${stemGroups.length > 0 ? '已识别原文 · ' : ''}小问 ${subqs.length} 题`;
         }
         if (stemGroups.length === 0 && subqs.length === 0) {
-            listEl.innerHTML = '<div class="rg-list-empty">请在左侧框选区拖拽划出公共题干或各小问</div>';
+            listEl.innerHTML = '<div class="rg-list-empty">请在左侧框选区直接拖拽划出各小问（第 1 小问上界以上区域将自动识别为公共原文）</div>';
             return;
         }
 
-        const stemHtml = stemGroups.map((sg, gIdx) => {
+        const stemHtml = stemGroups.map((sg) => {
             const pLabels = Array.from(new Set(sg.boxes.map(b => 'P' + ((b.pageOffset || 0) + 1)))).join('~');
-            const firstIdx = sg.indices[0];
             return `
                 <div class="rg-focus-list-row stem">
-                    <span class="rg-focus-badge stem">原文${gIdx + 1}</span>
+                    <span class="rg-focus-badge stem">自动原文</span>
                     <span class="rg-card-meta">${escapeHtmlRg(pLabels)}</span>
-                    <button type="button" class="rg-subq-del-btn" onclick="rgDeleteSubBox('${it.id}', 'stem', ${firstIdx})" title="删除此原文框">×</button>
                 </div>
             `;
         }).join('');
@@ -2112,7 +2119,7 @@
         `).join('');
 
         listEl.innerHTML = `
-            ${stemGroups.length > 0 ? `<div class="rg-focus-list-group"><div class="rg-focus-list-title">公共题干 / 原文</div>${stemHtml}</div>` : ''}
+            ${stemGroups.length > 0 ? `<div class="rg-focus-list-group"><div class="rg-focus-list-title">公共题干 / 原文（自动判定）</div>${stemHtml}</div>` : ''}
             ${subqs.length > 0 ? `<div class="rg-focus-list-group"><div class="rg-focus-list-title">小问列表</div>${subqHtml}</div>` : ''}
         `;
     }
@@ -2148,12 +2155,13 @@
             };
         };
 
-        const renderStitchedBox = (topPx, botPx, kind, groupBoxes, firstIdx, labelText) => {
+        const renderStitchedBox = (topPx, botPx, kind, groupBoxes, firstIdx, labelText, isReadOnlyAuto = false) => {
             const topPct = (topPx / Math.max(1, totalH)) * 100;
             const heightPct = Math.max(0.8, ((botPx - topPx) / Math.max(1, totalH)) * 100);
             const div = document.createElement('div');
             const nearTopCls = topPx < 22 ? ' near-top' : '';
-            div.className = `rg-box ${kind} active${nearTopCls}`;
+            const autoCls = isReadOnlyAuto ? ' auto-stem' : '';
+            div.className = `rg-box ${kind}${autoCls} active${nearTopCls}`;
             div.style.left = '0%';
             div.style.top = topPct + '%';
             div.style.width = '100%';
@@ -2164,37 +2172,39 @@
             tag.textContent = labelText;
             div.appendChild(tag);
 
-            ['n', 's'].forEach(edge => {
-                const h = document.createElement('div');
-                h.className = `rg-handle rg-handle-${edge}`;
-                h.addEventListener('pointerdown', (e) => startFocusBoxResize(e, kind, it.id, groupBoxes, edge, div, topPx, botPx, stitch));
-                div.appendChild(h);
-            });
+            if (!isReadOnlyAuto) {
+                ['n', 's'].forEach(edge => {
+                    const h = document.createElement('div');
+                    h.className = `rg-handle rg-handle-${edge}`;
+                    h.addEventListener('pointerdown', (e) => startFocusBoxResize(e, kind, it.id, groupBoxes, edge, div, topPx, botPx, stitch));
+                    div.appendChild(h);
+                });
 
-            const delBtn = document.createElement('button');
-            delBtn.type = 'button';
-            delBtn.className = 'rg-box-del';
-            delBtn.title = kind === 'stem' ? '删除此原文框' : '删除此小问框';
-            delBtn.textContent = '×';
-            delBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
-            delBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                rgDeleteSubBox(it.id, kind, firstIdx);
-            });
-            div.appendChild(delBtn);
+                const delBtn = document.createElement('button');
+                delBtn.type = 'button';
+                delBtn.className = 'rg-box-del';
+                delBtn.title = '删除此小问框';
+                delBtn.textContent = '×';
+                delBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+                delBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    rgDeleteSubBox(it.id, kind, firstIdx);
+                });
+                div.appendChild(delBtn);
+            }
 
             layerEl.appendChild(div);
         };
 
         const stemGroups = groupStemBoxes(it.stemBoxes);
-        stemGroups.forEach((sg, gIdx) => {
+        stemGroups.forEach((sg) => {
             const spans = sg.boxes.map(boxToStitchSpan).filter(Boolean);
             if (spans.length === 0) return;
             const topPx = Math.min(...spans.map(sp => sp.topPx));
             const botPx = Math.max(...spans.map(sp => sp.botPx));
             const pLabels = Array.from(new Set(sg.boxes.map(b => 'P' + ((b.pageOffset || 0) + 1)))).join('~');
             const suffix = sg.boxes.length > 1 ? ` (跨${pLabels})` : '';
-            renderStitchedBox(topPx, botPx, 'stem', sg.boxes, sg.indices[0], `原文${gIdx + 1}${suffix}`);
+            renderStitchedBox(topPx, botPx, 'stem', sg.boxes, sg.indices[0], `自动原文${suffix}`, true);
         });
 
         (it.subqBoxes || []).forEach((qb, qIdx) => {
@@ -2357,8 +2367,6 @@
         focusDialogEventsBound = true;
 
         const startInp = document.getElementById('rg-focus-start-input');
-        const stemBtn = document.getElementById('rg-subtarget-stem');
-        const subqBtn = document.getElementById('rg-subtarget-subq');
         const twoTapBtn = document.getElementById('rg-focus-twotap-btn');
         const zoomOutBtn = document.getElementById('rg-focus-zoom-out');
         const zoomInBtn = document.getElementById('rg-focus-zoom-in');
@@ -2388,8 +2396,6 @@
             });
         }
 
-        if (stemBtn) stemBtn.addEventListener('click', () => rgSetSubDrawTarget('stem'));
-        if (subqBtn) subqBtn.addEventListener('click', () => rgSetSubDrawTarget('subq'));
         if (twoTapBtn) {
             twoTapBtn.addEventListener('click', () => {
                 rgState.twoTapMode = !rgState.twoTapMode;
@@ -2466,33 +2472,22 @@
                 const it = getFocusActiveItem();
                 if (it && rz.stitch) {
                     const rects = splitStitchRangeToRects(rz.curTopPx, rz.curBotPx, rz.stitch);
-                    if (rects.length > 0) {
-                        if (rz.kind === 'stem') {
-                            const oldSet = new Set(rz.groupBoxes);
-                            const firstIdx = Math.max(0, (it.stemBoxes || []).findIndex(b => oldSet.has(b)));
-                            const linkId = rects.length > 1
-                                ? ((rz.groupBoxes[0] && rz.groupBoxes[0].linkId) || `stem_${Date.now()}_${rgState.nextSeq++}`)
-                                : '';
-                            const newItems = rects.map(r => (linkId ? { ...r, linkId } : r));
-                            const kept = (it.stemBoxes || []).filter(b => !oldSet.has(b));
-                            kept.splice(Math.min(firstIdx, kept.length), 0, ...newItems);
-                            it.stemBoxes = kept;
-                        } else if (rz.groupBoxes[0]) {
-                            let bestRect = rects[0];
-                            if (rects.length > 1) {
-                                let bestScore = -1;
-                                rects.forEach((r) => {
-                                    const sIdx = findBestSliceForBox(r, rz.stitch.slices);
-                                    const s = sIdx >= 0 ? rz.stitch.slices[sIdx] : null;
-                                    const pxH = s ? (r.h / Math.max(0.001, s.crop.h)) * s.logicalH : r.h;
-                                    if (pxH > bestScore) {
-                                        bestScore = pxH;
-                                        bestRect = r;
-                                    }
-                                });
-                            }
-                            Object.assign(rz.groupBoxes[0], bestRect);
+                    if (rects.length > 0 && rz.groupBoxes[0]) {
+                        let bestRect = rects[0];
+                        if (rects.length > 1) {
+                            let bestScore = -1;
+                            rects.forEach((r) => {
+                                const sIdx = findBestSliceForBox(r, rz.stitch.slices);
+                                const s = sIdx >= 0 ? rz.stitch.slices[sIdx] : null;
+                                const pxH = s ? (r.h / Math.max(0.001, s.crop.h)) * s.logicalH : r.h;
+                                if (pxH > bestScore) {
+                                    bestScore = pxH;
+                                    bestRect = r;
+                                }
+                            });
                         }
+                        Object.assign(rz.groupBoxes[0], bestRect);
+                        syncAutoStemBoxes(it);
                     }
                 }
                 renderAllRg();
@@ -2553,12 +2548,12 @@
 
         bindFocusDialogEventsOnce();
         it.isBig = true;
-        it.stemBoxes = it.stemBoxes || [];
         it.subqBoxes = it.subqBoxes || [];
+        syncAutoStemBoxes(it);
         rgState.subMode = {
             tab,
             itemId,
-            target: it.stemBoxes.length === 0 ? 'stem' : 'subq'
+            target: 'subq'
         };
         rgState.selectedId = itemId;
         rgState.focusTwoTapStart = null;
@@ -2593,9 +2588,7 @@
                     body: '当前大题还没有框选任何小问。您可以继续留在专注模式框选小问，或取消大题设置（恢复为普通单题）。',
                     confirmText: '继续框选',
                     cancelText: '取消大题设置',
-                    onConfirm: () => {
-                        rgSetSubDrawTarget('subq');
-                    },
+                    onConfirm: () => {},
                     onCancel: () => {
                         it.isBig = false;
                         it.stemBoxes = [];
@@ -2634,9 +2627,9 @@
         await openFocusSubMode(itemId);
     };
 
-    window.rgSetSubDrawTarget = function (target) {
+    window.rgSetSubDrawTarget = function () {
         if (!rgState.subMode) return;
-        rgState.subMode.target = target === 'subq' ? 'subq' : 'stem';
+        rgState.subMode.target = 'subq';
         renderSubModeBar();
     };
 
@@ -2645,18 +2638,9 @@
         const tabState = getTabState(rgState.subMode.tab);
         const it = tabState.items.find(x => x.id === rgState.subMode.itemId);
         if (!it) return;
-        if (rgState.subMode.target === 'subq' && it.subqBoxes.length > 0) {
+        if (Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
             it.subqBoxes.pop();
-        } else if (it.stemBoxes.length > 0) {
-            const last = it.stemBoxes[it.stemBoxes.length - 1];
-            if (last && last.linkId) {
-                it.stemBoxes = it.stemBoxes.filter(sb => sb.linkId !== last.linkId);
-            } else {
-                it.stemBoxes.pop();
-            }
-            if (it.stemBoxes.length === 0) {
-                rgState.subMode.target = 'stem';
-            }
+            syncAutoStemBoxes(it);
         }
         renderAllRg();
         scheduleDraftSave();
@@ -2890,6 +2874,7 @@
             const varSubCounter = new Map();
 
             for (const it of exItems) {
+                if (it.isBig) syncAutoStemBoxes(it);
                 const itemExThumb = (await generateRegionCropThumb(rgState.exercise.pdfDoc, it.regions[0], exPageCache)) || exPdfObj.thumb;
 
                 if (bankType === 'variation') {

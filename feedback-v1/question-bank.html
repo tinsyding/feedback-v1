@@ -13,7 +13,7 @@
     <script src="js/theme-boot.js?v=20261114-04"></script>
     <link rel="stylesheet" href="css/common.css?v=20261114-04">
     <link rel="stylesheet" href="css/upload.css?v=20261114-04">
-    <link rel="stylesheet" href="css/question-bank.css?v=20261117-01">
+    <link rel="stylesheet" href="css/question-bank.css?v=20261117-02">
     <link rel="stylesheet" href="css/auth.css?v=20261114-04">
     <link rel="stylesheet" href="css/tokens.css?v=20261114-04">
     <!-- PDF 核心库：PDF-Lib (切片合并) + PDF.js (页面缩略图高清晰渲染) -->
@@ -24,7 +24,7 @@
     <script defer src="js/common.js?v=20261114-04"></script>
     <script defer src="js/auth.js?v=20261114-08"></script>
     <script defer src="js/question-bank.js?v=20261117-02"></script>
-    <script defer src="js/region-debug.js?v=20261117-01"></script>
+    <script defer src="js/region-debug.js?v=20261117-02"></script>
 </head>
 
 <body class="upload-page">
@@ -676,7 +676,7 @@
                                         <span class="rg-zoom-val" id="rg-zoom-val">100%</span>
                                         <button type="button" class="btn sm secondary" data-action="rg-zoom" data-arg="0.15">+</button>
                                         <button type="button" class="btn sm secondary" data-action="rg-undo-region" title="快捷键: Ctrl/Cmd + Z">撤销上一框</button>
-                                        <span class="rg-shortcut-hint" title="快捷键：←/→ 翻页 · Ctrl+Z 撤销 · Delete 删除选中框 · Ctrl+滚轮 缩放 · 1/2 切换原文/小问 · Esc 退出子模式">快捷键</span>
+                                        <span class="rg-shortcut-hint" title="快捷键：←/→ 翻页 · Ctrl+Z 撤销 · Delete 删除选中框 · Ctrl+滚轮 缩放 · Esc 退出当前模式">快捷键</span>
                                     </div>
                                 </div>
                                 <div class="rg-viewport" id="rg-viewport">
@@ -764,10 +764,6 @@
                         <input type="number" id="rg-focus-start-input" min="1" step="1" inputmode="numeric">
                     </div>
                 </div>
-                <div class="rg-subtarget-switch" id="rg-subtarget-switch">
-                    <button type="button" class="rg-subtarget-btn active" id="rg-subtarget-stem">1. 框选原文/公共题干</button>
-                    <button type="button" class="rg-subtarget-btn" id="rg-subtarget-subq">2. 框选小问</button>
-                </div>
                 <div class="rg-focus-controls">
                     <button type="button" class="btn sm secondary rg-mode-btn" id="rg-focus-twotap-btn" title="开启后只需点击两次（上边界 + 下边界）即可快速成框">两点定框: 关</button>
                     <div class="rg-focus-zoom-group">
@@ -780,8 +776,8 @@
                 </div>
             </div>
             <div class="rg-focus-subbar">
-                <span class="rg-submode-hint" id="rg-submode-hint">当前：绿虚线框选公共原文/题干，按 2 切换“框选小问”</span>
-                <span class="rg-focus-shortcut-note">专注模式仅展示当前大题区域 · 快捷键：1/2 切换原文/小问 · Ctrl+Z 撤销 · Esc 完成退出</span>
+                <span class="rg-submode-hint" id="rg-submode-hint">直接拖拽框选各小问（大题上界至第 1 小问上界将自动判定为公共原文）</span>
+                <span class="rg-focus-shortcut-note">专注模式仅展示当前大题区域 · 快捷键：Ctrl+Z 撤销 · Esc 完成退出</span>
             </div>
             <div class="rg-focus-body">
                 <div class="rg-focus-viewport" id="rg-focus-viewport">
@@ -790,10 +786,10 @@
                 <aside class="rg-focus-sidebar">
                     <div class="rg-sidebar-header">
                         <span>本题切分清单</span>
-                        <span class="rg-sidebar-tip" id="rg-focus-summary">原文 0 · 小问 0</span>
+                        <span class="rg-sidebar-tip" id="rg-focus-summary">小问 0</span>
                     </div>
                     <div class="rg-list" id="rg-focus-list">
-                        <div class="rg-list-empty">请在左侧框选区拖拽划出公共题干或各小问</div>
+                        <div class="rg-list-empty">请在左侧框选区直接拖拽划出各小问（第 1 小问上界以上区域将自动识别为公共原文）</div>
                     </div>
                 </aside>
             </div>
