@@ -975,7 +975,7 @@
                             onclick="event.stopPropagation()"
                             oninput="rgUpdateSubqNum('${it.id}', ${qIdx}, this.value)"
                             onchange="rgUpdateSubqNum('${it.id}', ${qIdx}, this.value)">
-                        <button type="button" class="rg-subq-del-btn" onclick="event.stopPropagation(); rgDeleteSubBox('${it.id}', 'subq', ${qIdx})" title="删除小问框">×</button>
+                        <button type="button" class="rg-subq-del-btn" onclick="event.stopPropagation(); rgDeleteSubBox('${it.id}', 'subq', ${qIdx})" title="删除小问框" aria-label="删除小问框"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
                     </span>
                 `).join('');
                 bigDetailHtml = `
@@ -1035,7 +1035,7 @@
                     ${headerEditorHtml}
                     <div class="rg-card-actions" onclick="event.stopPropagation()">
                         <button type="button" class="btn sm secondary" onclick="rgStartContinue('${it.id}')">+ 跨页续框</button>
-                        ${bankType === 'variation' ? '' : `<button type="button" class="btn sm secondary" onclick="rgEnterSubMode('${it.id}')">${it.isBig ? '继续细分' : '设为大题'}</button>`}
+                        ${bankType === 'variation' ? '' : `<button type="button" class="btn sm secondary" onclick="rgEnterSubMode('${it.id}')">${it.isBig ? '继续切分' : '设为大题'}</button>`}
                         <button type="button" class="btn sm secondary" onclick="rgDeleteItem('${it.id}')">删除</button>
                     </div>
                 </div>
@@ -2114,7 +2114,7 @@
                         onchange="rgUpdateSubqNum('${it.id}', ${qIdx}, this.value)">
                 </div>
                 <span class="rg-card-meta">P${(qb.pageOffset || 0) + 1}</span>
-                <button type="button" class="rg-subq-del-btn" onclick="rgDeleteSubBox('${it.id}', 'subq', ${qIdx})" title="删除此小问框">×</button>
+                <button type="button" class="rg-subq-del-btn" onclick="rgDeleteSubBox('${it.id}', 'subq', ${qIdx})" title="删除此小问框" aria-label="删除此小问框"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
             </div>
         `).join('');
 

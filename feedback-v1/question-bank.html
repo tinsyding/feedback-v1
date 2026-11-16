@@ -13,7 +13,7 @@
     <script src="js/theme-boot.js?v=20261114-04"></script>
     <link rel="stylesheet" href="css/common.css?v=20261114-04">
     <link rel="stylesheet" href="css/upload.css?v=20261114-04">
-    <link rel="stylesheet" href="css/question-bank.css?v=20261117-02">
+    <link rel="stylesheet" href="css/question-bank.css?v=20261117-03">
     <link rel="stylesheet" href="css/auth.css?v=20261114-04">
     <link rel="stylesheet" href="css/tokens.css?v=20261114-04">
     <!-- PDF 核心库：PDF-Lib (切片合并) + PDF.js (页面缩略图高清晰渲染) -->
@@ -24,7 +24,7 @@
     <script defer src="js/common.js?v=20261114-04"></script>
     <script defer src="js/auth.js?v=20261114-08"></script>
     <script defer src="js/question-bank.js?v=20261117-03"></script>
-    <script defer src="js/region-debug.js?v=20261117-02"></script>
+    <script defer src="js/region-debug.js?v=20261117-03"></script>
 </head>
 
 <body class="upload-page">
@@ -672,9 +672,18 @@
                                     <div class="rg-zoom-controls">
                                         <button type="button" class="btn sm secondary rg-mode-btn active" id="rg-interact-mode-btn" data-action="rg-toggle-interact" title="在手机上可切换：拉框模式（单指框题） / 浏览滚动（单指滑动页面）">模式: 拉框</button>
                                         <button type="button" class="btn sm secondary rg-mode-btn" id="rg-twotap-btn" data-action="rg-toggle-twotap" title="开启后只需点击两次（上边界 + 下边界）即可快速成框，适合手机端单栏操作">两点定框: 关</button>
-                                        <button type="button" class="btn sm secondary" data-action="rg-zoom" data-arg="-0.15">-</button>
+                                        <button type="button" class="btn sm secondary" data-action="rg-zoom" data-arg="-0.15" title="缩小" aria-label="缩小">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+                                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                                            </svg>
+                                        </button>
                                         <span class="rg-zoom-val" id="rg-zoom-val">100%</span>
-                                        <button type="button" class="btn sm secondary" data-action="rg-zoom" data-arg="0.15">+</button>
+                                        <button type="button" class="btn sm secondary" data-action="rg-zoom" data-arg="0.15" title="放大" aria-label="放大">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+                                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                                            </svg>
+                                        </button>
                                         <button type="button" class="btn sm secondary" data-action="rg-undo-region" title="快捷键: Ctrl/Cmd + Z">撤销上一框</button>
                                         <span class="rg-shortcut-hint" title="快捷键：←/→ 翻页 · Ctrl+Z 撤销 · Delete 删除选中框 · Ctrl+滚轮 缩放 · Esc 退出当前模式">快捷键</span>
                                     </div>
@@ -758,7 +767,7 @@
         <div class="rg-focus-box">
             <div class="rg-focus-header">
                 <div class="rg-focus-title-wrap">
-                    <span class="rg-submode-badge" id="rg-focus-title">大题专注切分</span>
+                    <h3 class="rg-focus-title" id="rg-focus-title">大题专注切分</h3>
                     <div class="rg-focus-start-editor">
                         <label for="rg-focus-start-input">首题题号</label>
                         <input type="number" id="rg-focus-start-input" min="1" step="1" inputmode="numeric">
@@ -767,12 +776,21 @@
                 <div class="rg-focus-controls">
                     <button type="button" class="btn sm secondary rg-mode-btn" id="rg-focus-twotap-btn" title="开启后只需点击两次（上边界 + 下边界）即可快速成框">两点定框: 关</button>
                     <div class="rg-focus-zoom-group">
-                        <button type="button" class="btn sm secondary" id="rg-focus-zoom-out" title="缩小">-</button>
+                        <button type="button" class="btn sm secondary" id="rg-focus-zoom-out" title="缩小" aria-label="缩小">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                        </button>
                         <span class="rg-zoom-val" id="rg-focus-zoom-val">100%</span>
-                        <button type="button" class="btn sm secondary" id="rg-focus-zoom-in" title="放大">+</button>
+                        <button type="button" class="btn sm secondary" id="rg-focus-zoom-in" title="放大" aria-label="放大">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                        </button>
                     </div>
-                    <button type="button" class="btn sm secondary" id="rg-focus-undo-btn" title="快捷键: Ctrl/Cmd + Z">撤销小框</button>
-                    <button type="button" class="btn sm primary" id="rg-focus-done-btn" title="完成并返回整卷 (Esc)">完成大题细分</button>
+                    <button type="button" class="btn sm secondary" id="rg-focus-undo-btn" title="快捷键: Ctrl/Cmd + Z">撤销上一小问</button>
+                    <button type="button" class="btn sm primary" id="rg-focus-done-btn" title="完成并返回整卷 (Esc)">完成大题切分</button>
                 </div>
             </div>
             <div class="rg-focus-subbar">

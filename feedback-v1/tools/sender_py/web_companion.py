@@ -888,22 +888,30 @@ class WebCompanionWindow:
             dlg.configure(bg="#ffffff")
             apply_window_icon(dlg)
 
-            accent = "#dc2626" if is_error else "#d97706"
-            bg_tint = "#fef2f2" if is_error else "#fffbeb"
+            accent = "#dc2626" if is_error else "#b45309"
 
-            banner = tk.Frame(dlg, bg=bg_tint, padx=16, pady=12)
+            shell = tk.Frame(dlg, bg="#ffffff")
+            shell.pack(fill="both", expand=True)
+            tk.Frame(shell, bg=accent, width=4).pack(side="left", fill="y")
+
+            content = tk.Frame(shell, bg="#ffffff")
+            content.pack(side="left", fill="both", expand=True)
+
+            banner = tk.Frame(content, bg="#ffffff", padx=16, pady=12)
             banner.pack(fill="x")
             tk.Label(
-                banner, text=("⛔ " if is_error else "⚠ ") + title,
-                font=("Microsoft YaHei", 11, "bold"), fg=accent, bg=bg_tint, anchor="w",
+                banner, text=title,
+                font=("Microsoft YaHei", 11), fg="#171717", bg="#ffffff", anchor="w",
             ).pack(fill="x")
 
-            body = tk.Frame(dlg, bg="#ffffff", padx=18, pady=14)
+            tk.Frame(content, bg="#e5e5e5", height=1).pack(fill="x", padx=16)
+
+            body = tk.Frame(content, bg="#ffffff", padx=16, pady=16)
             body.pack(fill="both", expand=True)
             tk.Label(
                 body, text=message, font=("Microsoft YaHei", 10),
-                fg="#1e293b", bg="#ffffff", justify="left", anchor="w", wraplength=380,
-            ).pack(fill="x", pady=(0, 14))
+                fg="#525252", bg="#ffffff", justify="left", anchor="w", wraplength=380,
+            ).pack(fill="x", pady=(0, 16))
 
             def _ack():
                 self._close_foreground_alert()
@@ -919,9 +927,9 @@ class WebCompanionWindow:
             btn_row = tk.Frame(body, bg="#ffffff")
             btn_row.pack(fill="x")
             tk.Button(
-                btn_row, text="我知道了（切回控制台）", font=("Microsoft YaHei", 9, "bold"),
-                bg=accent, fg="#ffffff", activebackground=accent, activeforeground="#ffffff",
-                relief="flat", padx=14, pady=6, cursor="hand2", command=_ack,
+                btn_row, text="我知道了（切回控制台）", font=("Microsoft YaHei", 9),
+                bg="#171717", fg="#ffffff", activebackground="#262626", activeforeground="#ffffff",
+                relief="flat", padx=16, pady=8, cursor="hand2", command=_ack,
             ).pack(side="right")
 
             dlg.protocol("WM_DELETE_WINDOW", _ack)

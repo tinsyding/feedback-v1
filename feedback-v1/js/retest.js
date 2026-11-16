@@ -1426,25 +1426,23 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         return out;
     }
 
-    // 大题小问左侧边距极简错题标记缓存（极简「×题号」细描边徽标，无框无竖线不干扰题干）
+    // 大题小问错题角标缓存（白底细描边角标）
     const errorBoxTagCache = {};
-    function generateErrorBoxTagPng(qNum, compact = false, showCross = false) {
+    function generateErrorBoxTagPng(qNum, compact = false) {
         const numStr = (qNum !== undefined && qNum !== null && String(qNum).trim() !== '') ? String(qNum).trim() : '';
-        const text = showCross ? (numStr ? ('×' + numStr) : '×') : (compact ? numStr : ('错题 ' + numStr));
-        const cacheKey = (showCross ? 'M_' : (compact ? 'C2_' : 'F2_')) + text;
+        const text = compact ? numStr : ('错题 ' + numStr);
+        const cacheKey = (compact ? 'C2_' : 'F2_') + text;
         if (errorBoxTagCache[cacheKey]) return errorBoxTagCache[cacheKey];
         try {
             const K = 3;
             const testCanvas = document.createElement('canvas');
             const testCtx = testCanvas.getContext('2d');
-            const fontSizePt = showCross ? 7.5 : (compact ? 7.2 : 8.0);
-            const font = '600 ' + Math.round(fontSizePt * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+            const fontSizePt = compact ? 7.2 : 8.0;
+            const font = '500 ' + Math.round(fontSizePt * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
             testCtx.font = font;
             const tw = testCtx.measureText(text).width;
-            const wPt = showCross
-                ? Math.max(13, Math.min(23, Math.ceil((tw / K) + 6)))
-                : (compact ? Math.max(13, Math.ceil((tw / K) + 6)) : Math.max(26, Math.ceil((tw / K) + 9)));
-            const hPt = showCross ? 11.5 : (compact ? 10.5 : 12);
+            const wPt = compact ? Math.max(13, Math.ceil((tw / K) + 6)) : Math.max(26, Math.ceil((tw / K) + 9));
+            const hPt = compact ? 10.5 : 12;
             const wpx = Math.round(wPt * K);
             const hpx = Math.round(hPt * K);
 
@@ -1453,7 +1451,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             canvas.height = hpx;
             const ctx = canvas.getContext('2d');
 
-            const radius = showCross ? (hpx / 2 - 0.8 * K) : ((compact ? 2 : 2.5) * K);
+            const radius = (compact ? 2 : 2.5) * K;
             questionTopicBadgeRoundRect(ctx, 0.6 * K, 0.6 * K, wpx - 1.2 * K, hpx - 1.2 * K, radius);
             ctx.fillStyle = '#ffffff';
             ctx.fill();
@@ -2481,7 +2479,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                     });
 
                     if (ebNum) {
-                        const tagSpec = generateErrorBoxTagPng(ebNum, isCompactTag, false);
+                        const tagSpec = generateErrorBoxTagPng(ebNum, isCompactTag);
                         if (tagSpec && tagSpec.dataUrl) {
                             const tagImg = await embedPngCached(tagSpec.dataUrl);
                             if (tagImg) {
