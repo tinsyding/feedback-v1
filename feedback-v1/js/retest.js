@@ -2459,31 +2459,29 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
             const drawErrorBoxHighlight = async (page, { ebX, ebBottomY, ebW, ebH, ebTopY, ebNum, isCompactTag, boxX, sliceTopY }) => {
                 try {
-                    // 四角 L 形取景框：只在四角绘制细折角，中间边线留空不抢题干视觉
-                    const armX = Math.min(9, Math.max(4, ebW * 0.18));
-                    const armY = Math.min(8, Math.max(4, ebH * 0.25));
-                    const cornerSvgPath = [
-                        `M 0 ${armY} V 0 H ${armX}`,
-                        `M ${ebW - armX} 0 H ${ebW} V ${armY}`,
-                        `M ${ebW} ${ebH - armY} V ${ebH} H ${ebW - armX}`,
-                        `M ${armX} ${ebH} H 0 V ${ebH - armY}`
-                    ].join(' ');
+                    // 方案一：左侧竖向标条 + 轻量白底细描边角标（不压字、不抢题干视觉）
+                    const railW = 2.2;
+                    const railX = Math.max(boxX + 2.5, ebX - 3);
+                    const railY = ebBottomY + 1;
+                    const railH = Math.max(8, ebH - 2);
 
-                    // 轻微白色衬底，防止四角折线压到原卷表格线或字符笔画时粘连
-                    page.drawSvgPath(cornerSvgPath, {
-                        x: ebX,
-                        y: ebTopY,
-                        borderColor: PDFLib.rgb(1, 1, 1),
-                        borderWidth: 2.0,
-                        borderOpacity: 0.85
+                    // 轻微白色衬底，防止压在原卷边线上粘连
+                    page.drawRectangle({
+                        x: railX - 0.6,
+                        y: railY - 0.6,
+                        width: railW + 1.2,
+                        height: railH + 1.2,
+                        color: PDFLib.rgb(1, 1, 1),
+                        opacity: 0.85
                     });
 
-                    // 细锐深灰墨色四角折线
-                    page.drawSvgPath(cornerSvgPath, {
-                        x: ebX,
-                        y: ebTopY,
-                        borderColor: PDFLib.rgb(0.24, 0.28, 0.36),
-                        borderWidth: 1.05
+                    // 柔和深墨灰竖条
+                    page.drawRectangle({
+                        x: railX,
+                        y: railY,
+                        width: railW,
+                        height: railH,
+                        color: PDFLib.rgb(0.24, 0.29, 0.38)
                     });
 
                     if (ebNum) {
@@ -2494,11 +2492,11 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                                 const preferAboveY = ebTopY + 1;
                                 const canPlaceAbove = (preferAboveY + tagSpec.heightPt <= sliceTopY + 3);
                                 const tagX = canPlaceAbove
-                                    ? Math.max(boxX + 4, ebX)
-                                    : Math.max(boxX + 4, ebX + armX + 2);
+                                    ? Math.max(boxX + 4, railX)
+                                    : Math.max(boxX + 4, railX + railW + 2.5);
                                 const tagY = canPlaceAbove
                                     ? preferAboveY
-                                    : Math.max(ebBottomY + 1, ebTopY - tagSpec.heightPt - 1);
+                                    : Math.max(ebBottomY + 1, ebTopY - tagSpec.heightPt - 0.5);
                                 page.drawImage(tagImg, {
                                     x: tagX,
                                     y: tagY,
