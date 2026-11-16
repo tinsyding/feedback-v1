@@ -24,10 +24,10 @@
         selectedId: null,
         subMode: null, // { tab, itemId, target: 'stem' | 'subq' }
         focusZoom: 1.0,
-        focusTwoTapStart: null, // { sliceIdx, x, y }
+        focusTwoTapStart: null, // { yPx }
         focusDrag: null,
         focusResize: null,
-        focusSlices: [], // [{ sliceIdx, crop, stageEl, layerEl }]
+        focusStitch: null, // { stageEl, layerEl, width, totalH, slices }
         focusPageCache: new Map(),
         focusRenderSeq: 0,
         presetNextLabel: null,
@@ -184,7 +184,7 @@
         rgState.focusTwoTapStart = null;
         rgState.focusDrag = null;
         rgState.focusResize = null;
-        rgState.focusSlices = [];
+        rgState.focusStitch = null;
         rgState.focusPageCache.clear();
         closeFocusDialogSafe();
         rgState.twoTapStart = null;
@@ -985,12 +985,17 @@
 
             let bigDetailHtml = '';
             if (it.isBig) {
-                const stemChips = (it.stemBoxes || []).map((sb, sIdx) => `
-                    <span class="rg-subq-chip stem-chip" title="P${sb.pageOffset + 1}">
-                        <span>原文${sIdx + 1}</span>
-                        <button type="button" class="rg-subq-del-btn" onclick="event.stopPropagation(); rgDeleteSubBox('${it.id}', 'stem', ${sIdx})" title="删除原文框">×</button>
-                    </span>
-                `).join('');
+                const stemGroups = groupStemBoxes(it.stemBoxes);
+                const stemChips = stemGroups.map((sg, gIdx) => {
+                    const pLabels = Array.from(new Set(sg.boxes.map(b => 'P' + ((b.pageOffset || 0) + 1)))).join('~');
+                    const firstIdx = sg.indices[0];
+                    return `
+                        <span class="rg-subq-chip stem-chip" title="${escapeHtmlRg(pLabels)}">
+                            <span>原文${gIdx + 1}${sg.boxes.length > 1 ? `(${escapeHtmlRg(pLabels)})` : ''}</span>
+                            <button type="button" class="rg-subq-del-btn" onclick="event.stopPropagation(); rgDeleteSubBox('${it.id}', 'stem', ${firstIdx})" title="删除原文框">×</button>
+                        </span>
+                    `;
+                }).join('');
                 const subqChips = (it.subqBoxes || []).map((qb, qIdx) => `
                     <span class="rg-subq-chip" title="P${qb.pageOffset + 1}">
                         <span>#</span>
@@ -1002,7 +1007,7 @@
                     </span>
                 `).join('');
                 bigDetailHtml = `
-                    <div class="rg-card-submeta">大题 · 原文 ${(it.stemBoxes || []).length} / 小问 ${(it.subqBoxes || []).length}</div>
+                    <div class="rg-card-submeta">大题 · 原文 ${stemGroups.length} / 小问 ${(it.subqBoxes || []).length}</div>
                     ${(stemChips || subqChips) ? `<div class="rg-subq-list">${stemChips}${subqChips}</div>` : ''}
                 `;
             }
@@ -1102,8 +1107,8 @@
         }
         if (hint) {
             hint.textContent = rgState.subMode.target === 'stem'
-                ? '当前：绿虚线框选公共原文/题干，按 2 切换“框选小问”'
-                : '当前：红框依次框出各小问（自动递增，可在右侧清单单独改号）';
+                ? '当前：绿虚线框选公共原文/题干（跨页可一笔框完，框好后自动切至小问）'
+                : '当前：红框依次框出各小问（自动递增，按 1 可切回补框原文）';
         }
         renderFocusSidebar();
         renderFocusSliceOverlays();
@@ -1724,7 +1729,12 @@
         const it = tabState.items.find(x => x.id === itemId);
         if (!it) return;
         if (kind === 'stem' && Array.isArray(it.stemBoxes)) {
-            it.stemBoxes.splice(idx, 1);
+            const target = it.stemBoxes[idx];
+            if (target && target.linkId) {
+                it.stemBoxes = it.stemBoxes.filter(sb => sb.linkId !== target.linkId);
+            } else {
+                it.stemBoxes.splice(idx, 1);
+            }
         } else if (kind === 'subq' && Array.isArray(it.subqBoxes)) {
             it.subqBoxes.splice(idx, 1);
         }
@@ -1903,6 +1913,24 @@
         });
     }
 
+    function groupStemBoxes(stemBoxes) {
+        const groups = [];
+        const linkMap = new Map();
+        (stemBoxes || []).forEach((sb, idx) => {
+            const lk = sb && sb.linkId ? String(sb.linkId) : '';
+            if (lk && linkMap.has(lk)) {
+                const g = linkMap.get(lk);
+                g.boxes.push(sb);
+                g.indices.push(idx);
+            } else {
+                const g = { linkId: lk, boxes: [sb], indices: [idx] };
+                if (lk) linkMap.set(lk, g);
+                groups.push(g);
+            }
+        });
+        return groups;
+    }
+
     function computeRegionDisplayCrop(rg) {
         const padY = 0.006;
         const rx = clamp01(Number(rg.x) || 0);
@@ -1920,13 +1948,14 @@
         };
     }
 
-    function findBestSliceForBox(box, crops) {
+    function findBestSliceForBox(box, slices) {
         let bestIdx = -1;
         let bestOverlap = 0;
         const by0 = Number(box.y) || 0;
         const by1 = by0 + (Number(box.h) || 0);
         const midY = (by0 + by1) / 2;
-        crops.forEach((c, idx) => {
+        slices.forEach((s, idx) => {
+            const c = s.crop || s;
             if (c.pageOffset !== (parseInt(box.pageOffset, 10) || 0)) return;
             const cy0 = c.y;
             const cy1 = c.y + c.h;
@@ -1939,44 +1968,107 @@
         return bestIdx;
     }
 
-    function addFocusSubBox(rectObj) {
-        if (!rgState.subMode) return;
+    function splitStitchRangeToRects(y0Px, y1Px, stitch) {
+        if (!stitch || !Array.isArray(stitch.slices) || stitch.slices.length === 0) return [];
+        const topPx = Math.max(0, Math.min(y0Px, y1Px));
+        const botPx = Math.min(stitch.totalH, Math.max(y0Px, y1Px));
+        const hits = [];
+        let maxOverlap = 0;
+        let bestSingle = null;
+
+        stitch.slices.forEach((s) => {
+            const interTop = Math.max(topPx, s.topPx);
+            const interBot = Math.min(botPx, s.bottomPx);
+            const overlap = interBot - interTop;
+            if (overlap > maxOverlap) {
+                maxOverlap = overlap;
+                bestSingle = { slice: s, interTop, interBot, overlap };
+            }
+            if (overlap >= 4) {
+                hits.push({ slice: s, interTop, interBot, overlap });
+            }
+        });
+
+        const chosen = hits.length > 0 ? hits : (bestSingle && bestSingle.overlap > 0 ? [bestSingle] : []);
+        return chosen.map(({ slice, interTop, interBot }) => {
+            const relY = clamp01((interTop - slice.topPx) / Math.max(1, slice.logicalH));
+            const relH = Math.max(0.008, (interBot - interTop) / Math.max(1, slice.logicalH));
+            const pageY = clamp01(slice.crop.y + relY * slice.crop.h);
+            const pageH = Math.max(0.006, Math.min(1 - pageY, relH * slice.crop.h));
+            return {
+                pageOffset: slice.crop.pageOffset,
+                x: round4(slice.crop.x),
+                y: round4(pageY),
+                w: round4(slice.crop.w),
+                h: round4(pageH)
+            };
+        });
+    }
+
+    function commitStitchedDrawRange(y0Px, y1Px) {
+        if (!rgState.subMode || !rgState.focusStitch) return;
         const it = getFocusActiveItem();
         if (!it) return;
+        const rects = splitStitchRangeToRects(y0Px, y1Px, rgState.focusStitch);
+        if (rects.length === 0) return;
+
         if (rgState.subMode.target === 'stem') {
             it.stemBoxes = it.stemBoxes || [];
-            it.stemBoxes.push(rectObj);
+            const wasEmpty = it.stemBoxes.length === 0;
+            if (rects.length > 1) {
+                const linkId = `stem_${Date.now()}_${rgState.nextSeq++}`;
+                rects.forEach(r => it.stemBoxes.push({ ...r, linkId }));
+            } else {
+                it.stemBoxes.push(rects[0]);
+            }
+            if (wasEmpty) {
+                rgState.subMode.target = 'subq';
+                showToast('原文已框选，已自动切换为「2. 框选小问」', 'info');
+            }
         } else {
+            // 小问模式：若不慎拖跨页缝，归属垂直交集最大的一页，避免产生重复题号
+            let bestRect = rects[0];
+            if (rects.length > 1) {
+                let bestScore = -1;
+                rects.forEach((r) => {
+                    const sIdx = findBestSliceForBox(r, rgState.focusStitch.slices);
+                    const s = sIdx >= 0 ? rgState.focusStitch.slices[sIdx] : null;
+                    const pxH = s ? (r.h / Math.max(0.001, s.crop.h)) * s.logicalH : r.h;
+                    if (pxH > bestScore) {
+                        bestScore = pxH;
+                        bestRect = r;
+                    }
+                });
+                showToast('小问已归属占比更大的一页', 'info');
+            }
             it.subqBoxes = it.subqBoxes || [];
             const baseNum = parseInt(it.label, 10) || 1;
             const nextSubNum = it.subqBoxes.length === 0
                 ? baseNum
                 : (Math.max(...it.subqBoxes.map(b => parseInt(b.num, 10) || baseNum)) + 1);
-            it.subqBoxes.push({ ...rectObj, num: nextSubNum, customNum: false });
+            it.subqBoxes.push({ ...bestRect, num: nextSubNum, customNum: false });
         }
         renderAllRg();
         scheduleDraftSave();
     }
 
-    function startFocusBoxResize(e, kind, itemId, boxRef, edge, boxEl, crop, stageEl) {
+    function startFocusBoxResize(e, kind, itemId, groupBoxes, edge, boxEl, origTopPx, origBotPx, stitch) {
         if (e.pointerType === 'mouse' && e.button !== 0) return;
         e.preventDefault();
         e.stopPropagation();
-        const rect = stageEl.getBoundingClientRect();
-        const origRelY = clamp01(((Number(boxRef.y) || 0) - crop.y) / crop.h);
-        const origRelH = Math.max(0.012, Math.min(1 - origRelY, (Number(boxRef.h) || 0.05) / crop.h));
         rgState.focusResize = {
             pointerId: e.pointerId,
             kind,
             itemId,
-            boxRef,
+            groupBoxes,
             edge,
             boxEl,
-            crop,
-            stageRect: rect,
+            stitch,
             startClientY: e.clientY,
-            origRelY,
-            origRelH
+            origTopPx,
+            origBotPx,
+            curTopPx: origTopPx,
+            curBotPx: origBotPx
         };
         try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
     }
@@ -1987,23 +2079,27 @@
         const it = getFocusActiveItem();
         if (!listEl || !it) return;
 
-        const stems = it.stemBoxes || [];
+        const stemGroups = groupStemBoxes(it.stemBoxes);
         const subqs = it.subqBoxes || [];
         if (summaryEl) {
-            summaryEl.textContent = `原文 ${stems.length} 块 · 小问 ${subqs.length} 题`;
+            summaryEl.textContent = `原文 ${stemGroups.length} 块 · 小问 ${subqs.length} 题`;
         }
-        if (stems.length === 0 && subqs.length === 0) {
+        if (stemGroups.length === 0 && subqs.length === 0) {
             listEl.innerHTML = '<div class="rg-list-empty">请在左侧框选区拖拽划出公共题干或各小问</div>';
             return;
         }
 
-        const stemHtml = stems.map((sb, sIdx) => `
-            <div class="rg-focus-list-row stem">
-                <span class="rg-focus-badge stem">原文${sIdx + 1}</span>
-                <span class="rg-card-meta">P${(sb.pageOffset || 0) + 1}</span>
-                <button type="button" class="rg-subq-del-btn" onclick="rgDeleteSubBox('${it.id}', 'stem', ${sIdx})" title="删除此原文框">×</button>
-            </div>
-        `).join('');
+        const stemHtml = stemGroups.map((sg, gIdx) => {
+            const pLabels = Array.from(new Set(sg.boxes.map(b => 'P' + ((b.pageOffset || 0) + 1)))).join('~');
+            const firstIdx = sg.indices[0];
+            return `
+                <div class="rg-focus-list-row stem">
+                    <span class="rg-focus-badge stem">原文${gIdx + 1}</span>
+                    <span class="rg-card-meta">${escapeHtmlRg(pLabels)}</span>
+                    <button type="button" class="rg-subq-del-btn" onclick="rgDeleteSubBox('${it.id}', 'stem', ${firstIdx})" title="删除此原文框">×</button>
+                </div>
+            `;
+        }).join('');
 
         const subqHtml = subqs.map((qb, qIdx) => `
             <div class="rg-focus-list-row subq">
@@ -2020,89 +2116,95 @@
         `).join('');
 
         listEl.innerHTML = `
-            ${stems.length > 0 ? `<div class="rg-focus-list-group"><div class="rg-focus-list-title">公共题干 / 原文</div>${stemHtml}</div>` : ''}
+            ${stemGroups.length > 0 ? `<div class="rg-focus-list-group"><div class="rg-focus-list-title">公共题干 / 原文</div>${stemHtml}</div>` : ''}
             ${subqs.length > 0 ? `<div class="rg-focus-list-group"><div class="rg-focus-list-title">小问列表</div>${subqHtml}</div>` : ''}
         `;
     }
 
     function renderFocusSliceOverlays() {
         const it = getFocusActiveItem();
-        if (!it || !Array.isArray(rgState.focusSlices) || rgState.focusSlices.length === 0) return;
+        const stitch = rgState.focusStitch;
+        if (!it || !stitch || !stitch.layerEl || !Array.isArray(stitch.slices) || stitch.slices.length === 0) return;
 
-        const crops = rgState.focusSlices.map(s => s.crop);
-        const stems = it.stemBoxes || [];
-        const subqs = it.subqBoxes || [];
+        const { layerEl, totalH, slices } = stitch;
+        layerEl.innerHTML = '';
 
-        rgState.focusSlices.forEach((slice) => {
-            const { sliceIdx, crop, stageEl, layerEl } = slice;
-            if (!layerEl) return;
-            layerEl.innerHTML = '';
+        if (rgState.focusTwoTapStart) {
+            const line = document.createElement('div');
+            line.className = 'rg-anchor-line';
+            line.style.top = ((rgState.focusTwoTapStart.yPx / Math.max(1, totalH)) * 100) + '%';
+            const lbl = document.createElement('span');
+            lbl.className = 'rg-anchor-label';
+            lbl.textContent = '上边界已定，请点下边界';
+            line.appendChild(lbl);
+            layerEl.appendChild(line);
+        }
 
-            if (rgState.focusTwoTapStart && rgState.focusTwoTapStart.sliceIdx === sliceIdx) {
-                const line = document.createElement('div');
-                line.className = 'rg-anchor-line';
-                line.style.top = (rgState.focusTwoTapStart.y * 100) + '%';
-                const lbl = document.createElement('span');
-                lbl.className = 'rg-anchor-label';
-                lbl.textContent = '上边界已定，请点下边界';
-                line.appendChild(lbl);
-                layerEl.appendChild(line);
-            }
-
-            const renderSubOverlay = (box, kind, idx, labelText) => {
-                const relY = clamp01((box.y - crop.y) / crop.h);
-                const relH = Math.max(0.015, Math.min(1 - relY, box.h / crop.h));
-                const relX = clamp01((box.x - crop.x) / crop.w);
-                const relW = Math.max(0.05, Math.min(1 - relX, box.w / crop.w));
-
-                const div = document.createElement('div');
-                const nearTopCls = relY < 0.06 ? ' near-top' : '';
-                div.className = `rg-box ${kind} active${nearTopCls}`;
-                div.style.left = (relX * 100) + '%';
-                div.style.top = (relY * 100) + '%';
-                div.style.width = (relW * 100) + '%';
-                div.style.height = (relH * 100) + '%';
-
-                const tag = document.createElement('span');
-                tag.className = 'rg-box-tag';
-                tag.textContent = labelText;
-                div.appendChild(tag);
-
-                ['n', 's'].forEach(edge => {
-                    const h = document.createElement('div');
-                    h.className = `rg-handle rg-handle-${edge}`;
-                    h.addEventListener('pointerdown', (e) => startFocusBoxResize(e, kind, it.id, box, edge, div, crop, stageEl));
-                    div.appendChild(h);
-                });
-
-                const delBtn = document.createElement('button');
-                delBtn.type = 'button';
-                delBtn.className = 'rg-box-del';
-                delBtn.title = kind === 'stem' ? '删除此原文框' : '删除此小问框';
-                delBtn.textContent = '×';
-                delBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
-                delBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    rgDeleteSubBox(it.id, kind, idx);
-                });
-                div.appendChild(delBtn);
-
-                div.addEventListener('pointerdown', (e) => {
-                    if (e.target.closest('.rg-handle') || e.target.closest('.rg-box-del')) return;
-                    // 专注模式下允许在已有小框附近/内部继续拉框或两点定框，不阻断画布事件
-                });
-                layerEl.appendChild(div);
+        const boxToStitchSpan = (box) => {
+            const sIdx = findBestSliceForBox(box, slices);
+            if (sIdx < 0) return null;
+            const s = slices[sIdx];
+            const relY = clamp01((box.y - s.crop.y) / s.crop.h);
+            const relBot = clamp01((box.y + box.h - s.crop.y) / s.crop.h);
+            return {
+                topPx: s.topPx + relY * s.logicalH,
+                botPx: Math.max(s.topPx + relY * s.logicalH + 8, s.topPx + relBot * s.logicalH)
             };
+        };
 
-            stems.forEach((sb, sIdx) => {
-                if (findBestSliceForBox(sb, crops) !== sliceIdx) return;
-                renderSubOverlay(sb, 'stem', sIdx, `原文${sIdx + 1}`);
+        const renderStitchedBox = (topPx, botPx, kind, groupBoxes, firstIdx, labelText) => {
+            const topPct = (topPx / Math.max(1, totalH)) * 100;
+            const heightPct = Math.max(0.8, ((botPx - topPx) / Math.max(1, totalH)) * 100);
+            const div = document.createElement('div');
+            const nearTopCls = topPx < 22 ? ' near-top' : '';
+            div.className = `rg-box ${kind} active${nearTopCls}`;
+            div.style.left = '0%';
+            div.style.top = topPct + '%';
+            div.style.width = '100%';
+            div.style.height = heightPct + '%';
+
+            const tag = document.createElement('span');
+            tag.className = 'rg-box-tag';
+            tag.textContent = labelText;
+            div.appendChild(tag);
+
+            ['n', 's'].forEach(edge => {
+                const h = document.createElement('div');
+                h.className = `rg-handle rg-handle-${edge}`;
+                h.addEventListener('pointerdown', (e) => startFocusBoxResize(e, kind, it.id, groupBoxes, edge, div, topPx, botPx, stitch));
+                div.appendChild(h);
             });
 
-            subqs.forEach((qb, qIdx) => {
-                if (findBestSliceForBox(qb, crops) !== sliceIdx) return;
-                renderSubOverlay(qb, 'subq', qIdx, `${qb.num}`);
+            const delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.className = 'rg-box-del';
+            delBtn.title = kind === 'stem' ? '删除此原文框' : '删除此小问框';
+            delBtn.textContent = '×';
+            delBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+            delBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                rgDeleteSubBox(it.id, kind, firstIdx);
             });
+            div.appendChild(delBtn);
+
+            layerEl.appendChild(div);
+        };
+
+        const stemGroups = groupStemBoxes(it.stemBoxes);
+        stemGroups.forEach((sg, gIdx) => {
+            const spans = sg.boxes.map(boxToStitchSpan).filter(Boolean);
+            if (spans.length === 0) return;
+            const topPx = Math.min(...spans.map(sp => sp.topPx));
+            const botPx = Math.max(...spans.map(sp => sp.botPx));
+            const pLabels = Array.from(new Set(sg.boxes.map(b => 'P' + ((b.pageOffset || 0) + 1)))).join('~');
+            const suffix = sg.boxes.length > 1 ? ` (跨${pLabels})` : '';
+            renderStitchedBox(topPx, botPx, 'stem', sg.boxes, sg.indices[0], `原文${gIdx + 1}${suffix}`);
+        });
+
+        (it.subqBoxes || []).forEach((qb, qIdx) => {
+            const sp = boxToStitchSpan(qb);
+            if (!sp) return;
+            renderStitchedBox(sp.topPx, sp.botPx, 'subq', [qb], qIdx, `${qb.num}`);
         });
     }
 
@@ -2119,12 +2221,17 @@
         const mySeq = ++rgState.focusRenderSeq;
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
         const availW = Math.max(360, Math.min(860, ((viewportEl && viewportEl.clientWidth) ? viewportEl.clientWidth : 780) - 48));
+        const stitchW = Math.max(240, Math.round(availW * rgState.focusZoom));
 
         container.innerHTML = '';
-        rgState.focusSlices = [];
-        const regions = (Array.isArray(it.regions) && it.regions.length > 0)
+        rgState.focusStitch = null;
+        const rawRegions = (Array.isArray(it.regions) && it.regions.length > 0)
             ? it.regions
             : [{ pageOffset: 0, x: FULL_WIDTH_X, y: 0, w: FULL_WIDTH_W, h: 1 }];
+        const regions = [...rawRegions].sort((a, b) => ((a.pageOffset || 0) - (b.pageOffset || 0)) || ((a.y || 0) - (b.y || 0)));
+
+        const prepared = [];
+        let totalH = 0;
 
         for (let sliceIdx = 0; sliceIdx < regions.length; sliceIdx++) {
             if (mySeq !== rgState.focusRenderSeq) return;
@@ -2134,7 +2241,7 @@
             if (mySeq !== rgState.focusRenderSeq) return;
 
             const baseVp = page.getViewport({ scale: 1.0 });
-            const fitScale = (availW / Math.max(1, baseVp.width * crop.w)) * rgState.focusZoom;
+            const fitScale = stitchW / Math.max(1, baseVp.width * crop.w);
             const renderScale = Number((fitScale * dpr).toFixed(3));
             const cacheKey = `${tab}_${crop.pageOffset}_${Math.round(renderScale * 100)}`;
 
@@ -2157,23 +2264,8 @@
             const sw = Math.max(1, Math.min(fullCanvas.width - sx, Math.round(crop.w * fullCanvas.width)));
             const sh = Math.max(1, Math.min(fullCanvas.height - sy, Math.round(crop.h * fullCanvas.height)));
 
-            const logicalW = Math.max(120, Math.round(sw / dpr));
-            const logicalH = Math.max(40, Math.round(sh / dpr));
-
-            const sliceCard = document.createElement('div');
-            sliceCard.className = 'rg-focus-slice';
-
-            if (regions.length > 1) {
-                const hdr = document.createElement('div');
-                hdr.className = 'rg-focus-slice-header';
-                hdr.textContent = `片段 ${sliceIdx + 1}/${regions.length} · 第 ${pageNum} 页`;
-                sliceCard.appendChild(hdr);
-            }
-
-            const stageEl = document.createElement('div');
-            stageEl.className = 'rg-stage draw-mode rg-focus-slice-stage';
-            stageEl.style.width = logicalW + 'px';
-            stageEl.style.height = logicalH + 'px';
+            const logicalW = stitchW;
+            const logicalH = Math.max(32, Math.round(sh / dpr));
 
             const canvas = document.createElement('canvas');
             canvas.width = sw;
@@ -2185,49 +2277,81 @@
             ctx.fillRect(0, 0, sw, sh);
             ctx.drawImage(fullCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
 
-            const layerEl = document.createElement('div');
-            layerEl.className = 'rg-box-layer';
-
-            stageEl.appendChild(canvas);
-            stageEl.appendChild(layerEl);
-            sliceCard.appendChild(stageEl);
-            container.appendChild(sliceCard);
-
-            const sliceMeta = { sliceIdx, crop, stageEl, layerEl };
-            rgState.focusSlices.push(sliceMeta);
-
-            stageEl.addEventListener('pointerdown', (e) => {
-                if (rgState.focusResize) return;
-                if (e.isPrimary === false) return;
-                if (e.pointerType === 'mouse' && e.button !== 0) return;
-                if (e.target && e.target.closest && (e.target.closest('.rg-handle') || e.target.closest('.rg-box-del'))) {
-                    return;
-                }
-                if (document.activeElement && document.activeElement.tagName === 'INPUT') {
-                    document.activeElement.blur();
-                }
-                e.preventDefault();
-                try { stageEl.setPointerCapture(e.pointerId); } catch (_) {}
-                const rect = stageEl.getBoundingClientRect();
-                const ptX = clamp01((e.clientX - rect.left) / Math.max(1, rect.width));
-                const ptY = clamp01((e.clientY - rect.top) / Math.max(1, rect.height));
-                const draftEl = document.createElement('div');
-                draftEl.className = 'rg-box draft';
-                layerEl.appendChild(draftEl);
-                rgState.focusDrag = {
-                    pointerId: e.pointerId,
-                    sliceIdx,
-                    crop,
-                    stageEl,
-                    stageRect: rect,
-                    startX: ptX,
-                    startY: ptY,
-                    curX: ptX,
-                    curY: ptY,
-                    draftEl
-                };
+            prepared.push({
+                sliceIdx,
+                pageNum,
+                crop,
+                canvas,
+                topPx: totalH,
+                bottomPx: totalH + logicalH,
+                logicalH
             });
+            totalH += logicalH;
         }
+
+        if (mySeq !== rgState.focusRenderSeq) return;
+
+        const stageEl = document.createElement('div');
+        stageEl.className = 'rg-stage draw-mode rg-focus-stitch-stage';
+        stageEl.style.width = stitchW + 'px';
+        stageEl.style.height = totalH + 'px';
+
+        prepared.forEach((p, idx) => {
+            stageEl.appendChild(p.canvas);
+            if (idx > 0) {
+                const seam = document.createElement('div');
+                seam.className = 'rg-focus-seam-line';
+                seam.style.top = p.topPx + 'px';
+                const badge = document.createElement('span');
+                badge.className = 'rg-focus-seam-badge';
+                badge.textContent = `P${prepared[idx - 1].pageNum} / P${p.pageNum}`;
+                seam.appendChild(badge);
+                stageEl.appendChild(seam);
+            }
+        });
+
+        const layerEl = document.createElement('div');
+        layerEl.className = 'rg-box-layer';
+        stageEl.appendChild(layerEl);
+        container.appendChild(stageEl);
+
+        rgState.focusStitch = {
+            stageEl,
+            layerEl,
+            width: stitchW,
+            totalH,
+            slices: prepared.map(({ sliceIdx, pageNum, crop, topPx, bottomPx, logicalH }) => ({
+                sliceIdx, pageNum, crop, topPx, bottomPx, logicalH
+            }))
+        };
+
+        stageEl.addEventListener('pointerdown', (e) => {
+            if (rgState.focusResize) return;
+            if (e.isPrimary === false) return;
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
+            if (e.target && e.target.closest && (e.target.closest('.rg-handle') || e.target.closest('.rg-box-del'))) {
+                return;
+            }
+            if (document.activeElement && document.activeElement.tagName === 'INPUT') {
+                document.activeElement.blur();
+            }
+            e.preventDefault();
+            try { stageEl.setPointerCapture(e.pointerId); } catch (_) {}
+            const rect = stageEl.getBoundingClientRect();
+            const ptY = clamp01((e.clientY - rect.top) / Math.max(1, rect.height));
+            const yPx = ptY * totalH;
+            const draftEl = document.createElement('div');
+            draftEl.className = 'rg-box draft';
+            layerEl.appendChild(draftEl);
+            rgState.focusDrag = {
+                pointerId: e.pointerId,
+                stageEl,
+                totalH,
+                startYPx: yPx,
+                curYPx: yPx,
+                draftEl
+            };
+        });
 
         renderFocusSliceOverlays();
     }
@@ -2308,22 +2432,20 @@
         window.addEventListener('pointermove', (e) => {
             if (rgState.focusResize && rgState.focusResize.pointerId === e.pointerId) {
                 const rz = rgState.focusResize;
-                const dy = (e.clientY - rz.startClientY) / Math.max(1, rz.stageRect.height);
-                const minRel = Math.max(0.012, 8 / Math.max(1, rz.stageRect.height));
-                let ny = rz.origRelY;
-                let nh = rz.origRelH;
+                const dyPx = e.clientY - rz.startClientY;
+                const minPx = 8;
+                let newTop = rz.origTopPx;
+                let newBot = rz.origBotPx;
                 if (rz.edge === 'n') {
-                    const maxTop = rz.origRelY + rz.origRelH - minRel;
-                    ny = Math.max(0, Math.min(maxTop, rz.origRelY + dy));
-                    nh = rz.origRelY + rz.origRelH - ny;
+                    newTop = Math.max(0, Math.min(rz.origBotPx - minPx, rz.origTopPx + dyPx));
                 } else if (rz.edge === 's') {
-                    nh = Math.max(minRel, Math.min(1 - rz.origRelY, rz.origRelH + dy));
+                    newBot = Math.max(rz.origTopPx + minPx, Math.min(rz.stitch.totalH, rz.origBotPx + dyPx));
                 }
-                rz.boxRef.y = round4(clamp01(rz.crop.y + ny * rz.crop.h));
-                rz.boxRef.h = round4(Math.max(0.005, nh * rz.crop.h));
+                rz.curTopPx = newTop;
+                rz.curBotPx = newBot;
                 if (rz.boxEl) {
-                    rz.boxEl.style.top = (ny * 100) + '%';
-                    rz.boxEl.style.height = (nh * 100) + '%';
+                    rz.boxEl.style.top = ((newTop / Math.max(1, rz.stitch.totalH)) * 100) + '%';
+                    rz.boxEl.style.height = (((newBot - newTop) / Math.max(1, rz.stitch.totalH)) * 100) + '%';
                 }
                 return;
             }
@@ -2331,68 +2453,83 @@
             if (!rgState.focusDrag || rgState.focusDrag.pointerId !== e.pointerId) return;
             const d = rgState.focusDrag;
             const rect = d.stageEl.getBoundingClientRect();
-            const ptX = clamp01((e.clientX - rect.left) / Math.max(1, rect.width));
             const ptY = clamp01((e.clientY - rect.top) / Math.max(1, rect.height));
-            d.curX = ptX;
-            d.curY = ptY;
-            const y = Math.min(d.startY, ptY);
-            const h = Math.abs(ptY - d.startY);
+            d.curYPx = ptY * d.totalH;
+            const topPx = Math.min(d.startYPx, d.curYPx);
+            const hPx = Math.abs(d.curYPx - d.startYPx);
             d.draftEl.style.left = '0%';
             d.draftEl.style.width = '100%';
-            d.draftEl.style.top = (y * 100) + '%';
-            d.draftEl.style.height = (h * 100) + '%';
+            d.draftEl.style.top = ((topPx / Math.max(1, d.totalH)) * 100) + '%';
+            d.draftEl.style.height = ((hPx / Math.max(1, d.totalH)) * 100) + '%';
         });
 
         const finishFocusPointer = (e) => {
             if (rgState.focusResize && rgState.focusResize.pointerId === e.pointerId) {
+                const rz = rgState.focusResize;
                 rgState.focusResize = null;
+                const it = getFocusActiveItem();
+                if (it && rz.stitch) {
+                    const rects = splitStitchRangeToRects(rz.curTopPx, rz.curBotPx, rz.stitch);
+                    if (rects.length > 0) {
+                        if (rz.kind === 'stem') {
+                            const oldSet = new Set(rz.groupBoxes);
+                            const firstIdx = Math.max(0, (it.stemBoxes || []).findIndex(b => oldSet.has(b)));
+                            const linkId = rects.length > 1
+                                ? ((rz.groupBoxes[0] && rz.groupBoxes[0].linkId) || `stem_${Date.now()}_${rgState.nextSeq++}`)
+                                : '';
+                            const newItems = rects.map(r => (linkId ? { ...r, linkId } : r));
+                            const kept = (it.stemBoxes || []).filter(b => !oldSet.has(b));
+                            kept.splice(Math.min(firstIdx, kept.length), 0, ...newItems);
+                            it.stemBoxes = kept;
+                        } else if (rz.groupBoxes[0]) {
+                            let bestRect = rects[0];
+                            if (rects.length > 1) {
+                                let bestScore = -1;
+                                rects.forEach((r) => {
+                                    const sIdx = findBestSliceForBox(r, rz.stitch.slices);
+                                    const s = sIdx >= 0 ? rz.stitch.slices[sIdx] : null;
+                                    const pxH = s ? (r.h / Math.max(0.001, s.crop.h)) * s.logicalH : r.h;
+                                    if (pxH > bestScore) {
+                                        bestScore = pxH;
+                                        bestRect = r;
+                                    }
+                                });
+                            }
+                            Object.assign(rz.groupBoxes[0], bestRect);
+                        }
+                    }
+                }
                 renderAllRg();
                 scheduleDraftSave();
                 return;
             }
+
             if (!rgState.focusDrag || rgState.focusDrag.pointerId !== e.pointerId) return;
             const d = cleanupFocusDraft();
             if (!d) return;
 
-            const rect = d.stageEl.getBoundingClientRect();
-            const dyPx = Math.abs(d.curY - d.startY) * Math.max(1, rect.height);
+            const dyPx = Math.abs(d.curYPx - d.startYPx);
 
             if (rgState.twoTapMode && dyPx < 8) {
-                if (!rgState.focusTwoTapStart || rgState.focusTwoTapStart.sliceIdx !== d.sliceIdx) {
-                    rgState.focusTwoTapStart = { sliceIdx: d.sliceIdx, x: d.curX, y: d.curY };
+                if (!rgState.focusTwoTapStart) {
+                    rgState.focusTwoTapStart = { yPx: d.curYPx };
                     renderFocusSliceOverlays();
                     return;
                 }
-                const start = rgState.focusTwoTapStart;
+                const startY = rgState.focusTwoTapStart.yPx;
                 rgState.focusTwoTapStart = null;
-                const y = Math.min(start.y, d.curY);
-                const h = Math.abs(d.curY - start.y);
-                if (h * Math.max(1, rect.height) < 8) {
+                if (Math.abs(d.curYPx - startY) < 8) {
                     renderFocusSliceOverlays();
                     return;
                 }
-                addFocusSubBox({
-                    pageOffset: d.crop.pageOffset,
-                    x: round4(d.crop.x),
-                    y: round4(clamp01(d.crop.y + y * d.crop.h)),
-                    w: round4(d.crop.w),
-                    h: round4(Math.max(0.008, h * d.crop.h))
-                });
+                commitStitchedDrawRange(startY, d.curYPx);
                 return;
             }
 
             if (dyPx < 8) return;
 
-            const y = Math.min(d.startY, d.curY);
-            const h = Math.abs(d.curY - d.startY);
             rgState.focusTwoTapStart = null;
-            addFocusSubBox({
-                pageOffset: d.crop.pageOffset,
-                x: round4(d.crop.x),
-                y: round4(clamp01(d.crop.y + y * d.crop.h)),
-                w: round4(d.crop.w),
-                h: round4(Math.max(0.008, h * d.crop.h))
-            });
+            commitStitchedDrawRange(d.startYPx, d.curYPx);
         };
 
         window.addEventListener('pointerup', finishFocusPointer);
@@ -2512,10 +2649,18 @@
         const tabState = getTabState(rgState.subMode.tab);
         const it = tabState.items.find(x => x.id === rgState.subMode.itemId);
         if (!it) return;
-        if (rgState.subMode.target === 'stem' && it.stemBoxes.length > 0) {
-            it.stemBoxes.pop();
-        } else if (rgState.subMode.target === 'subq' && it.subqBoxes.length > 0) {
+        if (rgState.subMode.target === 'subq' && it.subqBoxes.length > 0) {
             it.subqBoxes.pop();
+        } else if (it.stemBoxes.length > 0) {
+            const last = it.stemBoxes[it.stemBoxes.length - 1];
+            if (last && last.linkId) {
+                it.stemBoxes = it.stemBoxes.filter(sb => sb.linkId !== last.linkId);
+            } else {
+                it.stemBoxes.pop();
+            }
+            if (it.stemBoxes.length === 0) {
+                rgState.subMode.target = 'stem';
+            }
         }
         renderAllRg();
         scheduleDraftSave();
@@ -2526,7 +2671,7 @@
         rgState.focusTwoTapStart = null;
         rgState.focusDrag = null;
         rgState.focusResize = null;
-        rgState.focusSlices = [];
+        rgState.focusStitch = null;
         closeFocusDialogSafe();
         renderAllRg();
         scheduleDraftSave();
