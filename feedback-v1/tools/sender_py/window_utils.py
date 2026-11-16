@@ -713,3 +713,243 @@ class GlobalEscWatcher:
                 except Exception:
                     pass
                 self._hook = None
+
+
+def _resolve_tk_top_hwnd(tk_win) -> int:
+    """解析 Tkinter 窗口对应的顶层 Win32 HWND（兼容 overrideredirect 与普通窗口）。"""
+    import ctypes
+    user32 = ctypes.windll.user32
+    tk_win.update_idletasks()
+    raw_hwnd = int(tk_win.winfo_id())
+    try:
+        root_hwnd = int(user32.GetAncestor(raw_hwnd, 2))  # GA_ROOT = 2
+        if root_hwnd:
+            return root_hwnd
+    except Exception:
+        pass
+    try:
+        parent_hwnd = int(user32.GetParent(raw_hwnd))
+        if parent_hwnd:
+            return parent_hwnd
+    except Exception:
+        pass
+    return raw_hwnd
+
+
+def bring_hwnd_to_front(hwnd: int, topmost: bool = False) -> bool:
+    """将指定 Win32 窗口强力拉到前台（必要时绕过 Windows 前台焦点锁定）；non-Windows 返回 False。"""
+    if sys.platform != "win32" or not hwnd:
+        return False
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        hwnd = int(hwnd)
+
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+        else:
+            user32.ShowWindow(hwnd, 5)  # SW_SHOW
+
+        fg_hwnd = int(user32.GetForegroundWindow() or 0)
+        fg_tid = int(user32.GetWindowThreadProcessId(fg_hwnd, None) or 0) if fg_hwnd else 0
+        cur_tid = int(kernel32.GetCurrentThreadId() or 0)
+        attached = False
+        try:
+            if fg_tid and cur_tid and fg_tid != cur_tid:
+                attached = bool(user32.AttachThreadInput(cur_tid, fg_tid, True))
+            # 先临时置顶确保越过企业微信/浏览器 Z-order；non-topmost 再退回 HWND_NOTOPMOST 保持在前但不锁死顶层
+            user32.SetWindowPos(hwnd, ctypes.c_void_p(-1), 0, 0, 0, 0, 0x0043)
+            if not topmost:
+                user32.SetWindowPos(hwnd, ctypes.c_void_p(-2), 0, 0, 0, 0, 0x0043)
+            user32.BringWindowToTop(hwnd)
+            user32.SetForegroundWindow(hwnd)
+            if int(user32.GetForegroundWindow() or 0) != hwnd:
+                user32.keybd_event(VK_MENU, 0, 0, 0)
+                user32.SetForegroundWindow(hwnd)
+                user32.keybd_event(VK_MENU, 0, _KEYEVENTF_KEYUP, 0)
+        finally:
+            if attached:
+                try:
+                    user32.AttachThreadInput(cur_tid, fg_tid, False)
+                except Exception:
+                    pass
+        return True
+    except Exception:
+        return False
+
+
+def bring_tk_window_to_front(tk_win, topmost: bool = False) -> bool:
+    """将 Tkinter 窗口恢复并置顶拉到前台获取焦点；topmost=False 时在短暂延时后取消永久置顶。"""
+    if tk_win is None:
+        return False
+    try:
+        tk_win.deiconify()
+    except Exception:
+        pass
+    try:
+        tk_win.lift()
+    except Exception:
+        pass
+    try:
+        tk_win.attributes("-topmost", True)
+    except Exception:
+        pass
+    ok = False
+    if sys.platform == "win32":
+        try:
+            hwnd = _resolve_tk_top_hwnd(tk_win)
+            ok = bring_hwnd_to_front(hwnd, topmost=topmost)
+        except Exception:
+            ok = False
+    else:
+        ok = True
+    try:
+        tk_win.focus_force()
+    except Exception:
+        pass
+    if not topmost:
+        try:
+            tk_win.after(200, lambda: tk_win.attributes("-topmost", False))
+        except Exception:
+            pass
+    return ok
+
+
+def bring_browser_to_front(title_keyword: str = "极方每周反馈程序") -> bool:
+    """查找包含指定标题关键词的浏览器控制面板窗口并拉到前台（排除本地控制台自身）。"""
+    if sys.platform != "win32" or not title_keyword:
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        matched_hwnds = []
+
+        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        def _enum_cb(hwnd, _lp):
+            try:
+                if not user32.IsWindowVisible(hwnd):
+                    return True
+                length = int(user32.GetWindowTextLengthW(hwnd) or 0)
+                if length <= 0:
+                    return True
+                buf = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, buf, length + 1)
+                title = buf.value
+                if title_keyword in title and "控制台" not in title and "企业微信" not in title:
+                    matched_hwnds.append(int(hwnd))
+            except Exception:
+                pass
+            return True
+
+        user32.EnumWindows(_enum_cb, 0)
+        if not matched_hwnds:
+            return False
+        return bring_hwnd_to_front(matched_hwnds[0], topmost=False)
+    except Exception:
+        return False
+
+
+def promote_process_dialog_to_front(pid: int = None, title_keyword: str = "", topmost: bool = True) -> bool:
+    """将当前进程弹出的 Win32 原生对话框（#32770，如文件选择框/提示框）强制置顶并拉到前台。"""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        import os
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        target_pid = int(pid or os.getpid())
+        found = []
+
+        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        def _enum_cb(hwnd, _lp):
+            try:
+                if not user32.IsWindowVisible(hwnd):
+                    return True
+                win_pid = wintypes.DWORD(0)
+                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(win_pid))
+                if int(win_pid.value) != target_pid:
+                    return True
+                cls_buf = ctypes.create_unicode_buffer(64)
+                user32.GetClassNameW(hwnd, cls_buf, 64)
+                if cls_buf.value != "#32770":
+                    return True
+                if title_keyword:
+                    length = int(user32.GetWindowTextLengthW(hwnd) or 0)
+                    tbuf = ctypes.create_unicode_buffer(length + 1)
+                    if length > 0:
+                        user32.GetWindowTextW(hwnd, tbuf, length + 1)
+                    if title_keyword not in tbuf.value:
+                        return True
+                found.append(int(hwnd))
+            except Exception:
+                pass
+            return True
+
+        user32.EnumWindows(_enum_cb, 0)
+        if not found:
+            return False
+        return bring_hwnd_to_front(found[0], topmost=topmost)
+    except Exception:
+        return False
+
+
+def pick_files_foreground(master=None, **dialog_kwargs):
+    """置顶并激活前台唤起系统原生多文件选择框，防止被浏览器或后台窗口遮挡。"""
+    import tkinter as tk
+    from tkinter import filedialog
+
+    own_root = None
+    helper = None
+    timer = None
+    try:
+        if master is None:
+            own_root = tk.Tk()
+            helper = own_root
+        else:
+            helper = tk.Toplevel(master)
+        try:
+            helper.withdraw()
+            helper.overrideredirect(True)
+        except Exception:
+            pass
+        try:
+            helper.attributes("-alpha", 0.0)
+        except Exception:
+            pass
+        try:
+            sw = int(helper.winfo_screenwidth() or 1920)
+            sh = int(helper.winfo_screenheight() or 1080)
+            helper.geometry(f"1x1+{max(0, sw // 2)}+{max(0, sh // 2)}")
+        except Exception:
+            pass
+        bring_tk_window_to_front(helper, topmost=True)
+
+        title_kw = str(dialog_kwargs.get("title") or "")
+        if sys.platform == "win32":
+            timer = threading.Timer(
+                0.18,
+                lambda: promote_process_dialog_to_front(title_keyword=title_kw, topmost=True),
+            )
+            timer.daemon = True
+            timer.start()
+
+        return filedialog.askopenfilenames(parent=helper, **dialog_kwargs)
+    finally:
+        if timer is not None:
+            try:
+                timer.cancel()
+            except Exception:
+                pass
+        if helper is not None:
+            try:
+                helper.destroy()
+            except Exception:
+                pass
+        if own_root is not None and own_root is not helper:
+            try:
+                own_root.destroy()
+            except Exception:
+                pass

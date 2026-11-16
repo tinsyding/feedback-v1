@@ -496,6 +496,7 @@ class WebCompanionWindow:
 
         self.root = root if root is not None else tk.Tk()
         self._progress_hud = None
+        self._alert_dialog = None
         self._was_running = False
         self._init_window()
         self._build_ui()
@@ -718,10 +719,13 @@ class WebCompanionWindow:
             pass
 
     def _do_pick_files(self):
-        from tkinter import filedialog
         try:
-            paths = filedialog.askopenfilenames(
-                parent=self.root,
+            try:
+                from sender_py import window_utils as wu
+            except ModuleNotFoundError:
+                import window_utils as wu
+            paths = wu.pick_files_foreground(
+                master=self.root,
                 title="选择反馈文件（可按 Ctrl+A 全选所有文件）",
                 filetypes=[
                     ("反馈文件（JSON / HTML）", "*.json *.html *.htm"),
@@ -802,6 +806,8 @@ class WebCompanionWindow:
         just_started = is_running and not self._was_running
         just_finished = (not is_running) and self._was_running
         self._was_running = is_running
+        if just_started:
+            self._close_foreground_alert()
         try:
             if is_running or just_finished:
                 if self._progress_hud is None:
@@ -811,7 +817,141 @@ class WebCompanionWindow:
                 self._progress_hud.update(state, just_finished=just_finished)
         except Exception:
             pass
+        if just_finished:
+            self._handle_run_finished_alert(state)
         return is_running
+
+    def _close_foreground_alert(self):
+        dlg = getattr(self, "_alert_dialog", None)
+        if dlg is not None:
+            try:
+                dlg.destroy()
+            except Exception:
+                pass
+            self._alert_dialog = None
+
+    def _handle_run_finished_alert(self, state: dict):
+        """发送异常停止或出现失败/侧边栏告警时，将浏览器控制台与置顶提示弹窗拉到企微前方，防止被企微遮挡。"""
+        prog = state.get("progress") if isinstance(state.get("progress"), dict) else {}
+        summary = state.get("summary") if isinstance(state.get("summary"), dict) else {}
+        sidebar_alert = prog.get("sidebar_alert")
+        step_text = str(prog.get("step_text") or "").strip()
+
+        sent_c = int(summary.get("sent") or 0)
+        failed_c = int(summary.get("failed") or 0)
+        unmatched_c = int(summary.get("unmatched", summary.get("mismatch", 0)) or 0)
+        blocked_c = int(summary.get("blocked") or 0)
+
+        has_failure = bool(
+            sidebar_alert
+            or failed_c > 0
+            or unmatched_c > 0
+            or blocked_c > 0
+            or any(k in step_text for k in ("异常", "失败", "校准"))
+        )
+        if not has_failure:
+            return
+
+        try:
+            try:
+                from sender_py import window_utils as wu
+            except ModuleNotFoundError:
+                import window_utils as wu
+            wu.bring_browser_to_front("极方每周反馈程序")
+        except Exception:
+            pass
+
+        if sidebar_alert:
+            title = (sidebar_alert.get("title") if isinstance(sidebar_alert, dict) else "") or "请先关闭企业微信右侧边栏"
+            message = (sidebar_alert.get("message") if isinstance(sidebar_alert, dict) else "") or (
+                "检测到企业微信右侧边栏已打开，已停止发送。请先关闭企微右侧边栏后再继续发送。"
+            )
+            self._show_foreground_alert(title=title, message=message, is_error=True)
+        else:
+            stats_line = f"本批结果：成功 {sent_c} · 失败 {failed_c} · 未匹配 {unmatched_c} · 拦截 {blocked_c}"
+            detail = f"{stats_line}\n{step_text}" if step_text else stats_line
+            self._show_foreground_alert(
+                title="部分学员发送未成功，请处理",
+                message=detail,
+                is_error=(failed_c > 0 or blocked_c > 0),
+            )
+
+    def _show_foreground_alert(self, title: str, message: str, is_error: bool = True):
+        """在屏幕中央弹出置顶原生提示窗（不被企业微信遮挡），点击确认可切回浏览器控制台。"""
+        self._close_foreground_alert()
+        try:
+            import tkinter as tk
+            dlg = tk.Toplevel(self.root)
+            dlg.withdraw()
+            dlg.title(title)
+            dlg.resizable(False, False)
+            dlg.configure(bg="#ffffff")
+            apply_window_icon(dlg)
+
+            accent = "#dc2626" if is_error else "#d97706"
+            bg_tint = "#fef2f2" if is_error else "#fffbeb"
+
+            banner = tk.Frame(dlg, bg=bg_tint, padx=16, pady=12)
+            banner.pack(fill="x")
+            tk.Label(
+                banner, text=("⛔ " if is_error else "⚠ ") + title,
+                font=("Microsoft YaHei", 11, "bold"), fg=accent, bg=bg_tint, anchor="w",
+            ).pack(fill="x")
+
+            body = tk.Frame(dlg, bg="#ffffff", padx=18, pady=14)
+            body.pack(fill="both", expand=True)
+            tk.Label(
+                body, text=message, font=("Microsoft YaHei", 10),
+                fg="#1e293b", bg="#ffffff", justify="left", anchor="w", wraplength=380,
+            ).pack(fill="x", pady=(0, 14))
+
+            def _ack():
+                self._close_foreground_alert()
+                try:
+                    try:
+                        from sender_py import window_utils as wu
+                    except ModuleNotFoundError:
+                        import window_utils as wu
+                    wu.bring_browser_to_front("极方每周反馈程序")
+                except Exception:
+                    pass
+
+            btn_row = tk.Frame(body, bg="#ffffff")
+            btn_row.pack(fill="x")
+            tk.Button(
+                btn_row, text="我知道了（切回控制台）", font=("Microsoft YaHei", 9, "bold"),
+                bg=accent, fg="#ffffff", activebackground=accent, activeforeground="#ffffff",
+                relief="flat", padx=14, pady=6, cursor="hand2", command=_ack,
+            ).pack(side="right")
+
+            dlg.protocol("WM_DELETE_WINDOW", _ack)
+            dlg.update_idletasks()
+            w = max(420, int(dlg.winfo_reqwidth() or 420))
+            h = max(170, int(dlg.winfo_reqheight() or 170))
+            sw = int(self.root.winfo_screenwidth() or 1920)
+            sh = int(self.root.winfo_screenheight() or 1080)
+            x = max(0, (sw - w) // 2)
+            y = max(0, (sh - h) // 2)
+            dlg.geometry(f"{w}x{h}+{x}+{y}")
+
+            try:
+                try:
+                    from sender_py import window_utils as wu
+                except ModuleNotFoundError:
+                    import window_utils as wu
+                wu.bring_tk_window_to_front(dlg, topmost=True)
+            except Exception:
+                try:
+                    dlg.attributes("-topmost", True)
+                    dlg.deiconify()
+                    dlg.lift()
+                    dlg.focus_force()
+                except Exception:
+                    pass
+
+            self._alert_dialog = dlg
+        except Exception:
+            pass
 
     def on_close(self):
         """用户点击右上角 [X] 或「退出程序」按钮时的退出确认与资源释放。"""
@@ -852,6 +992,7 @@ class WebCompanionWindow:
             pass
 
         try:
+            self._close_foreground_alert()
             if self._progress_hud is not None:
                 self._progress_hud.destroy()
         except Exception:

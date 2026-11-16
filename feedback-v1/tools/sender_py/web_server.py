@@ -340,16 +340,12 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
 
     def _choose_native_files(self):
         try:
-            import tkinter as tk
-            from tkinter import filedialog
-            root = tk.Tk()
-            root.withdraw()
             try:
-                root.attributes("-topmost", True)
-            except Exception:
-                pass
-            paths = filedialog.askopenfilenames(
-                parent=root,
+                from sender_py import window_utils as wu
+            except ModuleNotFoundError:
+                import window_utils as wu
+            paths = wu.pick_files_foreground(
+                master=None,
                 title="选择反馈文件（可按 Ctrl+A 全选所有文件）",
                 filetypes=[
                     ("反馈文件（JSON / HTML）", "*.json *.html *.htm"),
@@ -358,7 +354,6 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
                     ("所有文件", "*.*"),
                 ],
             )
-            root.destroy()
             if paths:
                 self.controller.add_input_files(list(paths), replace=False)
         except Exception as exc:

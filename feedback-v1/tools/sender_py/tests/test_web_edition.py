@@ -675,6 +675,76 @@ class TestWebEdition(unittest.TestCase):
             self.assertFalse(running_after)
             self.assertEqual(win._progress_hud._badge_lbl.config.call_args[1]["text"], "发送完成")
             self.assertTrue(mock_root.after.called)
+            self.assertIsNone(win._alert_dialog)
+
+    def test_web_companion_file_picker_and_foreground_alerts(self):
+        """选择文件应置顶拉起文件框；侧边栏告警或失败结束时应拉起浏览器并弹出置顶原生提示窗。"""
+        import sys
+        from sender_py import window_utils as wu
+
+        mock_tk = unittest.mock.MagicMock()
+        mock_ttk = unittest.mock.MagicMock()
+        mock_tk.Label.side_effect = lambda *a, **kw: unittest.mock.MagicMock()
+        mock_tk.Button.side_effect = lambda *a, **kw: unittest.mock.MagicMock()
+        mock_tk.Frame.side_effect = lambda *a, **kw: unittest.mock.MagicMock()
+        mock_tk.Toplevel.side_effect = lambda *a, **kw: unittest.mock.MagicMock()
+
+        with unittest.mock.patch.dict(sys.modules, {"tkinter": mock_tk, "tkinter.ttk": mock_ttk}):
+            from sender_py.web_companion import WebCompanionWindow
+            ctrl = WebController()
+            mock_server = unittest.mock.MagicMock()
+            mock_root = unittest.mock.MagicMock()
+            mock_root.winfo_screenwidth.return_value = 1920
+            mock_root.winfo_screenheight.return_value = 1080
+            win = WebCompanionWindow(ctrl, mock_server, 8765, "http://127.0.0.1:8765", root=mock_root)
+
+            # 1. 文件选择应通过 pick_files_foreground 置顶唤起并写入 controller
+            with unittest.mock.patch.object(wu, "pick_files_foreground", return_value=["/tmp/a.json"]) as mock_pick, \
+                 unittest.mock.patch.object(ctrl, "add_input_files") as mock_add, \
+                 unittest.mock.patch.object(win, "_update_status_display"):
+                win._do_pick_files()
+            mock_pick.assert_called_once()
+            self.assertIs(mock_pick.call_args.kwargs["master"], mock_root)
+            mock_add.assert_called_once_with(["/tmp/a.json"], replace=False)
+
+            # 2. 发送中 -> 因侧边栏告警停止 -> 拉起浏览器并弹出置顶告警窗
+            with unittest.mock.patch.object(ctrl, "get_state", return_value={
+                "running": True,
+                "files": ["a.json"],
+                "progress": {"processed": 0, "total": 2, "current_name": "90001张三", "step_text": "正在发送", "countdown": 0},
+                "summary": {"total": 2, "selected": 2, "sent": 0, "failed": 0, "unmatched": 0, "blocked": 0, "skipped": 0},
+            }):
+                win._update_status_display()
+
+            with unittest.mock.patch.object(ctrl, "get_state", return_value={
+                "running": False,
+                "files": ["a.json"],
+                "progress": {
+                    "processed": 0, "total": 2, "current_name": "90001张三",
+                    "step_text": "已停止发送：请先关闭企业微信右侧边栏",
+                    "countdown": 0,
+                    "sidebar_alert": {"id": 123, "title": "请先关闭企业微信右侧边栏", "message": "检测到侧边栏已打开"},
+                },
+                "summary": {"total": 2, "selected": 2, "sent": 0, "failed": 0, "unmatched": 0, "blocked": 0, "skipped": 0},
+            }), \
+                 unittest.mock.patch.object(wu, "bring_browser_to_front", return_value=True) as mock_browser, \
+                 unittest.mock.patch.object(wu, "bring_tk_window_to_front", return_value=True) as mock_topmost:
+                win._update_status_display()
+
+            mock_browser.assert_called_once_with("极方每周反馈程序")
+            mock_topmost.assert_called_once()
+            self.assertTrue(mock_topmost.call_args.kwargs.get("topmost"))
+            self.assertIsNotNone(win._alert_dialog)
+
+            # 3. 再次开跑时自动清理旧提示窗
+            with unittest.mock.patch.object(ctrl, "get_state", return_value={
+                "running": True,
+                "files": ["a.json"],
+                "progress": {"processed": 0, "total": 2, "current_name": "", "step_text": "准备发送...", "countdown": 3},
+                "summary": {"total": 2, "selected": 2, "sent": 0, "failed": 0, "unmatched": 0, "blocked": 0, "skipped": 0},
+            }):
+                win._update_status_display()
+            self.assertIsNone(win._alert_dialog)
 
 
 if __name__ == "__main__":

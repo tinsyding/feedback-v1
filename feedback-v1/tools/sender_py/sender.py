@@ -3598,10 +3598,31 @@ class SenderApp:
                       "完成后将自动更新右上角“待回名单”。")
         saved_hint = "\n\n📁 本次发送记录（JSON与HTML快照）已自动保存在本地，可在右上角“已发文件”中查看与打开。"
         from tkinter import messagebox
-        if sidebar_stop_reason:
-            messagebox.showwarning("请关闭企业微信右侧边栏", sidebar_stop_reason, parent=self.root)
-            return
-        messagebox.showinfo("发送结束", summary + extra + saved_hint, parent=self.root)
+        try:
+            try:
+                from sender_py import window_utils as wu
+            except ModuleNotFoundError:
+                import window_utils as wu
+            wu.bring_tk_window_to_front(self.root, topmost=bool(sidebar_stop_reason))
+            if sys.platform == "win32":
+                t = threading.Timer(
+                    0.15,
+                    lambda: wu.promote_process_dialog_to_front(topmost=True),
+                )
+                t.daemon = True
+                t.start()
+        except Exception:
+            pass
+        try:
+            if sidebar_stop_reason:
+                messagebox.showwarning("请关闭企业微信右侧边栏", sidebar_stop_reason, parent=self.root)
+                return
+            messagebox.showinfo("发送结束", summary + extra + saved_hint, parent=self.root)
+        finally:
+            try:
+                self.root.attributes("-topmost", False)
+            except Exception:
+                pass
 
 
 def main(argv=None):
