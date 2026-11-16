@@ -66,6 +66,54 @@ class TestStage5(unittest.TestCase):
         self.assertIsNone(calibrate_roi(None, "https://feedback.wxjifang.cn"))
         self.assertIsNone(calibrate_roi("invalid", "not-a-valid-url"))
 
+    def test_detect_sidebar_guards_and_mapping(self):
+        import sys
+        import types
+        from unittest import mock
+        from sender_py.vision_api import detect_sidebar
+
+        class _StubImg:
+            size = (400, 300)
+
+            def save(self, buf, format="PNG"):
+                buf.write(b"fake-png")
+
+        fake_pil_image = types.SimpleNamespace(LANCZOS=1)
+        fake_pil = types.SimpleNamespace(Image=fake_pil_image)
+        fake_resp = mock.MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.json.return_value = {
+            "success": True,
+            "data": {
+                "has_sidebar": True,
+                "sidebar_title": "学员详情",
+                "reason": "右侧存在学员详情侧边栏",
+                "duration_ms": 321,
+            },
+        }
+        fake_requests = types.SimpleNamespace(post=mock.MagicMock(return_value=fake_resp))
+
+        with mock.patch.dict(sys.modules, {
+            "PIL": fake_pil,
+            "PIL.Image": fake_pil_image,
+            "requests": fake_requests,
+        }):
+            with self.assertRaises(RuntimeError):
+                detect_sidebar(None, "https://feedback.wxjifang.cn")
+            img = _StubImg()
+            with self.assertRaises(RuntimeError):
+                detect_sidebar(img, "not-a-url")
+
+            res = detect_sidebar(
+                img, "https://feedback.wxjifang.cn",
+                token="tok", target_id="55650", target_name="徐思琪",
+            )
+        self.assertTrue(res["has_sidebar"])
+        self.assertEqual(res["sidebar_title"], "学员详情")
+        self.assertEqual(res["duration_ms"], 321)
+        self.assertEqual(fake_requests.post.call_args.kwargs["data"]["mode"], "sidebar")
+        self.assertIn("image_window", fake_requests.post.call_args.kwargs["files"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -24,6 +24,10 @@ class TestWebEdition(unittest.TestCase):
             content = f.read()
         self.assertIn("极方每周反馈程序", content)
         self.assertIn("/api/state", content)
+        self.assertNotIn("请勿将企业微信窗口拖出屏幕边缘", content)
+        self.assertNotIn("cloudPolicyBadge", content)
+        self.assertNotIn("纯本地OCR", content)
+        self.assertIn("sidebarAlertModal", content)
 
     def test_find_free_port(self):
         port = find_free_port(18765)
@@ -546,6 +550,60 @@ class TestWebEdition(unittest.TestCase):
             logs_joined = "\n".join(ctrl.get_logs())
             self.assertIn("后台留言分析：需回复", logs_joined)
             self.assertIn("跳过 1，待发 1", logs_joined)
+
+    def test_run_worker_stops_on_sidebar_open_and_checks_only_first_person(self):
+        """打开第一个人若大模型检测到侧边栏则立刻停止并设置告警；未打开侧边栏时后续学员不再重复检测。"""
+        with tempfile.TemporaryDirectory() as td:
+            # 1. 检测到右侧边栏 -> 立即停止发送且不继续处理第 2 人
+            ctrl = WebController()
+            ctrl.sent_files = SentFilesManager(base_dir=td)
+            ctrl.items = [
+                {"_id": "1", "sid": "55650", "sname": "徐思琪", "studentName": "55650徐思琪", "message": "m1", "_status": "待发送", "_selected": True},
+                {"_id": "2", "sid": "55651", "sname": "李四", "studentName": "55651李四", "message": "m2", "_status": "待发送", "_selected": True},
+            ]
+            with mock.patch("sender_py.web_controller.time.sleep", return_value=None), \
+                 mock.patch("sender_py.window_utils.restore_and_center_wecom", return_value=(True, (0, 0, 960, 640))), \
+                 mock.patch("sender_py.web_controller.send_student", return_value={
+                     "result": "sidebar_open",
+                     "reason": "检测到企业微信右侧边栏（「学员详情」）已打开，已停止发送。请先关闭企微右侧边栏后再继续发送。",
+                     "sidebar_checked": True,
+                     "notes": [],
+                 }) as mock_send, \
+                 mock.patch.object(ctrl, "_stop_esc_watcher"), \
+                 mock.patch("sender_py.web_controller.sync_batch_summary"), \
+                 mock.patch("sender_py.web_controller.flush_cloud_logs"):
+                ctrl._run_worker({"1", "2"}, 2, 2)
+
+            self.assertEqual(mock_send.call_count, 1)
+            self.assertTrue(mock_send.call_args.kwargs["check_sidebar"])
+            self.assertFalse(ctrl._running)
+            self.assertEqual(ctrl.items[0]["_status"], "待发送")
+            self.assertTrue(ctrl.items[0]["_selected"])
+            self.assertIsNotNone(ctrl.progress.get("sidebar_alert"))
+            self.assertIn("关闭企业微信右侧边栏", ctrl.progress["step_text"])
+
+            # 2. 第 1 人未检测到侧边栏 -> 第 2 人应传 check_sidebar=False
+            ctrl2 = WebController()
+            ctrl2.sent_files = SentFilesManager(base_dir=td)
+            ctrl2.items = [
+                {"_id": "1", "sid": "55650", "sname": "徐思琪", "studentName": "55650徐思琪", "message": "m1", "_status": "待发送", "_selected": True},
+                {"_id": "2", "sid": "55651", "sname": "李四", "studentName": "55651李四", "message": "m2", "_status": "待发送", "_selected": True},
+            ]
+            with mock.patch("sender_py.web_controller.time.sleep", return_value=None), \
+                 mock.patch("sender_py.window_utils.restore_and_center_wecom", return_value=(True, (0, 0, 960, 640))), \
+                 mock.patch("sender_py.web_controller.send_student", side_effect=[
+                     {"result": "sent", "reason": "已发送", "sidebar_checked": True, "notes": []},
+                     {"result": "sent", "reason": "已发送", "sidebar_checked": False, "notes": []},
+                 ]) as mock_send2, \
+                 mock.patch.object(ctrl2, "_stop_esc_watcher"), \
+                 mock.patch("sender_py.web_controller.sync_batch_summary"), \
+                 mock.patch("sender_py.web_controller.flush_cloud_logs"):
+                ctrl2._run_worker({"1", "2"}, 2, 2)
+
+            self.assertEqual(mock_send2.call_count, 2)
+            self.assertTrue(mock_send2.call_args_list[0].kwargs["check_sidebar"])
+            self.assertFalse(mock_send2.call_args_list[1].kwargs["check_sidebar"])
+            self.assertIsNone(ctrl2.progress.get("sidebar_alert"))
 
 
 if __name__ == "__main__":

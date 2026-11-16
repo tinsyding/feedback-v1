@@ -1034,6 +1034,88 @@ class TestStage6(unittest.TestCase):
         self.assertIn("采用本地 OCR 极速核验", log_text)
         self.assertNotIn("采用本地 OCR 备用通道核验", log_text)
 
+    def test_send_student_sidebar_detection_stops_before_sending(self):
+        """开启 check_sidebar=True 时，首个私聊命中后若大模型检测到右侧边栏，应阻止发送并提示关闭。"""
+        item = {"sid": "55650", "sname": "徐思琪", "studentName": "55650徐思琪", "message": "反馈话术"}
+        roi = {"title": [0.2, 0.0, 0.8, 0.1], "input": [0.2, 0.8, 0.8, 0.2], "chat": [0.2, 0.1, 0.8, 0.7]}
+        logs = []
+
+        # 1. 检测到侧边栏 -> 立即停止，不调用 paste_and_send，不投递 reply_analyzer
+        fake_analyzer = mock.MagicMock()
+        with mock.patch.object(wu, "find_and_activate_wecom", return_value=True), \
+             mock.patch.object(wu, "ensure_fully_visible", return_value=(True, (0, 0, 1000, 700))), \
+             mock.patch.object(wu, "get_dpi_scale", return_value=1.0), \
+             mock.patch.object(wu, "get_wecom_rect", return_value=(0, 0, 1000, 700)), \
+             mock.patch.object(wu, "find_wecom_search_tab_wnd", return_value=None), \
+             mock.patch("sender_py.sender.ensure_roi", return_value=roi), \
+             mock.patch("sender_py.sender._capture_title_crop", return_value=None), \
+             mock.patch("sender_py.sender.search_and_enter", return_value=True), \
+             mock.patch("sender_py.sender.judge_candidate", return_value=(
+                 {"matched": True, "is_group": False, "detected_title": "55650徐思琪"},
+                 "55650徐思琪", None, object(),
+             )), \
+             mock.patch("sender_py.sender.check_wecom_sidebar", return_value={
+                 "checked": True, "has_sidebar": True, "sidebar_title": "学员详情", "reason": "右侧展开学员详情",
+             }) as mock_sb, \
+             mock.patch("sender_py.sender.paste_and_send") as mock_paste, \
+             mock.patch("sender_py.sender.time.sleep", return_value=None):
+            res = send_student(
+                item, "https://mock.server", log=logs.append,
+                reply_analyzer=fake_analyzer, check_sidebar=True,
+            )
+
+        self.assertEqual(res["result"], "sidebar_open")
+        self.assertTrue(res["sidebar_checked"])
+        self.assertIn("关闭企微右侧边栏", res["reason"])
+        mock_sb.assert_called_once()
+        mock_paste.assert_not_called()
+        fake_analyzer.submit.assert_not_called()
+
+        # 2. 群聊拦截时不触发侧边栏检测，sidebar_checked=False 留给下一个真实私聊学生
+        with mock.patch.object(wu, "find_and_activate_wecom", return_value=True), \
+             mock.patch.object(wu, "ensure_fully_visible", return_value=(True, (0, 0, 1000, 700))), \
+             mock.patch.object(wu, "get_dpi_scale", return_value=1.0), \
+             mock.patch.object(wu, "get_wecom_rect", return_value=(0, 0, 1000, 700)), \
+             mock.patch.object(wu, "find_wecom_search_tab_wnd", return_value=None), \
+             mock.patch("sender_py.sender.ensure_roi", return_value=roi), \
+             mock.patch("sender_py.sender._capture_title_crop", return_value=None), \
+             mock.patch("sender_py.sender.search_and_enter", return_value=True), \
+             mock.patch("sender_py.sender.judge_candidate", return_value=(
+                 {"matched": False, "is_group": True, "detected_title": "初二数学群(45)"},
+                 "初二数学群(45)", None,
+             )), \
+             mock.patch("sender_py.sender.check_wecom_sidebar") as mock_sb_grp, \
+             mock.patch("sender_py.sender.time.sleep", return_value=None):
+            res_grp = send_student(item, "https://mock.server", log=[].append, check_sidebar=True)
+
+        self.assertEqual(res_grp["result"], "blocked")
+        self.assertFalse(res_grp["sidebar_checked"])
+        mock_sb_grp.assert_not_called()
+
+        # 3. 侧边栏检测异常时 fail-open 放行，不阻断发送
+        from sender_py import capture, vision_api
+        with mock.patch.object(wu, "find_and_activate_wecom", return_value=True), \
+             mock.patch.object(wu, "ensure_fully_visible", return_value=(True, (0, 0, 1000, 700))), \
+             mock.patch.object(wu, "get_dpi_scale", return_value=1.0), \
+             mock.patch.object(wu, "get_wecom_rect", return_value=(0, 0, 1000, 700)), \
+             mock.patch.object(wu, "find_wecom_search_tab_wnd", return_value=None), \
+             mock.patch("sender_py.sender.ensure_roi", return_value=roi), \
+             mock.patch("sender_py.sender._capture_title_crop", return_value=None), \
+             mock.patch("sender_py.sender.search_and_enter", return_value=True), \
+             mock.patch("sender_py.sender.judge_candidate", return_value=(
+                 {"matched": True, "is_group": False, "detected_title": "55650徐思琪"},
+                 "55650徐思琪", None,
+             )), \
+             mock.patch.object(capture, "capture_wecom_window", return_value=object()), \
+             mock.patch.object(vision_api, "detect_sidebar", side_effect=RuntimeError("network timeout")), \
+             mock.patch("sender_py.sender.paste_and_send", return_value=(True, "已发送")) as mock_paste_ok, \
+             mock.patch("sender_py.sender.time.sleep", return_value=None):
+            res_ok = send_student(item, "https://mock.server", log=[].append, check_sidebar=True)
+
+        self.assertEqual(res_ok["result"], "sent")
+        self.assertTrue(res_ok["sidebar_checked"])
+        mock_paste_ok.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

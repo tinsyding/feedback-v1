@@ -83,13 +83,13 @@ function _clip_text($v, $max = 64) {
 $targetId = _clip_text($_POST['target_id'] ?? '');
 $targetName = _clip_text($_POST['target_name'] ?? '');
 $mode = _clip_text($_POST['mode'] ?? 'full', 16);
-if (!in_array($mode, ['full', 'title', 'reply'], true)) {
+if (!in_array($mode, ['full', 'title', 'reply', 'sidebar'], true)) {
     $mode = 'full';
 }
 $purpose = strtolower(_clip_text($_POST['purpose'] ?? '', 24));
 $detectedTitleIn = _clip_text($_POST['detected_title'] ?? '', 128);
 
-if ($targetId === '' && $targetName === '') {
+if ($mode !== 'sidebar' && $targetId === '' && $targetName === '') {
     sendResponse(false, null, 'target_id 与 target_name 不能同时为空', 400);
 }
 
@@ -114,6 +114,8 @@ if ($mode === 'title' && $purpose === 'benchmark') {
     if (empty($sc['enableReplyAnalysis'])) {
         sendResponse(false, null, 'ADMIN_DISABLED_REPLY_ANALYSIS: 管理员已关闭后台家长留言分析大模型', 200);
     }
+} elseif ($mode === 'sidebar') {
+    // 侧边栏检测：每次开跑仅在首次进入个人会话时触发一次，不受标题本地模式门禁拦截
 } else {
     // 传统 full 双图模式同时覆盖标题核验，受本地模式门禁约束
     if (!empty($cfgJson['disableQwenFlashTitle']) || ($sc['verifyMode'] ?? 'auto') === 'local') {
@@ -126,6 +128,8 @@ if ($mode === 'title') {
     $requiredFields = ['image_title'];
 } elseif ($mode === 'reply') {
     $requiredFields = ['image_chat'];
+} elseif ($mode === 'sidebar') {
+    $requiredFields = ['image_window'];
 }
 
 foreach ($requiredFields as $field) {
@@ -154,9 +158,11 @@ if ($apiBase === '') {
 } elseif (substr($apiBase, -17) !== '/chat/completions') {
     $apiBase = rtrim($apiBase, '/') . '/chat/completions';
 }
-// 按环节选择模型：reply/full 用 identifyModel (默认 qwen3.8-max)；title 用 identifyFastModel (默认 qwen3.8-flash)；benchmark 优先用 benchmarkModel
+// 按环节选择模型：reply/full 用 identifyModel (默认 qwen3.8-max)；sidebar 优先 calibrateModel -> identifyModel；title 用 identifyFastModel (默认 qwen3.8-flash)；benchmark 优先用 benchmarkModel
 $model = trim((string)($cfgJson['identifyModel'] ?? '')) ?: (getenv('IDENTIFY_MODEL') ?: ($localKeys['identifyModel'] ?? '') ?: 'qwen3.8-max');
-if ($mode === 'title') {
+if ($mode === 'sidebar') {
+    $model = trim((string)($cfgJson['calibrateModel'] ?? '')) ?: $model;
+} elseif ($mode === 'title') {
     $fastModel = trim((string)($cfgJson['identifyFastModel'] ?? '')) ?: (getenv('IDENTIFY_FAST_MODEL') ?: ($localKeys['identifyFastModel'] ?? '') ?: 'qwen3.8-flash');
     if ($purpose === 'benchmark') {
         $model = trim((string)($cfgJson['benchmarkModel'] ?? '')) ?: $fastModel;
@@ -203,6 +209,19 @@ if ($mode === 'title') {
     $userContent = [
         ['type' => 'text', 'text' => $prompt],
         ['type' => 'image_url', 'image_url' => ['url' => _img_data_url($_FILES['image_chat']['tmp_name'])]],
+    ];
+} elseif ($mode === 'sidebar') {
+    $prompt = '你是企业微信客户端界面布局分析专家。图中是一个在 Windows 上运行的企业微信主窗口截图。'
+        . '请判断当前主聊天窗口【最右侧】是否额外展开了独立的右侧边栏面板（例如：「学员详情 / 客户详情 / 客户画像 / 快捷回复 / 服务总结」、「查找聊天记录」或「聊天信息」等右侧功能栏）。'
+        . '【关键判断依据】：'
+        . '1. 正常未展开右侧边栏时，整个窗口从左到右只有 3 栏：①最左侧导航图标栏、②会话列表栏、③主聊天窗口（底部输入框右下角的「发送(S)」按钮紧贴整个企微窗口最右边缘）。'
+        . '2. 若展开了右侧边栏，整个窗口会变成 4 栏：在主聊天窗口（「发送(S)」按钮与聊天消息区）的右侧，还会多出一整块独立的垂直面板区域（通常顶部或内部有「学员详情」「客户详情」「快捷回复」「服务总结」「查找聊天记录」等标签或资料栏）。'
+        . '3. 最左侧的导航栏、会话列表栏、以及主聊天区内部的气泡卡片都不算右侧边栏；只有主聊天区右侧多出来的独立侧边栏才算 has_sidebar=true。'
+        . '只输出 JSON（无 markdown、无多余文字）：'
+        . '{"has_sidebar":bool(右侧是否展开了独立侧边栏),"sidebar_title":string(识别到的侧边栏标签或标题，无则为空字符串),"reason":string(一句话判断依据)}';
+    $userContent = [
+        ['type' => 'text', 'text' => $prompt],
+        ['type' => 'image_url', 'image_url' => ['url' => _img_data_url($_FILES['image_window']['tmp_name'])]],
     ];
 } else {
     $prompt = '你是企业微信窗口核验器。看两张图：图1是聊天窗口顶部标题栏截图，图2是同一窗口聊天区末尾截图。'
@@ -285,18 +304,27 @@ function _as_bool_or_null($v) {
     }
     return null;
 }
-$out = [
-    'matched' => ($parsed['matched'] ?? false) === true,
-    'is_group' => ($parsed['is_group'] ?? false) === true,
-    'title_in_header' => ($parsed['title_in_header'] ?? false) === true,
-    'detected_title' => (string)($parsed['detected_title'] ?? ''),
-    'last_sender' => in_array($parsed['last_sender'] ?? null, ['me', 'parent', 'unknown', null], true)
-        ? ($parsed['last_sender'] ?? null) : 'unknown',
-    'last_message_text' => (string)($parsed['last_message_text'] ?? ''),
-    'needs_reply' => _as_bool_or_null($parsed['needs_reply'] ?? null),
-    'reason' => (string)($parsed['reason'] ?? ''),
-    'duration_ms' => (int)round((microtime(true) - $t0) * 1000),
-];
+if ($mode === 'sidebar') {
+    $out = [
+        'has_sidebar' => _as_bool_or_null($parsed['has_sidebar'] ?? null) === true,
+        'sidebar_title' => (string)($parsed['sidebar_title'] ?? ''),
+        'reason' => (string)($parsed['reason'] ?? ''),
+        'duration_ms' => (int)round((microtime(true) - $t0) * 1000),
+    ];
+} else {
+    $out = [
+        'matched' => ($parsed['matched'] ?? false) === true,
+        'is_group' => ($parsed['is_group'] ?? false) === true,
+        'title_in_header' => ($parsed['title_in_header'] ?? false) === true,
+        'detected_title' => (string)($parsed['detected_title'] ?? ''),
+        'last_sender' => in_array($parsed['last_sender'] ?? null, ['me', 'parent', 'unknown', null], true)
+            ? ($parsed['last_sender'] ?? null) : 'unknown',
+        'last_message_text' => (string)($parsed['last_message_text'] ?? ''),
+        'needs_reply' => _as_bool_or_null($parsed['needs_reply'] ?? null),
+        'reason' => (string)($parsed['reason'] ?? ''),
+        'duration_ms' => (int)round((microtime(true) - $t0) * 1000),
+    ];
+}
 
 // ---- 存档：上传图 + 请求 JSON + 返回 JSON（保留 14 天）----
 $archiveRoot = __DIR__ . '/../data/identify_archive';
@@ -307,6 +335,9 @@ if (isset($_FILES['image_title']['tmp_name']) && is_file($_FILES['image_title'][
 }
 if (isset($_FILES['image_chat']['tmp_name']) && is_file($_FILES['image_chat']['tmp_name'])) {
     @move_uploaded_file($_FILES['image_chat']['tmp_name'], $dayDir . '/chat.png');
+}
+if (isset($_FILES['image_window']['tmp_name']) && is_file($_FILES['image_window']['tmp_name'])) {
+    @move_uploaded_file($_FILES['image_window']['tmp_name'], $dayDir . '/window.png');
 }
 @file_put_contents($dayDir . '/request.json', json_encode([
     'mode' => $mode, 'target_id' => $targetId, 'target_name' => $targetName,

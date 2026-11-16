@@ -611,12 +611,6 @@
       <div class="file-chips" id="fileChipsContainer" style="display:none;"></div>
     </section>
 
-    <!-- 运行环境贴士 -->
-    <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:9px 14px; margin-bottom:12px; font-size:12px; color:#1e40af; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-      <span><strong>温馨提示</strong>：发送与评测过程中，请勿将企业微信窗口拖出屏幕边缘（藏在边角），且任务开始后请勿随意改动企微窗口大小，以免遮挡或影响图像识别精准度。</span>
-      <span id="cloudPolicyBadge" style="font-size:11px; background:#fff; color:#1d4ed8; border:1px solid #93c5fd; border-radius:999px; padding:2px 9px; white-space:nowrap; font-weight:600; cursor:pointer;" onclick="refreshCloudControlNow()" title="点击立即从服务端同步最新云控策略">云控策略: 同步中...</span>
-    </div>
-
     <!-- 云控公告 / 版本门禁 / 维护锁定横幅（由服务端下发，空时自动隐藏） -->
     <div id="cloudControlBanner" style="display:none; border-radius:8px; padding:10px 14px; margin-bottom:12px; font-size:13px; line-height:1.5; border:1px solid #fcd34d; background:#fffbeb; color:#92400e;"></div>
 
@@ -1034,6 +1028,25 @@
     </div>
   </div>
 
+  <!-- 弹窗 8：检测到企微右侧边栏已打开告警 -->
+  <div class="modal-overlay" id="sidebarAlertModal">
+    <div class="modal-card" style="max-width:460px;">
+      <div class="modal-header" style="background:#fef2f2; border-bottom:1px solid #fecaca;">
+        <h3 id="sidebarAlertTitle" style="color:#b91c1c;">请先关闭企业微信右侧边栏</h3>
+        <button class="modal-close" onclick="closeModal('sidebarAlertModal')">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:18px 20px; line-height:1.65; color:#1e293b; font-size:14px;">
+        <div id="sidebarAlertMessage" style="margin-bottom:10px;"></div>
+        <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:10px 12px; font-size:12px; color:#92400e;">
+          操作建议：请在企业微信聊天窗口右上角/工具栏收起「学员详情 / 快捷回复 / 查找聊天记录」等右侧边栏，然后再点击「继续发送」。
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary btn-sm" onclick="closeModal('sidebarAlertModal')">我知道了</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 轻量气泡通知 Toast -->
   <div id="toast">已复制到剪贴板</div>
 
@@ -1049,6 +1062,7 @@
       reply_notes_count: 0
     };
     let currentModalMessage = "";
+    let lastShownSidebarAlertId = null;
 
     // 页面初始化
     document.addEventListener("DOMContentLoaded", () => {
@@ -1484,22 +1498,6 @@
       };
     }
 
-    async function refreshCloudControlNow() {
-      try {
-        showToast("正在从云端同步最新策略...");
-        const res = await fetch("/api/cloud_control/refresh", { method: "POST" });
-        const data = await res.json();
-        await fetchState();
-        if (data && data.success) {
-          showToast("云控策略已同步");
-        } else {
-          showToast("云端暂不可达，已沿用当前策略");
-        }
-      } catch (e) {
-        showToast("刷新云控策略失败");
-      }
-    }
-
     function escapeHtmlInline(str) {
       return String(str || "")
         .replace(/&/g, "&amp;")
@@ -1509,31 +1507,10 @@
     }
 
     function renderCloudControlBanner() {
-      const badge = document.getElementById("cloudPolicyBadge");
       const banner = document.getElementById("cloudControlBanner");
       const cc = appState.cloud_control || {};
       const pol = cc.policy || {};
       const gate = cc.start_gate || {};
-
-      if (badge) {
-        const vmMap = { auto: "智能核验", local: "纯本地OCR", api: "仅云端API" };
-        const vmText = vmMap[pol.verifyMode] || "智能核验";
-        const replyText = pol.enableReplyAnalysis === false ? " · 已关Max分析" : "";
-        const overrideTag = cc.has_client_override ? " · 单机策略" : "";
-        if (pol.senderServiceEnabled === false) {
-          badge.innerText = "⛔ 云控维护暂停中";
-          badge.style.background = "#fef2f2";
-          badge.style.color = "#b91c1c";
-          badge.style.borderColor = "#fecaca";
-        } else if (cc.synced) {
-          badge.innerText = `☁ ${vmText}${replyText}${overrideTag}`;
-          badge.style.background = cc.has_client_override ? "#fffbeb" : "#f0fdf4";
-          badge.style.color = cc.has_client_override ? "#b45309" : "#15803d";
-          badge.style.borderColor = cc.has_client_override ? "#fde68a" : "#bbf7d0";
-        } else {
-          badge.innerText = `☁ ${vmText} (默认)`;
-        }
-      }
 
       if (!banner) return;
       const lines = [];
@@ -1653,6 +1630,17 @@
 
       // 4. 底部控制器
       renderBottomBar();
+
+      // 5. 企微右侧边栏弹窗提醒（每次触发仅弹一次）
+      const sbAlert = (appState.progress || {}).sidebar_alert;
+      if (sbAlert && sbAlert.id && sbAlert.id !== lastShownSidebarAlertId) {
+        lastShownSidebarAlertId = sbAlert.id;
+        const titleEl = document.getElementById("sidebarAlertTitle");
+        const msgEl = document.getElementById("sidebarAlertMessage");
+        if (titleEl) titleEl.innerText = sbAlert.title || "请先关闭企业微信右侧边栏";
+        if (msgEl) msgEl.innerText = sbAlert.message || "检测到企业微信右侧边栏已打开，已停止发送，请关闭右侧边栏后再继续发送。";
+        openModal("sidebarAlertModal");
+      }
     }
 
     async function saveTeacherNote(val) {
@@ -1832,6 +1820,7 @@
       }
 
       if (appState.running) {
+        stepText.style.color = "";
         stepText.innerText = p.step_text || "正在发送中...";
         const processed = p.processed || 0;
         const total = p.total || 1;
@@ -1842,6 +1831,7 @@
         startBtn.disabled = true;
         stopBtn.disabled = false;
       } else {
+        stepText.style.color = p.sidebar_alert ? "#dc2626" : "";
         stepText.innerText = p.step_text || "就绪";
         progressFill.style.width = "0%";
         percentLabel.innerText = "";

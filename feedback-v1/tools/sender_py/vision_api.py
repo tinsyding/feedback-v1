@@ -279,3 +279,71 @@ def calibrate_roi(base_image, server: str, token=None, timeout: int = 50) -> dic
     except Exception:
         return None
 
+
+def detect_sidebar(window_img, server: str, token=None, target_id: str = "",
+                   target_name: str = "", timeout: int = 35) -> dict:
+    """调用云端视觉模型检测企微主窗口最右侧是否展开了侧边栏（如学员详情/快捷回复等）。
+
+    返回 {"has_sidebar": bool, "sidebar_title": str, "reason": str, "duration_ms": int}。
+    网络或接口异常时抛出 RuntimeError，由调用方按 fail-open 策略安全处理。
+    """
+    if window_img is None:
+        raise RuntimeError("整窗截图为空")
+    try:
+        import io
+        from PIL import Image
+        import requests
+    except Exception as e:
+        raise RuntimeError(f"缺少依赖（requests/Pillow）：{e}")
+
+    server = (server or "").strip().rstrip("/")
+    if not server.startswith(("http://", "https://")):
+        raise RuntimeError("服务器地址必须以 http(s):// 开头")
+    tok = load_token(token) or DEFAULT_SENDER_TOKEN
+
+    img_to_send = window_img
+    if hasattr(window_img, "size") and (window_img.size[0] > 1920 or window_img.size[1] > 1080):
+        scale = min(1920 / window_img.size[0], 1080 / window_img.size[1])
+        new_size = (max(1, int(window_img.size[0] * scale)), max(1, int(window_img.size[1] * scale)))
+        img_to_send = window_img.resize(new_size, Image.LANCZOS)
+
+    buf = io.BytesIO()
+    img_to_send.save(buf, format="PNG")
+
+    try:
+        resp = requests.post(
+            server + IDENTIFY_PATH,
+            data={
+                "mode": "sidebar",
+                "target_id": target_id or "",
+                "target_name": target_name or "",
+                "token": tok,
+            },
+            files={
+                "image_window": ("window.png", buf.getvalue(), "image/png"),
+            },
+            timeout=timeout,
+        )
+    except Exception as e:
+        raise RuntimeError(f"侧边栏检测请求失败：{e}")
+
+    try:
+        payload = resp.json()
+    except Exception:
+        raise RuntimeError(f"侧边栏检测返回非 JSON（HTTP {resp.status_code}）")
+
+    if not isinstance(payload, dict) or not payload.get("success"):
+        err = payload.get("error") if isinstance(payload, dict) else None
+        raise RuntimeError(f"侧边栏检测被拒绝：{err or resp.status_code}")
+
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise RuntimeError("侧边栏检测返回数据异常")
+
+    return {
+        "has_sidebar": data.get("has_sidebar") is True,
+        "sidebar_title": str(data.get("sidebar_title") or ""),
+        "reason": str(data.get("reason") or ""),
+        "duration_ms": int(data.get("duration_ms") or 0),
+    }
+

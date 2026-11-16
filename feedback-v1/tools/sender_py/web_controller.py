@@ -113,6 +113,7 @@ class WebController:
             "current_name": "",
             "step_text": "就绪",
             "countdown": 0,
+            "sidebar_alert": None,
         }
 
         self.benchmark_state = {
@@ -530,6 +531,7 @@ class WebController:
             self.progress["total"] = effective_count
             self.progress["current_name"] = ""
             self.progress["step_text"] = "准备发送..."
+            self.progress["sidebar_alert"] = None
 
         self._start_esc_watcher()
         self._load_token()
@@ -619,6 +621,8 @@ class WebController:
 
         processed = 0
         stopped = False
+        sidebar_checked = False
+        sidebar_stop_reason = ""
         config_path = default_config_path()
 
         try:
@@ -681,9 +685,13 @@ class WebController:
                         enter_wait=eff_enter_wait,
                         enable_reply_analysis=eff_enable_reply,
                         snapshot_policy=eff_snapshot_policy,
+                        check_sidebar=(not sidebar_checked),
                     )
                 except Exception as exc:
                     res = {"result": "error", "reason": f"异常: {exc}", "notes": []}
+
+                if res.get("sidebar_checked"):
+                    sidebar_checked = True
 
                 self._drain_reply_events()
 
@@ -697,18 +705,20 @@ class WebController:
                     "blocked": "已拦截",
                     "unmatched": "未匹配",
                     "stopped": "待发送",
+                    "sidebar_open": "待发送",
                     "error": "发送失败",
                 }
                 status = status_map.get(result, "发送失败")
 
                 with self._lock:
                     item["_status"] = status
-                    item["_last_result"] = result
+                    item["_last_result"] = "paused" if result == "sidebar_open" else result
                     item["_last_reason"] = reason
                     if result == "sent":
                         # 成功发送后自动取消勾选
                         item["_selected"] = False
-                    processed += 1
+                    if result not in ("stopped", "sidebar_open"):
+                        processed += 1
                     self.progress["processed"] = processed
 
                 item_key = item.get("_archive_key") or "反馈结果 [第 1 周]"
@@ -724,13 +734,16 @@ class WebController:
                     self.emit(f"  ✗ [{name}] 状态更新：未匹配（{reason}）")
                 elif result == "stopped":
                     self.emit(f"  ⏹ [{name}] 状态保持：已暂停（{reason}）")
+                elif result == "sidebar_open":
+                    self.emit(f"  ⛔ [{name}] {reason}", level="WARNING")
+                    sidebar_stop_reason = reason
                 else:
                     self.emit(f"  ✗ [{name}] 状态更新：发送失败（{reason}）")
 
                 self._sync_runtime_context()
                 self._notify_state_change()
 
-                if result == "stopped" or self._stop_requested:
+                if result in ("stopped", "sidebar_open") or self._stop_requested:
                     stopped = True
                     break
 
@@ -753,7 +766,7 @@ class WebController:
             self.emit(f"发送任务异常中止：{exc}", level="ERROR", exc_info=exc)
             stopped = True
         finally:
-            self._finish_run(stopped=stopped, selected_ids=selected_ids)
+            self._finish_run(stopped=stopped, selected_ids=selected_ids, sidebar_stop_reason=sidebar_stop_reason)
 
     def _wait_and_drain_reply_analyzer(self, timeout: float = 4.0):
         """等待在途后台留言分析任务短暂收尾并排空事件队列。"""
@@ -770,7 +783,7 @@ class WebController:
                 time.sleep(0.1)
         self._drain_reply_events()
 
-    def _finish_run(self, stopped: bool, selected_ids: set):
+    def _finish_run(self, stopped: bool, selected_ids: set, sidebar_stop_reason: str = ""):
         self._stop_esc_watcher()
         analyzer = self._reply_analyzer
         try:
@@ -788,12 +801,23 @@ class WebController:
             self.progress["running"] = False
             self.progress["countdown"] = 0
             if stopped:
-                self.progress["step_text"] = "已暂停发送，可点击“继续发送”继续"
+                if sidebar_stop_reason:
+                    self.progress["step_text"] = "已停止发送：请先关闭企业微信右侧边栏"
+                    self.progress["sidebar_alert"] = {
+                        "id": int(time.time() * 1000),
+                        "title": "请先关闭企业微信右侧边栏",
+                        "message": sidebar_stop_reason,
+                    }
+                else:
+                    self.progress["step_text"] = "已暂停发送，可点击“继续发送”继续"
                 for it in self.items:
                     if it["_id"] in selected_ids and it.get("_status") in ("待发送", "发送中"):
                         it["_status"] = "待发送"
                         it["_last_result"] = "paused"
-                        it["_last_reason"] = "已暂停，可继续发送"
+                        if sidebar_stop_reason and it.get("_last_reason"):
+                            pass
+                        else:
+                            it["_last_reason"] = sidebar_stop_reason or "已暂停，可继续发送"
                         it["_selected"] = True
             else:
                 self.progress["step_text"] = "发送完成"

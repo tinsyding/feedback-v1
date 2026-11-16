@@ -899,10 +899,46 @@ def _images_visually_same(img_a, img_b, diff_threshold: float = 0.8) -> bool:
         return False
 
 
+def check_wecom_sidebar(rect, server: str, token=None, target_id: str = "",
+                       target_name: str = "", log=print) -> dict:
+    """截取企微整窗并调用云端大模型检测右侧是否展开了侧边栏（学员详情/快捷回复等）。
+
+    采用 fail-open：截图或接口异常时仅记录提示并放行，避免网络抖动阻断正常发送；
+    只有大模型明确判定 has_sidebar=True 时才返回告警。
+    """
+    try:
+        try:
+            from sender_py.capture import capture_wecom_window
+            from sender_py.vision_api import detect_sidebar
+        except ModuleNotFoundError:
+            from capture import capture_wecom_window
+            from vision_api import detect_sidebar
+        win_img = capture_wecom_window(rect)
+        if win_img is None:
+            return {"checked": False, "has_sidebar": False, "sidebar_title": "", "reason": "整窗截图为空"}
+        res = detect_sidebar(
+            win_img, server=server, token=token,
+            target_id=target_id, target_name=target_name,
+        )
+        return {
+            "checked": True,
+            "has_sidebar": bool(res.get("has_sidebar")),
+            "sidebar_title": str(res.get("sidebar_title") or ""),
+            "reason": str(res.get("reason") or ""),
+        }
+    except Exception as exc:
+        try:
+            log(f"  [侧边栏检测提示] 云端检测跳过（{exc}）")
+        except Exception:
+            pass
+        return {"checked": False, "has_sidebar": False, "sidebar_title": "", "reason": str(exc)}
+
+
 def send_student(item: dict, server: str, token=None, config_path: str = None,
                  parent=None, log=print, should_stop=None, reply_analyzer=None,
                  verify_mode: str = "auto", search_wait: float = 1.5, enter_wait: float = 1.2,
-                 enable_reply_analysis: bool = True, snapshot_policy: str = None) -> dict:
+                 enable_reply_analysis: bool = True, snapshot_policy: str = None,
+                 check_sidebar: bool = False) -> dict:
     """单个学生全流程：最多 3 候选机械 1→2→3。返回 {result, notes, ...}（notes 供待回名单）。"""
     try:
         from sender_py import window_utils as wu
@@ -910,6 +946,7 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         import window_utils as wu
     name, sid, sname, message = item["studentName"], item["sid"], item["sname"], item["message"]
     notes = []
+    sidebar_checked_here = False
 
     # 清理之前可能遗留的企业微信“全局搜索”弹窗
     old_search = wu.find_wecom_search_tab_wnd()
@@ -1116,7 +1153,32 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
             log(f"  ✓ 候选 {cand} 核验通过 (窗口标题: [{chat_title or '未知'}])，符合发送条件")
             if should_stop is not None and should_stop():
                 log(f"  └ 收到停止请求，候选 {cand} 未发送")
-                return {"result": "stopped", "reason": "用户停止", "notes": notes}
+                return {"result": "stopped", "reason": "用户停止", "sidebar_checked": sidebar_checked_here, "notes": notes}
+            if check_sidebar and not sidebar_checked_here:
+                log("  └ 首次进入个人会话，正在调用大模型检测企微右侧是否打开侧边栏...")
+                sb = check_wecom_sidebar(
+                    rect, server, token=token, target_id=sid, target_name=sname, log=log
+                )
+                sidebar_checked_here = True
+                if sb.get("has_sidebar"):
+                    sb_title = (sb.get("sidebar_title") or "").strip()
+                    sb_desc = f"「{sb_title}」" if sb_title else (sb.get("reason") or "右侧功能栏")
+                    stop_msg = (
+                        f"检测到企业微信右侧边栏（{sb_desc}）已打开，已停止发送。"
+                        "请先关闭企微右侧边栏后再继续发送。"
+                    )
+                    log(f"  ⛔ {stop_msg}")
+                    return {
+                        "result": "sidebar_open",
+                        "at_candidate": cand,
+                        "reason": stop_msg,
+                        "sidebar_title": sb_title,
+                        "sidebar_reason": sb.get("reason", ""),
+                        "sidebar_checked": True,
+                        "notes": notes,
+                    }
+                if sb.get("checked"):
+                    log("  ✓ 未检测到右侧边栏，继续执行发送...")
             if enable_reply_analysis and reply_analyzer is not None and chat_img is not None:
                 reply_analyzer.submit(name, cand, sid, sname, chat_title, True, chat_img)
                 log("  └ 已将聊天区截图投递至后台分析家长留言，立即开始发送反馈话术...")
@@ -1130,15 +1192,18 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
             if should_stop is None or not should_stop():
                 _paced(AFTER_SEND_GAP)
             return {"result": "sent" if ok else "error",
-                    "at_candidate": cand, "reason": why, "notes": notes}
+                    "at_candidate": cand, "reason": why,
+                    "sidebar_checked": sidebar_checked_here, "notes": notes}
         if decision["action"] == "intercept":
             log(f"  ✗ 候选 {cand} 命中安全红线拦截：检测为群聊 (窗口标题: [{chat_title or '未知'}])，安全拦截！")
             return {"result": "blocked", "at_candidate": cand,
-                    "reason": decision["reason"], "notes": notes}
+                    "reason": decision["reason"],
+                    "sidebar_checked": sidebar_checked_here, "notes": notes}
         log(f"  ✗ 候选 {cand} 核验未通过：学号或姓名不匹配 (实际窗口标题: [{chat_title or '未检测到'}])")
         _paced(CANDIDATE_GAP)
     log(f"  ✗ [{name}] 前 {MAX_CANDIDATES} 个候选均未匹配到对应的私聊窗口")
-    return {"result": "unmatched", "reason": "3 候选均未 MATCH", "notes": notes}
+    return {"result": "unmatched", "reason": "3 候选均未 MATCH",
+            "sidebar_checked": sidebar_checked_here, "notes": notes}
 
 
 # ================= Tk 主界面 =================
@@ -3248,6 +3313,8 @@ class SenderApp:
     def _run_all_worker(self, target_ids, effective_count, token, verify_mode):
         processed = 0
         stopped = False
+        sidebar_checked = False
+        sidebar_stop_reason = ""
         self.emit("=================== 开始执行发送任务 ===================")
         self.emit(f"📋 任务概览：本次计划发送 {effective_count} 人（名单总计 {len(self.items)} 人）")
         self.emit("🔍 标题核验：Qwen3.8-Max 云端多模态大模型优先，网络异常自动降级本地 OCR")
@@ -3300,9 +3367,12 @@ class SenderApp:
                         item, self.server, token, parent=self.root,
                         log=self.emit, should_stop=self._poll_stop,
                         reply_analyzer=self._reply_analyzer,
-                        verify_mode=verify_mode)
+                        verify_mode=verify_mode,
+                        check_sidebar=(not sidebar_checked))
                 except Exception as exc:
                     res = {"result": "error", "reason": f"程序异常：{exc}", "notes": []}
+                if res.get("sidebar_checked"):
+                    sidebar_checked = True
                 result = res.get("result", "")
                 reason = res.get("reason", "") or ""
                 item["_last_result"] = result
@@ -3312,6 +3382,7 @@ class SenderApp:
                     "blocked": "已拦截",
                     "unmatched": "未匹配",
                     "stopped": "待发送",
+                    "sidebar_open": "待发送",
                 }.get(result)
                 if status is None:
                     status = "发送失败"
@@ -3350,6 +3421,11 @@ class SenderApp:
                     self.emit(f"  ⚠️ [{name}] 状态更新：未匹配（{reason}）")
                 elif result == "stopped":
                     self.emit(f"  ⏹ [{name}] 状态保持：已暂停（{reason}）")
+                elif result == "sidebar_open":
+                    self.emit(f"  ⛔ [{name}] {reason}")
+                    sidebar_stop_reason = reason
+                    stopped = True
+                    break
                 else:
                     self.emit(f"  ❌ [{name}] 状态更新：发送失败（{reason}）")
 
@@ -3381,20 +3457,24 @@ class SenderApp:
                             and self._status_of(item) in ("待发送", "发送中")):
                         self.set_status(item, "待发送")
                         item["_last_result"] = "paused"
-                        item["_last_reason"] = "已暂停，可继续发送"
+                        if not (sidebar_stop_reason and item.get("_last_reason") == sidebar_stop_reason):
+                            item["_last_reason"] = sidebar_stop_reason or "已暂停，可继续发送"
             for item in self.items:
                 if self._status_of(item) == "发送中":
                     self.set_status(item, "待发送" if stopped else "发送失败")
                     item["_last_result"] = "paused" if stopped else "error"
-                    reason = "已暂停，可继续发送" if stopped else (item.get("_last_reason") or "程序异常中断")
+                    reason = (sidebar_stop_reason or "已暂停，可继续发送") if stopped else (item.get("_last_reason") or "程序异常中断")
                     item["_last_reason"] = reason
                     if not stopped:
                         item["_last_failure_reason"] = reason
             summary = self._summary_text(stopped, effective_count)
             self.result_var.set(summary)
             self._update_progress(processed, effective_count, stopped=stopped)
-            self.hint_var.set(
-                "已暂停发送，点击“继续发送”可随时断点续发剩余学员。" if stopped else "本批处理结束")
+            if sidebar_stop_reason:
+                self.hint_var.set("⛔ 已停止：请先关闭企业微信右侧边栏后再继续发送。")
+            else:
+                self.hint_var.set(
+                    "已暂停发送，点击“继续发送”可随时断点续发剩余学员。" if stopped else "本批处理结束")
 
             if not self._close_after_stop:
                 try:
@@ -3414,11 +3494,12 @@ class SenderApp:
 
             # 调度回主线程更新 UI、恢复按键状态并弹出提示
             try:
-                self.root.after(0, self._on_worker_finished, stopped, effective_count, counts, summary)
+                self.root.after(0, self._on_worker_finished, stopped, effective_count, counts, summary, sidebar_stop_reason)
             except Exception:
                 pass
 
-    def _on_worker_finished(self, stopped: bool, selected_count: int, counts: dict, summary: str):
+    def _on_worker_finished(self, stopped: bool, selected_count: int, counts: dict, summary: str,
+                            sidebar_stop_reason: str = ""):
         self._set_running_ui(False)
         if self._close_after_stop:
             self._stop_esc_watcher()
@@ -3444,6 +3525,9 @@ class SenderApp:
                       "完成后将自动更新右上角“待回名单”。")
         saved_hint = "\n\n📁 本次发送记录（JSON与HTML快照）已自动保存在本地，可在右上角“已发文件”中查看与打开。"
         from tkinter import messagebox
+        if sidebar_stop_reason:
+            messagebox.showwarning("请关闭企业微信右侧边栏", sidebar_stop_reason, parent=self.root)
+            return
         messagebox.showinfo("发送结束", summary + extra + saved_hint, parent=self.root)
 
 
