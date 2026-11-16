@@ -1,13 +1,12 @@
 // ========== Whole-Paper Region-Crop Studio ==========
 // 免切题分页：直接上传整卷原卷 PDF（单栏/双栏），逐题拉框标注，支持大题（先原文后小问）、
 // 跨页续框、预习跳题手动输题号、举一反三归属原题选择、答案独立拉框、边框拖拽微调、
-// 快捷键、高分屏渲染、IndexedDB 本地草稿自动恢复以及已保存题库反加载调整。
+// 快捷键、高分屏渲染以及已保存题库反加载调整。
 
 (function () {
     const FULL_WIDTH_X = 0.03;
     const FULL_WIDTH_W = 0.94;
     const DRAFT_DB_NAME = 'qbank_region_drafts';
-    const DRAFT_STORE_NAME = 'drafts';
 
     const isCoarsePointer = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
 
@@ -146,131 +145,10 @@
         return '待输入题号';
     }
 
-    // ========== IndexedDB 本地草稿持久化 ==========
-    function openDraftDb() {
-        return new Promise((resolve, reject) => {
-            if (typeof indexedDB === 'undefined') {
-                resolve(null);
-                return;
-            }
-            const req = indexedDB.open(DRAFT_DB_NAME, 1);
-            req.onupgradeneeded = () => {
-                const db = req.result;
-                if (!db.objectStoreNames.contains(DRAFT_STORE_NAME)) {
-                    db.createObjectStore(DRAFT_STORE_NAME, { keyPath: 'contextKey' });
-                }
-            };
-            req.onsuccess = () => resolve(req.result);
-            req.onerror = () => reject(req.error);
-        });
-    }
+    // 草稿持久化已关闭：保留空实现以兼容现有调用
+    function scheduleDraftSave() {}
 
-    function cloneItemsForDraft(items) {
-        return (items || []).map(it => ({
-            id: it.id,
-            label: it.label || '',
-            targetExId: it.targetExId || null,
-            parentNums: Array.isArray(it.parentNums) ? [...it.parentNums] : [],
-            isBig: Boolean(it.isBig),
-            regions: (it.regions || []).map(r => ({ ...r })),
-            stemBoxes: (it.stemBoxes || []).map(sb => ({ ...sb })),
-            subqBoxes: (it.subqBoxes || []).map(qb => ({ ...qb }))
-        }));
-    }
-
-    async function saveDraftNow() {
-        const key = rgState.contextKey;
-        if (!key) return;
-        const hasData = Boolean(
-            rgState.exercise.file ||
-            rgState.answer.file ||
-            rgState.exercise.items.length > 0 ||
-            rgState.answer.items.length > 0
-        );
-        if (!hasData) return;
-        try {
-            const db = await openDraftDb();
-            if (!db) return;
-            const record = {
-                contextKey: key,
-                stage: rgState.stage,
-                activeTab: rgState.activeTab,
-                fullWidth: rgState.fullWidth,
-                scale: rgState.scale,
-                nextSeq: rgState.nextSeq,
-                exerciseFile: rgState.exercise.file || null,
-                exerciseName: rgState.exercise.file ? rgState.exercise.file.name : '',
-                exercisePageNum: rgState.exercise.pageNum || 1,
-                exerciseItems: cloneItemsForDraft(rgState.exercise.items),
-                answerFile: rgState.answer.file || null,
-                answerName: rgState.answer.file ? rgState.answer.file.name : '',
-                answerPageNum: rgState.answer.pageNum || 1,
-                answerItems: cloneItemsForDraft(rgState.answer.items),
-                updatedAt: Date.now()
-            };
-            await new Promise((resolve, reject) => {
-                const tx = db.transaction(DRAFT_STORE_NAME, 'readwrite');
-                tx.objectStore(DRAFT_STORE_NAME).put(record);
-                tx.oncomplete = () => resolve();
-                tx.onerror = () => reject(tx.error);
-            });
-            db.close();
-        } catch (err) {
-            console.warn('Save region draft failed:', err);
-        }
-    }
-
-    function scheduleDraftSave() {
-        if (rgState.draftTimer) clearTimeout(rgState.draftTimer);
-        rgState.draftTimer = setTimeout(() => {
-            rgState.draftTimer = null;
-            saveDraftNow();
-        }, 400);
-    }
-
-    async function loadDraftFromIdb(contextKey) {
-        if (!contextKey) return null;
-        try {
-            const db = await openDraftDb();
-            if (!db) return null;
-            const record = await new Promise((resolve, reject) => {
-                const tx = db.transaction(DRAFT_STORE_NAME, 'readonly');
-                const req = tx.objectStore(DRAFT_STORE_NAME).get(contextKey);
-                req.onsuccess = () => resolve(req.result || null);
-                req.onerror = () => reject(req.error);
-            });
-            db.close();
-            return record;
-        } catch (err) {
-            return null;
-        }
-    }
-
-    async function clearDraftInIdb(contextKey) {
-        if (!contextKey) return;
-        try {
-            const db = await openDraftDb();
-            if (!db) return;
-            await new Promise((resolve, reject) => {
-                const tx = db.transaction(DRAFT_STORE_NAME, 'readwrite');
-                tx.objectStore(DRAFT_STORE_NAME).delete(contextKey);
-                tx.oncomplete = () => resolve();
-                tx.onerror = () => reject(tx.error);
-            });
-            db.close();
-        } catch (err) {
-            console.warn('Clear region draft failed:', err);
-        }
-    }
-
-    window.rgClearSavedDraft = async function (contextKey) {
-        const key = contextKey || rgState.contextKey;
-        if (rgState.draftTimer) {
-            clearTimeout(rgState.draftTimer);
-            rgState.draftTimer = null;
-        }
-        await clearDraftInIdb(key);
-    };
+    window.rgClearSavedDraft = async function () {};
 
     function buildContextKeyFromSelectors() {
         return [
@@ -319,73 +197,6 @@
         const ansLbl = document.getElementById('rg-answer-file-label');
         if (exLbl) exLbl.textContent = '必传 · 点击选择单栏题目原卷 PDF';
         if (ansLbl) ansLbl.textContent = '必传 · 点击选择答案原卷 PDF';
-    }
-
-    async function restoreDraftRecord(record) {
-        if (!record) return false;
-        const loadPdfDoc = async (fileObj) => {
-            if (!fileObj || typeof fileObj.arrayBuffer !== 'function') return null;
-            const buf = await fileObj.arrayBuffer();
-            return await pdfjsLib.getDocument({ data: buf }).promise;
-        };
-
-        let restoredAny = false;
-        if (record.exerciseFile) {
-            try {
-                const exDoc = await loadPdfDoc(record.exerciseFile);
-                if (exDoc) {
-                    const exName = record.exerciseName || record.exerciseFile.name || '题目原卷.pdf';
-                    rgState.exercise.file = record.exerciseFile instanceof File
-                        ? record.exerciseFile
-                        : new File([record.exerciseFile], exName, { type: 'application/pdf' });
-                    rgState.exercise.pdfDoc = exDoc;
-                    rgState.exercise.totalPages = exDoc.numPages;
-                    rgState.exercise.pageNum = Math.min(exDoc.numPages, Math.max(1, record.exercisePageNum || 1));
-                    rgState.exercise.items = cloneItemsForDraft(record.exerciseItems);
-                    const exLbl = document.getElementById('rg-exercise-file-label');
-                    if (exLbl) exLbl.textContent = `${exName} (${exDoc.numPages} 页)`;
-                    restoredAny = true;
-                }
-            } catch (e) {
-                console.warn('Restore exercise PDF failed:', e);
-            }
-        }
-        if (record.answerFile) {
-            try {
-                const ansDoc = await loadPdfDoc(record.answerFile);
-                if (ansDoc) {
-                    const ansName = record.answerName || record.answerFile.name || '答案原卷.pdf';
-                    rgState.answer.file = record.answerFile instanceof File
-                        ? record.answerFile
-                        : new File([record.answerFile], ansName, { type: 'application/pdf' });
-                    rgState.answer.pdfDoc = ansDoc;
-                    rgState.answer.totalPages = ansDoc.numPages;
-                    rgState.answer.pageNum = Math.min(ansDoc.numPages, Math.max(1, record.answerPageNum || 1));
-                    rgState.answer.items = cloneItemsForDraft(record.answerItems);
-                    const ansLbl = document.getElementById('rg-answer-file-label');
-                    if (ansLbl) ansLbl.textContent = `${ansName} (${ansDoc.numPages} 页)`;
-                    restoredAny = true;
-                }
-            } catch (e) {
-                console.warn('Restore answer PDF failed:', e);
-            }
-        }
-        if (!restoredAny) return false;
-
-        rgState.fullWidth = true;
-        rgState.scale = typeof record.scale === 'number' ? record.scale : 1.0;
-        rgState.nextSeq = Math.max(1, parseInt(record.nextSeq, 10) || 1);
-        if (record.stage === 'answer' && rgState.answer.pdfDoc && rgState.exercise.items.length > 0) {
-            rgState.stage = 'answer';
-            rgState.activeTab = 'answer';
-        } else if (record.stage !== 'upload' && rgState.exercise.pdfDoc && rgState.answer.pdfDoc) {
-            rgState.stage = 'exercise';
-            rgState.activeTab = 'exercise';
-        } else {
-            rgState.stage = 'upload';
-            rgState.activeTab = 'exercise';
-        }
-        return true;
     }
 
     function syncInteractModeUi() {
@@ -1247,7 +1058,7 @@
                     ${headerEditorHtml}
                     <div class="rg-card-actions" onclick="event.stopPropagation()">
                         <button type="button" class="btn sm secondary" onclick="rgStartContinue('${it.id}')">+ 跨页续框</button>
-                        ${bankType === 'variation' ? '' : `<button type="button" class="btn sm secondary" onclick="rgEnterSubMode('${it.id}')">${it.isBig ? '继续细分大题' : '设为大题'}</button>`}
+                        ${bankType === 'variation' ? '' : `<button type="button" class="btn sm secondary" onclick="rgEnterSubMode('${it.id}')">${it.isBig ? '继续细分' : '设为大题'}</button>`}
                         <button type="button" class="btn sm secondary" onclick="rgDeleteItem('${it.id}')">删除</button>
                     </div>
                 </div>
@@ -1329,7 +1140,6 @@
         const prevBtn = document.getElementById('rg-prev-stage-btn');
         const nextBtn = document.getElementById('rg-next-stage-btn');
         const finishBtn = document.getElementById('rg-finish-btn');
-        const clearBtn = document.getElementById('rg-clear-draft-btn');
         const loadExistBtn = document.getElementById('rg-load-existing-btn');
         const uploadFooter = document.getElementById('rg-upload-gate-footer');
         const exBox = document.getElementById('rg-exercise-upload-box');
@@ -1341,11 +1151,6 @@
         if (gate) gate.style.display = st === 'upload' ? 'block' : 'none';
         if (ws) ws.style.display = st === 'upload' ? 'none' : 'grid';
 
-        const hasAnyDraft = Boolean(
-            rgState.exercise.pdfDoc || rgState.answer.pdfDoc ||
-            rgState.exercise.items.length > 0 || rgState.answer.items.length > 0
-        );
-        if (clearBtn) clearBtn.style.display = hasAnyDraft ? 'inline-flex' : 'none';
         const showLoadExist = hasRegionDebugPermission() && st === 'upload' && hasSavedRegionCropInCurrentQuestions();
         if (loadExistBtn) {
             loadExistBtn.style.display = showLoadExist ? 'inline-flex' : 'none';
@@ -1630,14 +1435,10 @@
 
         bindCanvasEventsOnce();
 
-        // 若内存中尚无 PDF，尝试从 IndexedDB 恢复上次未导入草稿
-        let restoredFromDraft = false;
-        if (!rgState.exercise.pdfDoc && !rgState.answer.pdfDoc) {
-            const draft = await loadDraftFromIdb(newContextKey);
-            if (draft) {
-                restoredFromDraft = await restoreDraftRecord(draft);
-            }
-        }
+        // 草稿功能已关闭：若浏览器曾留存旧 IndexedDB 草稿库，直接清理
+        try {
+            if (typeof indexedDB !== 'undefined') indexedDB.deleteDatabase(DRAFT_DB_NAME);
+        } catch (_) {}
 
         goToStep('debug');
 
@@ -1660,9 +1461,6 @@
 
         renderAllRg();
         await renderPdfPage();
-        if (restoredFromDraft) {
-            showToast('已自动恢复上次未导入的框题草稿', 'info');
-        }
     };
 
     window.rgEditQuestionRegionFromStep4 = async function (index) {
@@ -1673,30 +1471,6 @@
         const q = Array.isArray(currentQuestions) ? currentQuestions[index] : null;
         if (!q) return;
         await window.openRegionDebugStudio({ skipReload: true, focusQuestion: q });
-    };
-
-    window.rgClearDraftPrompt = function () {
-        if (typeof showCustomDialog === 'function') {
-            showCustomDialog({
-                title: '清空框题草稿',
-                body: '确定要清空当前已上传的原卷 PDF 与所有框选记录吗？此操作无法恢复。',
-                confirmText: '确定清空',
-                danger: true,
-                onConfirm: async () => {
-                    await window.rgClearSavedDraft(rgState.contextKey);
-                    resetStudioMemoryState();
-                    renderAllRg();
-                    await renderPdfPage();
-                    showToast('已清空当前框题草稿');
-                }
-            });
-            return;
-        }
-        window.rgClearSavedDraft(rgState.contextKey).then(async () => {
-            resetStudioMemoryState();
-            renderAllRg();
-            await renderPdfPage();
-        });
     };
 
     window.exitRegionDebugStudio = function () {
@@ -1998,9 +1772,26 @@
         scheduleDraftSave();
     };
 
-    window.rgStartContinue = function (itemId) {
+    window.rgStartContinue = async function (itemId) {
+        const tabState = getTabState();
+        const it = tabState.items.find(x => x.id === itemId);
         rgState.continueTargetId = itemId;
         rgState.selectedId = itemId;
+        if (tabState.pdfDoc && tabState.totalPages > 1) {
+            const lastPageNum = (it && Array.isArray(it.regions) && it.regions.length > 0)
+                ? (Math.max(...it.regions.map(r => parseInt(r.pageOffset, 10) || 0)) + 1)
+                : tabState.pageNum;
+            if (lastPageNum < tabState.totalPages) {
+                const targetPage = lastPageNum + 1;
+                if (targetPage !== tabState.pageNum) {
+                    tabState.pageNum = targetPage;
+                    rgState.twoTapStart = null;
+                    await renderPdfPage();
+                }
+            } else {
+                showToast('当前已是最后一页，可直接在本页续框', 'info');
+            }
+        }
         renderSidebar();
     };
 

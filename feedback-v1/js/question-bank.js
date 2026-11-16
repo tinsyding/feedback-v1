@@ -3756,10 +3756,6 @@ async function executeSaveQuestions(data) {
         const result = await apiPost(data);
         if (result.success) {
             isDirty = false;
-            if (typeof window.rgClearSavedDraft === 'function') {
-                const draftKey = [data.bankType, data.year, data.season, data.subject, data.grade, data.tier, data.week].join('|');
-                window.rgClearSavedDraft(draftKey);
-            }
             // 性能优化：不再执行全量 DOM 清空重绘 renderQuestionList()，仅更新保存状态与已有统计
             updateStatus();
             renderSavedDataList();
@@ -6623,7 +6619,6 @@ window.addEventListener('resize', () => {
         'go-config-step': () => goToConfigStep(),
         'go-home': () => goToHome(),
         'exit-rg-studio': () => exitRegionDebugStudio(),
-        'rg-clear-draft': () => rgClearDraftPrompt(),
         'rg-prev-stage': () => rgGoPrevStage(),
         'rg-next-stage': () => rgGoNextStage(),
         'rg-finish-import': () => rgFinishAndImport(),
