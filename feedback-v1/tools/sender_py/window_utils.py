@@ -377,6 +377,90 @@ def is_foreground_wecom() -> bool:
         return True
 
 
+def get_monitor_work_rect(hwnd=None):
+    """获取指定窗口（默认企微窗口）所在显示器的工作区矩形 (left, top, width, height)，排除任务栏。非 Windows 返回 None。"""
+    _ensure_thread_dpi_aware()
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = _user32()
+    except Exception:
+        return None
+
+    class _RECT(ctypes.Structure):
+        _fields_ = [
+            ("left", ctypes.c_long),
+            ("top", ctypes.c_long),
+            ("right", ctypes.c_long),
+            ("bottom", ctypes.c_long),
+        ]
+
+    class _MONITORINFO(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD),
+            ("rcMonitor", _RECT),
+            ("rcWork", _RECT),
+            ("dwFlags", wintypes.DWORD),
+        ]
+
+    target_hwnd = hwnd or get_wecom_hwnd()
+    try:
+        if target_hwnd:
+            h_monitor = user32.MonitorFromWindow(target_hwnd, 2)  # MONITOR_DEFAULTTONEAREST
+            if h_monitor:
+                mi = _MONITORINFO()
+                mi.cbSize = ctypes.sizeof(_MONITORINFO)
+                if user32.GetMonitorInfoW(h_monitor, ctypes.byref(mi)):
+                    return (
+                        int(mi.rcWork.left),
+                        int(mi.rcWork.top),
+                        int(mi.rcWork.right - mi.rcWork.left),
+                        int(mi.rcWork.bottom - mi.rcWork.top),
+                    )
+        return (
+            int(user32.GetSystemMetrics(76)),
+            int(user32.GetSystemMetrics(77)),
+            int(user32.GetSystemMetrics(78)),
+            int(user32.GetSystemMetrics(79)),
+        )
+    except Exception:
+        return None
+
+
+def show_window_topmost_noactivate(tk_win) -> bool:
+    """将 Tk 窗口置顶显示但不抢夺当前前台窗口（企微）焦点。"""
+    try:
+        tk_win.attributes("-topmost", True)
+    except Exception:
+        pass
+    try:
+        import ctypes
+        import sys
+        if sys.platform != "win32":
+            tk_win.deiconify()
+            return True
+        user32 = ctypes.windll.user32
+        tk_win.update_idletasks()
+        hwnd = tk_win.winfo_id()
+        try:
+            if not tk_win.overrideredirect():
+                parent_hwnd = user32.GetParent(hwnd)
+                if parent_hwnd:
+                    hwnd = parent_hwnd
+        except Exception:
+            pass
+        # HWND_TOPMOST = -1; SWP_NOSIZE(1) | SWP_NOMOVE(2) | SWP_NOACTIVATE(0x10) | SWP_SHOWWINDOW(0x40) = 0x53
+        user32.ShowWindow(hwnd, 4)  # SW_SHOWNOACTIVATE
+        user32.SetWindowPos(hwnd, ctypes.c_void_p(-1), 0, 0, 0, 0, 0x0053)
+        return True
+    except Exception:
+        try:
+            tk_win.deiconify()
+        except Exception:
+            pass
+        return False
+
+
 def restore_and_center_wecom(hwnd=None, log=None) -> tuple:
     """将企业微信窗口恢复为「向下还原状态」，缩至其内置最小极限尺寸，并精准居中于其当前所在的显示器。
 
@@ -440,45 +524,12 @@ def restore_and_center_wecom(hwnd=None, log=None) -> tuple:
             min_h = max(min_h, baseline_h)
 
         # 3. 屏幕识别（多显示器安全检测）：
-        # 使用 MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) 查找企微主要所在的显示器句柄，
-        # 无论副屏在主屏左侧（负坐标）、右侧还是上方，均能精准捕获对应显示器的工作区（排除任务栏）。
-        class _RECT(ctypes.Structure):
-            _fields_ = [
-                ("left", ctypes.c_long),
-                ("top", ctypes.c_long),
-                ("right", ctypes.c_long),
-                ("bottom", ctypes.c_long),
-            ]
-
-        class _MONITORINFO(ctypes.Structure):
-            _fields_ = [
-                ("cbSize", wintypes.DWORD),
-                ("rcMonitor", _RECT),
-                ("rcWork", _RECT),
-                ("dwFlags", wintypes.DWORD),
-            ]
-
-        MONITOR_DEFAULTTONEAREST = 2
-        h_monitor = user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
-
-        work_l, work_t, work_w, work_h = 0, 0, 1920, 1080
-        got_monitor = False
-
-        if h_monitor:
-            mi = _MONITORINFO()
-            mi.cbSize = ctypes.sizeof(_MONITORINFO)
-            if user32.GetMonitorInfoW(h_monitor, ctypes.byref(mi)):
-                work_l = mi.rcWork.left
-                work_t = mi.rcWork.top
-                work_w = mi.rcWork.right - mi.rcWork.left
-                work_h = mi.rcWork.bottom - mi.rcWork.top
-                got_monitor = True
-
-        if not got_monitor:
-            work_l = user32.GetSystemMetrics(76)  # SM_XVIRTUALSCREEN
-            work_t = user32.GetSystemMetrics(77)  # SM_YVIRTUALSCREEN
-            work_w = user32.GetSystemMetrics(78)  # SM_CXVIRTUALSCREEN
-            work_h = user32.GetSystemMetrics(79)  # SM_CYVIRTUALSCREEN
+        # 使用 get_monitor_work_rect 查找企微主要所在的显示器工作区（排除任务栏）。
+        work_rect = get_monitor_work_rect(hwnd)
+        if work_rect:
+            work_l, work_t, work_w, work_h = work_rect
+        else:
+            work_l, work_t, work_w, work_h = 0, 0, 1920, 1080
 
         # 4. 计算居中坐标：保证窗口完全在工作区内，水平和垂直均精准居中
         final_w = min(min_w, work_w)

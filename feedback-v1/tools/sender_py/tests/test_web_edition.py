@@ -605,6 +605,77 @@ class TestWebEdition(unittest.TestCase):
             self.assertFalse(mock_send2.call_args_list[1].kwargs["check_sidebar"])
             self.assertIsNone(ctrl2.progress.get("sidebar_alert"))
 
+    def test_compute_side_hud_geometry_avoids_wecom(self):
+        """侧边进度浮窗应优先停靠企微右侧，空间不足切左侧或窄幅贴靠，绝不遮挡企微。"""
+        from sender_py.web_companion import compute_side_hud_geometry
+
+        work = (0, 0, 1920, 1040)
+        # 1. 企微居中 (480..1440) -> 右侧有 480px 空余，停在企微右侧
+        wx, wy, ww, wh = (480, 200, 960, 640)
+        x, y, w, h = compute_side_hud_geometry((wx, wy, ww, wh), work, hud_w=276, hud_h=236, margin=12)
+        self.assertEqual((x, y, w, h), (480 + 960 + 12, 200, 276, 236))
+        self.assertGreaterEqual(x, wx + ww + 12)
+
+        # 2. 企微靠右 -> 右侧不足，自动切到企微左侧
+        x2, y2, w2, _ = compute_side_hud_geometry((900, 100, 960, 640), work, hud_w=276, hud_h=236, margin=12)
+        self.assertEqual(w2, 276)
+        self.assertLessEqual(x2 + w2, 900 - 12)
+
+        # 3. 笔记本高缩放窄边（两侧各剩 230px < 276，但 >= 196）-> 自动缩窄贴靠右侧，仍不重叠企微
+        x3, _, w3, _ = compute_side_hud_geometry((230, 80, 900, 600), (0, 0, 1360, 720), hud_w=276, hud_h=236, margin=12, min_w=196)
+        self.assertGreaterEqual(x3, 230 + 900 + 12)
+        self.assertLessEqual(x3 + w3, 1360)
+        self.assertGreaterEqual(w3, 196)
+
+        # 4. 企微未就绪 (None) -> 停在工作区右上角
+        x4, y4, w4, _ = compute_side_hud_geometry(None, work, hud_w=276, hud_h=236, margin=12)
+        self.assertEqual((x4, y4, w4), (1920 - 276 - 12, 12, 276))
+
+    def test_web_companion_side_hud_lifecycle(self):
+        """发送启动时展示侧边进度浮窗，结束时切为完成提示并安排自动关闭。"""
+        import sys
+        mock_tk = unittest.mock.MagicMock()
+        mock_ttk = unittest.mock.MagicMock()
+        mock_tk.Label.side_effect = lambda *a, **kw: unittest.mock.MagicMock()
+        mock_tk.Button.side_effect = lambda *a, **kw: unittest.mock.MagicMock()
+        mock_tk.Frame.side_effect = lambda *a, **kw: unittest.mock.MagicMock()
+        mock_tk.Toplevel.side_effect = lambda *a, **kw: unittest.mock.MagicMock()
+
+        with unittest.mock.patch.dict(sys.modules, {"tkinter": mock_tk, "tkinter.ttk": mock_ttk}):
+            from sender_py.web_companion import WebCompanionWindow
+            ctrl = WebController()
+            mock_server = unittest.mock.MagicMock()
+            mock_root = unittest.mock.MagicMock()
+            mock_root.winfo_screenwidth.return_value = 1920
+            mock_root.winfo_screenheight.return_value = 1080
+
+            win = WebCompanionWindow(ctrl, mock_server, 8765, "http://127.0.0.1:8765", root=mock_root)
+
+            # 1. 发送中状态 -> 创建并展示 HUD
+            with unittest.mock.patch.object(ctrl, "get_state", return_value={
+                "running": True,
+                "files": ["a.json"],
+                "progress": {"processed": 2, "total": 5, "current_name": "55650徐思琪", "step_text": "正在发送：55650徐思琪 (3/5)", "countdown": 0},
+                "summary": {"total": 5, "selected": 5, "sent": 2, "failed": 0, "unmatched": 0, "blocked": 0, "skipped": 0},
+            }):
+                running = win._update_status_display()
+            self.assertTrue(running)
+            self.assertIsNotNone(win._progress_hud)
+            self.assertTrue(win._progress_hud._visible)
+            self.assertEqual(win._progress_hud._pct_lbl.config.call_args[1]["text"], "2/5 (40%)")
+
+            # 2. 发送结束 -> 切换结束态并调度自动隐藏
+            with unittest.mock.patch.object(ctrl, "get_state", return_value={
+                "running": False,
+                "files": ["a.json"],
+                "progress": {"processed": 5, "total": 5, "current_name": "", "step_text": "发送完成", "countdown": 0},
+                "summary": {"total": 5, "selected": 0, "sent": 5, "failed": 0, "unmatched": 0, "blocked": 0, "skipped": 0},
+            }):
+                running_after = win._update_status_display()
+            self.assertFalse(running_after)
+            self.assertEqual(win._progress_hud._badge_lbl.config.call_args[1]["text"], "发送完成")
+            self.assertTrue(mock_root.after.called)
+
 
 if __name__ == "__main__":
     unittest.main()

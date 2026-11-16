@@ -106,6 +106,384 @@ def apply_window_icon(root, ico_path=None):
     return photo_ref
 
 
+def compute_side_hud_geometry(
+    wecom_rect,
+    work_rect,
+    hud_w: int = 276,
+    hud_h: int = 236,
+    margin: int = 12,
+    min_w: int = 196,
+) -> tuple:
+    """纯函数：计算侧边进度浮窗的几何位置 (x, y, w, h)，紧贴企微窗口旁侧且不遮挡企微。
+
+    优先级：
+      1. 企微右侧有足够空间（≥ hud_w）→ 停靠在企微右侧；
+      2. 企微左侧有足够空间（≥ hud_w）→ 停靠在企微左侧；
+      3. 两侧空间不足 hud_w 但较宽一侧 ≥ min_w → 窄幅贴靠在该侧且不重叠企微；
+      4. 极窄屏（企微几乎占满全宽）→ 退避至工作区右上角。
+    """
+    wl, wt, ww_work, wh_work = (int(v) for v in work_rect)
+    work_r = wl + max(1, ww_work)
+    work_b = wt + max(1, wh_work)
+    actual_h = min(int(hud_h), max(120, wh_work - 2 * margin))
+
+    if not wecom_rect or len(wecom_rect) < 4:
+        actual_w = min(int(hud_w), max(min_w, ww_work - 2 * margin))
+        return (work_r - actual_w - margin, wt + margin, actual_w, actual_h)
+
+    wx, wy, ww, _wh = (int(v) for v in wecom_rect[:4])
+    right_avail = work_r - (wx + ww) - margin
+    left_avail = (wx - wl) - margin
+
+    if right_avail >= hud_w:
+        actual_w = int(hud_w)
+        x = wx + ww + margin
+    elif left_avail >= hud_w:
+        actual_w = int(hud_w)
+        x = wx - margin - actual_w
+    elif max(right_avail, left_avail) >= min_w:
+        if right_avail >= left_avail:
+            actual_w = min(int(hud_w), max(min_w, right_avail - 2))
+            x = wx + ww + margin
+        else:
+            actual_w = min(int(hud_w), max(min_w, left_avail - 2))
+            x = wx - margin - actual_w
+    else:
+        actual_w = min(int(hud_w), max(min_w, ww_work - 2 * margin))
+        x = work_r - actual_w - margin
+
+    max_y = max(wt + margin, work_b - actual_h - margin)
+    y = min(max(wy, wt + margin), max_y)
+    return (int(x), int(y), int(actual_w), int(actual_h))
+
+
+class FloatingProgressHUD:
+    """发送期间紧贴企微窗口旁侧的置顶进度浮窗（不抢焦点、不遮挡企微画面）。"""
+
+    def __init__(self, master, on_stop=None):
+        self.master = master
+        self.on_stop = on_stop
+        self.win = None
+        self._visible = False
+        self._dismissed = False
+        self._user_moved = False
+        self._last_geom = None
+        self._auto_hide_after_id = None
+        self._drag_offset = None
+
+    def _cancel_auto_hide(self):
+        if self._auto_hide_after_id is not None and self.master is not None:
+            try:
+                self.master.after_cancel(self._auto_hide_after_id)
+            except Exception:
+                pass
+            self._auto_hide_after_id = None
+
+    def _get_scale_and_rects(self):
+        try:
+            try:
+                from sender_py import window_utils as wu
+            except ModuleNotFoundError:
+                import window_utils as wu
+            hwnd = wu.get_wecom_hwnd()
+            wecom_rect = wu.get_wecom_rect()
+            work_rect = wu.get_monitor_work_rect(hwnd)
+            scale = wu.get_dpi_scale(hwnd) if hwnd else wu.get_dpi_scale()
+        except Exception:
+            wecom_rect, work_rect, scale = None, None, 1.0
+
+        if not isinstance(scale, (int, float)) or scale <= 0:
+            scale = 1.0
+        if not work_rect:
+            try:
+                sw = self.master.winfo_screenwidth()
+                sh = self.master.winfo_screenheight()
+                if isinstance(sw, (int, float)) and isinstance(sh, (int, float)) and sw > 100 and sh > 100:
+                    work_rect = (0, 0, int(sw), int(sh))
+            except Exception:
+                pass
+        if not work_rect:
+            work_rect = (0, 0, 1920, 1040)
+        return scale, wecom_rect, work_rect
+
+    def _ensure_window(self):
+        if self.win is not None:
+            try:
+                if self.win.winfo_exists():
+                    return True
+            except Exception:
+                self.win = None
+
+        import tkinter as tk
+        from tkinter import ttk
+
+        win = tk.Toplevel(self.master)
+        win.withdraw()
+        try:
+            win.overrideredirect(True)
+        except Exception:
+            pass
+        try:
+            win.attributes("-topmost", True)
+        except Exception:
+            pass
+        win.configure(bg="#cbd5e1")
+
+        outer = tk.Frame(win, bg="#ffffff", bd=0, highlightthickness=0)
+        outer.pack(fill="both", expand=True, padx=1, pady=1)
+
+        header = tk.Frame(outer, bg="#0f172a", padx=10, pady=6, cursor="fleur")
+        header.pack(fill="x")
+
+        title_lbl = tk.Label(
+            header, text="📊 极方反馈 · 发送进度",
+            font=("Microsoft YaHei", 9, "bold"), fg="#f8fafc", bg="#0f172a", anchor="w",
+        )
+        title_lbl.pack(side="left", fill="x", expand=True)
+
+        close_lbl = tk.Label(
+            header, text="×", font=("Microsoft YaHei", 11, "bold"),
+            fg="#94a3b8", bg="#0f172a", padx=4, cursor="hand2",
+        )
+        close_lbl.pack(side="right")
+        close_lbl.bind("<Button-1>", lambda _e: self.dismiss())
+
+        def _on_drag_start(ev):
+            try:
+                self._drag_offset = (ev.x_root - win.winfo_x(), ev.y_root - win.winfo_y())
+            except Exception:
+                self._drag_offset = None
+
+        def _on_drag_move(ev):
+            if not self._drag_offset:
+                return
+            try:
+                self._user_moved = True
+                nx = int(ev.x_root - self._drag_offset[0])
+                ny = int(ev.y_root - self._drag_offset[1])
+                win.geometry(f"+{nx}+{ny}")
+            except Exception:
+                pass
+
+        for w_drag in (header, title_lbl):
+            w_drag.bind("<ButtonPress-1>", _on_drag_start)
+            w_drag.bind("<B1-Motion>", _on_drag_move)
+
+        body = tk.Frame(outer, bg="#ffffff", padx=12, pady=10)
+        body.pack(fill="both", expand=True)
+
+        top_row = tk.Frame(body, bg="#ffffff")
+        top_row.pack(fill="x", pady=(0, 6))
+
+        self._badge_lbl = tk.Label(
+            top_row, text="准备中", font=("Microsoft YaHei", 8, "bold"),
+            fg="#1d4ed8", bg="#dbeafe", padx=6, pady=2,
+        )
+        self._badge_lbl.pack(side="left")
+
+        self._pct_lbl = tk.Label(
+            top_row, text="0/0 (0%)", font=("Microsoft YaHei", 9, "bold"),
+            fg="#0f172a", bg="#ffffff",
+        )
+        self._pct_lbl.pack(side="right")
+
+        self._pbar = ttk.Progressbar(body, mode="determinate", maximum=100, value=0)
+        self._pbar.pack(fill="x", pady=(0, 8))
+
+        self._current_lbl = tk.Label(
+            body, text="当前学员：等待开始...", font=("Microsoft YaHei", 9, "bold"),
+            fg="#1e293b", bg="#ffffff", anchor="w",
+        )
+        self._current_lbl.pack(fill="x", pady=(0, 4))
+
+        self._step_lbl = tk.Label(
+            body, text="正在准备发送任务...", font=("Microsoft YaHei", 8),
+            fg="#475569", bg="#ffffff", anchor="w", justify="left", wraplength=240,
+        )
+        self._step_lbl.pack(fill="x", pady=(0, 8))
+
+        self._stats_lbl = tk.Label(
+            body, text="成功 0 · 失败 0 · 未匹配 0 · 拦截 0", font=("Microsoft YaHei", 8),
+            fg="#64748b", bg="#f8fafc", padx=6, pady=4, anchor="w",
+        )
+        self._stats_lbl.pack(fill="x", pady=(0, 8))
+
+        self._action_btn = tk.Button(
+            body, text="⏹ 停止发送 (Esc)", font=("Microsoft YaHei", 9, "bold"),
+            bg="#fee2e2", fg="#dc2626", activebackground="#fecaca", activeforeground="#b91c1c",
+            relief="flat", cursor="hand2", pady=4, command=self._handle_action_click,
+        )
+        self._action_btn.pack(fill="x")
+
+        self.win = win
+        return True
+
+    def _handle_action_click(self):
+        if getattr(self, "_is_running_state", False):
+            if callable(self.on_stop):
+                try:
+                    self._action_btn.config(state="disabled", text="正在停止...")
+                except Exception:
+                    pass
+                self.on_stop()
+        else:
+            self.dismiss()
+
+    def _apply_geometry(self, force_show: bool = False):
+        if self.win is None:
+            return
+        scale, wecom_rect, work_rect = self._get_scale_and_rects()
+        hud_w = int(round(276 * scale))
+        hud_h = int(round(238 * scale))
+        margin = int(round(12 * scale))
+        min_w = int(round(196 * scale))
+        x, y, w, h = compute_side_hud_geometry(
+            wecom_rect, work_rect, hud_w=hud_w, hud_h=hud_h, margin=margin, min_w=min_w,
+        )
+        try:
+            self._step_lbl.config(wraplength=max(150, w - int(round(28 * scale))))
+        except Exception:
+            pass
+        if not self._user_moved:
+            geom = (x, y, w, h)
+            if geom != self._last_geom:
+                self._last_geom = geom
+                try:
+                    self.win.geometry(f"{w}x{h}+{x}+{y}")
+                except Exception:
+                    pass
+        if force_show or not self._visible:
+            self._visible = True
+            try:
+                try:
+                    from sender_py import window_utils as wu
+                except ModuleNotFoundError:
+                    import window_utils as wu
+                wu.show_window_topmost_noactivate(self.win)
+            except Exception:
+                try:
+                    self.win.deiconify()
+                except Exception:
+                    pass
+
+    def reset_for_new_run(self):
+        self._cancel_auto_hide()
+        self._dismissed = False
+        self._user_moved = False
+        self._last_geom = None
+
+    def update(self, state: dict, just_finished: bool = False):
+        if self._dismissed:
+            return
+        try:
+            if not self._ensure_window():
+                return
+        except Exception:
+            return
+
+        is_running = bool(state.get("running", False))
+        self._is_running_state = is_running
+        prog = state.get("progress") if isinstance(state.get("progress"), dict) else {}
+        summary = state.get("summary") if isinstance(state.get("summary"), dict) else {}
+
+        processed = int(prog.get("processed") or 0)
+        total = max(0, int(prog.get("total") or 0))
+        countdown = int(prog.get("countdown") or 0)
+        cur_name = str(prog.get("current_name") or "").strip()
+        step_text = str(prog.get("step_text") or "").strip()
+        sidebar_alert = prog.get("sidebar_alert")
+
+        sent_c = int(summary.get("sent") or 0)
+        fail_c = int(summary.get("failed") or 0)
+        unmatched_c = int(summary.get("unmatched", summary.get("mismatch", 0)) or 0)
+        blocked_c = int(summary.get("blocked") or 0)
+
+        pct = min(100, int(round((processed / total) * 100))) if total > 0 else 0
+        try:
+            self._pbar.config(value=100 if (not is_running and not sidebar_alert and total > 0 and processed >= total) else pct)
+            self._pct_lbl.config(text=f"{processed}/{total} ({pct}%)" if total > 0 else "0/0")
+            self._stats_lbl.config(text=f"成功 {sent_c} · 失败 {fail_c} · 未匹配 {unmatched_c} · 拦截 {blocked_c}")
+        except Exception:
+            pass
+
+        if is_running:
+            self._cancel_auto_hide()
+            if countdown > 0:
+                badge_txt, badge_fg, badge_bg = f"倒计时 {countdown}s", "#b45309", "#fef3c7"
+                cur_txt = "即将开始发送..."
+            else:
+                badge_txt, badge_fg, badge_bg = "发送中", "#1d4ed8", "#dbeafe"
+                cur_txt = f"当前：{cur_name}" if cur_name else "当前：准备中..."
+            try:
+                self._badge_lbl.config(text=badge_txt, fg=badge_fg, bg=badge_bg)
+                self._current_lbl.config(text=cur_txt, fg="#1e293b")
+                self._step_lbl.config(text=step_text or "正在执行发送...", fg="#475569")
+                self._action_btn.config(
+                    state="normal", text="⏹ 停止发送 (Esc)",
+                    bg="#fee2e2", fg="#dc2626", activebackground="#fecaca",
+                )
+            except Exception:
+                pass
+            self._apply_geometry(force_show=not self._visible)
+            return
+
+        if just_finished and self._visible:
+            if sidebar_alert:
+                badge_txt, badge_fg, badge_bg = "请关侧边栏", "#b91c1c", "#fee2e2"
+                cur_txt = "检测到企微右侧边栏已打开"
+                detail_txt = (sidebar_alert.get("message") if isinstance(sidebar_alert, dict) else "") or step_text
+                delay_ms = 15000
+            elif "暂停" in step_text:
+                badge_txt, badge_fg, badge_bg = "已暂停", "#b45309", "#fef3c7"
+                cur_txt = f"已完成 {processed}/{total}"
+                detail_txt = step_text
+                delay_ms = 8000
+            else:
+                badge_txt, badge_fg, badge_bg = "发送完成", "#15803d", "#dcfce7"
+                cur_txt = f"本批结束（成功 {sent_c} / 共 {total}）"
+                detail_txt = step_text or "本批处理已结束"
+                delay_ms = 8000
+            try:
+                self._badge_lbl.config(text=badge_txt, fg=badge_fg, bg=badge_bg)
+                self._current_lbl.config(text=cur_txt, fg=badge_fg)
+                self._step_lbl.config(text=detail_txt, fg="#334155")
+                self._action_btn.config(
+                    state="normal", text="关闭浮窗",
+                    bg="#e2e8f0", fg="#1e293b", activebackground="#cbd5e1",
+                )
+            except Exception:
+                pass
+            self._apply_geometry(force_show=False)
+            self._cancel_auto_hide()
+            try:
+                self._auto_hide_after_id = self.master.after(delay_ms, self.hide)
+            except Exception:
+                pass
+
+    def dismiss(self):
+        self._dismissed = True
+        self.hide()
+
+    def hide(self):
+        self._cancel_auto_hide()
+        self._visible = False
+        if self.win is not None:
+            try:
+                self.win.withdraw()
+            except Exception:
+                pass
+
+    def destroy(self):
+        self._cancel_auto_hide()
+        self._visible = False
+        if self.win is not None:
+            try:
+                self.win.destroy()
+            except Exception:
+                pass
+            self.win = None
+
+
 class WebCompanionWindow:
     def __init__(self, controller, server, port: int, url: str, root=None):
         self.controller = controller
@@ -117,6 +495,8 @@ class WebCompanionWindow:
         from tkinter import ttk
 
         self.root = root if root is not None else tk.Tk()
+        self._progress_hud = None
+        self._was_running = False
         self._init_window()
         self._build_ui()
         self._setup_hooks()
@@ -362,10 +742,11 @@ class WebCompanionWindow:
         self._update_status_display()
 
     def _schedule_poll(self):
-        """每 800ms 轮询一次控制器状态，刷新控制台界面。"""
+        """运行期每 250ms、空闲期每 800ms 轮询一次控制器状态，刷新控制台与侧边进度浮窗。"""
         try:
-            self._update_status_display()
-            self.root.after(800, self._schedule_poll)
+            is_running = self._update_status_display()
+            interval = 250 if is_running else 800
+            self.root.after(interval, self._schedule_poll)
         except Exception:
             pass
 
@@ -373,16 +754,16 @@ class WebCompanionWindow:
         try:
             state = self.controller.get_state()
         except Exception:
-            return
+            return False
 
-        is_running = state.get("running", False)
+        is_running = bool(state.get("running", False))
         files = state.get("files", [])
         summary = state.get("summary", {})
         total_students = summary.get("total", 0)
         selected_students = summary.get("selected", 0)
         sent_count = summary.get("sent", 0)
         failed_count = summary.get("failed", 0)
-        mismatch_count = summary.get("mismatch", 0)
+        mismatch_count = summary.get("unmatched", summary.get("mismatch", 0))
         skipped_count = summary.get("skipped", 0)
 
         # 更新状态指示徽标
@@ -416,6 +797,21 @@ class WebCompanionWindow:
         self.lbl_send_progress.config(
             text=f"发送进度：已发送 {sent_count} · 失败 {failed_count} · 未匹配 {mismatch_count} · 跳过 {skipped_count}"
         )
+
+        # 同步侧边进度浮窗（仅在发送期间或刚结束收尾时显示在企微旁侧，不挡企微且不抢焦点）
+        just_started = is_running and not self._was_running
+        just_finished = (not is_running) and self._was_running
+        self._was_running = is_running
+        try:
+            if is_running or just_finished:
+                if self._progress_hud is None:
+                    self._progress_hud = FloatingProgressHUD(self.root, on_stop=self.stop_send)
+                if just_started:
+                    self._progress_hud.reset_for_new_run()
+                self._progress_hud.update(state, just_finished=just_finished)
+        except Exception:
+            pass
+        return is_running
 
     def on_close(self):
         """用户点击右上角 [X] 或「退出程序」按钮时的退出确认与资源释放。"""
@@ -452,6 +848,12 @@ class WebCompanionWindow:
         try:
             self.server.shutdown()
             self.server.server_close()
+        except Exception:
+            pass
+
+        try:
+            if self._progress_hud is not None:
+                self._progress_hud.destroy()
         except Exception:
             pass
 
