@@ -1426,24 +1426,25 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         return out;
     }
 
-    // 大题小问页内错题角标缓存（白底深灰细描边轻量小标牌，黑白激光打印依然清晰且不抢题干）
+    // 大题小问左侧边距极简错题标记缓存（极简「×题号」细描边徽标，无框无竖线不干扰题干）
     const errorBoxTagCache = {};
-    function generateErrorBoxTagPng(qNum, compact = false) {
-        const text = compact ? String(qNum) : ('错题 ' + qNum);
-        const cacheKey = (compact ? 'C2_' : 'F2_') + text;
+    function generateErrorBoxTagPng(qNum, compact = false, showCross = false) {
+        const numStr = (qNum !== undefined && qNum !== null && String(qNum).trim() !== '') ? String(qNum).trim() : '';
+        const text = showCross ? (numStr ? ('×' + numStr) : '×') : (compact ? numStr : ('错题 ' + numStr));
+        const cacheKey = (showCross ? 'M_' : (compact ? 'C2_' : 'F2_')) + text;
         if (errorBoxTagCache[cacheKey]) return errorBoxTagCache[cacheKey];
         try {
             const K = 3;
             const testCanvas = document.createElement('canvas');
             const testCtx = testCanvas.getContext('2d');
-            const fontSizePt = compact ? 7.2 : 8.0;
+            const fontSizePt = showCross ? 7.5 : (compact ? 7.2 : 8.0);
             const font = '600 ' + Math.round(fontSizePt * K) + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
             testCtx.font = font;
             const tw = testCtx.measureText(text).width;
-            const wPt = compact
-                ? Math.max(13, Math.ceil((tw / K) + 6))
-                : Math.max(26, Math.ceil((tw / K) + 9));
-            const hPt = compact ? 10.5 : 12;
+            const wPt = showCross
+                ? Math.max(13, Math.min(23, Math.ceil((tw / K) + 6)))
+                : (compact ? Math.max(13, Math.ceil((tw / K) + 6)) : Math.max(26, Math.ceil((tw / K) + 9)));
+            const hPt = showCross ? 11.5 : (compact ? 10.5 : 12);
             const wpx = Math.round(wPt * K);
             const hpx = Math.round(hPt * K);
 
@@ -1452,8 +1453,8 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             canvas.height = hpx;
             const ctx = canvas.getContext('2d');
 
-            // 白色实底 + 柔和深灰细描边，视觉轻量克制
-            questionTopicBadgeRoundRect(ctx, 0.6 * K, 0.6 * K, wpx - 1.2 * K, hpx - 1.2 * K, (compact ? 2 : 2.5) * K);
+            const radius = showCross ? (hpx / 2 - 0.8 * K) : ((compact ? 2 : 2.5) * K);
+            questionTopicBadgeRoundRect(ctx, 0.6 * K, 0.6 * K, wpx - 1.2 * K, hpx - 1.2 * K, radius);
             ctx.fillStyle = '#ffffff';
             ctx.fill();
             ctx.lineWidth = 0.85 * K;
@@ -2459,53 +2460,26 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
             const drawErrorBoxHighlight = async (page, { ebX, ebBottomY, ebW, ebH, ebTopY, ebNum, isCompactTag, boxX, sliceTopY }) => {
                 try {
-                    // 方案一：左侧竖向标条 + 轻量白底细描边角标（不压字、不抢题干视觉）
-                    const railW = 2.2;
-                    const railX = Math.max(boxX + 2.5, ebX - 3);
-                    const railY = ebBottomY + 1;
-                    const railH = Math.max(8, ebH - 2);
+                    // 方案四：极简无框，仅在错题小问左侧边距空白处印轻量「×题号」细圈徽标
+                    const tagSpec = generateErrorBoxTagPng(ebNum, true, true);
+                    if (!tagSpec || !tagSpec.dataUrl) return;
+                    const tagImg = await embedPngCached(tagSpec.dataUrl);
+                    if (!tagImg) return;
 
-                    // 轻微白色衬底，防止压在原卷边线上粘连
-                    page.drawRectangle({
-                        x: railX - 0.6,
-                        y: railY - 0.6,
-                        width: railW + 1.2,
-                        height: railH + 1.2,
-                        color: PDFLib.rgb(1, 1, 1),
-                        opacity: 0.85
+                    const inLeftMargin = (ebX <= boxX + 26);
+                    const tagX = inLeftMargin
+                        ? Math.max(3, boxX - tagSpec.widthPt - 2.5)
+                        : Math.max(boxX + 4, ebX - tagSpec.widthPt - 2.5);
+                    const tagY = Math.min(
+                        sliceTopY - tagSpec.heightPt,
+                        Math.max(ebBottomY, ebTopY - tagSpec.heightPt - 1)
+                    );
+                    page.drawImage(tagImg, {
+                        x: tagX,
+                        y: tagY,
+                        width: tagSpec.widthPt,
+                        height: tagSpec.heightPt
                     });
-
-                    // 柔和深墨灰竖条
-                    page.drawRectangle({
-                        x: railX,
-                        y: railY,
-                        width: railW,
-                        height: railH,
-                        color: PDFLib.rgb(0.24, 0.29, 0.38)
-                    });
-
-                    if (ebNum) {
-                        const tagSpec = generateErrorBoxTagPng(ebNum, isCompactTag);
-                        if (tagSpec && tagSpec.dataUrl) {
-                            const tagImg = await embedPngCached(tagSpec.dataUrl);
-                            if (tagImg) {
-                                const preferAboveY = ebTopY + 1;
-                                const canPlaceAbove = (preferAboveY + tagSpec.heightPt <= sliceTopY + 3);
-                                const tagX = canPlaceAbove
-                                    ? Math.max(boxX + 4, railX)
-                                    : Math.max(boxX + 4, railX + railW + 2.5);
-                                const tagY = canPlaceAbove
-                                    ? preferAboveY
-                                    : Math.max(ebBottomY + 1, ebTopY - tagSpec.heightPt - 0.5);
-                                page.drawImage(tagImg, {
-                                    x: tagX,
-                                    y: tagY,
-                                    width: tagSpec.widthPt,
-                                    height: tagSpec.heightPt
-                                });
-                            }
-                        }
-                    }
                 } catch (ebErr) {
                     console.warn('Draw error box failed:', ebErr);
                 }
