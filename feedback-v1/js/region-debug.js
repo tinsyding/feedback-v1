@@ -346,7 +346,7 @@
         }
         if (!restoredAny) return false;
 
-        rgState.fullWidth = typeof record.fullWidth === 'boolean' ? record.fullWidth : true;
+        rgState.fullWidth = true;
         rgState.scale = typeof record.scale === 'number' ? record.scale : 1.0;
         rgState.nextSeq = Math.max(1, parseInt(record.nextSeq, 10) || 1);
         if (record.stage === 'answer' && rgState.answer.pdfDoc && rgState.exercise.items.length > 0) {
@@ -359,18 +359,7 @@
             rgState.stage = 'upload';
             rgState.activeTab = 'exercise';
         }
-        syncFullWidthUi();
         return true;
-    }
-
-    function syncFullWidthUi() {
-        const chk = document.getElementById('rg-fullwidth-toggle');
-        const toolBtn = document.getElementById('rg-fullwidth-toolbar-btn');
-        if (chk) chk.checked = Boolean(rgState.fullWidth);
-        if (toolBtn) {
-            toolBtn.classList.toggle('active', Boolean(rgState.fullWidth));
-            toolBtn.textContent = rgState.fullWidth ? '全宽: 开' : '全宽: 关';
-        }
     }
 
     function syncInteractModeUi() {
@@ -390,7 +379,6 @@
             twoTapBtn.classList.toggle('active', Boolean(rgState.twoTapMode));
             twoTapBtn.textContent = rgState.twoTapMode ? '两点定框: 开' : '两点定框: 关';
         }
-        syncFullWidthUi();
     }
 
     function startBoxResize(e, kind, itemId, boxRef, edge, boxEl) {
@@ -905,9 +893,12 @@
 
                 div.addEventListener('pointerdown', (e) => {
                     if (e.target.closest('.rg-handle') || e.target.closest('.rg-box-del')) return;
+                    // 大题细分拉框模式下，允许 pointerdown 冒泡到画布以在内部框选公共题干/小问
+                    if (rgState.subMode && rgState.subMode.tab === tab && rgState.interactMode === 'draw') return;
                     e.stopPropagation();
                 });
                 div.addEventListener('click', (e) => {
+                    if (rgState.subMode && rgState.subMode.tab === tab && rgState.interactMode === 'draw') return;
                     e.stopPropagation();
                     rgState.selectedId = it.id;
                     renderAllRg();
@@ -1746,13 +1737,6 @@
         } finally {
             inputEl.value = '';
         }
-    };
-
-    window.rgToggleFullWidth = function (checked) {
-        rgState.fullWidth = Boolean(checked);
-        syncFullWidthUi();
-        renderBoxOverlay();
-        scheduleDraftSave();
     };
 
     window.rgToggleInteractMode = function () {

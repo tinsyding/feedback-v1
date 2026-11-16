@@ -6630,7 +6630,6 @@ window.addEventListener('resize', () => {
         'rg-change-page': (_el, arg) => rgChangePage(parseInt(arg, 10)),
         'rg-toggle-interact': () => rgToggleInteractMode(),
         'rg-toggle-twotap': () => rgToggleTwoTapMode(),
-        'rg-toggle-fullwidth-btn': () => rgToggleFullWidth(!document.getElementById('rg-fullwidth-toggle')?.checked),
         'rg-zoom': (_el, arg) => rgZoom(parseFloat(arg)),
         'rg-undo-region': () => rgUndoLastRegion(),
         'rg-cancel-continue': () => rgCancelContinue(),
@@ -6656,7 +6655,6 @@ window.addEventListener('resize', () => {
         'qb-selector': () => onSelectorChange(),
         'toggle-auto-cascade': (el) => toggleAutoCascade(el.checked),
         'rg-pdf-upload': (el, arg) => rgHandlePdfUpload(arg, el),
-        'rg-toggle-fullwidth': (el) => rgToggleFullWidth(el.checked),
         'lightbox-label': (el) => onLightboxLabelChange(el.value)
     };
 
