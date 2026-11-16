@@ -1260,6 +1260,7 @@
         const finishBtn = document.getElementById('rg-finish-btn');
         const clearBtn = document.getElementById('rg-clear-draft-btn');
         const loadExistBtn = document.getElementById('rg-load-existing-btn');
+        const uploadFooter = document.getElementById('rg-upload-gate-footer');
         const exBox = document.getElementById('rg-exercise-upload-box');
         const ansBox = document.getElementById('rg-answer-upload-box');
 
@@ -1274,8 +1275,12 @@
             rgState.exercise.items.length > 0 || rgState.answer.items.length > 0
         );
         if (clearBtn) clearBtn.style.display = hasAnyDraft ? 'inline-flex' : 'none';
+        const showLoadExist = hasRegionDebugPermission() && st === 'upload' && hasSavedRegionCropInCurrentQuestions();
         if (loadExistBtn) {
-            loadExistBtn.style.display = (hasRegionDebugPermission() && st === 'upload' && hasSavedRegionCropInCurrentQuestions()) ? 'inline-flex' : 'none';
+            loadExistBtn.style.display = showLoadExist ? 'inline-flex' : 'none';
+        }
+        if (uploadFooter) {
+            uploadFooter.style.display = showLoadExist ? 'flex' : 'none';
         }
 
         if (pillUp) {

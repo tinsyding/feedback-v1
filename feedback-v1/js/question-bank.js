@@ -542,6 +542,10 @@ function goToStep(n) {
         return;
     }
     currentStep = n;
+    const shell = document.querySelector('.upload-shell');
+    if (shell) {
+        shell.classList.toggle('rg-studio-mode', n === 'debug');
+    }
     document.querySelectorAll('.step-panel').forEach(panel => {
         panel.classList.toggle('active', panel.id === `step-${n}`);
     });
