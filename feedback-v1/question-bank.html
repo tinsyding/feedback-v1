@@ -13,7 +13,7 @@
     <script src="js/theme-boot.js?v=20261114-04"></script>
     <link rel="stylesheet" href="css/common.css?v=20261114-04">
     <link rel="stylesheet" href="css/upload.css?v=20261114-04">
-    <link rel="stylesheet" href="css/question-bank.css?v=20261116-01">
+    <link rel="stylesheet" href="css/question-bank.css?v=20261116-02">
     <link rel="stylesheet" href="css/auth.css?v=20261114-04">
     <link rel="stylesheet" href="css/tokens.css?v=20261114-04">
     <!-- PDF 核心库：PDF-Lib (切片合并) + PDF.js (页面缩略图高清晰渲染) -->
@@ -23,8 +23,8 @@
     <script defer src="js/logger.js?v=20261114-04"></script>
     <script defer src="js/common.js?v=20261114-04"></script>
     <script defer src="js/auth.js?v=20261114-08"></script>
-    <script defer src="js/question-bank.js?v=20261116-01"></script>
-    <script defer src="js/region-debug.js?v=20261116-01"></script>
+    <script defer src="js/question-bank.js?v=20261116-02"></script>
+    <script defer src="js/region-debug.js?v=20261116-02"></script>
 </head>
 
 <body class="upload-page">
@@ -662,22 +662,6 @@
                             </div>
                         </div>
 
-                        <!-- 大题内部细分工具栏（点击某框的“设为大题”后激活） -->
-                        <div class="rg-submode-bar" id="rg-submode-bar" style="display: none;">
-                            <div class="rg-submode-left">
-                                <span class="rg-submode-badge" id="rg-submode-badge">大题细分模式</span>
-                                <div class="rg-subtarget-switch" id="rg-subtarget-switch">
-                                    <button type="button" class="rg-subtarget-btn active" id="rg-subtarget-stem" data-action="rg-sub-target" data-arg="stem">1. 框选原文/公共题干</button>
-                                    <button type="button" class="rg-subtarget-btn" id="rg-subtarget-subq" data-action="rg-sub-target" data-arg="subq">2. 框选小问</button>
-                                </div>
-                                <span class="rg-submode-hint" id="rg-submode-hint">先用绿框框出公共原文，再切换到“框选小问”框出各小题</span>
-                            </div>
-                            <div class="rg-submode-actions">
-                                <button type="button" class="btn sm secondary" data-action="rg-undo-subbox">撤销小框</button>
-                                <button type="button" class="btn sm primary" data-action="rg-exit-submode">完成大题细分</button>
-                            </div>
-                        </div>
-
                         <div class="rg-workspace" id="rg-workspace" style="display: none;">
                             <!-- 左侧：PDF 整卷画布 -->
                             <div class="rg-canvas-col">
@@ -746,6 +730,74 @@
             <div class="dialog-footer">
                 <button type="button" class="btn secondary" id="dialog-cancel">取消</button>
                 <button type="button" class="btn primary" id="dialog-confirm">确认</button>
+            </div>
+        </div>
+    </dialog>
+
+    <!-- 整卷框题：设为大题前确认首题题号 -->
+    <dialog class="dialog-overlay native-dialog" id="rg-bigq-startnum-dialog" closedby="any" aria-labelledby="rg-startnum-title">
+        <div class="dialog-box rg-startnum-dialog-box">
+            <div class="dialog-header">
+                <h3 class="dialog-title" id="rg-startnum-title">设置大题首题题号</h3>
+            </div>
+            <div class="dialog-body">
+                <p class="rg-startnum-desc">进入专注切分前，请先确认本题的首题题号（后续框选的小问将从此题号开始自动顺排）：</p>
+                <div class="rg-startnum-field">
+                    <label for="rg-startnum-input">首题题号</label>
+                    <input type="number" id="rg-startnum-input" class="rg-startnum-input" min="1" step="1" inputmode="numeric" placeholder="如：10">
+                </div>
+                <div class="rg-startnum-err" id="rg-startnum-err" style="display: none;"></div>
+            </div>
+            <div class="dialog-footer">
+                <button type="button" class="btn secondary" id="rg-startnum-cancel">取消</button>
+                <button type="button" class="btn primary" id="rg-startnum-confirm">确认并进入专注切分</button>
+            </div>
+        </div>
+    </dialog>
+
+    <!-- 整卷框题：大题专注切分模态窗 -->
+    <dialog class="dialog-overlay native-dialog" id="rg-focus-dialog" closedby="none" aria-labelledby="rg-focus-title">
+        <div class="rg-focus-box">
+            <div class="rg-focus-header">
+                <div class="rg-focus-title-wrap">
+                    <span class="rg-submode-badge" id="rg-focus-title">大题专注切分</span>
+                    <div class="rg-focus-start-editor">
+                        <label for="rg-focus-start-input">首题题号</label>
+                        <input type="number" id="rg-focus-start-input" min="1" step="1" inputmode="numeric">
+                    </div>
+                </div>
+                <div class="rg-subtarget-switch" id="rg-subtarget-switch">
+                    <button type="button" class="rg-subtarget-btn active" id="rg-subtarget-stem">1. 框选原文/公共题干</button>
+                    <button type="button" class="rg-subtarget-btn" id="rg-subtarget-subq">2. 框选小问</button>
+                </div>
+                <div class="rg-focus-controls">
+                    <button type="button" class="btn sm secondary rg-mode-btn" id="rg-focus-twotap-btn" title="开启后只需点击两次（上边界 + 下边界）即可快速成框">两点定框: 关</button>
+                    <div class="rg-focus-zoom-group">
+                        <button type="button" class="btn sm secondary" id="rg-focus-zoom-out" title="缩小">-</button>
+                        <span class="rg-zoom-val" id="rg-focus-zoom-val">100%</span>
+                        <button type="button" class="btn sm secondary" id="rg-focus-zoom-in" title="放大">+</button>
+                    </div>
+                    <button type="button" class="btn sm secondary" id="rg-focus-undo-btn" title="快捷键: Ctrl/Cmd + Z">撤销小框</button>
+                    <button type="button" class="btn sm primary" id="rg-focus-done-btn" title="完成并返回整卷 (Esc)">完成大题细分</button>
+                </div>
+            </div>
+            <div class="rg-focus-subbar">
+                <span class="rg-submode-hint" id="rg-submode-hint">当前：绿虚线框选公共原文/题干，按 2 切换“框选小问”</span>
+                <span class="rg-focus-shortcut-note">专注模式仅展示当前大题区域 · 快捷键：1/2 切换原文/小问 · Ctrl+Z 撤销 · Esc 完成退出</span>
+            </div>
+            <div class="rg-focus-body">
+                <div class="rg-focus-viewport" id="rg-focus-viewport">
+                    <div class="rg-focus-slices" id="rg-focus-slices"></div>
+                </div>
+                <aside class="rg-focus-sidebar">
+                    <div class="rg-sidebar-header">
+                        <span>本题切分清单</span>
+                        <span class="rg-sidebar-tip" id="rg-focus-summary">原文 0 · 小问 0</span>
+                    </div>
+                    <div class="rg-list" id="rg-focus-list">
+                        <div class="rg-list-empty">请在左侧框选区拖拽划出公共题干或各小问</div>
+                    </div>
+                </aside>
             </div>
         </div>
     </dialog>

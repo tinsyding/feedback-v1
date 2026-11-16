@@ -24,6 +24,13 @@
         continueTargetId: null,
         selectedId: null,
         subMode: null, // { tab, itemId, target: 'stem' | 'subq' }
+        focusZoom: 1.0,
+        focusTwoTapStart: null, // { sliceIdx, x, y }
+        focusDrag: null,
+        focusResize: null,
+        focusSlices: [], // [{ sliceIdx, crop, stageEl, layerEl }]
+        focusPageCache: new Map(),
+        focusRenderSeq: 0,
         presetNextLabel: null,
         presetNextTargetExId: null,
         drag: null,
@@ -277,12 +284,31 @@
         ].join('|');
     }
 
+    function closeFocusDialogSafe() {
+        const dlg = document.getElementById('rg-focus-dialog');
+        if (dlg && (dlg.open || dlg.classList.contains('active'))) {
+            if (typeof closeNativeDialog === 'function') {
+                closeNativeDialog(dlg);
+            } else if (window.DialogHelper) {
+                window.DialogHelper.close(dlg);
+            } else {
+                dlg.classList.remove('active');
+            }
+        }
+    }
+
     function resetStudioMemoryState() {
         rgState.exercise = { file: null, pdfDoc: null, pageNum: 1, totalPages: 0, items: [] };
         rgState.answer = { file: null, pdfDoc: null, pageNum: 1, totalPages: 0, items: [] };
         rgState.selectedId = null;
         rgState.continueTargetId = null;
         rgState.subMode = null;
+        rgState.focusTwoTapStart = null;
+        rgState.focusDrag = null;
+        rgState.focusResize = null;
+        rgState.focusSlices = [];
+        rgState.focusPageCache.clear();
+        closeFocusDialogSafe();
         rgState.twoTapStart = null;
         rgState.presetNextLabel = null;
         rgState.presetNextTargetExId = null;
@@ -595,9 +621,49 @@
 
         // 快捷键与 Ctrl+滚轮缩放
         document.addEventListener('keydown', (e) => {
+            const startDlg = document.getElementById('rg-bigq-startnum-dialog');
+            const customDlg = document.getElementById('custom-dialog');
+            if ((startDlg && (startDlg.open || startDlg.classList.contains('active')))
+                || (customDlg && (customDlg.open || customDlg.classList.contains('active')))) {
+                return;
+            }
+
+            const focusDlg = document.getElementById('rg-focus-dialog');
+            const inFocus = Boolean(rgState.subMode && focusDlg && (focusDlg.open || focusDlg.classList.contains('active')));
+            const tag = document.activeElement ? document.activeElement.tagName : '';
+
+            if (inFocus) {
+                if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+                    if (e.key === 'Escape') {
+                        e.preventDefault();
+                        document.activeElement.blur();
+                    }
+                    return;
+                }
+                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+                    e.preventDefault();
+                    rgUndoSubBox();
+                    return;
+                }
+                if (e.key === '1' || e.key === '2') {
+                    e.preventDefault();
+                    rgSetSubDrawTarget(e.key === '1' ? 'stem' : 'subq');
+                    return;
+                }
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    if (rgState.focusTwoTapStart) {
+                        rgState.focusTwoTapStart = null;
+                        renderFocusSliceOverlays();
+                    } else {
+                        rgRequestExitSubMode();
+                    }
+                }
+                return;
+            }
+
             const panel = document.getElementById('step-debug');
             if (!panel || !panel.classList.contains('active') || rgState.stage === 'upload') return;
-            const tag = document.activeElement ? document.activeElement.tagName : '';
             if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
                 if (e.key === 'Escape') document.activeElement.blur();
                 return;
@@ -625,22 +691,17 @@
                 rgChangePage(1);
                 return;
             }
-            if (rgState.subMode && (e.key === '1' || e.key === '2')) {
-                e.preventDefault();
-                rgSetSubDrawTarget(e.key === '1' ? 'stem' : 'subq');
-                return;
-            }
             if (e.key === 'Escape') {
                 if (rgState.twoTapStart) {
                     rgState.twoTapStart = null;
                     renderBoxOverlay();
                 } else if (rgState.continueTargetId) {
                     rgCancelContinue();
-                } else if (rgState.subMode) {
-                    rgExitSubMode();
                 }
             }
         });
+
+        bindFocusDialogEventsOnce();
 
         if (viewportEl) {
             let wheelZoomAt = 0;
@@ -1195,26 +1256,34 @@
     }
 
     function renderSubModeBar() {
-        const bar = document.getElementById('rg-submode-bar');
-        const badge = document.getElementById('rg-submode-badge');
         const stemBtn = document.getElementById('rg-subtarget-stem');
         const subqBtn = document.getElementById('rg-subtarget-subq');
         const hint = document.getElementById('rg-submode-hint');
-        if (!bar) return;
+        const titleEl = document.getElementById('rg-focus-title');
+        const startInp = document.getElementById('rg-focus-start-input');
+        const zoomVal = document.getElementById('rg-focus-zoom-val');
+        const twoTapBtn = document.getElementById('rg-focus-twotap-btn');
 
         if (!rgState.subMode || rgState.subMode.tab !== rgState.activeTab) {
-            bar.style.display = 'none';
+            closeFocusDialogSafe();
             return;
         }
         const tabState = getTabState(rgState.subMode.tab);
         const it = tabState.items.find(x => x.id === rgState.subMode.itemId);
         if (!it) {
             rgState.subMode = null;
-            bar.style.display = 'none';
+            closeFocusDialogSafe();
             return;
         }
-        bar.style.display = 'flex';
-        if (badge) badge.textContent = `大题细分：${formatItemTitle(it, rgState.subMode.tab)}`;
+        if (titleEl) titleEl.textContent = `大题专注切分 · ${formatItemTitle(it, rgState.subMode.tab)}`;
+        if (startInp && document.activeElement !== startInp) {
+            startInp.value = it.label || '';
+        }
+        if (zoomVal) zoomVal.textContent = Math.round(rgState.focusZoom * 100) + '%';
+        if (twoTapBtn) {
+            twoTapBtn.classList.toggle('active', Boolean(rgState.twoTapMode));
+            twoTapBtn.textContent = rgState.twoTapMode ? '两点定框: 开' : '两点定框: 关';
+        }
         if (stemBtn) stemBtn.classList.toggle('active', rgState.subMode.target === 'stem');
         if (subqBtn) {
             subqBtn.classList.toggle('active', rgState.subMode.target === 'subq');
@@ -1223,8 +1292,10 @@
         if (hint) {
             hint.textContent = rgState.subMode.target === 'stem'
                 ? '当前：绿虚线框选公共原文/题干，按 2 切换“框选小问”'
-                : '当前：红框依次框出各小问（自动递增，可在右侧卡片单独改号）';
+                : '当前：红框依次框出各小问（自动递增，可在右侧清单单独改号）';
         }
+        renderFocusSidebar();
+        renderFocusSliceOverlays();
     }
 
     function setBtnLabel(btn, text) {
@@ -1644,6 +1715,8 @@
             rgState.activeTab = 'exercise';
             rgState.continueTargetId = null;
             rgState.subMode = null;
+            rgState.focusPageCache.clear();
+            closeFocusDialogSafe();
             rgState.twoTapStart = null;
             renderAllRg();
             await renderPdfPage();
@@ -1680,6 +1753,8 @@
             rgState.activeTab = 'answer';
             rgState.continueTargetId = null;
             rgState.subMode = null;
+            rgState.focusPageCache.clear();
+            closeFocusDialogSafe();
             rgState.twoTapStart = null;
             rgState.presetNextLabel = null;
             rgState.presetNextTargetExId = null;
@@ -1724,6 +1799,8 @@
             tabState.items = [];
             rgState.continueTargetId = null;
             rgState.subMode = null;
+            rgState.focusPageCache.clear();
+            closeFocusDialogSafe();
             rgState.twoTapStart = null;
 
             const lbl = document.getElementById(tab === 'answer' ? 'rg-answer-file-label' : 'rg-exercise-file-label');
@@ -1838,13 +1915,18 @@
                     const parsed = parseInt(sb.num, 10);
                     cursor = (!isNaN(parsed) && parsed >= cursor) ? (parsed + 1) : (cursor + 1);
                 });
-                const subInputs = document.querySelectorAll(`.rg-card[data-id="${itemId}"] .rg-subq-num-input`);
+                const subInputs = document.querySelectorAll(`.rg-card[data-id="${itemId}"] .rg-subq-num-input, #rg-focus-list .rg-subq-num-input`);
                 subInputs.forEach((inp, idx) => {
                     if (it.subqBoxes[idx]) inp.value = it.subqBoxes[idx].num;
                 });
             }
         }
+        const focusTitle = document.getElementById('rg-focus-title');
+        if (focusTitle && rgState.subMode && rgState.subMode.itemId === itemId) {
+            focusTitle.textContent = `大题专注切分 · ${formatItemTitle(it, rgState.subMode.tab)}`;
+        }
         renderBoxOverlay();
+        renderFocusSliceOverlays();
         renderMissingAnswerBar();
         syncStageUi();
         scheduleDraftSave();
@@ -1858,6 +1940,7 @@
         it.subqBoxes[subIdx].num = clean || '';
         it.subqBoxes[subIdx].customNum = Boolean(clean);
         renderBoxOverlay();
+        renderFocusSliceOverlays();
         renderMissingAnswerBar();
         scheduleDraftSave();
     };
@@ -1926,11 +2009,625 @@
         renderSidebar();
     };
 
-    window.rgEnterSubMode = async function (itemId) {
+    let focusDialogEventsBound = false;
+
+    function getFocusActiveItem() {
+        if (!rgState.subMode) return null;
+        const tabState = getTabState(rgState.subMode.tab);
+        return tabState.items.find(x => x.id === rgState.subMode.itemId) || null;
+    }
+
+    function promptBigQuestionStartNum(it) {
+        const dlg = document.getElementById('rg-bigq-startnum-dialog');
+        const input = document.getElementById('rg-startnum-input');
+        const errEl = document.getElementById('rg-startnum-err');
+        const confirmBtn = document.getElementById('rg-startnum-confirm');
+        const cancelBtn = document.getElementById('rg-startnum-cancel');
+        if (!dlg || !input || !confirmBtn || !cancelBtn) {
+            return Promise.resolve(parseInt(it.label, 10) || 1);
+        }
+
+        const existingRaw = String(it.label || '').trim();
+        input.value = /^\d+$/.test(existingRaw) && parseInt(existingRaw, 10) > 0 ? existingRaw : '';
+        if (errEl) {
+            errEl.style.display = 'none';
+            errEl.textContent = '';
+        }
+
+        return new Promise((resolve) => {
+            let settled = false;
+            const finish = (val) => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                if (typeof closeNativeDialog === 'function') {
+                    closeNativeDialog(dlg);
+                } else if (dlg.open) {
+                    dlg.close();
+                } else {
+                    dlg.classList.remove('active');
+                }
+                resolve(val);
+            };
+
+            const tryConfirm = () => {
+                const raw = String(input.value || '').trim();
+                const parsed = parseInt(raw, 10);
+                if (!/^\d+$/.test(raw) || isNaN(parsed) || parsed <= 0) {
+                    if (errEl) {
+                        errEl.textContent = '请先输入有效的首题题号（正整数，例如 10）';
+                        errEl.style.display = 'block';
+                    }
+                    input.focus();
+                    input.select();
+                    return;
+                }
+                finish(parsed);
+            };
+
+            const onKeyDown = (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    tryConfirm();
+                }
+            };
+            const onCancel = () => finish(null);
+            const onClose = () => {
+                if (!settled) finish(null);
+            };
+            const onInput = () => {
+                if (errEl && errEl.style.display !== 'none') {
+                    errEl.style.display = 'none';
+                }
+            };
+
+            function cleanup() {
+                confirmBtn.removeEventListener('click', tryConfirm);
+                cancelBtn.removeEventListener('click', onCancel);
+                input.removeEventListener('keydown', onKeyDown);
+                input.removeEventListener('input', onInput);
+                dlg.removeEventListener('close', onClose);
+            }
+
+            confirmBtn.addEventListener('click', tryConfirm);
+            cancelBtn.addEventListener('click', onCancel);
+            input.addEventListener('keydown', onKeyDown);
+            input.addEventListener('input', onInput);
+            dlg.addEventListener('close', onClose);
+
+            if (typeof openNativeDialog === 'function') {
+                openNativeDialog(dlg, {
+                    dismissible: true,
+                    onCancel: () => { if (!settled) { settled = true; cleanup(); resolve(null); } }
+                });
+            } else {
+                dlg.classList.add('active');
+                if (typeof dlg.showModal === 'function' && !dlg.open) dlg.showModal();
+            }
+
+            setTimeout(() => {
+                input.focus();
+                input.select();
+            }, 60);
+        });
+    }
+
+    function computeRegionDisplayCrop(rg) {
+        const padY = 0.006;
+        const rx = clamp01(Number(rg.x) || 0);
+        const rw = Math.max(0.05, Math.min(1 - rx, Number(rg.w) || 0.94));
+        const ry = clamp01(Number(rg.y) || 0);
+        const rh = Math.max(0.015, Number(rg.h) || 0.1);
+        const cy0 = clamp01(ry - padY);
+        const cy1 = clamp01(ry + rh + padY);
+        return {
+            pageOffset: parseInt(rg.pageOffset, 10) || 0,
+            x: rx,
+            y: cy0,
+            w: rw,
+            h: Math.max(0.02, cy1 - cy0)
+        };
+    }
+
+    function findBestSliceForBox(box, crops) {
+        let bestIdx = -1;
+        let bestOverlap = 0;
+        const by0 = Number(box.y) || 0;
+        const by1 = by0 + (Number(box.h) || 0);
+        const midY = (by0 + by1) / 2;
+        crops.forEach((c, idx) => {
+            if (c.pageOffset !== (parseInt(box.pageOffset, 10) || 0)) return;
+            const cy0 = c.y;
+            const cy1 = c.y + c.h;
+            const overlap = Math.min(by1, cy1) - Math.max(by0, cy0);
+            if (overlap > bestOverlap || (overlap > 0 && midY >= cy0 && midY <= cy1 && bestOverlap <= 0)) {
+                bestOverlap = Math.max(overlap, 0.0001);
+                bestIdx = idx;
+            }
+        });
+        return bestIdx;
+    }
+
+    function addFocusSubBox(rectObj) {
+        if (!rgState.subMode) return;
+        const it = getFocusActiveItem();
+        if (!it) return;
+        if (rgState.subMode.target === 'stem') {
+            it.stemBoxes = it.stemBoxes || [];
+            it.stemBoxes.push(rectObj);
+        } else {
+            it.subqBoxes = it.subqBoxes || [];
+            const baseNum = parseInt(it.label, 10) || 1;
+            const nextSubNum = it.subqBoxes.length === 0
+                ? baseNum
+                : (Math.max(...it.subqBoxes.map(b => parseInt(b.num, 10) || baseNum)) + 1);
+            it.subqBoxes.push({ ...rectObj, num: nextSubNum, customNum: false });
+        }
+        renderAllRg();
+        scheduleDraftSave();
+    }
+
+    function startFocusBoxResize(e, kind, itemId, boxRef, edge, boxEl, crop, stageEl) {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const rect = stageEl.getBoundingClientRect();
+        const origRelY = clamp01(((Number(boxRef.y) || 0) - crop.y) / crop.h);
+        const origRelH = Math.max(0.012, Math.min(1 - origRelY, (Number(boxRef.h) || 0.05) / crop.h));
+        rgState.focusResize = {
+            pointerId: e.pointerId,
+            kind,
+            itemId,
+            boxRef,
+            edge,
+            boxEl,
+            crop,
+            stageRect: rect,
+            startClientY: e.clientY,
+            origRelY,
+            origRelH
+        };
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+    }
+
+    function renderFocusSidebar() {
+        const listEl = document.getElementById('rg-focus-list');
+        const summaryEl = document.getElementById('rg-focus-summary');
+        const it = getFocusActiveItem();
+        if (!listEl || !it) return;
+
+        const stems = it.stemBoxes || [];
+        const subqs = it.subqBoxes || [];
+        if (summaryEl) {
+            summaryEl.textContent = `原文 ${stems.length} 块 · 小问 ${subqs.length} 题`;
+        }
+        if (stems.length === 0 && subqs.length === 0) {
+            listEl.innerHTML = '<div class="rg-list-empty">请在左侧框选区拖拽划出公共题干或各小问</div>';
+            return;
+        }
+
+        const stemHtml = stems.map((sb, sIdx) => `
+            <div class="rg-focus-list-row stem">
+                <span class="rg-focus-badge stem">原文${sIdx + 1}</span>
+                <span class="rg-card-meta">P${(sb.pageOffset || 0) + 1}</span>
+                <button type="button" class="rg-subq-del-btn" onclick="rgDeleteSubBox('${it.id}', 'stem', ${sIdx})" title="删除此原文框">×</button>
+            </div>
+        `).join('');
+
+        const subqHtml = subqs.map((qb, qIdx) => `
+            <div class="rg-focus-list-row subq">
+                <span class="rg-focus-badge subq">小问</span>
+                <div class="rg-focus-subq-edit">
+                    <span>#</span>
+                    <input type="text" class="rg-subq-num-input" value="${escapeHtmlRg(qb.num)}"
+                        oninput="rgUpdateSubqNum('${it.id}', ${qIdx}, this.value)"
+                        onchange="rgUpdateSubqNum('${it.id}', ${qIdx}, this.value)">
+                </div>
+                <span class="rg-card-meta">P${(qb.pageOffset || 0) + 1}</span>
+                <button type="button" class="rg-subq-del-btn" onclick="rgDeleteSubBox('${it.id}', 'subq', ${qIdx})" title="删除此小问框">×</button>
+            </div>
+        `).join('');
+
+        listEl.innerHTML = `
+            ${stems.length > 0 ? `<div class="rg-focus-list-group"><div class="rg-focus-list-title">公共题干 / 原文</div>${stemHtml}</div>` : ''}
+            ${subqs.length > 0 ? `<div class="rg-focus-list-group"><div class="rg-focus-list-title">小问列表</div>${subqHtml}</div>` : ''}
+        `;
+    }
+
+    function renderFocusSliceOverlays() {
+        const it = getFocusActiveItem();
+        if (!it || !Array.isArray(rgState.focusSlices) || rgState.focusSlices.length === 0) return;
+
+        const crops = rgState.focusSlices.map(s => s.crop);
+        const stems = it.stemBoxes || [];
+        const subqs = it.subqBoxes || [];
+
+        rgState.focusSlices.forEach((slice) => {
+            const { sliceIdx, crop, stageEl, layerEl } = slice;
+            if (!layerEl) return;
+            layerEl.innerHTML = '';
+
+            if (rgState.focusTwoTapStart && rgState.focusTwoTapStart.sliceIdx === sliceIdx) {
+                const line = document.createElement('div');
+                line.className = 'rg-anchor-line';
+                line.style.top = (rgState.focusTwoTapStart.y * 100) + '%';
+                const lbl = document.createElement('span');
+                lbl.className = 'rg-anchor-label';
+                lbl.textContent = '上边界已定，请点下边界';
+                line.appendChild(lbl);
+                layerEl.appendChild(line);
+            }
+
+            const renderSubOverlay = (box, kind, idx, labelText) => {
+                const relY = clamp01((box.y - crop.y) / crop.h);
+                const relH = Math.max(0.015, Math.min(1 - relY, box.h / crop.h));
+                const relX = clamp01((box.x - crop.x) / crop.w);
+                const relW = Math.max(0.05, Math.min(1 - relX, box.w / crop.w));
+
+                const div = document.createElement('div');
+                const nearTopCls = relY < 0.06 ? ' near-top' : '';
+                div.className = `rg-box ${kind} active${nearTopCls}`;
+                div.style.left = (relX * 100) + '%';
+                div.style.top = (relY * 100) + '%';
+                div.style.width = (relW * 100) + '%';
+                div.style.height = (relH * 100) + '%';
+
+                const tag = document.createElement('span');
+                tag.className = 'rg-box-tag';
+                tag.textContent = labelText;
+                div.appendChild(tag);
+
+                ['n', 's'].forEach(edge => {
+                    const h = document.createElement('div');
+                    h.className = `rg-handle rg-handle-${edge}`;
+                    h.addEventListener('pointerdown', (e) => startFocusBoxResize(e, kind, it.id, box, edge, div, crop, stageEl));
+                    div.appendChild(h);
+                });
+
+                const delBtn = document.createElement('button');
+                delBtn.type = 'button';
+                delBtn.className = 'rg-box-del';
+                delBtn.title = kind === 'stem' ? '删除此原文框' : '删除此小问框';
+                delBtn.textContent = '×';
+                delBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+                delBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    rgDeleteSubBox(it.id, kind, idx);
+                });
+                div.appendChild(delBtn);
+
+                div.addEventListener('pointerdown', (e) => {
+                    if (e.target.closest('.rg-handle') || e.target.closest('.rg-box-del')) return;
+                    // 专注模式下允许在已有小框附近/内部继续拉框或两点定框，不阻断画布事件
+                });
+                layerEl.appendChild(div);
+            };
+
+            stems.forEach((sb, sIdx) => {
+                if (findBestSliceForBox(sb, crops) !== sliceIdx) return;
+                renderSubOverlay(sb, 'stem', sIdx, `原文${sIdx + 1}`);
+            });
+
+            subqs.forEach((qb, qIdx) => {
+                if (findBestSliceForBox(qb, crops) !== sliceIdx) return;
+                renderSubOverlay(qb, 'subq', qIdx, `${qb.num}`);
+            });
+        });
+    }
+
+    async function renderFocusSlices() {
+        const container = document.getElementById('rg-focus-slices');
+        const viewportEl = document.getElementById('rg-focus-viewport');
+        const it = getFocusActiveItem();
+        if (!container || !it || !rgState.subMode) return;
+
+        const tab = rgState.subMode.tab;
+        const tabState = getTabState(tab);
+        if (!tabState.pdfDoc) return;
+
+        const mySeq = ++rgState.focusRenderSeq;
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const availW = Math.max(360, Math.min(860, ((viewportEl && viewportEl.clientWidth) ? viewportEl.clientWidth : 780) - 48));
+
+        container.innerHTML = '';
+        rgState.focusSlices = [];
+        const regions = (Array.isArray(it.regions) && it.regions.length > 0)
+            ? it.regions
+            : [{ pageOffset: 0, x: FULL_WIDTH_X, y: 0, w: FULL_WIDTH_W, h: 1 }];
+
+        for (let sliceIdx = 0; sliceIdx < regions.length; sliceIdx++) {
+            if (mySeq !== rgState.focusRenderSeq) return;
+            const crop = computeRegionDisplayCrop(regions[sliceIdx]);
+            const pageNum = Math.min(tabState.pdfDoc.numPages, Math.max(1, crop.pageOffset + 1));
+            const page = await tabState.pdfDoc.getPage(pageNum);
+            if (mySeq !== rgState.focusRenderSeq) return;
+
+            const baseVp = page.getViewport({ scale: 1.0 });
+            const fitScale = (availW / Math.max(1, baseVp.width * crop.w)) * rgState.focusZoom;
+            const renderScale = Number((fitScale * dpr).toFixed(3));
+            const cacheKey = `${tab}_${crop.pageOffset}_${Math.round(renderScale * 100)}`;
+
+            let fullCanvas = rgState.focusPageCache.get(cacheKey);
+            if (!fullCanvas) {
+                const renderVp = page.getViewport({ scale: renderScale });
+                fullCanvas = document.createElement('canvas');
+                fullCanvas.width = Math.max(1, Math.round(renderVp.width));
+                fullCanvas.height = Math.max(1, Math.round(renderVp.height));
+                const fctx = fullCanvas.getContext('2d', { alpha: false });
+                fctx.fillStyle = '#ffffff';
+                fctx.fillRect(0, 0, fullCanvas.width, fullCanvas.height);
+                await page.render({ canvasContext: fctx, viewport: renderVp }).promise;
+                if (mySeq !== rgState.focusRenderSeq) return;
+                rgState.focusPageCache.set(cacheKey, fullCanvas);
+            }
+
+            const sx = Math.max(0, Math.floor(crop.x * fullCanvas.width));
+            const sy = Math.max(0, Math.floor(crop.y * fullCanvas.height));
+            const sw = Math.max(1, Math.min(fullCanvas.width - sx, Math.round(crop.w * fullCanvas.width)));
+            const sh = Math.max(1, Math.min(fullCanvas.height - sy, Math.round(crop.h * fullCanvas.height)));
+
+            const logicalW = Math.max(120, Math.round(sw / dpr));
+            const logicalH = Math.max(40, Math.round(sh / dpr));
+
+            const sliceCard = document.createElement('div');
+            sliceCard.className = 'rg-focus-slice';
+
+            if (regions.length > 1) {
+                const hdr = document.createElement('div');
+                hdr.className = 'rg-focus-slice-header';
+                hdr.textContent = `片段 ${sliceIdx + 1}/${regions.length} · 第 ${pageNum} 页`;
+                sliceCard.appendChild(hdr);
+            }
+
+            const stageEl = document.createElement('div');
+            stageEl.className = 'rg-stage draw-mode rg-focus-slice-stage';
+            stageEl.style.width = logicalW + 'px';
+            stageEl.style.height = logicalH + 'px';
+
+            const canvas = document.createElement('canvas');
+            canvas.width = sw;
+            canvas.height = sh;
+            canvas.style.width = logicalW + 'px';
+            canvas.style.height = logicalH + 'px';
+            const ctx = canvas.getContext('2d', { alpha: false });
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, sw, sh);
+            ctx.drawImage(fullCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
+
+            const layerEl = document.createElement('div');
+            layerEl.className = 'rg-box-layer';
+
+            stageEl.appendChild(canvas);
+            stageEl.appendChild(layerEl);
+            sliceCard.appendChild(stageEl);
+            container.appendChild(sliceCard);
+
+            const sliceMeta = { sliceIdx, crop, stageEl, layerEl };
+            rgState.focusSlices.push(sliceMeta);
+
+            stageEl.addEventListener('pointerdown', (e) => {
+                if (rgState.focusResize) return;
+                if (e.isPrimary === false) return;
+                if (e.pointerType === 'mouse' && e.button !== 0) return;
+                if (e.target && e.target.closest && (e.target.closest('.rg-handle') || e.target.closest('.rg-box-del'))) {
+                    return;
+                }
+                if (document.activeElement && document.activeElement.tagName === 'INPUT') {
+                    document.activeElement.blur();
+                }
+                e.preventDefault();
+                try { stageEl.setPointerCapture(e.pointerId); } catch (_) {}
+                const rect = stageEl.getBoundingClientRect();
+                const ptX = clamp01((e.clientX - rect.left) / Math.max(1, rect.width));
+                const ptY = clamp01((e.clientY - rect.top) / Math.max(1, rect.height));
+                const draftEl = document.createElement('div');
+                draftEl.className = 'rg-box draft';
+                layerEl.appendChild(draftEl);
+                rgState.focusDrag = {
+                    pointerId: e.pointerId,
+                    sliceIdx,
+                    crop,
+                    stageEl,
+                    stageRect: rect,
+                    startX: ptX,
+                    startY: ptY,
+                    curX: ptX,
+                    curY: ptY,
+                    draftEl
+                };
+            });
+        }
+
+        renderFocusSliceOverlays();
+    }
+
+    function bindFocusDialogEventsOnce() {
+        if (focusDialogEventsBound) return;
+        focusDialogEventsBound = true;
+
+        const startInp = document.getElementById('rg-focus-start-input');
+        const stemBtn = document.getElementById('rg-subtarget-stem');
+        const subqBtn = document.getElementById('rg-subtarget-subq');
+        const twoTapBtn = document.getElementById('rg-focus-twotap-btn');
+        const zoomOutBtn = document.getElementById('rg-focus-zoom-out');
+        const zoomInBtn = document.getElementById('rg-focus-zoom-in');
+        const undoBtn = document.getElementById('rg-focus-undo-btn');
+        const doneBtn = document.getElementById('rg-focus-done-btn');
+        const viewportEl = document.getElementById('rg-focus-viewport');
+
+        if (startInp) {
+            startInp.addEventListener('input', () => {
+                const it = getFocusActiveItem();
+                if (!it) return;
+                const raw = String(startInp.value || '').trim();
+                if (/^\d+$/.test(raw) && parseInt(raw, 10) > 0) {
+                    rgUpdateItemLabel(it.id, raw);
+                }
+            });
+            startInp.addEventListener('blur', () => {
+                const it = getFocusActiveItem();
+                if (!it) return;
+                const raw = String(startInp.value || '').trim();
+                if (!/^\d+$/.test(raw) || parseInt(raw, 10) <= 0) {
+                    startInp.value = it.label || '1';
+                    showToast('首题题号须为正整数', 'warn');
+                } else {
+                    renderSidebar();
+                }
+            });
+        }
+
+        if (stemBtn) stemBtn.addEventListener('click', () => rgSetSubDrawTarget('stem'));
+        if (subqBtn) subqBtn.addEventListener('click', () => rgSetSubDrawTarget('subq'));
+        if (twoTapBtn) {
+            twoTapBtn.addEventListener('click', () => {
+                rgState.twoTapMode = !rgState.twoTapMode;
+                rgState.focusTwoTapStart = null;
+                syncInteractModeUi();
+                renderSubModeBar();
+            });
+        }
+        if (zoomOutBtn) zoomOutBtn.addEventListener('click', () => rgFocusZoomBy(-0.15));
+        if (zoomInBtn) zoomInBtn.addEventListener('click', () => rgFocusZoomBy(0.15));
+        if (undoBtn) undoBtn.addEventListener('click', () => rgUndoSubBox());
+        if (doneBtn) doneBtn.addEventListener('click', () => rgRequestExitSubMode());
+
+        if (viewportEl) {
+            let wheelAt = 0;
+            viewportEl.addEventListener('wheel', (e) => {
+                if (!e.ctrlKey && !e.metaKey) return;
+                e.preventDefault();
+                const now = Date.now();
+                if (now - wheelAt < 80) return;
+                wheelAt = now;
+                rgFocusZoomBy(e.deltaY < 0 ? 0.15 : -0.15);
+            }, { passive: false });
+        }
+
+        const cleanupFocusDraft = () => {
+            if (!rgState.focusDrag) return null;
+            const d = rgState.focusDrag;
+            rgState.focusDrag = null;
+            if (d.draftEl && d.draftEl.parentNode) {
+                d.draftEl.parentNode.removeChild(d.draftEl);
+            }
+            return d;
+        };
+
+        window.addEventListener('pointermove', (e) => {
+            if (rgState.focusResize && rgState.focusResize.pointerId === e.pointerId) {
+                const rz = rgState.focusResize;
+                const dy = (e.clientY - rz.startClientY) / Math.max(1, rz.stageRect.height);
+                const minRel = Math.max(0.012, 8 / Math.max(1, rz.stageRect.height));
+                let ny = rz.origRelY;
+                let nh = rz.origRelH;
+                if (rz.edge === 'n') {
+                    const maxTop = rz.origRelY + rz.origRelH - minRel;
+                    ny = Math.max(0, Math.min(maxTop, rz.origRelY + dy));
+                    nh = rz.origRelY + rz.origRelH - ny;
+                } else if (rz.edge === 's') {
+                    nh = Math.max(minRel, Math.min(1 - rz.origRelY, rz.origRelH + dy));
+                }
+                rz.boxRef.y = round4(clamp01(rz.crop.y + ny * rz.crop.h));
+                rz.boxRef.h = round4(Math.max(0.005, nh * rz.crop.h));
+                if (rz.boxEl) {
+                    rz.boxEl.style.top = (ny * 100) + '%';
+                    rz.boxEl.style.height = (nh * 100) + '%';
+                }
+                return;
+            }
+
+            if (!rgState.focusDrag || rgState.focusDrag.pointerId !== e.pointerId) return;
+            const d = rgState.focusDrag;
+            const rect = d.stageEl.getBoundingClientRect();
+            const ptX = clamp01((e.clientX - rect.left) / Math.max(1, rect.width));
+            const ptY = clamp01((e.clientY - rect.top) / Math.max(1, rect.height));
+            d.curX = ptX;
+            d.curY = ptY;
+            const y = Math.min(d.startY, ptY);
+            const h = Math.abs(ptY - d.startY);
+            d.draftEl.style.left = '0%';
+            d.draftEl.style.width = '100%';
+            d.draftEl.style.top = (y * 100) + '%';
+            d.draftEl.style.height = (h * 100) + '%';
+        });
+
+        const finishFocusPointer = (e) => {
+            if (rgState.focusResize && rgState.focusResize.pointerId === e.pointerId) {
+                rgState.focusResize = null;
+                renderAllRg();
+                scheduleDraftSave();
+                return;
+            }
+            if (!rgState.focusDrag || rgState.focusDrag.pointerId !== e.pointerId) return;
+            const d = cleanupFocusDraft();
+            if (!d) return;
+
+            const rect = d.stageEl.getBoundingClientRect();
+            const dyPx = Math.abs(d.curY - d.startY) * Math.max(1, rect.height);
+
+            if (rgState.twoTapMode && dyPx < 8) {
+                if (!rgState.focusTwoTapStart || rgState.focusTwoTapStart.sliceIdx !== d.sliceIdx) {
+                    rgState.focusTwoTapStart = { sliceIdx: d.sliceIdx, x: d.curX, y: d.curY };
+                    renderFocusSliceOverlays();
+                    return;
+                }
+                const start = rgState.focusTwoTapStart;
+                rgState.focusTwoTapStart = null;
+                const y = Math.min(start.y, d.curY);
+                const h = Math.abs(d.curY - start.y);
+                if (h * Math.max(1, rect.height) < 8) {
+                    renderFocusSliceOverlays();
+                    return;
+                }
+                addFocusSubBox({
+                    pageOffset: d.crop.pageOffset,
+                    x: round4(d.crop.x),
+                    y: round4(clamp01(d.crop.y + y * d.crop.h)),
+                    w: round4(d.crop.w),
+                    h: round4(Math.max(0.008, h * d.crop.h))
+                });
+                return;
+            }
+
+            if (dyPx < 8) return;
+
+            const y = Math.min(d.startY, d.curY);
+            const h = Math.abs(d.curY - d.startY);
+            rgState.focusTwoTapStart = null;
+            addFocusSubBox({
+                pageOffset: d.crop.pageOffset,
+                x: round4(d.crop.x),
+                y: round4(clamp01(d.crop.y + y * d.crop.h)),
+                w: round4(d.crop.w),
+                h: round4(Math.max(0.008, h * d.crop.h))
+            });
+        };
+
+        window.addEventListener('pointerup', finishFocusPointer);
+        window.addEventListener('pointercancel', (e) => {
+            if (rgState.focusResize && rgState.focusResize.pointerId === e.pointerId) {
+                rgState.focusResize = null;
+                renderAllRg();
+            }
+            cleanupFocusDraft();
+        });
+    }
+
+    async function rgFocusZoomBy(delta) {
+        rgState.focusZoom = Math.max(0.6, Math.min(2.2, Number((rgState.focusZoom + delta).toFixed(2))));
+        const zoomVal = document.getElementById('rg-focus-zoom-val');
+        if (zoomVal) zoomVal.textContent = Math.round(rgState.focusZoom * 100) + '%';
+        await renderFocusSlices();
+    }
+
+    async function openFocusSubMode(itemId) {
         const tab = rgState.activeTab;
         const tabState = getTabState(tab);
         const it = tabState.items.find(x => x.id === itemId);
         if (!it) return;
+
+        bindFocusDialogEventsOnce();
         it.isBig = true;
         it.stemBoxes = it.stemBoxes || [];
         it.subqBoxes = it.subqBoxes || [];
@@ -1940,12 +2637,77 @@
             target: it.stemBoxes.length === 0 ? 'stem' : 'subq'
         };
         rgState.selectedId = itemId;
-        if (it.regions.length > 0) {
-            tabState.pageNum = it.regions[0].pageOffset + 1;
-            await renderPdfPage();
+        rgState.focusTwoTapStart = null;
+        rgState.focusDrag = null;
+        rgState.focusResize = null;
+
+        const dlg = document.getElementById('rg-focus-dialog');
+        if (dlg) {
+            if (typeof openNativeDialog === 'function') {
+                openNativeDialog(dlg, { dismissible: false });
+            } else {
+                dlg.classList.add('active');
+                if (typeof dlg.showModal === 'function' && !dlg.open) dlg.showModal();
+            }
         }
         renderAllRg();
+        await new Promise(r => requestAnimationFrame(r));
+        await renderFocusSlices();
         scheduleDraftSave();
+    }
+
+    function rgRequestExitSubMode() {
+        const it = getFocusActiveItem();
+        if (!it) {
+            window.rgExitSubMode();
+            return;
+        }
+        if (!Array.isArray(it.subqBoxes) || it.subqBoxes.length === 0) {
+            if (typeof showCustomDialog === 'function') {
+                showCustomDialog({
+                    title: '尚未框选小问',
+                    body: '当前大题还没有框选任何小问。您可以继续留在专注模式框选小问，或取消大题设置（恢复为普通单题）。',
+                    confirmText: '继续框选',
+                    cancelText: '取消大题设置',
+                    onConfirm: () => {
+                        rgSetSubDrawTarget('subq');
+                    },
+                    onCancel: () => {
+                        it.isBig = false;
+                        it.stemBoxes = [];
+                        it.subqBoxes = [];
+                        window.rgExitSubMode();
+                    }
+                });
+                return;
+            }
+        }
+        window.rgExitSubMode();
+    }
+
+    window.rgEnterSubMode = async function (itemId) {
+        const tab = rgState.activeTab;
+        const tabState = getTabState(tab);
+        const it = tabState.items.find(x => x.id === itemId);
+        if (!it) return;
+
+        const existingLabel = String(it.label || '').trim();
+        const hasValidStartNum = /^\d+$/.test(existingLabel) && parseInt(existingLabel, 10) > 0;
+        if (!it.isBig || !hasValidStartNum) {
+            const startNum = await promptBigQuestionStartNum(it);
+            if (!startNum) return;
+            it.label = String(startNum);
+            if (Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
+                let cursor = startNum;
+                it.subqBoxes.forEach((sb) => {
+                    if (!sb.customNum) sb.num = cursor;
+                    const parsed = parseInt(sb.num, 10);
+                    cursor = (!isNaN(parsed) && parsed >= cursor) ? (parsed + 1) : (cursor + 1);
+                });
+            }
+        }
+
+        await openFocusSubMode(itemId);
     };
 
     window.rgSetSubDrawTarget = function (target) {
@@ -1970,7 +2732,13 @@
 
     window.rgExitSubMode = function () {
         rgState.subMode = null;
+        rgState.focusTwoTapStart = null;
+        rgState.focusDrag = null;
+        rgState.focusResize = null;
+        rgState.focusSlices = [];
+        closeFocusDialogSafe();
         renderAllRg();
+        scheduleDraftSave();
     };
 
     window.rgDeleteItem = function (itemId) {
@@ -1978,7 +2746,10 @@
         tabState.items = tabState.items.filter(x => x.id !== itemId);
         if (rgState.selectedId === itemId) rgState.selectedId = null;
         if (rgState.continueTargetId === itemId) rgState.continueTargetId = null;
-        if (rgState.subMode && rgState.subMode.itemId === itemId) rgState.subMode = null;
+        if (rgState.subMode && rgState.subMode.itemId === itemId) {
+            rgState.subMode = null;
+            closeFocusDialogSafe();
+        }
         renderAllRg();
         scheduleDraftSave();
     };

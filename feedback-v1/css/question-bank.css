@@ -4728,3 +4728,280 @@ span.rg-card-num-wrap {
 .rg-subq-del-btn:hover {
     color: var(--negative);
 }
+
+/* ===== Big-Question Start Number Prompt & Focus Submode Modal ===== */
+.rg-startnum-dialog-box {
+    max-width: 420px;
+}
+
+.rg-startnum-desc {
+    margin: 0 0 14px;
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.rg-startnum-field {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.rg-startnum-field label {
+    font-size: var(--text-sm);
+    font-weight: var(--weight-semibold);
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.rg-startnum-input {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    border: 1.5px solid var(--border-hover);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: var(--text-base);
+    font-weight: var(--weight-semibold);
+    font-variant-numeric: tabular-nums;
+}
+
+.rg-startnum-input:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: 1px;
+    border-color: var(--brand-500);
+}
+
+.rg-startnum-err {
+    margin-top: 8px;
+    font-size: var(--text-xs);
+    color: var(--negative);
+}
+
+.rg-focus-box {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    width: 96vw;
+    max-width: 1480px;
+    height: 92vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+    animation: dialogSlideIn 0.22s cubic-bezier(0.25, 0.1, 0.25, 1.0);
+}
+
+.rg-focus-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-secondary);
+    flex-shrink: 0;
+}
+
+.rg-focus-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.rg-focus-start-editor {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    color: var(--text-secondary);
+}
+
+.rg-focus-start-editor input {
+    width: 56px;
+    padding: 2px 6px;
+    border: 1px solid var(--border-hover);
+    border-radius: var(--radius-xs);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: var(--text-sm);
+    font-weight: var(--weight-semibold);
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+}
+
+.rg-focus-start-editor input:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: 1px;
+}
+
+.rg-focus-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.rg-focus-zoom-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.rg-focus-subbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 6px 18px;
+    background: rgba(224, 164, 58, 0.10);
+    border-bottom: 1px solid rgba(224, 164, 58, 0.25);
+    flex-shrink: 0;
+}
+
+[data-theme="light"] .rg-focus-subbar {
+    background: rgba(180, 83, 9, 0.06);
+    border-bottom-color: rgba(180, 83, 9, 0.20);
+}
+
+.rg-focus-shortcut-note {
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+}
+
+.rg-focus-body {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: 0;
+}
+
+.rg-focus-viewport {
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+    padding: 20px;
+    background: var(--bg-primary);
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+}
+
+.rg-focus-slices {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+}
+
+.rg-focus-slice {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+}
+
+.rg-focus-slice-header {
+    align-self: flex-start;
+    font-size: var(--text-xs);
+    font-weight: var(--weight-semibold);
+    color: var(--text-secondary);
+    padding: 2px 8px;
+    border-radius: var(--radius-xs);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+}
+
+.rg-focus-slice-stage {
+    border-radius: var(--radius-sm);
+}
+
+.rg-focus-slice-stage .rg-box.near-top .rg-box-tag {
+    bottom: auto;
+    top: 2px;
+    left: 2px;
+    border-radius: var(--radius-xs);
+}
+
+.rg-focus-sidebar {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid var(--border-subtle);
+    background: var(--bg-card);
+}
+
+.rg-focus-list-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.rg-focus-list-title {
+    font-size: var(--text-xs);
+    font-weight: var(--weight-semibold);
+    color: var(--text-secondary);
+    padding: 2px 0;
+}
+
+.rg-focus-list-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-primary);
+}
+
+.rg-focus-badge {
+    font-size: var(--text-xs);
+    font-weight: var(--weight-semibold);
+    padding: 2px 6px;
+    border-radius: var(--radius-xs);
+}
+
+.rg-focus-badge.stem {
+    color: var(--positive);
+    background: rgba(22, 163, 74, 0.12);
+}
+
+.rg-focus-badge.subq {
+    color: #dc2626;
+    background: rgba(220, 38, 38, 0.12);
+}
+
+.rg-focus-subq-edit {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+}
+
+@media (max-width: 900px) {
+    .rg-focus-body {
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(0, 1fr) 220px;
+    }
+
+    .rg-focus-sidebar {
+        border-left: none;
+        border-top: 1px solid var(--border-subtle);
+    }
+}
