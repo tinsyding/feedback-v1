@@ -1343,12 +1343,16 @@ select.modern-input option {
 
 @media (max-width: 1024px) {
     .config-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
     }
 
     .config-grid> :first-child,
     .config-grid> .config-span-full {
         grid-column: auto;
+    }
+
+    .config-grid > .config-card {
+        min-width: 0;
     }
 }
 
@@ -1441,13 +1445,17 @@ select.modern-input option {
     }
 
     .config-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
         gap: 14px;
     }
 
     .config-grid> :first-child,
     .config-grid> .config-span-full {
         grid-column: auto;
+    }
+
+    .config-grid > .config-card {
+        min-width: 0;
     }
 
     .option-cards {

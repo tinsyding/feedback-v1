@@ -1625,6 +1625,7 @@ body.viewer-page {
         display: flex;
         align-items: center;
         flex-wrap: nowrap;
+        justify-content: flex-start;
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
         gap: 6px;

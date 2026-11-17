@@ -213,6 +213,18 @@ button, .btn, a, select, input, textarea, [role="button"], label {
     -webkit-tap-highlight-color: transparent;
 }
 
+/* 移动端表单控件保持 16px 以上，避免 iOS Safari 聚焦输入框时自动放大页面 */
+@media (max-width: 768px) {
+    input,
+    select,
+    textarea,
+    input[class],
+    select[class],
+    textarea[class] {
+        font-size: 16px !important;
+    }
+}
+
 /* ============================================================================
    9. 全局 Toast 统一收敛规范（Unslop 纯净准则，覆盖存量各页样式）
    ============================================================================ */

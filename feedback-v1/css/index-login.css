@@ -137,6 +137,18 @@ body {
     }
 }
 
+/* 移动端表单控件保持 16px 以上，避免 iOS Safari 聚焦输入框时自动放大页面 */
+@media (max-width: 768px) {
+    input,
+    select,
+    textarea,
+    input[class],
+    select[class],
+    textarea[class] {
+        font-size: 16px !important;
+    }
+}
+
 .login-header {
     display: flex;
     align-items: center;

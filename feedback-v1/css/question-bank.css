@@ -57,11 +57,21 @@
 
 @media (max-width: 520px) {
     .qb-selectors {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
     }
 
     .qb-selectors .qb-select-group:last-child {
         grid-column: auto;
+    }
+
+    /* 允许下拉框随容器收缩，避免 16px 表单字号把标签页撑出屏幕 */
+    .qb-select-group {
+        min-width: 0;
+    }
+
+    .qb-select {
+        min-width: 0;
+        max-width: 100%;
     }
 }
 
@@ -1302,6 +1312,23 @@
     font-weight: 400;
     color: var(--text-muted);
     margin-left: auto;
+}
+
+@media (max-width: 768px) {
+    /* 窄屏下标题不压缩成竖排，说明文案另起一行 */
+    .saved-data-section .config-card-header {
+        flex-wrap: wrap;
+    }
+
+    .saved-data-section .config-card-header h3 {
+        flex-shrink: 0;
+        white-space: nowrap;
+    }
+
+    .saved-data-section .section-hint {
+        flex-basis: 100%;
+        margin-left: 0;
+    }
 }
 
 /* Page Grid Sizes: 强制大图预览与稳定垂直滚动（单列宽幅左右对照） */

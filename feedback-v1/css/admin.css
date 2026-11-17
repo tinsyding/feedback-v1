@@ -1261,7 +1261,8 @@ select option {
     box-shadow: var(--shadow-xs);
 }
 
-.table-wrapper {
+.table-wrapper,
+.data-table-wrapper {
     overflow-x: auto;
     width: 100%;
 }
@@ -2438,6 +2439,21 @@ select option {
         font-size: 0.8rem;
     }
 
+    /* 日志子视图按钮文案较长，窄屏允许换行，避免撑出卡片 */
+    #logs-subview-bar > div {
+        min-width: 0;
+    }
+
+    #logs-subview-bar .btn {
+        white-space: normal;
+        text-align: left;
+    }
+
+    #sender-clients-count-badge {
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
     /* Cards Layout for Mobile */
     .db-cards-wrapper {
         grid-template-columns: 1fr !important;
@@ -2556,7 +2572,8 @@ select option {
         flex: 1 1 calc(50% - 4px);
         min-width: 110px;
     }
-    .table-wrapper {
+    .table-wrapper,
+    .data-table-wrapper {
         -webkit-overflow-scrolling: touch;
     }
     .data-table thead th,
