@@ -1,0 +1,58 @@
+name: Bump static asset versions
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '版本号策略：timestamp（全部打新时间戳）或 hash（仅文件内容变更的资源变号）'
+        required: true
+        default: 'timestamp'
+        type: choice
+        options:
+          - timestamp
+          - hash
+      custom_version:
+        description: '可选：自定义版本号（仅 timestamp 模式生效，留空则自动生成 YYYYMMDD-HHMMSS）'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Bump ?v= asset versions
+        env:
+          BUMP_MODE: ${{ inputs.mode }}
+          CUSTOM_VER: ${{ inputs.custom_version }}
+        run: |
+          if [ -n "$CUSTOM_VER" ] && [ "$BUMP_MODE" = "timestamp" ]; then
+            python3 scripts/bump_asset_versions.py --mode "$BUMP_MODE" --version "$CUSTOM_VER"
+          else
+            python3 scripts/bump_asset_versions.py --mode "$BUMP_MODE"
+          fi
+
+      - name: Commit and push if changed
+        run: |
+          if git diff --quiet feedback-v1/*.html; then
+            echo "No asset version changes."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add feedback-v1/*.html
+          git commit -m "chore(assets): bump static asset ?v= versions (${{ inputs.mode }})"
+          git push origin main
