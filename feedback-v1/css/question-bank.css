@@ -4012,7 +4012,7 @@ input[type=number] {
 
 .rg-box.active {
     border-width: 2px;
-    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.16), 0 0 0 2px rgba(255, 255, 255, 0.65);
 }
 
 .rg-box.stem {
@@ -5046,12 +5046,13 @@ span.rg-card-num-wrap {
 
 .rg-box.continue-existing {
     border-style: solid;
-    background: rgba(37, 99, 235, 0.16);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12), 0 0 0 2px rgba(255, 255, 255, 0.65);
+    background: rgba(15, 23, 42, 0.14);
+    box-shadow: inset 0 0 20px rgba(15, 23, 42, 0.12), 0 4px 14px rgba(0, 0, 0, 0.18);
 }
 
 .rg-box.answer.continue-existing {
-    background: rgba(22, 163, 74, 0.16);
+    background: rgba(22, 163, 74, 0.18);
+    box-shadow: inset 0 0 20px rgba(15, 23, 42, 0.10), 0 4px 14px rgba(0, 0, 0, 0.18);
 }
 
 .rg-focus-continue-pager {
