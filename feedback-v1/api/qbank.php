@@ -325,6 +325,149 @@ function getFilePath($dataDir, $subject, $grade, $tier, $week, $year = null, $se
 }
 
 /**
+ * 构建 题号 => 知识点 映射（兼容共享 PDF 题目的 id 为 "7,8" 这种写法）
+ */
+function buildHomeworkTopicMap($questions) {
+    $map = [];
+    if (!is_array($questions)) return $map;
+    foreach ($questions as $q) {
+        if (!is_array($q)) continue;
+        $topic = trim((string)($q['topic'] ?? ''));
+        if ($topic === '') continue;
+
+        $rawId = $q['question_num'] ?? ($q['id'] ?? null);
+        $nums = [];
+        if (is_array($rawId)) {
+            $nums = $rawId;
+        } elseif (is_string($rawId)) {
+            $nums = preg_split('/[,，、]/u', $rawId) ?: [];
+        } elseif ($rawId !== null && $rawId !== '') {
+            $nums = [$rawId];
+        }
+
+        foreach ($nums as $n) {
+            $n = intval($n);
+            if ($n > 0) $map[$n] = $topic;
+        }
+    }
+    return $map;
+}
+
+/**
+ * 解析变式题关联的原题号，主原题号优先
+ */
+function getVariationParentNums($q) {
+    if (!is_array($q)) return [];
+    $nums = [];
+
+    $primary = intval($q['parentQuestionNum'] ?? ($q['parent_question_num'] ?? 0));
+    if ($primary > 0) $nums[] = $primary;
+
+    $raw = $q['parentQuestionNums'] ?? ($q['parent_question_nums'] ?? null);
+    if (is_array($raw)) {
+        foreach ($raw as $n) {
+            $n = intval($n);
+            if ($n > 0) $nums[] = $n;
+        }
+    } elseif (is_string($raw) && trim($raw) !== '') {
+        foreach (explode(',', $raw) as $n) {
+            $n = intval($n);
+            if ($n > 0) $nums[] = $n;
+        }
+    }
+
+    return array_values(array_unique($nums));
+}
+
+/**
+ * 变式题知识点始终跟随原题：按主原题号（找不到时退回其它关联原题号）取当前知识点。
+ * 仅覆盖非空的当前原题知识点，避免原题暂未填写时把变式题知识点清空。
+ */
+function syncVariationTopicsToHomework($variations, $homeworkTopicMap) {
+    if (!is_array($variations) || empty($homeworkTopicMap)) return $variations;
+    foreach ($variations as &$q) {
+        if (!is_array($q)) continue;
+        foreach (getVariationParentNums($q) as $pNum) {
+            if (!empty($homeworkTopicMap[$pNum])) {
+                $q['topic'] = $homeworkTopicMap[$pNum];
+                break;
+            }
+        }
+    }
+    unset($q);
+    return $variations;
+}
+
+/**
+ * 读取同一专题下课后巩固题目的当前知识点映射
+ */
+function loadHomeworkTopicMapFromDb($year, $season, $subject, $grade, $tier, $week) {
+    try {
+        $rows = DB::fetchAll(
+            "SELECT `question_num`, `topic`
+             FROM `qbank_questions`
+             WHERE `bank_type` = 'homework' AND `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ?
+             ORDER BY `question_num` ASC",
+            [$year, $season, $subject, $grade, $tier, intval($week)]
+        );
+        if (DB::getLastError() !== null) return [];
+        return buildHomeworkTopicMap($rows);
+    } catch (Throwable $e) {
+        error_log("loadHomeworkTopicMap error: " . $e->getMessage());
+        return [];
+    }
+}
+
+/**
+ * 课后巩固保存后，级联刷新同专题变式题的知识点，避免变式题继续显示旧考点。
+ */
+function cascadeHomeworkTopicsToVariations($db, $year, $season, $subject, $grade, $tier, $week, $questions) {
+    if (!$db) return 0;
+    $stmt = $db->prepare(
+        "UPDATE `qbank_questions`
+         SET `topic` = ?, `updated_at` = `updated_at`
+         WHERE `bank_type` = 'variation'
+           AND `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ?
+           AND `parent_question_num` = ?
+           AND (`topic` IS NULL OR `topic` <> ?)"
+    );
+    if (!$stmt) return 0;
+
+    $changed = 0;
+    foreach ($questions as $q) {
+        if (!is_array($q)) continue;
+        $qNum = intval($q['id'] ?? ($q['question_num'] ?? ($q['num'] ?? 0)));
+        if ($qNum <= 0) continue;
+        $topic = trim((string)($q['topic'] ?? ''));
+        if ($topic === '') continue;
+        $stmt->execute([$topic, $year, $season, $subject, $grade, $tier, intval($week), $qNum, $topic]);
+        $changed += $stmt->rowCount();
+    }
+    return $changed;
+}
+
+/**
+ * 同步刷新举一反三 JSON 灾备镜像中的知识点。
+ */
+function cascadeHomeworkTopicsToVariationJson($dataDir, $year, $season, $subject, $grade, $tier, $week, $questions) {
+    $path = getFilePath($dataDir, $subject, $grade, $tier, $week, $year, $season, 'variation');
+    if (!file_exists($path)) return false;
+
+    $content = json_decode(@file_get_contents($path), true);
+    if (!is_array($content) || empty($content['questions']) || !is_array($content['questions'])) return false;
+
+    $topicMap = buildHomeworkTopicMap($questions);
+    if (empty($topicMap)) return false;
+
+    $before = $content['questions'];
+    $content['questions'] = syncVariationTopicsToHomework($content['questions'], $topicMap);
+    if ($content['questions'] === $before) return false;
+
+    @file_put_contents($path, json_encode($content, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+    return true;
+}
+
+/**
  * 解析文件名以备回退
  */
 function parseFileName($filename, $defaultYear, $defaultSeason) {
@@ -583,6 +726,21 @@ try {
                             $questions[] = $qObj;
                         }
 
+                        // 变式题知识点始终跟随原题：读取时用当前课后巩固知识点覆盖历史镜像值
+                        if (normalizeBankType($qbank['bankType'] ?? $bankType) === 'variation') {
+                            $homeworkTopicMap = loadHomeworkTopicMapFromDb(
+                                intval($qbank['year']),
+                                $qbank['season'],
+                                $qbank['subject'],
+                                $qbank['grade'],
+                                $qbank['tier'],
+                                intval($qbank['week'])
+                            );
+                            if (!empty($homeworkTopicMap)) {
+                                $questions = syncVariationTopicsToHomework($questions, $homeworkTopicMap);
+                            }
+                        }
+
                         $operator = !empty($qbank['updated_by']) ? $qbank['updated_by'] : ($qbank['created_by'] ?? '');
                         $operatorName = '';
                         if (!empty($operator)) {
@@ -628,6 +786,27 @@ try {
                         $content['questionCount'] = count($content['questions'] ?? []);
                         if (empty($content['updatedAtFormatted']) && !empty($content['updatedAt'])) {
                             $content['updatedAtFormatted'] = date('Y-m-d H:i', round($content['updatedAt'] / 1000));
+                        }
+
+                        // 灾备文件同样让变式题知识点跟随当前课后巩固原题
+                        if ($content['bankType'] === 'variation' && !empty($content['questions'])) {
+                            $hwPath = getFilePath(
+                                $dataDir,
+                                $content['subject'] ?? $subject,
+                                $content['grade'] ?? $grade,
+                                $content['tier'] ?? $tier,
+                                intval($content['week'] ?? $week),
+                                $content['year'],
+                                $content['season'],
+                                'homework'
+                            );
+                            if (file_exists($hwPath)) {
+                                $hwContent = json_decode(@file_get_contents($hwPath), true);
+                                $hwTopicMap = buildHomeworkTopicMap($hwContent['questions'] ?? []);
+                                if (!empty($hwTopicMap)) {
+                                    $content['questions'] = syncVariationTopicsToHomework($content['questions'], $hwTopicMap);
+                                }
+                            }
                         }
                     }
                     echo json_encode(['success' => true, 'data' => $content], JSON_UNESCAPED_UNICODE);
@@ -826,6 +1005,15 @@ try {
                 error_log("DB qbank save error: " . $e->getMessage());
             }
 
+            // 1.5 课后巩固知识点变化后，级联刷新同专题举一反三变式题的知识点
+            if ($bankType === 'homework' && $dbSaved && isset($db) && $db) {
+                try {
+                    cascadeHomeworkTopicsToVariations($db, $year, $season, $subject, $grade, $tier, $week, $questions);
+                } catch (Throwable $e) {
+                    error_log("Cascade variation topic error: " . $e->getMessage());
+                }
+            }
+
             // 2. 同步写入 JSON 文件作为灾备和静态镜像
             $data = [
                 'bankType' => $bankType,
@@ -841,6 +1029,15 @@ try {
 
             $filePath = getFilePath($dataDir, $subject, $grade, $tier, $week, $year, $season, $bankType);
             @file_put_contents($filePath, json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+
+            // 2.1 同步刷新举一反三 JSON 灾备镜像中的知识点
+            if ($bankType === 'homework') {
+                try {
+                    cascadeHomeworkTopicsToVariationJson($dataDir, $year, $season, $subject, $grade, $tier, $week, $questions);
+                } catch (Throwable $e) {
+                    error_log("Cascade variation JSON topic error: " . $e->getMessage());
+                }
+            }
 
             // 记录保存题库的审计日志
             if (function_exists('recordServerLog')) {
