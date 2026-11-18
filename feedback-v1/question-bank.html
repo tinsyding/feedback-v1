@@ -688,6 +688,12 @@
                                         <span class="rg-shortcut-hint" title="快捷键：←/→ 翻页 · Ctrl+Z 撤销 · Delete 删除选中框 · Ctrl+滚轮 缩放 · Esc 退出当前模式">快捷键</span>
                                     </div>
                                 </div>
+                                <div class="rg-continue-banner" id="rg-continue-banner" style="display: none;">
+                                    <span id="rg-continue-text">正在为第 1 题追加跨页区域：请翻页后直接拉框</span>
+                                    <div class="rg-continue-banner-actions">
+                                        <button type="button" class="btn sm secondary" data-action="rg-cancel-continue">退出续框</button>
+                                    </div>
+                                </div>
                                 <div class="rg-viewport" id="rg-viewport">
                                     <div class="rg-empty-state" id="rg-empty-state">
                                         <p>尚未加载原卷 PDF</p>
@@ -707,10 +713,6 @@
                                     <span class="rg-sidebar-tip" id="rg-sidebar-tip">答案仅按题号自动匹配，不绑定排版</span>
                                 </div>
                                 <div class="rg-missing-bar" id="rg-missing-bar" style="display: none;"></div>
-                                <div class="rg-continue-banner" id="rg-continue-banner" style="display: none;">
-                                    <span id="rg-continue-text">正在为第 1 题追加跨页区域：请翻页后直接拉框</span>
-                                    <button type="button" class="btn sm secondary" data-action="rg-cancel-continue">取消</button>
-                                </div>
                                 <div class="rg-list" id="rg-list">
                                     <div class="rg-list-empty">暂无框选区域</div>
                                 </div>
@@ -762,14 +764,14 @@
         </div>
     </dialog>
 
-    <!-- 整卷框题：大题专注切分模态窗 -->
+    <!-- 整卷框题：大题切分 / 跨页续框专注模态窗 -->
     <dialog class="dialog-overlay native-dialog" id="rg-focus-dialog" closedby="none" aria-labelledby="rg-focus-title">
         <div class="rg-focus-box">
             <div class="rg-focus-header">
                 <div class="rg-focus-title-wrap">
                     <h3 class="rg-focus-title" id="rg-focus-title">大题专注切分</h3>
-                    <div class="rg-focus-start-editor">
-                        <label for="rg-focus-start-input">首题题号</label>
+                    <div class="rg-focus-start-editor" id="rg-focus-start-editor">
+                        <label for="rg-focus-start-input" id="rg-focus-start-label">首题题号</label>
                         <input type="number" id="rg-focus-start-input" min="1" step="1" inputmode="numeric">
                     </div>
                 </div>
@@ -789,13 +791,15 @@
                             </svg>
                         </button>
                     </div>
+                    <button type="button" class="btn sm secondary" id="rg-focus-freeform-btn" style="display: none;" title="退出专注弹窗，回到整卷画布自由翻页续框">切回整卷续框</button>
+                    <button type="button" class="btn sm secondary" id="rg-focus-to-bigq-btn" style="display: none;" title="续框完成后直接切分本题各小问">进入大题切分</button>
                     <button type="button" class="btn sm secondary" id="rg-focus-undo-btn" title="快捷键: Ctrl/Cmd + Z">撤销上一小问</button>
                     <button type="button" class="btn sm primary" id="rg-focus-done-btn" title="完成并返回整卷 (Esc)">完成大题切分</button>
                 </div>
             </div>
             <div class="rg-focus-subbar">
                 <span class="rg-submode-hint" id="rg-submode-hint">直接拖拽框选各小问（大题上界至第 1 小问上界将自动判定为公共原文）</span>
-                <span class="rg-focus-shortcut-note">专注模式仅展示当前大题区域 · 快捷键：Ctrl+Z 撤销 · Esc 完成退出</span>
+                <span class="rg-focus-shortcut-note" id="rg-focus-shortcut-note">专注模式仅展示当前大题区域 · 快捷键：Ctrl+Z 撤销 · Esc 完成退出</span>
             </div>
             <div class="rg-focus-body">
                 <div class="rg-focus-viewport" id="rg-focus-viewport">
@@ -803,11 +807,20 @@
                 </div>
                 <aside class="rg-focus-sidebar">
                     <div class="rg-sidebar-header">
-                        <span>本题切分清单</span>
+                        <span id="rg-focus-sidebar-title">本题切分清单</span>
                         <span class="rg-sidebar-tip" id="rg-focus-summary">小问 0</span>
                     </div>
                     <div class="rg-list" id="rg-focus-list">
                         <div class="rg-list-empty">请在左侧框选区直接拖拽划出各小问（第 1 小问上界以上区域将自动识别为公共原文）</div>
+                    </div>
+                    <div class="rg-continue-preview-panel" id="rg-continue-preview-panel" style="display: none;">
+                        <div class="rg-continue-preview-header">
+                            <span>实时拼接预览</span>
+                            <span class="rg-continue-preview-meta" id="rg-continue-preview-meta">1 段</span>
+                        </div>
+                        <div class="rg-continue-preview-viewport" id="rg-continue-preview-viewport">
+                            <canvas id="rg-continue-preview-canvas"></canvas>
+                        </div>
                     </div>
                 </aside>
             </div>

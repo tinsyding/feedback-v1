@@ -23,6 +23,7 @@
         continueTargetId: null,
         selectedId: null,
         subMode: null, // { tab, itemId, target: 'stem' | 'subq' }
+        continueFocus: null, // { tab, itemId, candidatePages: number[], addedStack: object[] }
         focusZoom: 1.0,
         focusTwoTapStart: null, // { yPx }
         focusDrag: null,
@@ -181,6 +182,7 @@
         rgState.selectedId = null;
         rgState.continueTargetId = null;
         rgState.subMode = null;
+        rgState.continueFocus = null;
         rgState.focusTwoTapStart = null;
         rgState.focusDrag = null;
         rgState.focusResize = null;
@@ -443,7 +445,8 @@
             }
 
             const focusDlg = document.getElementById('rg-focus-dialog');
-            const inFocus = Boolean(rgState.subMode && focusDlg && (focusDlg.open || focusDlg.classList.contains('active')));
+            const focusMode = getActiveFocusMode();
+            const inFocus = Boolean(focusMode && focusDlg && (focusDlg.open || focusDlg.classList.contains('active')));
             const tag = document.activeElement ? document.activeElement.tagName : '';
 
             if (inFocus) {
@@ -456,7 +459,11 @@
                 }
                 if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
                     e.preventDefault();
-                    rgUndoSubBox();
+                    if (focusMode === 'continue') {
+                        rgUndoContinueSlice();
+                    } else {
+                        rgUndoSubBox();
+                    }
                     return;
                 }
                 if (e.key === 'Escape') {
@@ -464,6 +471,8 @@
                     if (rgState.focusTwoTapStart) {
                         rgState.focusTwoTapStart = null;
                         renderFocusSliceOverlays();
+                    } else if (focusMode === 'continue') {
+                        rgExitContinueFocus();
                     } else {
                         rgRequestExitSubMode();
                     }
@@ -935,13 +944,16 @@
 
         renderMissingAnswerBar();
 
+        const viewportEl = document.getElementById('rg-viewport');
         if (contBanner && contText) {
             if (rgState.continueTargetId) {
                 const target = tabState.items.find(it => it.id === rgState.continueTargetId);
                 contBanner.style.display = 'flex';
                 contText.textContent = `正在为「${target ? formatItemTitle(target, tab) : '当前题'}」追加跨页区域：请翻页后拉框`;
+                if (viewportEl) viewportEl.classList.add('continue-active');
             } else {
                 contBanner.style.display = 'none';
+                if (viewportEl) viewportEl.classList.remove('continue-active');
             }
         }
 
@@ -1043,44 +1055,117 @@
         }).join('');
     }
 
+    function getActiveFocusMode() {
+        if (rgState.subMode) return 'bigq';
+        if (rgState.continueFocus) return 'continue';
+        return null;
+    }
+
+    function sortRegionsInPlace(it) {
+        if (!it || !Array.isArray(it.regions)) return;
+        it.regions.sort((a, b) =>
+            ((parseInt(a.pageOffset, 10) || 0) - (parseInt(b.pageOffset, 10) || 0))
+            || ((Number(a.y) || 0) - (Number(b.y) || 0))
+        );
+    }
+
     function renderSubModeBar() {
         const hint = document.getElementById('rg-submode-hint');
+        const shortcutNote = document.getElementById('rg-focus-shortcut-note');
         const titleEl = document.getElementById('rg-focus-title');
+        const startEditor = document.getElementById('rg-focus-start-editor');
+        const startLabel = document.getElementById('rg-focus-start-label');
         const startInp = document.getElementById('rg-focus-start-input');
         const zoomVal = document.getElementById('rg-focus-zoom-val');
         const twoTapBtn = document.getElementById('rg-focus-twotap-btn');
+        const freeformBtn = document.getElementById('rg-focus-freeform-btn');
+        const toBigqBtn = document.getElementById('rg-focus-to-bigq-btn');
+        const undoBtn = document.getElementById('rg-focus-undo-btn');
+        const doneBtn = document.getElementById('rg-focus-done-btn');
+        const sidebarTitle = document.getElementById('rg-focus-sidebar-title');
+        const previewPanel = document.getElementById('rg-continue-preview-panel');
 
-        if (!rgState.subMode || rgState.subMode.tab !== rgState.activeTab) {
+        const focusMode = getActiveFocusMode();
+        const activeCtx = rgState.subMode || rgState.continueFocus;
+        if (!focusMode || !activeCtx || activeCtx.tab !== rgState.activeTab) {
             closeFocusDialogSafe();
             return;
         }
-        const tabState = getTabState(rgState.subMode.tab);
-        const it = tabState.items.find(x => x.id === rgState.subMode.itemId);
+        const tabState = getTabState(activeCtx.tab);
+        const it = tabState.items.find(x => x.id === activeCtx.itemId);
         if (!it) {
             rgState.subMode = null;
+            rgState.continueFocus = null;
             closeFocusDialogSafe();
             return;
         }
-        if (titleEl) titleEl.textContent = `大题专注切分 · ${formatItemTitle(it, rgState.subMode.tab)}`;
-        if (startInp && document.activeElement !== startInp) {
-            startInp.value = it.label || '';
-        }
+
+        const bankType = getCurrentBankTypeSafe();
         if (zoomVal) zoomVal.textContent = Math.round(rgState.focusZoom * 100) + '%';
         if (twoTapBtn) {
             twoTapBtn.classList.toggle('active', Boolean(rgState.twoTapMode));
             twoTapBtn.textContent = rgState.twoTapMode ? '两点定框: 开' : '两点定框: 关';
         }
-        if (hint) {
-            const subqCount = Array.isArray(it.subqBoxes) ? it.subqBoxes.length : 0;
-            const hasStem = Array.isArray(it.stemBoxes) && it.stemBoxes.length > 0;
-            if (subqCount === 0) {
-                hint.textContent = '直接红框框选各小问（大题上界至第 1 小问上界将自动判定为公共原文）';
-            } else if (hasStem) {
-                hint.textContent = '继续红框框选后续小问 · 绿虚线为自动识别的公共原文（随第 1 小问上界自动联动）';
-            } else {
-                hint.textContent = '继续红框框选后续小问（当前第 1 小问紧贴大题顶部，未切分公共原文）';
+
+        if (focusMode === 'continue') {
+            if (titleEl) titleEl.textContent = `跨页续框专注模式 · ${formatItemTitle(it, activeCtx.tab)}`;
+            if (startEditor) startEditor.style.display = bankType === 'variation' ? 'none' : 'inline-flex';
+            if (startLabel) startLabel.textContent = it.isBig ? '起始题号' : '题号';
+            if (startInp && document.activeElement !== startInp) {
+                startInp.value = it.label || '';
+            }
+            if (freeformBtn) freeformBtn.style.display = 'inline-flex';
+            if (toBigqBtn) {
+                toBigqBtn.style.display = (activeCtx.tab === 'exercise' && bankType !== 'variation') ? 'inline-flex' : 'none';
+            }
+            if (undoBtn) {
+                undoBtn.textContent = '撤销上一段';
+                undoBtn.disabled = !(Array.isArray(activeCtx.addedStack) && activeCtx.addedStack.length > 0);
+            }
+            if (doneBtn) doneBtn.textContent = '完成续框';
+            if (sidebarTitle) sidebarTitle.textContent = '跨页分段清单';
+            if (shortcutNote) shortcutNote.textContent = '专注模式仅展示当前题衔接页面 · Ctrl+Z 撤销 · Esc 完成退出';
+            if (previewPanel) previewPanel.style.display = 'flex';
+            if (hint) {
+                const regCount = Array.isArray(it.regions) ? it.regions.length : 0;
+                const candPages = (activeCtx.candidatePages || []).map(p => 'P' + (p + 1)).join('、');
+                if (regCount <= 1) {
+                    const firstP = regCount > 0 ? ((parseInt(it.regions[0].pageOffset, 10) || 0) + 1) : 1;
+                    hint.textContent = `上方为 P${firstP} 已有末尾（可拖上下边微调），请在下方 ${candPages || '待续页面'} 拉框续接`;
+                } else {
+                    hint.textContent = `已串联 ${regCount} 段区域 · 右侧可实时核对拼接效果，可继续微调或追加后续页`;
+                }
+            }
+        } else {
+            if (titleEl) titleEl.textContent = `大题专注切分 · ${formatItemTitle(it, activeCtx.tab)}`;
+            if (startEditor) startEditor.style.display = 'inline-flex';
+            if (startLabel) startLabel.textContent = '首题题号';
+            if (startInp && document.activeElement !== startInp) {
+                startInp.value = it.label || '';
+            }
+            if (freeformBtn) freeformBtn.style.display = 'none';
+            if (toBigqBtn) toBigqBtn.style.display = 'none';
+            if (undoBtn) {
+                undoBtn.textContent = '撤销上一小问';
+                undoBtn.disabled = false;
+            }
+            if (doneBtn) doneBtn.textContent = '完成大题切分';
+            if (sidebarTitle) sidebarTitle.textContent = '本题切分清单';
+            if (shortcutNote) shortcutNote.textContent = '专注模式仅展示当前大题区域 · 快捷键：Ctrl+Z 撤销 · Esc 完成退出';
+            if (previewPanel) previewPanel.style.display = 'none';
+            if (hint) {
+                const subqCount = Array.isArray(it.subqBoxes) ? it.subqBoxes.length : 0;
+                const hasStem = Array.isArray(it.stemBoxes) && it.stemBoxes.length > 0;
+                if (subqCount === 0) {
+                    hint.textContent = '直接红框框选各小问（大题上界至第 1 小问上界将自动判定为公共原文）';
+                } else if (hasStem) {
+                    hint.textContent = '继续红框框选后续小问 · 绿虚线为自动识别的公共原文（随第 1 小问上界自动联动）';
+                } else {
+                    hint.textContent = '继续红框框选后续小问（当前第 1 小问紧贴大题顶部，未切分公共原文）';
+                }
             }
         }
+
         renderFocusSidebar();
         renderFocusSliceOverlays();
     }
@@ -1668,8 +1753,10 @@
             }
         }
         const focusTitle = document.getElementById('rg-focus-title');
-        if (focusTitle && rgState.subMode && rgState.subMode.itemId === itemId) {
-            focusTitle.textContent = `大题专注切分 · ${formatItemTitle(it, rgState.subMode.tab)}`;
+        const activeCtx = rgState.subMode || rgState.continueFocus;
+        if (focusTitle && activeCtx && activeCtx.itemId === itemId) {
+            const prefix = rgState.continueFocus ? '跨页续框专注模式' : '大题专注切分';
+            focusTitle.textContent = `${prefix} · ${formatItemTitle(it, activeCtx.tab)}`;
         }
         renderBoxOverlay();
         renderFocusSliceOverlays();
@@ -1708,9 +1795,15 @@
         const it = tabState.items.find(x => x.id === itemId);
         if (!it) return;
         if (Array.isArray(it.regions) && it.regions.length > 1) {
-            it.regions.splice(regionIdx, 1);
+            const [removed] = it.regions.splice(regionIdx, 1);
+            if (rgState.continueFocus && rgState.continueFocus.itemId === itemId && removed) {
+                rgState.continueFocus.addedStack = (rgState.continueFocus.addedStack || []).filter(ref => ref !== removed);
+            }
             if (it.isBig) syncAutoStemBoxes(it);
             renderAllRg();
+            if (rgState.continueFocus && rgState.continueFocus.itemId === itemId) {
+                renderFocusSlices();
+            }
             scheduleDraftSave();
             return;
         }
@@ -1744,7 +1837,7 @@
         scheduleDraftSave();
     };
 
-    window.rgStartContinue = async function (itemId) {
+    async function startFreeformContinue(itemId) {
         const tabState = getTabState();
         const it = tabState.items.find(x => x.id === itemId);
         rgState.continueTargetId = itemId;
@@ -1765,6 +1858,10 @@
             }
         }
         renderSidebar();
+    }
+
+    window.rgStartContinue = async function (itemId) {
+        await openContinueFocusMode(itemId);
     };
 
     window.rgCancelContinue = function () {
@@ -1775,9 +1872,10 @@
     let focusDialogEventsBound = false;
 
     function getFocusActiveItem() {
-        if (!rgState.subMode) return null;
-        const tabState = getTabState(rgState.subMode.tab);
-        return tabState.items.find(x => x.id === rgState.subMode.itemId) || null;
+        const activeCtx = rgState.subMode || rgState.continueFocus;
+        if (!activeCtx) return null;
+        const tabState = getTabState(activeCtx.tab);
+        return tabState.items.find(x => x.id === activeCtx.itemId) || null;
     }
 
     function promptBigQuestionStartNum(it) {
@@ -2024,7 +2122,74 @@
         });
     }
 
-    function commitStitchedDrawRange(y0Px, y1Px) {
+    function commitContinueDrawRange(y0Px, y1Px, x0Px, x1Px) {
+        if (!rgState.continueFocus || !rgState.focusStitch) return;
+        const it = getFocusActiveItem();
+        const stitch = rgState.focusStitch;
+        if (!it || !stitch || !Array.isArray(stitch.slices)) return;
+
+        const topPx = Math.max(0, Math.min(y0Px, y1Px));
+        const botPx = Math.min(stitch.totalH, Math.max(y0Px, y1Px));
+        const leftPx = Math.max(0, Math.min(x0Px ?? 0, x1Px ?? stitch.width));
+        const rightPx = Math.min(stitch.width, Math.max(x0Px ?? 0, x1Px ?? stitch.width));
+
+        const candidateSlices = stitch.slices.filter(s => s.role === 'candidate');
+        const created = [];
+
+        candidateSlices.forEach((s) => {
+            const interTop = Math.max(topPx, s.topPx);
+            const interBot = Math.min(botPx, s.bottomPx);
+            const overlap = interBot - interTop;
+            if (overlap < 8) return;
+
+            const relY = clamp01((interTop - s.topPx) / Math.max(1, s.logicalH));
+            const relH = Math.max(0.01, (interBot - interTop) / Math.max(1, s.logicalH));
+            const pageY = clamp01(s.crop.y + relY * s.crop.h);
+            const pageH = Math.max(0.012, Math.min(1 - pageY, relH * s.crop.h));
+
+            let pageX = FULL_WIDTH_X;
+            let pageW = FULL_WIDTH_W;
+            if (!rgState.fullWidth) {
+                const relX = clamp01(leftPx / Math.max(1, stitch.width));
+                const relW = Math.max(0.05, (rightPx - leftPx) / Math.max(1, stitch.width));
+                pageX = clamp01(s.crop.x + relX * s.crop.w);
+                pageW = Math.max(0.04, Math.min(1 - pageX, relW * s.crop.w));
+            }
+
+            created.push({
+                pageOffset: s.crop.pageOffset,
+                x: round4(pageX),
+                y: round4(pageY),
+                w: round4(pageW),
+                h: round4(pageH)
+            });
+        });
+
+        if (created.length === 0) {
+            const hitExisting = stitch.slices.some(s => s.role === 'existing' && Math.min(botPx, s.bottomPx) - Math.max(topPx, s.topPx) >= 8);
+            if (hitExisting) {
+                showToast('已有片段请拖动上下边缘微调；续框请在下方待续页面拉框', 'info');
+            }
+            return;
+        }
+
+        it.regions = it.regions || [];
+        rgState.continueFocus.addedStack = rgState.continueFocus.addedStack || [];
+        created.forEach((rectObj) => {
+            it.regions.push(rectObj);
+            rgState.continueFocus.addedStack.push(rectObj);
+        });
+        sortRegionsInPlace(it);
+        if (it.isBig) syncAutoStemBoxes(it);
+        renderAllRg();
+        scheduleDraftSave();
+    }
+
+    function commitStitchedDrawRange(y0Px, y1Px, x0Px, x1Px) {
+        if (rgState.continueFocus) {
+            commitContinueDrawRange(y0Px, y1Px, x0Px, x1Px);
+            return;
+        }
         if (!rgState.subMode || !rgState.focusStitch) return;
         const it = getFocusActiveItem();
         if (!it) return;
@@ -2057,10 +2222,12 @@
         scheduleDraftSave();
     }
 
-    function startFocusBoxResize(e, kind, itemId, groupBoxes, edge, boxEl, origTopPx, origBotPx, stitch) {
+    function startFocusBoxResize(e, kind, itemId, groupBoxes, edge, boxEl, origTopPx, origBotPx, stitch, sliceBounds = null, origLeftPx = 0, origRightPx = stitch.width) {
         if (e.pointerType === 'mouse' && e.button !== 0) return;
         e.preventDefault();
         e.stopPropagation();
+        const minTopPx = sliceBounds ? sliceBounds.topPx : 0;
+        const maxBotPx = sliceBounds ? sliceBounds.bottomPx : stitch.totalH;
         rgState.focusResize = {
             pointerId: e.pointerId,
             kind,
@@ -2069,13 +2236,118 @@
             edge,
             boxEl,
             stitch,
+            slice: sliceBounds || null,
+            minTopPx,
+            maxBotPx,
+            startClientX: e.clientX,
             startClientY: e.clientY,
             origTopPx,
             origBotPx,
             curTopPx: origTopPx,
-            curBotPx: origBotPx
+            curBotPx: origBotPx,
+            origLeftPx,
+            origRightPx,
+            curLeftPx: origLeftPx,
+            curRightPx: origRightPx
         };
         try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+    }
+
+    function renderContinuePreview(it) {
+        const canvas = document.getElementById('rg-continue-preview-canvas');
+        const metaEl = document.getElementById('rg-continue-preview-meta');
+        if (!canvas || !it) return;
+
+        const regions = [...(it.regions || [])];
+        const pagePages = Array.from(new Set(regions.map(r => 'P' + ((parseInt(r.pageOffset, 10) || 0) + 1)))).join(' → ');
+        if (metaEl) {
+            metaEl.textContent = `${regions.length} 段${pagePages ? ` · ${pagePages}` : ''}`;
+        }
+
+        const stitch = rgState.focusStitch;
+        const cacheMap = stitch && stitch.pageCanvasByOffset;
+        if (!cacheMap || regions.length === 0) {
+            canvas.width = 0;
+            canvas.height = 0;
+            return;
+        }
+
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const displayW = 248;
+        const targetPxW = Math.round(displayW * dpr);
+        const seamGapPx = Math.round(10 * dpr);
+        const drawSpecs = [];
+        let totalPxH = 0;
+
+        regions.forEach((rg, idx) => {
+            const pOff = parseInt(rg.pageOffset, 10) || 0;
+            const src = cacheMap.get(pOff);
+            if (!src || !src.width || !src.height) return;
+            const sx = Math.max(0, Math.floor((Number(rg.x) || 0) * src.width));
+            const sy = Math.max(0, Math.floor((Number(rg.y) || 0) * src.height));
+            const sw = Math.max(8, Math.min(src.width - sx, Math.round((Number(rg.w) || 1) * src.width)));
+            const sh = Math.max(8, Math.min(src.height - sy, Math.round((Number(rg.h) || 0.1) * src.height)));
+            const dstH = Math.max(12, Math.round(sh * (targetPxW / sw)));
+            if (drawSpecs.length > 0) totalPxH += seamGapPx;
+            drawSpecs.push({
+                idx,
+                pageNum: pOff + 1,
+                src,
+                sx,
+                sy,
+                sw,
+                sh,
+                dstY: totalPxH,
+                dstH
+            });
+            totalPxH += dstH;
+        });
+
+        if (drawSpecs.length === 0 || totalPxH <= 0) {
+            canvas.width = 0;
+            canvas.height = 0;
+            return;
+        }
+
+        canvas.width = targetPxW;
+        canvas.height = totalPxH;
+        canvas.style.width = displayW + 'px';
+        canvas.style.height = Math.round(totalPxH / dpr) + 'px';
+
+        const ctx = canvas.getContext('2d', { alpha: false });
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        drawSpecs.forEach((sp, i) => {
+            ctx.drawImage(sp.src, sp.sx, sp.sy, sp.sw, sp.sh, 0, sp.dstY, targetPxW, sp.dstH);
+            if (i > 0) {
+                const lineY = sp.dstY - Math.round(seamGapPx / 2);
+                ctx.save();
+                ctx.strokeStyle = '#94a3b8';
+                ctx.lineWidth = Math.max(1, Math.round(dpr));
+                ctx.setLineDash([4 * dpr, 3 * dpr]);
+                ctx.beginPath();
+                ctx.moveTo(0, lineY);
+                ctx.lineTo(targetPxW, lineY);
+                ctx.stroke();
+                ctx.restore();
+            }
+        });
+    }
+
+    function scrollToContinueRegion(regionIdx) {
+        const it = getFocusActiveItem();
+        const stitch = rgState.focusStitch;
+        const viewportEl = document.getElementById('rg-focus-viewport');
+        if (!it || !stitch || !viewportEl) return;
+        const rg = (it.regions || [])[regionIdx];
+        if (!rg) return;
+        const sIdx = findBestSliceForBox(rg, stitch.slices);
+        if (sIdx < 0) return;
+        const s = stitch.slices[sIdx];
+        const relY = clamp01((rg.y - s.crop.y) / Math.max(0.001, s.crop.h));
+        const topPx = s.topPx + relY * s.logicalH;
+        viewportEl.scrollTo({ top: Math.max(0, topPx - 24), behavior: 'smooth' });
     }
 
     function renderFocusSidebar() {
@@ -2083,6 +2355,36 @@
         const summaryEl = document.getElementById('rg-focus-summary');
         const it = getFocusActiveItem();
         if (!listEl || !it) return;
+
+        if (rgState.continueFocus) {
+            const regions = it.regions || [];
+            if (summaryEl) {
+                summaryEl.textContent = `共 ${regions.length} 段`;
+            }
+            if (regions.length === 0) {
+                listEl.innerHTML = '<div class="rg-list-empty">暂无框选分段，请在左侧画布拉框</div>';
+            } else {
+                const segHtml = regions.map((rg, rIdx) => {
+                    const pNum = (parseInt(rg.pageOffset, 10) || 0) + 1;
+                    const badgeCls = rIdx === 0 ? 'seg-head' : 'seg-cont';
+                    const badgeText = rIdx === 0 ? '首段' : `续 ${rIdx}`;
+                    const canDel = regions.length > 1;
+                    const delBtn = canDel
+                        ? `<button type="button" class="rg-subq-del-btn" onclick="event.stopPropagation(); rgDeleteRegionSlice('${it.id}', ${rIdx})" title="删除此跨页片段" aria-label="删除此跨页片段"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>`
+                        : '';
+                    return `
+                        <div class="rg-focus-list-row continue-seg" onclick="rgScrollContinueRegion(${rIdx})" title="点击定位到此片段">
+                            <span class="rg-focus-badge ${badgeCls}">${badgeText}</span>
+                            <span class="rg-focus-seg-info">P${pNum} · 第 ${rIdx + 1} 段</span>
+                            ${delBtn}
+                        </div>
+                    `;
+                }).join('');
+                listEl.innerHTML = `<div class="rg-focus-list-group"><div class="rg-focus-list-title">已选片段（点击定位）</div>${segHtml}</div>`;
+            }
+            renderContinuePreview(it);
+            return;
+        }
 
         const stemGroups = groupStemBoxes(it.stemBoxes);
         const subqs = it.subqBoxes || [];
@@ -2127,9 +2429,10 @@
     function renderFocusSliceOverlays() {
         const it = getFocusActiveItem();
         const stitch = rgState.focusStitch;
-        if (!it || !stitch || !stitch.layerEl || !Array.isArray(stitch.slices) || stitch.slices.length === 0) return;
+        const focusMode = getActiveFocusMode();
+        if (!it || !focusMode || !stitch || !stitch.layerEl || !Array.isArray(stitch.slices) || stitch.slices.length === 0) return;
 
-        const { layerEl, totalH, slices } = stitch;
+        const { layerEl, totalH, slices, width } = stitch;
         layerEl.innerHTML = '';
 
         if (rgState.focusTwoTapStart) {
@@ -2147,13 +2450,94 @@
             const sIdx = findBestSliceForBox(box, slices);
             if (sIdx < 0) return null;
             const s = slices[sIdx];
-            const relY = clamp01((box.y - s.crop.y) / s.crop.h);
-            const relBot = clamp01((box.y + box.h - s.crop.y) / s.crop.h);
+            const relY = clamp01((box.y - s.crop.y) / Math.max(0.001, s.crop.h));
+            const relBot = clamp01((box.y + box.h - s.crop.y) / Math.max(0.001, s.crop.h));
+            const relX = clamp01((box.x - s.crop.x) / Math.max(0.001, s.crop.w));
+            const relW = Math.max(0.02, Math.min(1 - relX, (box.w || 1) / Math.max(0.001, s.crop.w)));
             return {
+                slice: s,
                 topPx: s.topPx + relY * s.logicalH,
-                botPx: Math.max(s.topPx + relY * s.logicalH + 8, s.topPx + relBot * s.logicalH)
+                botPx: Math.max(s.topPx + relY * s.logicalH + 8, s.topPx + relBot * s.logicalH),
+                leftPx: relX * width,
+                rightPx: (relX + relW) * width,
+                leftPct: relX * 100,
+                widthPct: relW * 100
             };
         };
+
+        if (focusMode === 'continue') {
+            const activeCtx = rgState.continueFocus;
+            const tab = activeCtx.tab;
+            const tabState = getTabState(tab);
+
+            // 在待续页面上淡显其他题目的已有框选区域，防止续框重叠
+            const candidateSlicePages = new Set(slices.filter(s => s.role === 'candidate').map(s => s.crop.pageOffset));
+            tabState.items.forEach((other) => {
+                if (!other || other.id === it.id) return;
+                (other.regions || []).forEach((org) => {
+                    if (!candidateSlicePages.has(parseInt(org.pageOffset, 10) || 0)) return;
+                    const sp = boxToStitchSpan(org);
+                    if (!sp) return;
+                    const div = document.createElement('div');
+                    div.className = 'rg-box context-other';
+                    div.style.left = sp.leftPct + '%';
+                    div.style.top = ((sp.topPx / Math.max(1, totalH)) * 100) + '%';
+                    div.style.width = sp.widthPct + '%';
+                    div.style.height = Math.max(0.8, ((sp.botPx - sp.topPx) / Math.max(1, totalH)) * 100) + '%';
+                    const tag = document.createElement('span');
+                    tag.className = 'rg-box-tag';
+                    tag.textContent = formatItemTitle(other, tab);
+                    div.appendChild(tag);
+                    layerEl.appendChild(div);
+                });
+            });
+
+            (it.regions || []).forEach((rg, rIdx) => {
+                const sp = boxToStitchSpan(rg);
+                if (!sp) return;
+                const div = document.createElement('div');
+                const nearTopCls = sp.topPx < 22 ? ' near-top' : '';
+                const ansCls = tab === 'answer' ? ' answer' : '';
+                const roleCls = sp.slice.role === 'existing' ? ' continue-existing' : '';
+                div.className = `rg-box${ansCls}${roleCls} active${nearTopCls}`;
+                div.style.left = sp.leftPct + '%';
+                div.style.top = ((sp.topPx / Math.max(1, totalH)) * 100) + '%';
+                div.style.width = sp.widthPct + '%';
+                div.style.height = Math.max(0.8, ((sp.botPx - sp.topPx) / Math.max(1, totalH)) * 100) + '%';
+
+                const tag = document.createElement('span');
+                tag.className = 'rg-box-tag';
+                const suffix = it.regions.length > 1 ? ` (${rIdx + 1}/${it.regions.length})` : '';
+                tag.textContent = formatItemTitle(it, tab) + suffix;
+                div.appendChild(tag);
+
+                const edges = rgState.fullWidth ? ['n', 's'] : ['n', 's', 'w', 'e'];
+                edges.forEach((edge) => {
+                    const h = document.createElement('div');
+                    h.className = `rg-handle rg-handle-${edge}`;
+                    h.addEventListener('pointerdown', (e) => startFocusBoxResize(
+                        e, 'region', it.id, [rg], edge, div, sp.topPx, sp.botPx, stitch, sp.slice, sp.leftPx, sp.rightPx
+                    ));
+                    div.appendChild(h);
+                });
+
+                if (it.regions.length > 1) {
+                    const delBtn = document.createElement('button');
+                    delBtn.type = 'button';
+                    delBtn.className = 'rg-box-del';
+                    delBtn.title = '删除此跨页片段';
+                    delBtn.textContent = '×';
+                    delBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+                    delBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        rgDeleteRegionSlice(it.id, rIdx);
+                    });
+                    div.appendChild(delBtn);
+                }
+                layerEl.appendChild(div);
+            });
+            return;
+        }
 
         const renderStitchedBox = (topPx, botPx, kind, groupBoxes, firstIdx, labelText, isReadOnlyAuto = false) => {
             const topPct = (topPx / Math.max(1, totalH)) * 100;
@@ -2214,13 +2598,67 @@
         });
     }
 
+    function buildContinueSlicePlans(it, candidatePages) {
+        const cropX = rgState.fullWidth ? FULL_WIDTH_X : 0;
+        const cropW = rgState.fullWidth ? FULL_WIDTH_W : 1;
+        const sortedCand = Array.from(new Set((candidatePages || []).map(p => parseInt(p, 10) || 0))).sort((a, b) => a - b);
+        const candSet = new Set(sortedCand);
+
+        const byExistingPage = new Map();
+        (it.regions || []).forEach((rg) => {
+            const pOff = parseInt(rg.pageOffset, 10) || 0;
+            if (candSet.has(pOff)) return;
+            if (!byExistingPage.has(pOff)) byExistingPage.set(pOff, []);
+            byExistingPage.get(pOff).push(rg);
+        });
+
+        const existingPages = Array.from(byExistingPage.keys()).sort((a, b) => a - b);
+        const plans = [];
+
+        existingPages.forEach((pOff, idx) => {
+            const regs = byExistingPage.get(pOff);
+            const minY = Math.min(...regs.map(r => Number(r.y) || 0));
+            const maxBot = Math.max(...regs.map(r => (Number(r.y) || 0) + (Number(r.h) || 0.08)));
+            const isLastExisting = idx === existingPages.length - 1;
+            const y0 = clamp01(minY - 0.015);
+            const y1 = clamp01(maxBot + (isLastExisting ? 0.08 : 0.015));
+            plans.push({
+                role: 'existing',
+                crop: {
+                    pageOffset: pOff,
+                    x: cropX,
+                    y: y0,
+                    w: cropW,
+                    h: Math.max(0.03, y1 - y0)
+                }
+            });
+        });
+
+        sortedCand.forEach((pOff) => {
+            plans.push({
+                role: 'candidate',
+                crop: {
+                    pageOffset: pOff,
+                    x: cropX,
+                    y: 0,
+                    w: cropW,
+                    h: 1
+                }
+            });
+        });
+
+        return plans;
+    }
+
     async function renderFocusSlices() {
         const container = document.getElementById('rg-focus-slices');
         const viewportEl = document.getElementById('rg-focus-viewport');
         const it = getFocusActiveItem();
-        if (!container || !it || !rgState.subMode) return;
+        const focusMode = getActiveFocusMode();
+        const activeCtx = rgState.subMode || rgState.continueFocus;
+        if (!container || !it || !focusMode || !activeCtx) return;
 
-        const tab = rgState.subMode.tab;
+        const tab = activeCtx.tab;
         const tabState = getTabState(tab);
         if (!tabState.pdfDoc) return;
 
@@ -2231,17 +2669,26 @@
 
         container.innerHTML = '';
         rgState.focusStitch = null;
-        const rawRegions = (Array.isArray(it.regions) && it.regions.length > 0)
-            ? it.regions
-            : [{ pageOffset: 0, x: FULL_WIDTH_X, y: 0, w: FULL_WIDTH_W, h: 1 }];
-        const regions = [...rawRegions].sort((a, b) => ((a.pageOffset || 0) - (b.pageOffset || 0)) || ((a.y || 0) - (b.y || 0)));
+
+        let slicePlans = [];
+        if (focusMode === 'continue') {
+            slicePlans = buildContinueSlicePlans(it, activeCtx.candidatePages);
+        } else {
+            const rawRegions = (Array.isArray(it.regions) && it.regions.length > 0)
+                ? it.regions
+                : [{ pageOffset: 0, x: FULL_WIDTH_X, y: 0, w: FULL_WIDTH_W, h: 1 }];
+            const regions = [...rawRegions].sort((a, b) => ((a.pageOffset || 0) - (b.pageOffset || 0)) || ((a.y || 0) - (b.y || 0)));
+            slicePlans = regions.map(rg => ({ role: 'bigq', crop: computeRegionDisplayCrop(rg) }));
+        }
 
         const prepared = [];
+        const pageCanvasByOffset = new Map();
         let totalH = 0;
 
-        for (let sliceIdx = 0; sliceIdx < regions.length; sliceIdx++) {
+        for (let sliceIdx = 0; sliceIdx < slicePlans.length; sliceIdx++) {
             if (mySeq !== rgState.focusRenderSeq) return;
-            const crop = computeRegionDisplayCrop(regions[sliceIdx]);
+            const plan = slicePlans[sliceIdx];
+            const crop = plan.crop;
             const pageNum = Math.min(tabState.pdfDoc.numPages, Math.max(1, crop.pageOffset + 1));
             const page = await tabState.pdfDoc.getPage(pageNum);
             if (mySeq !== rgState.focusRenderSeq) return;
@@ -2264,6 +2711,7 @@
                 if (mySeq !== rgState.focusRenderSeq) return;
                 rgState.focusPageCache.set(cacheKey, fullCanvas);
             }
+            pageCanvasByOffset.set(crop.pageOffset, fullCanvas);
 
             const sx = Math.max(0, Math.floor(crop.x * fullCanvas.width));
             const sy = Math.max(0, Math.floor(crop.y * fullCanvas.height));
@@ -2286,6 +2734,7 @@
             prepared.push({
                 sliceIdx,
                 pageNum,
+                role: plan.role,
                 crop,
                 canvas,
                 topPx: totalH,
@@ -2305,12 +2754,17 @@
         prepared.forEach((p, idx) => {
             stageEl.appendChild(p.canvas);
             if (idx > 0) {
+                const prev = prepared[idx - 1];
                 const seam = document.createElement('div');
                 seam.className = 'rg-focus-seam-line';
                 seam.style.top = p.topPx + 'px';
                 const badge = document.createElement('span');
                 badge.className = 'rg-focus-seam-badge';
-                badge.textContent = `P${prepared[idx - 1].pageNum} / P${p.pageNum}`;
+                if (prev.role === 'existing' && p.role === 'candidate') {
+                    badge.textContent = `P${prev.pageNum} 已有末尾 / P${p.pageNum} 待续画布`;
+                } else {
+                    badge.textContent = `P${prev.pageNum} / P${p.pageNum}`;
+                }
                 seam.appendChild(badge);
                 stageEl.appendChild(seam);
             }
@@ -2321,13 +2775,29 @@
         stageEl.appendChild(layerEl);
         container.appendChild(stageEl);
 
+        if (focusMode === 'continue' && tabState.totalPages > 1) {
+            const maxCand = Math.max(...(activeCtx.candidatePages || [0]));
+            if (maxCand + 1 < tabState.totalPages) {
+                const pager = document.createElement('div');
+                pager.className = 'rg-focus-continue-pager';
+                const nextBtn = document.createElement('button');
+                nextBtn.type = 'button';
+                nextBtn.className = 'btn sm secondary';
+                nextBtn.textContent = `载入下一页 (P${maxCand + 2})`;
+                nextBtn.addEventListener('click', () => rgContinueLoadNextPage());
+                pager.appendChild(nextBtn);
+                container.appendChild(pager);
+            }
+        }
+
         rgState.focusStitch = {
             stageEl,
             layerEl,
             width: stitchW,
             totalH,
-            slices: prepared.map(({ sliceIdx, pageNum, crop, topPx, bottomPx, logicalH }) => ({
-                sliceIdx, pageNum, crop, topPx, bottomPx, logicalH
+            pageCanvasByOffset,
+            slices: prepared.map(({ sliceIdx, pageNum, role, crop, topPx, bottomPx, logicalH }) => ({
+                sliceIdx, pageNum, role, crop, topPx, bottomPx, logicalH
             }))
         };
 
@@ -2344,7 +2814,9 @@
             e.preventDefault();
             try { stageEl.setPointerCapture(e.pointerId); } catch (_) {}
             const rect = stageEl.getBoundingClientRect();
+            const ptX = clamp01((e.clientX - rect.left) / Math.max(1, rect.width));
             const ptY = clamp01((e.clientY - rect.top) / Math.max(1, rect.height));
+            const xPx = ptX * stitchW;
             const yPx = ptY * totalH;
             const draftEl = document.createElement('div');
             draftEl.className = 'rg-box draft';
@@ -2352,13 +2824,17 @@
             rgState.focusDrag = {
                 pointerId: e.pointerId,
                 stageEl,
+                totalW: stitchW,
                 totalH,
+                startXPx: xPx,
+                curXPx: xPx,
                 startYPx: yPx,
                 curYPx: yPx,
                 draftEl
             };
         });
 
+        renderFocusSidebar();
         renderFocusSliceOverlays();
     }
 
@@ -2370,6 +2846,8 @@
         const twoTapBtn = document.getElementById('rg-focus-twotap-btn');
         const zoomOutBtn = document.getElementById('rg-focus-zoom-out');
         const zoomInBtn = document.getElementById('rg-focus-zoom-in');
+        const freeformBtn = document.getElementById('rg-focus-freeform-btn');
+        const toBigqBtn = document.getElementById('rg-focus-to-bigq-btn');
         const undoBtn = document.getElementById('rg-focus-undo-btn');
         const doneBtn = document.getElementById('rg-focus-done-btn');
         const viewportEl = document.getElementById('rg-focus-viewport');
@@ -2379,13 +2857,15 @@
                 const it = getFocusActiveItem();
                 if (!it) return;
                 const raw = String(startInp.value || '').trim();
-                if (/^\d+$/.test(raw) && parseInt(raw, 10) > 0) {
+                if (rgState.continueFocus) {
+                    rgUpdateItemLabel(it.id, raw);
+                } else if (/^\d+$/.test(raw) && parseInt(raw, 10) > 0) {
                     rgUpdateItemLabel(it.id, raw);
                 }
             });
             startInp.addEventListener('blur', () => {
                 const it = getFocusActiveItem();
-                if (!it) return;
+                if (!it || rgState.continueFocus) return;
                 const raw = String(startInp.value || '').trim();
                 if (!/^\d+$/.test(raw) || parseInt(raw, 10) <= 0) {
                     startInp.value = it.label || '1';
@@ -2406,8 +2886,26 @@
         }
         if (zoomOutBtn) zoomOutBtn.addEventListener('click', () => rgFocusZoomBy(-0.15));
         if (zoomInBtn) zoomInBtn.addEventListener('click', () => rgFocusZoomBy(0.15));
-        if (undoBtn) undoBtn.addEventListener('click', () => rgUndoSubBox());
-        if (doneBtn) doneBtn.addEventListener('click', () => rgRequestExitSubMode());
+        if (freeformBtn) freeformBtn.addEventListener('click', () => rgSwitchContinueToFreeform());
+        if (toBigqBtn) toBigqBtn.addEventListener('click', () => rgContinueToBigQ());
+        if (undoBtn) {
+            undoBtn.addEventListener('click', () => {
+                if (rgState.continueFocus) {
+                    rgUndoContinueSlice();
+                } else {
+                    rgUndoSubBox();
+                }
+            });
+        }
+        if (doneBtn) {
+            doneBtn.addEventListener('click', () => {
+                if (rgState.continueFocus) {
+                    rgExitContinueFocus();
+                } else {
+                    rgRequestExitSubMode();
+                }
+            });
+        }
 
         if (viewportEl) {
             let wheelAt = 0;
@@ -2435,19 +2933,32 @@
             if (rgState.focusResize && rgState.focusResize.pointerId === e.pointerId) {
                 const rz = rgState.focusResize;
                 const dyPx = e.clientY - rz.startClientY;
+                const dxPx = e.clientX - rz.startClientX;
                 const minPx = 8;
                 let newTop = rz.origTopPx;
                 let newBot = rz.origBotPx;
+                let newLeft = rz.origLeftPx;
+                let newRight = rz.origRightPx;
                 if (rz.edge === 'n') {
-                    newTop = Math.max(0, Math.min(rz.origBotPx - minPx, rz.origTopPx + dyPx));
+                    newTop = Math.max(rz.minTopPx, Math.min(rz.origBotPx - minPx, rz.origTopPx + dyPx));
                 } else if (rz.edge === 's') {
-                    newBot = Math.max(rz.origTopPx + minPx, Math.min(rz.stitch.totalH, rz.origBotPx + dyPx));
+                    newBot = Math.max(rz.origTopPx + minPx, Math.min(rz.maxBotPx, rz.origBotPx + dyPx));
+                } else if (rz.edge === 'w') {
+                    newLeft = Math.max(0, Math.min(rz.origRightPx - minPx, rz.origLeftPx + dxPx));
+                } else if (rz.edge === 'e') {
+                    newRight = Math.max(rz.origLeftPx + minPx, Math.min(rz.stitch.width, rz.origRightPx + dxPx));
                 }
                 rz.curTopPx = newTop;
                 rz.curBotPx = newBot;
+                rz.curLeftPx = newLeft;
+                rz.curRightPx = newRight;
                 if (rz.boxEl) {
                     rz.boxEl.style.top = ((newTop / Math.max(1, rz.stitch.totalH)) * 100) + '%';
                     rz.boxEl.style.height = (((newBot - newTop) / Math.max(1, rz.stitch.totalH)) * 100) + '%';
+                    if (!rgState.fullWidth) {
+                        rz.boxEl.style.left = ((newLeft / Math.max(1, rz.stitch.width)) * 100) + '%';
+                        rz.boxEl.style.width = (((newRight - newLeft) / Math.max(1, rz.stitch.width)) * 100) + '%';
+                    }
                 }
                 return;
             }
@@ -2455,12 +2966,21 @@
             if (!rgState.focusDrag || rgState.focusDrag.pointerId !== e.pointerId) return;
             const d = rgState.focusDrag;
             const rect = d.stageEl.getBoundingClientRect();
+            const ptX = clamp01((e.clientX - rect.left) / Math.max(1, rect.width));
             const ptY = clamp01((e.clientY - rect.top) / Math.max(1, rect.height));
+            d.curXPx = ptX * d.totalW;
             d.curYPx = ptY * d.totalH;
             const topPx = Math.min(d.startYPx, d.curYPx);
             const hPx = Math.abs(d.curYPx - d.startYPx);
-            d.draftEl.style.left = '0%';
-            d.draftEl.style.width = '100%';
+            if (rgState.fullWidth) {
+                d.draftEl.style.left = '0%';
+                d.draftEl.style.width = '100%';
+            } else {
+                const leftPx = Math.min(d.startXPx, d.curXPx);
+                const wPx = Math.abs(d.curXPx - d.startXPx);
+                d.draftEl.style.left = ((leftPx / Math.max(1, d.totalW)) * 100) + '%';
+                d.draftEl.style.width = ((wPx / Math.max(1, d.totalW)) * 100) + '%';
+            }
             d.draftEl.style.top = ((topPx / Math.max(1, d.totalH)) * 100) + '%';
             d.draftEl.style.height = ((hPx / Math.max(1, d.totalH)) * 100) + '%';
         });
@@ -2471,23 +2991,41 @@
                 rgState.focusResize = null;
                 const it = getFocusActiveItem();
                 if (it && rz.stitch) {
-                    const rects = splitStitchRangeToRects(rz.curTopPx, rz.curBotPx, rz.stitch);
-                    if (rects.length > 0 && rz.groupBoxes[0]) {
-                        let bestRect = rects[0];
-                        if (rects.length > 1) {
-                            let bestScore = -1;
-                            rects.forEach((r) => {
-                                const sIdx = findBestSliceForBox(r, rz.stitch.slices);
-                                const s = sIdx >= 0 ? rz.stitch.slices[sIdx] : null;
-                                const pxH = s ? (r.h / Math.max(0.001, s.crop.h)) * s.logicalH : r.h;
-                                if (pxH > bestScore) {
-                                    bestScore = pxH;
-                                    bestRect = r;
-                                }
-                            });
+                    if (rz.kind === 'region' && rz.slice && rz.groupBoxes[0]) {
+                        const s = rz.slice;
+                        const relY = clamp01((rz.curTopPx - s.topPx) / Math.max(1, s.logicalH));
+                        const relH = Math.max(0.008, (rz.curBotPx - rz.curTopPx) / Math.max(1, s.logicalH));
+                        const pageY = clamp01(s.crop.y + relY * s.crop.h);
+                        const pageH = Math.max(0.01, Math.min(1 - pageY, relH * s.crop.h));
+                        const nextRect = { y: round4(pageY), h: round4(pageH) };
+                        if (!rgState.fullWidth) {
+                            const relX = clamp01(rz.curLeftPx / Math.max(1, rz.stitch.width));
+                            const relW = Math.max(0.04, (rz.curRightPx - rz.curLeftPx) / Math.max(1, rz.stitch.width));
+                            nextRect.x = round4(clamp01(s.crop.x + relX * s.crop.w));
+                            nextRect.w = round4(Math.max(0.04, Math.min(1 - nextRect.x, relW * s.crop.w)));
                         }
-                        Object.assign(rz.groupBoxes[0], bestRect);
-                        syncAutoStemBoxes(it);
+                        Object.assign(rz.groupBoxes[0], nextRect);
+                        sortRegionsInPlace(it);
+                        if (it.isBig) syncAutoStemBoxes(it);
+                    } else {
+                        const rects = splitStitchRangeToRects(rz.curTopPx, rz.curBotPx, rz.stitch);
+                        if (rects.length > 0 && rz.groupBoxes[0]) {
+                            let bestRect = rects[0];
+                            if (rects.length > 1) {
+                                let bestScore = -1;
+                                rects.forEach((r) => {
+                                    const sIdx = findBestSliceForBox(r, rz.stitch.slices);
+                                    const s = sIdx >= 0 ? rz.stitch.slices[sIdx] : null;
+                                    const pxH = s ? (r.h / Math.max(0.001, s.crop.h)) * s.logicalH : r.h;
+                                    if (pxH > bestScore) {
+                                        bestScore = pxH;
+                                        bestRect = r;
+                                    }
+                                });
+                            }
+                            Object.assign(rz.groupBoxes[0], bestRect);
+                            syncAutoStemBoxes(it);
+                        }
                     }
                 }
                 renderAllRg();
@@ -2500,27 +3038,29 @@
             if (!d) return;
 
             const dyPx = Math.abs(d.curYPx - d.startYPx);
+            const dxPx = Math.abs(d.curXPx - d.startXPx);
 
-            if (rgState.twoTapMode && dyPx < 8) {
+            if (rgState.twoTapMode && dyPx < 8 && (rgState.fullWidth || dxPx < 8)) {
                 if (!rgState.focusTwoTapStart) {
-                    rgState.focusTwoTapStart = { yPx: d.curYPx };
+                    rgState.focusTwoTapStart = { xPx: d.curXPx, yPx: d.curYPx };
                     renderFocusSliceOverlays();
                     return;
                 }
+                const startX = rgState.focusTwoTapStart.xPx ?? 0;
                 const startY = rgState.focusTwoTapStart.yPx;
                 rgState.focusTwoTapStart = null;
                 if (Math.abs(d.curYPx - startY) < 8) {
                     renderFocusSliceOverlays();
                     return;
                 }
-                commitStitchedDrawRange(startY, d.curYPx);
+                commitStitchedDrawRange(startY, d.curYPx, startX, d.curXPx);
                 return;
             }
 
-            if (dyPx < 8) return;
+            if (dyPx < 8 || (!rgState.fullWidth && dxPx < 8)) return;
 
             rgState.focusTwoTapStart = null;
-            commitStitchedDrawRange(d.startYPx, d.curYPx);
+            commitStitchedDrawRange(d.startYPx, d.curYPx, d.startXPx, d.curXPx);
         };
 
         window.addEventListener('pointerup', finishFocusPointer);
@@ -2540,6 +3080,161 @@
         await renderFocusSlices();
     }
 
+    async function openContinueFocusMode(itemId) {
+        const tab = rgState.activeTab;
+        const tabState = getTabState(tab);
+        const it = tabState.items.find(x => x.id === itemId);
+        if (!it || !tabState.pdfDoc) return;
+
+        bindFocusDialogEventsOnce();
+        sortRegionsInPlace(it);
+        const lastPageOffset = (Array.isArray(it.regions) && it.regions.length > 0)
+            ? Math.max(...it.regions.map(r => parseInt(r.pageOffset, 10) || 0))
+            : Math.max(0, (tabState.pageNum || 1) - 1);
+        const totalPages = Math.max(1, tabState.totalPages || tabState.pdfDoc.numPages || 1);
+        const candidatePages = (lastPageOffset + 1 < totalPages)
+            ? [lastPageOffset + 1]
+            : [lastPageOffset];
+
+        rgState.continueTargetId = null;
+        rgState.subMode = null;
+        rgState.continueFocus = {
+            tab,
+            itemId,
+            candidatePages,
+            addedStack: []
+        };
+        rgState.selectedId = itemId;
+        rgState.focusTwoTapStart = null;
+        rgState.focusDrag = null;
+        rgState.focusResize = null;
+
+        const dlg = document.getElementById('rg-focus-dialog');
+        if (dlg) {
+            if (typeof openNativeDialog === 'function') {
+                openNativeDialog(dlg, { dismissible: false });
+            } else {
+                dlg.classList.add('active');
+                if (typeof dlg.showModal === 'function' && !dlg.open) dlg.showModal();
+            }
+        }
+        renderAllRg();
+        await new Promise(r => requestAnimationFrame(r));
+        await renderFocusSlices();
+
+        const viewportEl = document.getElementById('rg-focus-viewport');
+        const stitch = rgState.focusStitch;
+        if (viewportEl && stitch && Array.isArray(stitch.slices)) {
+            const firstCand = stitch.slices.find(s => s.role === 'candidate');
+            if (firstCand && firstCand.topPx > 0) {
+                const targetTop = Math.max(0, firstCand.topPx - Math.round(viewportEl.clientHeight * 0.28));
+                viewportEl.scrollTop = targetTop;
+            } else if (firstCand && it.regions && it.regions.length > 0) {
+                const lastRg = it.regions[it.regions.length - 1];
+                const botPx = firstCand.topPx + clamp01((Number(lastRg.y) || 0) + (Number(lastRg.h) || 0)) * firstCand.logicalH;
+                viewportEl.scrollTop = Math.max(0, botPx - Math.round(viewportEl.clientHeight * 0.45));
+            } else {
+                viewportEl.scrollTop = 0;
+            }
+        }
+        if (lastPageOffset + 1 >= totalPages) {
+            showToast('当前已是最后一页，可直接微调或在本页补充区域', 'info');
+        }
+    }
+
+    async function rgContinueLoadNextPage() {
+        if (!rgState.continueFocus) return;
+        const tabState = getTabState(rgState.continueFocus.tab);
+        const totalPages = Math.max(1, tabState.totalPages || (tabState.pdfDoc ? tabState.pdfDoc.numPages : 1));
+        const currPages = rgState.continueFocus.candidatePages || [];
+        const maxCand = currPages.length > 0 ? Math.max(...currPages) : 0;
+        if (maxCand + 1 >= totalPages) {
+            showToast('已是最后一页', 'info');
+            return;
+        }
+        const nextPage = maxCand + 1;
+        if (!currPages.includes(nextPage)) {
+            currPages.push(nextPage);
+        }
+        renderSubModeBar();
+        await renderFocusSlices();
+        const viewportEl = document.getElementById('rg-focus-viewport');
+        const stitch = rgState.focusStitch;
+        if (viewportEl && stitch && Array.isArray(stitch.slices)) {
+            const addedSlice = stitch.slices.find(s => s.crop.pageOffset === nextPage);
+            if (addedSlice) {
+                viewportEl.scrollTo({ top: Math.max(0, addedSlice.topPx - 24), behavior: 'smooth' });
+            }
+        }
+    }
+
+    window.rgScrollContinueRegion = function (regionIdx) {
+        scrollToContinueRegion(regionIdx);
+    };
+
+    window.rgUndoContinueSlice = function () {
+        if (!rgState.continueFocus) return;
+        const it = getFocusActiveItem();
+        if (!it || !Array.isArray(it.regions)) return;
+        const stack = rgState.continueFocus.addedStack || [];
+        if (stack.length === 0 || it.regions.length <= 1) return;
+        const targetRef = stack.pop();
+        const idx = it.regions.indexOf(targetRef);
+        if (idx >= 0 && it.regions.length > 1) {
+            it.regions.splice(idx, 1);
+            if (it.isBig) syncAutoStemBoxes(it);
+        }
+        renderAllRg();
+        scheduleDraftSave();
+    };
+
+    window.rgExitContinueFocus = async function () {
+        const ctx = rgState.continueFocus;
+        const it = getFocusActiveItem();
+        rgState.continueFocus = null;
+        rgState.focusTwoTapStart = null;
+        rgState.focusDrag = null;
+        rgState.focusResize = null;
+        rgState.focusStitch = null;
+        closeFocusDialogSafe();
+
+        if (ctx && it && Array.isArray(it.regions) && it.regions.length > 0) {
+            const tabState = getTabState(ctx.tab);
+            const lastPage = (parseInt(it.regions[it.regions.length - 1].pageOffset, 10) || 0) + 1;
+            if (tabState.pdfDoc && lastPage !== tabState.pageNum) {
+                tabState.pageNum = Math.min(tabState.totalPages || lastPage, Math.max(1, lastPage));
+                await renderPdfPage();
+            }
+        }
+        renderAllRg();
+        scheduleDraftSave();
+    };
+
+    window.rgSwitchContinueToFreeform = async function () {
+        const ctx = rgState.continueFocus;
+        if (!ctx) return;
+        rgState.continueFocus = null;
+        rgState.focusTwoTapStart = null;
+        rgState.focusDrag = null;
+        rgState.focusResize = null;
+        rgState.focusStitch = null;
+        closeFocusDialogSafe();
+        await startFreeformContinue(ctx.itemId);
+    };
+
+    window.rgContinueToBigQ = async function () {
+        const ctx = rgState.continueFocus;
+        if (!ctx) return;
+        const itemId = ctx.itemId;
+        rgState.continueFocus = null;
+        rgState.focusTwoTapStart = null;
+        rgState.focusDrag = null;
+        rgState.focusResize = null;
+        rgState.focusStitch = null;
+        closeFocusDialogSafe();
+        await window.rgEnterSubMode(itemId);
+    };
+
     async function openFocusSubMode(itemId) {
         const tab = rgState.activeTab;
         const tabState = getTabState(tab);
@@ -2550,6 +3245,7 @@
         it.isBig = true;
         it.subqBoxes = it.subqBoxes || [];
         syncAutoStemBoxes(it);
+        rgState.continueFocus = null;
         rgState.subMode = {
             tab,
             itemId,
@@ -2662,8 +3358,9 @@
         tabState.items = tabState.items.filter(x => x.id !== itemId);
         if (rgState.selectedId === itemId) rgState.selectedId = null;
         if (rgState.continueTargetId === itemId) rgState.continueTargetId = null;
-        if (rgState.subMode && rgState.subMode.itemId === itemId) {
+        if ((rgState.subMode && rgState.subMode.itemId === itemId) || (rgState.continueFocus && rgState.continueFocus.itemId === itemId)) {
             rgState.subMode = null;
+            rgState.continueFocus = null;
             closeFocusDialogSafe();
         }
         renderAllRg();
