@@ -5046,6 +5046,12 @@ span.rg-card-num-wrap {
 
 .rg-box.continue-existing {
     border-style: solid;
+    background: rgba(37, 99, 235, 0.16);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12), 0 0 0 2px rgba(255, 255, 255, 0.65);
+}
+
+.rg-box.answer.continue-existing {
+    background: rgba(22, 163, 74, 0.16);
 }
 
 .rg-focus-continue-pager {

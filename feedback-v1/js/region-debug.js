@@ -1108,7 +1108,7 @@
         }
 
         if (focusMode === 'continue') {
-            if (titleEl) titleEl.textContent = `跨页续框专注模式 · ${formatItemTitle(it, activeCtx.tab)}`;
+            if (titleEl) titleEl.textContent = `跨页续框 · ${formatItemTitle(it, activeCtx.tab)}`;
             if (startEditor) startEditor.style.display = bankType === 'variation' ? 'none' : 'inline-flex';
             if (startLabel) startLabel.textContent = it.isBig ? '起始题号' : '题号';
             if (startInp && document.activeElement !== startInp) {
@@ -1124,7 +1124,7 @@
             }
             if (doneBtn) doneBtn.textContent = '完成续框';
             if (sidebarTitle) sidebarTitle.textContent = '跨页分段清单';
-            if (shortcutNote) shortcutNote.textContent = '专注模式仅展示当前题衔接页面 · Ctrl+Z 撤销 · Esc 完成退出';
+            if (shortcutNote) shortcutNote.textContent = '仅展示当前题衔接页面 · Ctrl+Z 撤销 · Esc 完成退出';
             if (previewPanel) previewPanel.style.display = 'flex';
             if (hint) {
                 const regCount = Array.isArray(it.regions) ? it.regions.length : 0;
@@ -1151,7 +1151,7 @@
             }
             if (doneBtn) doneBtn.textContent = '完成大题切分';
             if (sidebarTitle) sidebarTitle.textContent = '本题切分清单';
-            if (shortcutNote) shortcutNote.textContent = '专注模式仅展示当前大题区域 · 快捷键：Ctrl+Z 撤销 · Esc 完成退出';
+            if (shortcutNote) shortcutNote.textContent = '仅展示当前大题区域 · 快捷键：Ctrl+Z 撤销 · Esc 完成退出';
             if (previewPanel) previewPanel.style.display = 'none';
             if (hint) {
                 const subqCount = Array.isArray(it.subqBoxes) ? it.subqBoxes.length : 0;
@@ -1755,7 +1755,7 @@
         const focusTitle = document.getElementById('rg-focus-title');
         const activeCtx = rgState.subMode || rgState.continueFocus;
         if (focusTitle && activeCtx && activeCtx.itemId === itemId) {
-            const prefix = rgState.continueFocus ? '跨页续框专注模式' : '大题专注切分';
+            const prefix = rgState.continueFocus ? '跨页续框' : '大题专注切分';
             focusTitle.textContent = `${prefix} · ${formatItemTitle(it, activeCtx.tab)}`;
         }
         renderBoxOverlay();
@@ -3281,7 +3281,7 @@
             if (typeof showCustomDialog === 'function') {
                 showCustomDialog({
                     title: '尚未框选小问',
-                    body: '当前大题还没有框选任何小问。您可以继续留在专注模式框选小问，或取消大题设置（恢复为普通单题）。',
+                    body: '当前大题还没有框选任何小问。您可以继续留在此窗口框选小问，或取消大题设置（恢复为普通单题）。',
                     confirmText: '继续框选',
                     cancelText: '取消大题设置',
                     onConfirm: () => {},
