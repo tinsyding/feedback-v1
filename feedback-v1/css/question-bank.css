@@ -3999,15 +3999,16 @@ input[type=number] {
 .rg-box {
     position: absolute;
     border: 2px solid #2563eb;
-    background: rgba(37, 99, 235, 0.16);
+    background: rgba(37, 99, 235, 0.22);
     pointer-events: auto;
     cursor: pointer;
     box-sizing: border-box;
+    box-shadow: inset 0 0 18px rgba(15, 23, 42, 0.18), 0 3px 10px rgba(0, 0, 0, 0.22);
 }
 
 .rg-box.answer {
     border-color: #16a34a;
-    background: rgba(22, 163, 74, 0.16);
+    background: rgba(22, 163, 74, 0.22);
 }
 
 .rg-box.active {
@@ -4017,7 +4018,7 @@ input[type=number] {
 
 .rg-box.stem {
     border: 2px dashed #16a34a;
-    background: rgba(22, 163, 74, 0.14);
+    background: rgba(22, 163, 74, 0.20);
 }
 
 .rg-box.stem.auto-stem {
@@ -4026,12 +4027,12 @@ input[type=number] {
 
 .rg-box.subq {
     border: 2px solid #dc2626;
-    background: rgba(220, 38, 38, 0.14);
+    background: rgba(220, 38, 38, 0.20);
 }
 
 .rg-box.draft {
     border: 2px dashed #2563eb;
-    background: rgba(37, 99, 235, 0.14);
+    background: rgba(37, 99, 235, 0.20);
 }
 
 .rg-box-tag {
@@ -5032,7 +5033,8 @@ span.rg-card-num-wrap {
 
 .rg-box.context-other {
     border: 1px dashed var(--text-tertiary);
-    background: rgba(128, 128, 128, 0.08);
+    background: rgba(128, 128, 128, 0.12);
+    box-shadow: inset 0 0 12px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(0, 0, 0, 0.16);
     pointer-events: none;
     opacity: 0.65;
 }
