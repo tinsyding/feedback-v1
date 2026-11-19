@@ -1,10 +1,27 @@
 [
     {
+        "id": "update_2026_11_19",
+        "version": "v1.3.0",
+        "date": "2026-11-19",
+        "title": "系统更新提示",
+        "active": true,
+        "items": [
+            {
+                "title": "错题本新增「不分页方案」",
+                "desc": "直接上传整卷 PDF 框选题目，无需每页一题；支持大题切分、跨页续框，重新导入时按题号保留已填知识点与微课链接。原「分页方案」继续保留，可随时切换。"
+            },
+            {
+                "title": "视频教程",
+                "desc": "https://drive.weixin.qq.com/s?k=AFIACwevAA8gUPTNXo"
+            }
+        ]
+    },
+    {
         "id": "update_2026_11_12",
         "version": "v1.2.0",
         "date": "2026-11-12",
         "title": "系统更新提示",
-        "active": true,
+        "active": false,
         "items": [
             {
                 "title": "首页单人错题录入工作台",
