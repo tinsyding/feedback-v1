@@ -63,7 +63,7 @@ if (move_uploaded_file($file['tmp_name'], $targetFile)) {
     echo json_encode(['success' => false, 'error' => 'Failed to move']);
 }
 
-// 自动清理超过 30 天以上的上传文件（仅在上传时 10% 概率触发清理）
+// 自动清理超过 30 天以上的上传文件并同步压实 index.jsonl（仅在上传时 10% 概率触发清理）
 if (rand(1, 10) === 1) {
     // 30天的截止时间
     $cutoff = time() - (30 * 24 * 3600);
@@ -76,7 +76,7 @@ if (rand(1, 10) === 1) {
                 foreach ($files as $f) {
                     if (is_file($f)) {
                         if (filemtime($f) < $cutoff) {
-                            unlink($f);
+                            @unlink($f);
                         } else {
                             $empty = false;
                         }
@@ -88,4 +88,45 @@ if (rand(1, 10) === 1) {
             }
         }
     }
+
+    // 同步清理 index.jsonl 中已过期或物理文件已不存在的记录行
+    $idxFile = $uploadDir . '/index.jsonl';
+    if (is_file($idxFile)) {
+        $fp = @fopen($idxFile, 'c+');
+        if ($fp) {
+            if (flock($fp, LOCK_EX)) {
+                $rawContent = stream_get_contents($fp);
+                $lines = explode("\n", (string)$rawContent);
+                $keptLines = [];
+                $removedCount = 0;
+                foreach ($lines as $line) {
+                    $line = trim($line);
+                    if ($line === '') continue;
+                    $entry = json_decode($line, true);
+                    if (!is_array($entry)) {
+                        $removedCount++;
+                        continue;
+                    }
+                    $ts = intval($entry['ts'] ?? 0);
+                    $rel = (string)($entry['rel'] ?? '');
+                    if (($ts > 0 && $ts < $cutoff) || $rel === '' || !is_file($uploadDir . '/' . $rel)) {
+                        $removedCount++;
+                        continue;
+                    }
+                    $keptLines[] = $line;
+                }
+                if ($removedCount > 0) {
+                    ftruncate($fp, 0);
+                    rewind($fp);
+                    if (!empty($keptLines)) {
+                        fwrite($fp, implode("\n", $keptLines) . "\n");
+                    }
+                    fflush($fp);
+                }
+                flock($fp, LOCK_UN);
+            }
+            fclose($fp);
+        }
+    }
 }
+

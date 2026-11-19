@@ -38,7 +38,7 @@ function getHomeworkLabelFull() {
 
 
 function shouldForceIntegerScores() {
-    return true; // 系统强制开启四舍五入强行取整，统一以整型规范存储与计算
+    return window.forceIntegerScores !== false; // 默认开启四舍五入取整，可通过 window.forceIntegerScores = false 切换为保留小数
 }
 
 function parseScoreValue(raw) {
@@ -1450,6 +1450,9 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                 const effectivePreviewErrors = (isWenjuanxing && Array.isArray(pvInfo?.errors))
                     ? pvInfo.errors
                     : (previewParsedForPlus?.errorNums || []);
+                const hwSubInfo = homeworkMap ? homeworkMap[studentName] : null;
+                const isHwSubmitted = hwSubInfo ? Boolean(hwSubInfo.isSubmitted) : true;
+                const isPvSubmitted = pvInfo ? Boolean(pvInfo.isSubmitted) : true;
                 batchPayload.students.push({
                     id: studentId,
                     name: studentName,
@@ -1462,7 +1465,9 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                     homeworkScore: homeworkScore,
                     previewScore: previewScore,
                     totalScore: studentTot || batchTotalScore || 100,
-                    comment: fileCommentForPlus
+                    comment: fileCommentForPlus,
+                    submissionStatus: isHwSubmitted ? 'submitted' : 'unsubmitted',
+                    previewSubmissionStatus: pvInfo ? (isPvSubmitted ? 'submitted' : 'unsubmitted') : ''
                 });
             });
             
@@ -2064,6 +2069,7 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
 
     updateReminderBadges();
     renderOfflineToOnlineNotice(detectedOfflineToOnlineStudents);
+    renderQbankCompletenessNotice();
 
     // Notify about dropped students if any
     if (!skipUnsubmittedCheck && allDroppedSet.size > 0) {
@@ -2298,7 +2304,8 @@ async function doGeneratePreviewOnlyFeedback() {
                 homeworkScore: null,
                 previewScore: pvInfo?.score ?? null,
                 totalScore: 100,
-                comment: ''
+                comment: '',
+                previewSubmissionStatus: (pvInfo && pvInfo.isSubmitted === false) ? 'unsubmitted' : 'submitted'
             });
         });
         if (batchPayload.students.length > 0) {
@@ -2917,6 +2924,83 @@ function dismissOfflineToOnlineNotice() {
     const container = document.getElementById('offline-to-online-banner-container');
     if (container) {
         container.innerHTML = '';
+    }
+}
+
+function renderQbankCompletenessNotice() {
+    const existing = document.getElementById('qbank-completeness-notice-banner');
+    if (existing) existing.remove();
+    if (!cachedPlusData || !cachedPlusData.enabled || cachedPlusData.source === 'local') return;
+
+    const errorNums = Object.keys(cachedPlusErrorStats || {}).map(n => parseInt(n, 10)).filter(n => n > 0).sort((a, b) => a - b);
+    if (errorNums.length === 0) return;
+
+    const qList = Array.isArray(cachedPlusData.questions) ? cachedPlusData.questions : [];
+    const qMap = {};
+    qList.forEach(q => {
+        const qId = parseInt(q.id || q.question_num, 10);
+        if (qId > 0) qMap[qId] = q;
+    });
+
+    const missingPdfNums = [];
+    const missingTopicNums = [];
+    errorNums.forEach(num => {
+        const q = qMap[num];
+        if (!q || (!q.studentPdf && !q.teacherPdf && !q.student_pdf && !q.teacher_pdf)) {
+            missingPdfNums.push(num);
+        }
+        if (!q || !String(q.topic || '').trim()) {
+            missingTopicNums.push(num);
+        }
+    });
+
+    if (missingPdfNums.length === 0 && missingTopicNums.length === 0) return;
+
+    const hostContainer = document.getElementById('offline-to-online-banner-container') || resultBody;
+    if (!hostContainer) return;
+
+    const issues = [];
+    if (missingPdfNums.length > 0) {
+        issues.push(`第 <strong>${missingPdfNums.join('、')}</strong> 题尚未上传 PDF 切片（家长打开错题本将无法下载对应题目）`);
+    }
+    if (missingTopicNums.length > 0) {
+        issues.push(`第 <strong>${missingTopicNums.join('、')}</strong> 题尚未填写知识点考点`);
+    }
+
+    const banner = document.createElement('div');
+    banner.id = 'qbank-completeness-notice-banner';
+    banner.className = 'offline-online-notice-banner';
+    banner.style.marginTop = '8px';
+    banner.style.borderColor = 'rgba(245, 158, 11, 0.45)';
+    banner.style.background = 'rgba(245, 158, 11, 0.08)';
+    banner.innerHTML = `
+        <div class="notice-banner-main">
+            <div class="notice-banner-icon" aria-hidden="true" style="color:#d97706;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+            </div>
+            <div class="notice-banner-content">
+                <div class="notice-banner-text">
+                    <span><strong>题库完整性预检提示：</strong>检测到本次班级错题中有部分题目在题库中尚未完善：${issues.join('；')}。</span>
+                </div>
+            </div>
+        </div>
+        <div class="notice-banner-actions">
+            <a href="question-bank.html" target="_blank" rel="noopener" class="btn primary sm notice-btn-confirm" style="text-decoration:none;">
+                前往题库补齐
+            </a>
+            <button type="button" class="btn secondary sm notice-btn-dismiss" onclick="const b=document.getElementById('qbank-completeness-notice-banner');if(b)b.remove();">
+                知道了
+            </button>
+        </div>
+    `;
+    if (hostContainer.id === 'offline-to-online-banner-container') {
+        hostContainer.appendChild(banner);
+    } else {
+        hostContainer.insertBefore(banner, hostContainer.firstChild);
     }
 }
 

@@ -83,6 +83,17 @@ function getTablePrimaryKey(string $table): string {
 }
 
 /**
+ * 归一化题库类型并返回文件名后缀片段
+ * @return array{0:string, 1:string} [$bankType, $typeSegment]
+ */
+function resolveQbankTypeAndSegment(?string $rawType): array {
+    $t = strtolower(trim((string)$rawType));
+    $bankType = in_array($t, ['homework', 'preview', 'variation'], true) ? $t : 'homework';
+    $typeSegment = $bankType === 'preview' ? '_preview' : ($bankType === 'variation' ? '_variation' : '');
+    return [$bankType, $typeSegment];
+}
+
+/**
  * 同步指定题库专题期次的 JSON 灾备镜像文件
  * @param int $qbankId 题库专题期次 ID (qbank_weeks.id)
  * @param array|null $oldWeekRec 修改前的期次记录（用于清理已失效的原文件名）
@@ -97,27 +108,39 @@ function syncQbankJsonBackup(int $qbankId, ?array $oldWeekRec = null): void {
 
         $weekRec = DB::fetchOne("SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$qbankId]);
         if (!$weekRec) return;
-        $bankType = ($weekRec['bank_type'] ?? 'homework') === 'preview' ? 'preview' : 'homework';
-        $typeSegment = $bankType === 'preview' ? '_preview' : '';
+        [$bankType, $typeSegment] = resolveQbankTypeAndSegment($weekRec['bank_type'] ?? 'homework');
 
         // 若修改前记录存在，且文件名发生改变，安全删除旧文件
         if ($oldWeekRec) {
-            $oldBankType = ($oldWeekRec['bank_type'] ?? 'homework') === 'preview' ? 'preview' : 'homework';
-            $oldTypeSegment = $oldBankType === 'preview' ? '_preview' : '';
+            [, $oldTypeSegment] = resolveQbankTypeAndSegment($oldWeekRec['bank_type'] ?? 'homework');
             $oldF1 = $qbankDataDir . '/' . rawurlencode($oldWeekRec['year']) . '_' . rawurlencode($oldWeekRec['season']) . '_' . rawurlencode($oldWeekRec['subject']) . '_' . rawurlencode($oldWeekRec['grade']) . '_' . rawurlencode($oldWeekRec['tier']) . $oldTypeSegment . '_week' . intval($oldWeekRec['week']) . '.json';
             $oldF2 = $qbankDataDir . '/' . rawurlencode($oldWeekRec['subject']) . '_' . rawurlencode($oldWeekRec['grade']) . '_' . rawurlencode($oldWeekRec['tier']) . $oldTypeSegment . '_week' . intval($oldWeekRec['week']) . '.json';
             $newF1 = $qbankDataDir . '/' . rawurlencode($weekRec['year']) . '_' . rawurlencode($weekRec['season']) . '_' . rawurlencode($weekRec['subject']) . '_' . rawurlencode($weekRec['grade']) . '_' . rawurlencode($weekRec['tier']) . $typeSegment . '_week' . intval($weekRec['week']) . '.json';
             if ($oldF1 !== $newF1 && file_exists($oldF1)) @unlink($oldF1);
-            // 旧版无年份文件名已按题库类型带 _preview 后缀，不会误删另一类题库
             if (file_exists($oldF2) && $oldF2 !== $newF1) @unlink($oldF2);
         }
 
-        // 获取明细题目
+        // 获取明细题目（保留举一反三 parent_question_num / parent_question_nums / sub_num 与大题框选元数据 question_meta）
         $qRows = DB::fetchAll("SELECT * FROM `qbank_questions` WHERE `qbank_id` = ? ORDER BY `question_num` ASC", [$qbankId]);
         $questions = [];
         foreach ($qRows as $qr) {
-            $questions[] = [
+            $rawParentNums = $qr['parent_question_nums'] ?? null;
+            $parsedParentNums = [];
+            if (!empty($rawParentNums)) {
+                $parsedParentNums = array_values(array_unique(array_filter(array_map('intval', explode(',', (string)$rawParentNums)))));
+                sort($parsedParentNums);
+            } elseif (isset($qr['parent_question_num']) && $qr['parent_question_num'] !== null && intval($qr['parent_question_num']) > 0) {
+                $parsedParentNums = [intval($qr['parent_question_num'])];
+            }
+            $primaryParentNum = (isset($qr['parent_question_num']) && $qr['parent_question_num'] !== null && intval($qr['parent_question_num']) > 0)
+                ? intval($qr['parent_question_num'])
+                : (!empty($parsedParentNums) ? $parsedParentNums[0] : null);
+
+            $qObj = [
                 'id' => intval($qr['question_num']),
+                'parentQuestionNum' => $primaryParentNum,
+                'parentQuestionNums' => $parsedParentNums,
+                'subNum' => intval($qr['sub_num'] ?? 1),
                 'topic' => $qr['topic'] ?? '',
                 'videoUrl' => $qr['video_url'] ?? '',
                 'exercisePdf' => [
@@ -133,6 +156,13 @@ function syncQbankJsonBackup(int $qbankId, ?array $oldWeekRec = null): void {
                     'thumb' => $qr['answer_thumb'] ?? ''
                 ]
             ];
+            if (!empty($qr['question_meta'])) {
+                $decodedMeta = is_string($qr['question_meta']) ? json_decode($qr['question_meta'], true) : $qr['question_meta'];
+                if (is_array($decodedMeta) && !empty($decodedMeta)) {
+                    $qObj['questionMeta'] = $decodedMeta;
+                }
+            }
+            $questions[] = $qObj;
         }
 
         $jsonData = [
@@ -162,8 +192,7 @@ function deleteQbankJsonBackup(?array $weekRec): void {
         if (!$weekRec) return;
         $qbankDataDir = dirname(__DIR__, 2) . '/data/qbank';
         if (!is_dir($qbankDataDir)) return;
-        $bankType = ($weekRec['bank_type'] ?? 'homework') === 'preview' ? 'preview' : 'homework';
-        $typeSegment = $bankType === 'preview' ? '_preview' : '';
+        [, $typeSegment] = resolveQbankTypeAndSegment($weekRec['bank_type'] ?? 'homework');
         $f1 = $qbankDataDir . '/' . rawurlencode($weekRec['year']) . '_' . rawurlencode($weekRec['season']) . '_' . rawurlencode($weekRec['subject']) . '_' . rawurlencode($weekRec['grade']) . '_' . rawurlencode($weekRec['tier']) . $typeSegment . '_week' . intval($weekRec['week']) . '.json';
         $f2 = $qbankDataDir . '/' . rawurlencode($weekRec['subject']) . '_' . rawurlencode($weekRec['grade']) . '_' . rawurlencode($weekRec['tier']) . $typeSegment . '_week' . intval($weekRec['week']) . '.json';
         if (file_exists($f1)) @unlink($f1);
@@ -172,5 +201,3 @@ function deleteQbankJsonBackup(?array $weekRec): void {
         error_log("deleteQbankJsonBackup error: " . $e->getMessage());
     }
 }
-
-

@@ -2580,7 +2580,7 @@ async function onPlusSelectorChange() {
         let hwOk = true;
         let hwText = '';
         if (week) {
-            const hwQuery = new URLSearchParams({ ...baseParams, action: 'get', bankType: 'homework', week }).toString();
+            const hwQuery = new URLSearchParams({ ...baseParams, action: 'get', bankType: 'homework', week, exclude_thumbs: '1' }).toString();
             const hwResp = await fetch(`${QBANK_API}?${hwQuery}`);
             const hwResult = await hwResp.json();
             if (hwResult.success && hwResult.data) {
@@ -2602,7 +2602,7 @@ async function onPlusSelectorChange() {
         let pvText = '';
         let pvOk = true;
         if (previewWeek) {
-            const pvQuery = new URLSearchParams({ ...baseParams, action: 'get', bankType: 'preview', week: previewWeek }).toString();
+            const pvQuery = new URLSearchParams({ ...baseParams, action: 'get', bankType: 'preview', week: previewWeek, exclude_thumbs: '1' }).toString();
             const pvResp = await fetch(`${QBANK_API}?${pvQuery}`);
             const pvResult = await pvResp.json();
             if (pvResult.success && pvResult.data) {

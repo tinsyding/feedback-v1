@@ -667,3 +667,178 @@ if (!function_exists('retest_cleanup_add_revoked_token')) {
         });
     }
 }
+
+if (!function_exists('retest_sync_student_record_to_json')) {
+    /**
+     * 后台新增、修改或回滚 student_records 后，同步更新 data/history/{subject}_{grade}.json、_preview.json 与 token_map.json
+     * 消除后台改库后 JSON 灾备文件滞留旧错题导致家长端旧错题“复活”的问题。
+     */
+    function retest_sync_student_record_to_json(int $recordId, ?string $historyDir = null): bool
+    {
+        if ($recordId <= 0 || !class_exists('DB')) {
+            return false;
+        }
+
+        $row = DB::fetchOne(
+            "SELECT sr.*, cb.year, cb.season, cb.grade, cb.tier, cb.subject, cb.class_name
+             FROM `student_records` sr
+             INNER JOIN `class_batches` cb ON sr.batch_id = cb.id
+             WHERE sr.id = ? LIMIT 1",
+            [$recordId]
+        );
+        if (!$row) {
+            return false;
+        }
+
+        $subject = trim((string)($row['subject'] ?? ''));
+        $grade = trim((string)($row['grade'] ?? ''));
+        $tier = trim((string)($row['tier'] ?? ''));
+        $year = intval($row['year'] ?? date('Y'));
+        $season = trim((string)($row['season'] ?? ''));
+        $studentId = trim((string)($row['student_id'] ?? ''));
+        $studentName = trim((string)($row['student_name'] ?? ''));
+        $weekNum = intval($row['week_num'] ?? 0);
+        if ($subject === '' || $grade === '' || $studentName === '' || $weekNum <= 0) {
+            return false;
+        }
+
+        $canonicalKey = build_student_key($studentId, $studentName, $grade, $subject);
+        $candidateKeys = student_key_candidates($studentId, $studentName, $grade, $subject);
+        $dbKey = trim((string)($row['student_key'] ?? ''));
+        if ($dbKey !== '' && !in_array($dbKey, $candidateKeys, true)) {
+            $candidateKeys[] = $dbKey;
+        }
+        if (!in_array($studentName, $candidateKeys, true)) {
+            $candidateKeys[] = $studentName;
+        }
+
+        $parseErrArray = static function ($raw): array {
+            if (is_array($raw)) {
+                $arr = $raw;
+            } elseif (is_string($raw) && trim($raw) !== '') {
+                $decoded = json_decode($raw, true);
+                $arr = is_array($decoded) ? $decoded : (preg_split('/[\s,，、]+/', trim($raw)) ?: []);
+            } else {
+                $arr = [];
+            }
+            $nums = array_values(array_unique(array_filter(array_map('intval', $arr), static fn($n) => $n > 0)));
+            sort($nums);
+            return $nums;
+        };
+
+        $hwErrors = $parseErrArray($row['error_questions'] ?? '[]');
+        $pvErrors = $parseErrArray($row['preview_error_questions'] ?? '[]');
+        $pvWeek = intval($row['preview_week_num'] ?? 0);
+        if ($pvWeek <= 0) {
+            $pvWeek = $weekNum;
+        }
+
+        $dir = retest_cleanup_history_dir($historyDir);
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0755, true);
+        }
+
+        // 1. 同步课后巩固历史 JSON（包括主文件及可能存在的旧班型文件）
+        $basePrefix = $dir . '/' . rawurlencode($subject) . '_' . rawurlencode($grade);
+        $hwFile = $basePrefix . '.json';
+        $allFiles = retest_cleanup_history_files($subject, $grade, $dir);
+        $hwFiles = array_values(array_filter($allFiles, static fn($f) => substr($f, -strlen('_preview.json')) !== '_preview.json'));
+        if (!in_array($hwFile, $hwFiles, true)) {
+            $hwFiles[] = $hwFile;
+        }
+
+        foreach ($hwFiles as $file) {
+            if ($file !== $hwFile && !is_file($file)) {
+                continue;
+            }
+            retest_cleanup_json_update($file, static function (array $data) use ($canonicalKey, $candidateKeys, $weekNum, $hwErrors, $file, $hwFile): array {
+                $wKey = (string)$weekNum;
+                // 先清理所有候选旧 Key 下该周的数据，防止旧错题滞留
+                foreach ($candidateKeys as $k) {
+                    if (isset($data[$k]) && is_array($data[$k])) {
+                        unset($data[$k][$wKey]);
+                        if (empty($data[$k])) {
+                            unset($data[$k]);
+                        }
+                    }
+                }
+                // 在主文件中写入最新非空错题
+                if ($file === $hwFile && !empty($hwErrors)) {
+                    if (!isset($data[$canonicalKey]) || !is_array($data[$canonicalKey])) {
+                        $data[$canonicalKey] = [];
+                    }
+                    $data[$canonicalKey][$wKey] = $hwErrors;
+                }
+                return $data;
+            });
+        }
+
+        // 2. 同步预习历史 JSON
+        $pvFile = $basePrefix . '_preview.json';
+        if (is_file($pvFile) || !empty($pvErrors)) {
+            retest_cleanup_json_update($pvFile, static function (array $data) use ($canonicalKey, $candidateKeys, $weekNum, $pvWeek, $pvErrors): array {
+                $wKey = (string)$weekNum;
+                foreach ($candidateKeys as $k) {
+                    if (isset($data[$k]) && is_array($data[$k])) {
+                        unset($data[$k][$wKey]);
+                        if (empty($pvErrors) && $pvWeek > 0) {
+                            foreach ($data[$k] as $existWk => $existEntry) {
+                                $epw = is_array($existEntry) && isset($existEntry['previewWeek'])
+                                    ? intval($existEntry['previewWeek'])
+                                    : intval($existWk);
+                                if ($epw === $pvWeek) {
+                                    unset($data[$k][$existWk]);
+                                }
+                            }
+                        }
+                        if (empty($data[$k])) {
+                            unset($data[$k]);
+                        }
+                    }
+                }
+                if (!empty($pvErrors)) {
+                    if (!isset($data[$canonicalKey]) || !is_array($data[$canonicalKey])) {
+                        $data[$canonicalKey] = [];
+                    }
+                    $data[$canonicalKey][$wKey] = [
+                        'errors' => $pvErrors,
+                        'previewWeek' => $pvWeek,
+                    ];
+                }
+                return $data;
+            });
+        }
+
+        // 3. 同步 token_map.json
+        $token = trim((string)($row['retest_token'] ?? ''));
+        if ($token === '' && function_exists('deriveRetestToken')) {
+            $token = deriveRetestToken($subject, $grade, $canonicalKey);
+        }
+        if ($token !== '') {
+            $tokenMapFile = $dir . '/token_map.json';
+            retest_cleanup_json_update($tokenMapFile, static function (array $data) use (
+                $token, $subject, $grade, $tier, $weekNum, $pvWeek, $pvErrors, $studentName, $canonicalKey, $studentId, $year, $season
+            ): array {
+                $existing = isset($data[$token]) && is_array($data[$token]) ? $data[$token] : [];
+                $data[$token] = array_merge($existing, [
+                    's' => $subject,
+                    'g' => $grade,
+                    't' => $tier,
+                    'w' => max(intval($existing['w'] ?? 0), $weekNum),
+                    'pw' => $pvWeek,
+                    'pq' => $pvErrors,
+                    'n' => $studentName,
+                    'k' => $canonicalKey,
+                    'id' => $studentId,
+                    'year' => $year,
+                    'season' => $season,
+                    'u' => time(),
+                ]);
+                return $data;
+            });
+        }
+
+        return true;
+    }
+}
+

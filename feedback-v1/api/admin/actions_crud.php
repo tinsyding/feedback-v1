@@ -623,6 +623,10 @@ switch ($action) {
                 unset($input['password']);
             }
 
+            if ($table === 'class_batches' && isset($input['season'])) {
+                $input['season'] = normalizeSeason((string)$input['season'], 'zh');
+            }
+
             // 学生错题表特殊处理
             if ($table === 'student_records') {
                 if (empty($input['batch_id'])) {
@@ -631,18 +635,15 @@ switch ($action) {
                         $input['batch_id'] = $latestBatch;
                     }
                 }
+                $sBatch = !empty($input['batch_id'])
+                    ? DB::fetchOne("SELECT grade, subject FROM class_batches WHERE id = ?", [(int)$input['batch_id']])
+                    : null;
+                $sGrade = (string)($sBatch['grade'] ?? '');
+                $sSubject = (string)($sBatch['subject'] ?? '');
                 if (isset($input['student_id']) && isset($input['student_name']) && empty($input['student_key'])) {
                     $sId = trim((string)$input['student_id']);
                     $sName = trim((string)$input['student_name']);
-                    $sBatch = !empty($input['batch_id'])
-                        ? DB::fetchOne("SELECT grade, subject FROM class_batches WHERE id = ?", [(int)$input['batch_id']])
-                        : null;
-                    $input['student_key'] = build_student_key(
-                        $sId,
-                        $sName,
-                        (string)($sBatch['grade'] ?? ''),
-                        (string)($sBatch['subject'] ?? '')
-                    );
+                    $input['student_key'] = build_student_key($sId, $sName, $sGrade, $sSubject);
                 }
                 if (isset($input['error_questions'])) {
                     $eq = $input['error_questions'];
@@ -686,14 +687,13 @@ switch ($action) {
                     }
                 }
                 if (empty($input['retest_token']) || $input['retest_token'] === 'auto') {
-                    $chars = 'abcdefghjkmnpqrstuvwxyz23456789ABCDEFGHJKMNPQRSTUVWXYZ';
-                    $charLen = strlen($chars);
-                    $randBytes = random_bytes(10);
-                    $genToken = '';
-                    for ($ci = 0; $ci < 10; $ci++) {
-                        $genToken .= $chars[ord($randBytes[$ci]) % $charLen];
-                    }
-                    $input['retest_token'] = $genToken;
+                    $sKeyForToken = (string)($input['student_key'] ?? build_student_key(
+                        trim((string)($input['student_id'] ?? '')),
+                        trim((string)($input['student_name'] ?? '')),
+                        $sGrade,
+                        $sSubject
+                    ));
+                    $input['retest_token'] = deriveRetestToken($sSubject, $sGrade, $sKeyForToken);
                 }
             }
 
@@ -753,6 +753,12 @@ switch ($action) {
                 }
             } elseif ($table === 'qbank_weeks') {
                 syncQbankJsonBackup((int)$newId);
+            } elseif ($table === 'student_records') {
+                try {
+                    retest_sync_student_record_to_json((int)$newId);
+                } catch (Throwable $e) {
+                    error_log("Post-insert student_records JSON sync error: " . $e->getMessage());
+                }
             }
 
             recordServerLog('action', 'admin', 'db_record_created', [
@@ -801,6 +807,10 @@ switch ($action) {
                     }
                     unset($input['password']);
                 }
+            }
+
+            if ($table === 'class_batches' && isset($input['season'])) {
+                $input['season'] = normalizeSeason((string)$input['season'], 'zh');
             }
 
             if ($table === 'student_records') {
@@ -954,6 +964,15 @@ switch ($action) {
             $sql = "UPDATE `{$table}` SET " . implode(', ', $setParts) . " WHERE `{$pk}` = ?";
             $stmt = DB::query($sql, $values);
             if (!$stmt) sendResponse(false, null, '更新失败: ' . (DB::getLastError() ?: '请检查数据格式'), 500);
+
+            // 若更新的是 student_records 表，同步更新 JSON 历史档案与 token_map.json，防止旧错题在家长端复活
+            if ($table === 'student_records') {
+                try {
+                    retest_sync_student_record_to_json((int)$id);
+                } catch (Throwable $e) {
+                    error_log("Post-update student_records JSON sync error: " . $e->getMessage());
+                }
+            }
 
             // 若更新的是 qbank_weeks 表，级联同步更新 qbank_questions 明细表与 JSON 灾备文件
             if ($table === 'qbank_weeks') {

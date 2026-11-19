@@ -165,41 +165,128 @@ function parseRetestQuestionMeta($rawMeta, $qNum) {
     ];
 }
 
+/**
+ * 统一判定作业提交状态（优先采信显式 submission_status 字段，兼容历史评语关键词与空记录回退，避免真实 0 分或无分全对被误判为未交）
+ * @return string 'submitted' | 'unsubmitted' | 'exempt'
+ */
+function resolveSubmissionStatus(?string $explicitStatus, array $errors, $score, string $comment): string {
+    $st = strtolower(trim((string)$explicitStatus));
+    if (in_array($st, ['unsubmitted', 'exempt'], true)) {
+        return $st;
+    }
+    $comment = trim($comment);
+    if ($comment !== '' && preg_match('/(?:未交|未提交|缺交|未查阅|缺勤)/u', $comment)) {
+        return 'unsubmitted';
+    }
+    if ($st === 'submitted') {
+        return 'submitted';
+    }
+    // 历史无显式状态字段的老数据回退：仅当无错题、无分数（null）且评语为空时才视为未交（若得分为 0 但有记录或有全对评语则不再误判为未交）
+    $hasNumericScore = ($score !== null && $score !== '');
+    if (empty($errors) && !$hasNumericScore && $comment === '') {
+        return 'unsubmitted';
+    }
+    return 'submitted';
+}
+
+/**
+ * 批量预加载某学生在指定学科/年级下多个周次的全部题库记录（含 homework / preview / variation），
+ * 将错题本 decrypt 的 30~50 次 N+1 SQL 查询收敛为 1 次批量查询。
+ */
+function preloadMultiWeekQbankRows(string $subject, string $grade, array $weeks, $year = null, $season = null): void {
+    $weeks = array_values(array_unique(array_filter(array_map('intval', $weeks), static fn($w) => $w > 0)));
+    if (empty($weeks)) return;
+    $cacheKey = "{$subject}|{$grade}|" . intval($year) . "|" . (string)$season;
+    if (isset($GLOBALS['__RETEST_QBANK_PRELOAD'][$cacheKey])) return;
+
+    $GLOBALS['__RETEST_QBANK_PRELOAD'][$cacheKey] = [
+        'loaded_weeks' => array_fill_keys($weeks, true),
+        'rows' => []
+    ];
+
+    try {
+        $db = Database::getInstance();
+        if (!$db) {
+            unset($GLOBALS['__RETEST_QBANK_PRELOAD'][$cacheKey]);
+            return;
+        }
+        $wPlaceholders = implode(',', array_fill(0, count($weeks), '?'));
+        $whereParts = ["`subject` = ?", "`grade` = ?", "`week` IN ({$wPlaceholders})"];
+        $params = array_merge([$subject, $grade], $weeks);
+        if ($year) {
+            $whereParts[] = "`year` = ?";
+            $params[] = intval($year);
+        }
+        if ($season) {
+            $whereParts[] = "(`season` = ? OR `season` = ?)";
+            $params[] = $season;
+            $seasonMap = ['spring'=>'春','summer'=>'暑','autumn'=>'秋','winter'=>'寒','春'=>'spring','暑'=>'summer','秋'=>'autumn','寒'=>'winter'];
+            $params[] = $seasonMap[$season] ?? $season;
+        }
+        $sql = "SELECT `id`, `bank_type`, `tier`, `week`, `question_num`, `parent_question_num`, `parent_question_nums`, `sub_num`, `topic`, `video_url`, `question_meta`, `exercise_pdf`, `answer_pdf`
+                FROM `qbank_questions`
+                WHERE " . implode(' AND ', $whereParts) . "
+                ORDER BY `week` ASC, `question_num` ASC, `parent_question_num` ASC, `sub_num` ASC, `id` ASC";
+        $allRows = $db->fetchAll($sql, $params);
+        if (DB::getLastError() !== null) {
+            unset($GLOBALS['__RETEST_QBANK_PRELOAD'][$cacheKey]);
+            return;
+        }
+        foreach ($allRows as $r) {
+            $bt = (string)($r['bank_type'] ?? 'homework');
+            $tr = (string)($r['tier'] ?? '');
+            $wk = intval($r['week'] ?? 0);
+            $GLOBALS['__RETEST_QBANK_PRELOAD'][$cacheKey]['rows'][$bt][$tr][$wk][] = $r;
+        }
+    } catch (Throwable $e) {
+        unset($GLOBALS['__RETEST_QBANK_PRELOAD'][$cacheKey]);
+        error_log("preloadMultiWeekQbankRows error: " . $e->getMessage());
+    }
+}
+
 function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $year = null, $season = null, $bankType = 'homework') {
     $bankType = $bankType === 'preview' ? 'preview' : 'homework';
     $pdfList = [];
     $uniquePdfs = []; // 映射 exerciseUrl => $pdfList 索引，支持同篇大题多错题聚合与去重
 
-    // 1. 优先从 MySQL qbank_questions 查询
+    // 1. 优先从 MySQL qbank_questions（或批量预加载内存缓存）查询
     try {
         $db = Database::getInstance();
         if ($db && !empty($errorNums)) {
-            $inNums = implode(',', array_map('intval', $errorNums));
-            $whereParts = ["`bank_type` = ?", "`subject` = ?", "`grade` = ?", "`tier` = ?", "`week` = ?"];
-            $params = [$bankType, $subject, $grade, $tier, intval($weekNum)];
+            $wInt = intval($weekNum);
+            $cacheKey = "{$subject}|{$grade}|" . intval($year) . "|" . (string)$season;
+            $usePreload = isset($GLOBALS['__RETEST_QBANK_PRELOAD'][$cacheKey]['loaded_weeks'][$wInt]);
 
-            if ($year) {
-                $whereParts[] = "`year` = ?";
-                $params[] = intval($year);
-            }
-            if ($season) {
-                $whereParts[] = "(`season` = ? OR `season` = ?)";
-                $params[] = $season;
-                $seasonMap = ['spring'=>'春','summer'=>'暑','autumn'=>'秋','winter'=>'寒','春'=>'spring','暑'=>'summer','秋'=>'autumn','寒'=>'winter'];
-                $params[] = $seasonMap[$season] ?? $season;
-            }
+            if ($usePreload) {
+                $allWeekRows = $GLOBALS['__RETEST_QBANK_PRELOAD'][$cacheKey]['rows'][$bankType][(string)$tier][$wInt] ?? [];
+            } else {
+                $inNums = implode(',', array_map('intval', $errorNums));
+                $whereParts = ["`bank_type` = ?", "`subject` = ?", "`grade` = ?", "`tier` = ?", "`week` = ?"];
+                $params = [$bankType, $subject, $grade, $tier, $wInt];
 
-            $sql = "SELECT `question_num`, `topic`, `video_url`, `question_meta`, `exercise_pdf`, `answer_pdf`
-                    FROM `qbank_questions`
-                    WHERE " . implode(' AND ', $whereParts) . "
-                    ORDER BY `question_num` ASC";
-            $allWeekRows = $db->fetchAll($sql, $params);
-            if (DB::getLastError() !== null) {
-                $fallbackSql = "SELECT `question_num`, `topic`, `video_url`, `exercise_pdf`, `answer_pdf`
-                                FROM `qbank_questions`
-                                WHERE " . implode(' AND ', $whereParts) . "
-                                ORDER BY `question_num` ASC";
-                $allWeekRows = $db->fetchAll($fallbackSql, $params);
+                if ($year) {
+                    $whereParts[] = "`year` = ?";
+                    $params[] = intval($year);
+                }
+                if ($season) {
+                    $whereParts[] = "(`season` = ? OR `season` = ?)";
+                    $params[] = $season;
+                    $seasonMap = ['spring'=>'春','summer'=>'暑','autumn'=>'秋','winter'=>'寒','春'=>'spring','暑'=>'summer','秋'=>'autumn','寒'=>'winter'];
+                    $params[] = $seasonMap[$season] ?? $season;
+                }
+
+                $sql = "SELECT `question_num`, `topic`, `video_url`, `question_meta`, `exercise_pdf`, `answer_pdf`
+                        FROM `qbank_questions`
+                        WHERE " . implode(' AND ', $whereParts) . "
+                        ORDER BY `question_num` ASC";
+                $allWeekRows = $db->fetchAll($sql, $params);
+                if (DB::getLastError() !== null) {
+                    $fallbackSql = "SELECT `question_num`, `topic`, `video_url`, `exercise_pdf`, `answer_pdf`
+                                    FROM `qbank_questions`
+                                    WHERE " . implode(' AND ', $whereParts) . "
+                                    ORDER BY `question_num` ASC";
+                    $allWeekRows = $db->fetchAll($fallbackSql, $params);
+                }
             }
 
             // 按 exercise_pdf 统计同篇大题包含的全部题号（兼容未显式写 groupNums 的共享 PDF 题目）
@@ -223,47 +310,53 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
             $varMap = [];
             if ($bankType === 'homework') {
                 try {
-                    $findInSetClauses = [];
-                    foreach ($errorNums as $errNum) {
-                        $errInt = intval($errNum);
-                        if ($errInt > 0) {
-                            $findInSetClauses[] = "FIND_IN_SET('{$errInt}', `parent_question_nums`) > 0";
+                    if ($usePreload) {
+                        $varRows = $GLOBALS['__RETEST_QBANK_PRELOAD'][$cacheKey]['rows']['variation'][(string)$tier][$wInt] ?? [];
+                    } else {
+                        $inNums = implode(',', array_map('intval', $errorNums));
+                        $findInSetClauses = [];
+                        foreach ($errorNums as $errNum) {
+                            $errInt = intval($errNum);
+                            if ($errInt > 0) {
+                                $findInSetClauses[] = "FIND_IN_SET('{$errInt}', `parent_question_nums`) > 0";
+                            }
                         }
-                    }
-                    $matchClause = "`parent_question_num` IN ({$inNums})";
-                    if (!empty($findInSetClauses)) {
-                        $matchClause = "({$matchClause} OR " . implode(' OR ', $findInSetClauses) . ")";
-                    }
+                        $matchClause = "`parent_question_num` IN ({$inNums})";
+                        if (!empty($findInSetClauses)) {
+                            $matchClause = "({$matchClause} OR " . implode(' OR ', $findInSetClauses) . ")";
+                        }
 
-                    $varWhereParts = ["`bank_type` = 'variation'", "`subject` = ?", "`grade` = ?", "`tier` = ?", "`week` = ?", $matchClause];
-                    $varParams = [$subject, $grade, $tier, intval($weekNum)];
-                    if ($year) {
-                        $varWhereParts[] = "`year` = ?";
-                        $varParams[] = intval($year);
-                    }
-                    if ($season) {
-                        $varWhereParts[] = "(`season` = ? OR `season` = ?)";
-                        $varParams[] = $season;
-                        $varParams[] = $seasonMap[$season] ?? $season;
-                    }
-                    $varSql = "SELECT `id`, `parent_question_num`, `parent_question_nums`, `sub_num`, `topic`, `question_meta`, `exercise_pdf`, `answer_pdf`
-                               FROM `qbank_questions`
-                               WHERE " . implode(' AND ', $varWhereParts) . "
-                               ORDER BY `parent_question_num` ASC, `sub_num` ASC, `id` ASC";
-                    $varRows = $db->fetchAll($varSql, $varParams);
-                    if (DB::getLastError() !== null) {
-                        $fallbackVarWhere = ["`bank_type` = 'variation'", "`subject` = ?", "`grade` = ?", "`tier` = ?", "`week` = ?", "`parent_question_num` IN ({$inNums})"];
+                        $varWhereParts = ["`bank_type` = 'variation'", "`subject` = ?", "`grade` = ?", "`tier` = ?", "`week` = ?", $matchClause];
+                        $varParams = [$subject, $grade, $tier, $wInt];
                         if ($year) {
-                            $fallbackVarWhere[] = "`year` = ?";
+                            $varWhereParts[] = "`year` = ?";
+                            $varParams[] = intval($year);
                         }
                         if ($season) {
-                            $fallbackVarWhere[] = "(`season` = ? OR `season` = ?)";
+                            $varWhereParts[] = "(`season` = ? OR `season` = ?)";
+                            $varParams[] = $season;
+                            $seasonMap = ['spring'=>'春','summer'=>'暑','autumn'=>'秋','winter'=>'寒','春'=>'spring','暑'=>'summer','秋'=>'autumn','寒'=>'winter'];
+                            $varParams[] = $seasonMap[$season] ?? $season;
                         }
-                        $fallbackVarSql = "SELECT `id`, `parent_question_num`, `sub_num`, `topic`, `question_meta`, `exercise_pdf`, `answer_pdf`
-                                           FROM `qbank_questions`
-                                           WHERE " . implode(' AND ', $fallbackVarWhere) . "
-                                           ORDER BY `parent_question_num` ASC, `sub_num` ASC, `id` ASC";
-                        $varRows = $db->fetchAll($fallbackVarSql, $varParams);
+                        $varSql = "SELECT `id`, `parent_question_num`, `parent_question_nums`, `sub_num`, `topic`, `question_meta`, `exercise_pdf`, `answer_pdf`
+                                   FROM `qbank_questions`
+                                   WHERE " . implode(' AND ', $varWhereParts) . "
+                                   ORDER BY `parent_question_num` ASC, `sub_num` ASC, `id` ASC";
+                        $varRows = $db->fetchAll($varSql, $varParams);
+                        if (DB::getLastError() !== null) {
+                            $fallbackVarWhere = ["`bank_type` = 'variation'", "`subject` = ?", "`grade` = ?", "`tier` = ?", "`week` = ?", "`parent_question_num` IN ({$inNums})"];
+                            if ($year) {
+                                $fallbackVarWhere[] = "`year` = ?";
+                            }
+                            if ($season) {
+                                $fallbackVarWhere[] = "(`season` = ? OR `season` = ?)";
+                            }
+                            $fallbackVarSql = "SELECT `id`, `parent_question_num`, `sub_num`, `topic`, `question_meta`, `exercise_pdf`, `answer_pdf`
+                                               FROM `qbank_questions`
+                                               WHERE " . implode(' AND ', $fallbackVarWhere) . "
+                                               ORDER BY `parent_question_num` ASC, `sub_num` ASC, `id` ASC";
+                            $varRows = $db->fetchAll($fallbackVarSql, $varParams);
+                        }
                     }
                     if (!empty($varRows)) {
                         $errInts = array_map('intval', $errorNums);
@@ -281,6 +374,9 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
                             sort($matchedParents);
                             if (empty($matchedParents) && in_array($pNum, $errInts, true)) {
                                 $matchedParents = [$pNum];
+                            }
+                            if (empty($matchedParents)) {
+                                continue;
                             }
                             $vr['parent_nums'] = $allParentNums;
                             $vr['matched_parent_nums'] = $matchedParents;
@@ -1118,7 +1214,7 @@ if ($action === 'get_student_week_record') {
             if ($week > 0) {
                 $hwParams = array_merge([$subject, $grade, $week], $studentParams, [$tier]);
                 $hwRows = $db->fetchAll(
-                    "SELECT sr.error_questions, sr.error_count, sr.homework_score, sr.teacher_comment, sr.retest_token, sr.updated_at, cb.tier
+                    "SELECT sr.*, cb.tier
                      FROM `student_records` sr
                      INNER JOIN `class_batches` cb ON sr.batch_id = cb.id
                      WHERE cb.subject = ? AND cb.grade = ? AND sr.week_num = ? AND {$whereStudent}
@@ -1134,9 +1230,11 @@ if ($action === 'get_student_week_record') {
                     sort($errs, SORT_NUMERIC);
                     $cComment = trim((string)($hr['teacher_comment'] ?? ''));
                     $cScore = ($hr['homework_score'] !== null && $hr['homework_score'] !== '') ? floatval($hr['homework_score']) : null;
+                    $explicitHwStatus = trim((string)($hr['submission_status'] ?? ''));
                     $hasHw = !empty($errs)
                         || ($cScore !== null)
                         || $cComment !== ''
+                        || $explicitHwStatus !== ''
                         || ((int)($hr['error_count'] ?? 0) > 0);
                     if ($hasHw || !$hasHwRecord) {
                         $hwErrors = $errs;
@@ -1145,22 +1243,9 @@ if ($action === 'get_student_week_record') {
                         $hwComment = $cComment;
                         $hwUpdatedAt = !empty($hr['updated_at']) ? date('m-d H:i', strtotime($hr['updated_at'])) : '';
 
-                        // 准确判定是否属于未交作业
-                        $unsubMatch = preg_match('/(?:未交|未提交|缺交|未查阅|缺勤)/u', $cComment);
-                        if ($unsubMatch) {
-                            $isHwUnsubmitted = true;
-                        } elseif (empty($errs) && ($cScore === null || $cScore <= 0) && ($cComment === '' || $unsubMatch)) {
-                            $isHwUnsubmitted = true;
-                        } else {
-                            $isHwUnsubmitted = false;
-                        }
-
-                        // 准确判定是否真正满分全对
-                        if (!$isHwUnsubmitted && empty($errs)) {
-                            if (($cScore !== null && $cScore > 0) || preg_match('/(?:全对|全部正确|零失误|无错题|免除加练)/u', $cComment)) {
-                                $isHwFullScore = true;
-                            }
-                        }
+                        $resolvedHwStatus = resolveSubmissionStatus($explicitHwStatus, $errs, $cScore, $cComment);
+                        $isHwUnsubmitted = ($resolvedHwStatus === 'unsubmitted');
+                        $isHwFullScore = (!$isHwUnsubmitted && empty($errs));
                         if ($hasHw) break;
                     }
                 }
@@ -1196,7 +1281,7 @@ if ($action === 'get_student_week_record') {
             if ($targetPvWeek > 0) {
                 $pvParams = array_merge([$subject, $grade, $targetPvWeek, $targetPvWeek], $studentParams, [$tier]);
                 $pvRows = $db->fetchAll(
-                    "SELECT sr.preview_error_questions, sr.preview_score, sr.preview_comment, sr.preview_week_num, sr.retest_token, sr.updated_at, cb.tier
+                    "SELECT sr.*, cb.tier
                      FROM `student_records` sr
                      INNER JOIN `class_batches` cb ON sr.batch_id = cb.id
                      WHERE cb.subject = ? AND cb.grade = ?
@@ -1211,7 +1296,8 @@ if ($action === 'get_student_week_record') {
                     }
                     $cScore = ($pr['preview_score'] !== null && $pr['preview_score'] !== '') ? floatval($pr['preview_score']) : null;
                     $cComment = trim((string)($pr['preview_comment'] ?? ''));
-                    if ($pr['preview_error_questions'] !== null || $cScore !== null || $cComment !== '') {
+                    $explicitPvStatus = trim((string)($pr['preview_submission_status'] ?? ''));
+                    if ($pr['preview_error_questions'] !== null || $cScore !== null || $cComment !== '' || $explicitPvStatus !== '') {
                         $peq = json_decode($pr['preview_error_questions'] ?? '[]', true);
                         $pvErrors = is_array($peq) ? array_values(array_unique(array_filter(array_map('intval', $peq)))) : [];
                         sort($pvErrors, SORT_NUMERIC);
@@ -1220,20 +1306,9 @@ if ($action === 'get_student_week_record') {
                         $pvComment = $cComment;
                         $pvUpdatedAt = !empty($pr['updated_at']) ? date('m-d H:i', strtotime($pr['updated_at'])) : '';
 
-                        $unsubMatch = preg_match('/(?:未交|未提交|缺交|未查阅|缺勤)/u', $cComment);
-                        if ($unsubMatch) {
-                            $isPvUnsubmitted = true;
-                        } elseif (empty($pvErrors) && ($cScore === null || $cScore <= 0) && ($cComment === '' || $unsubMatch)) {
-                            $isPvUnsubmitted = true;
-                        } else {
-                            $isPvUnsubmitted = false;
-                        }
-
-                        if (!$isPvUnsubmitted && empty($pvErrors)) {
-                            if (($cScore !== null && $cScore > 0) || preg_match('/(?:全对|全部正确|零失误|无错题|免除加练)/u', $cComment)) {
-                                $isPvFullScore = true;
-                            }
-                        }
+                        $resolvedPvStatus = resolveSubmissionStatus($explicitPvStatus, $pvErrors, $cScore, $cComment);
+                        $isPvUnsubmitted = ($resolvedPvStatus === 'unsubmitted');
+                        $isPvFullScore = (!$isPvUnsubmitted && empty($pvErrors));
                         break;
                     }
                 }
@@ -1343,13 +1418,7 @@ if ($action === 'encrypt_batch') {
     $year = intval($input['year'] ?? 2026);
     $season = trim($input['season'] ?? '秋');
 
-    $seasonZhMap = [
-        'spring' => '春', '春季' => '春', '春' => '春',
-        'summer' => '暑', '暑假' => '暑', '暑' => '暑',
-        'autumn' => '秋', '秋季' => '秋', '秋' => '秋',
-        'winter' => '寒', '寒假' => '寒', '寒' => '寒'
-    ];
-    $normalizedSeason = $seasonZhMap[strtolower($season)] ?? $season;
+    $normalizedSeason = normalizeSeason($season, '秋');
     $shortYear = substr((string)$year, -2);
     $className = "{$shortYear}{$normalizedSeason}_{$grade}_{$tier}_{$subject}";
 
@@ -1608,42 +1677,9 @@ if ($action === 'encrypt_batch') {
             $previewErrors = array_values(array_unique(array_filter($previewErrors)));
         }
 
-        // 服务端智能兜底辅助：从评语中跨行提取题号（容忍冒号后回车、全角数字等）
-        $extractErrorsFallback = function(string $rawComment): array {
-            $commentNorm = strtr($rawComment, [
-                '０'=>'0','１'=>'1','２'=>'2','３'=>'3','４'=>'4',
-                '５'=>'5','６'=>'6','７'=>'7','８'=>'8','９'=>'9'
-            ]);
-            $lines = array_values(array_filter(array_map('trim', explode("\n", $commentNorm))));
-            if (empty($lines)) return [];
-
-            $prefixPattern = '/^(?:本次|本周|这周|今天)?(?:的)?(?:家庭)?(?:作业|测验|测试|练习)?(?:的)?(?:错题|做错的题|做错|错误)(?:题号|序号|编号|列表)?(?:为|是)?(?:\s*[:：]\s*|\s*(?=\d|第|无|0|零|全对|全部))(.*)$/iu';
-            foreach ($lines as $idx => $line) {
-                if (preg_match($prefixPattern, $line, $m)) {
-                    $after = trim($m[1] ?? '');
-                    // 若冒号后直接换行，向后探查下一非空行作为题号行
-                    if ($after === '' && isset($lines[$idx + 1])) {
-                        $after = $lines[$idx + 1];
-                    }
-                    if (preg_match('/^(?:无|没有|0|零|全对|全部正确|无错题|none)/iu', $after)) {
-                        return [];
-                    }
-                    $numsPart = preg_split('/[。!！;；\n]|(?=[\x{4e00}-\x{9fa5}]{2,})/u', $after)[0];
-                    if (preg_match_all('/\d+/', $numsPart, $numMatches)) {
-                        $parsedNums = array_values(array_unique(array_filter(array_map('intval', $numMatches[0]))));
-                        $valid = array_values(array_filter($parsedNums, fn($n) => $n >= 1 && $n <= 100));
-                        if (!empty($valid)) {
-                            return $valid;
-                        }
-                    }
-                }
-            }
-            return [];
-        };
-
-        // 服务端智能兜底：若前端传来的 errors 为空，但评语包含错题声明，自动解析题号
+        // 服务端智能兜底：若前端传来的 errors 为空，但评语包含错题声明，使用与前端一致的解析器自动解析题号
         if (empty($errors) && !empty($comment)) {
-            $parsed = $extractErrorsFallback($comment);
+            $parsed = parseErrorQuestionsFromCommentPhp($comment);
             if (!empty($parsed)) {
                 $errors = $parsed;
             }
@@ -1651,11 +1687,28 @@ if ($action === 'encrypt_batch') {
 
         // 预习评语同样兜底解析；预习评语为空时不影响课后巩固错题
         if (empty($previewErrors) && !empty($previewComment)) {
-            $parsedPv = $extractErrorsFallback($previewComment);
+            $parsedPv = parseErrorQuestionsFromCommentPhp($previewComment);
             if (!empty($parsedPv)) {
                 $previewErrors = $parsedPv;
             }
         }
+
+        // 解析显式提交状态（避免无分数全对或已交0分被误判为未交）
+        $rawHwStatus = trim((string)($student['submissionStatus'] ?? ($student['submission_status'] ?? '')));
+        if ($rawHwStatus === '' && array_key_exists('isUnsubmitted', $student)) {
+            $rawHwStatus = !empty($student['isUnsubmitted']) ? 'unsubmitted' : 'submitted';
+        }
+        $hwSubmissionStatus = $hasHomeworkData
+            ? resolveSubmissionStatus($rawHwStatus, $errors, $hwScore, $comment)
+            : 'submitted';
+
+        $rawPvStatus = trim((string)($student['previewSubmissionStatus'] ?? ($student['preview_submission_status'] ?? '')));
+        if ($rawPvStatus === '' && array_key_exists('isPreviewUnsubmitted', $student)) {
+            $rawPvStatus = !empty($student['isPreviewUnsubmitted']) ? 'unsubmitted' : 'submitted';
+        }
+        $pvSubmissionStatus = $studentHasPreview
+            ? resolveSubmissionStatus($rawPvStatus, $previewErrors, $preScore, $previewComment)
+            : null;
 
         // 归档到本次批次变更集：以唯一 studentKey 隔离存储
         $batchNameMap[$studentKey] = $name;
@@ -1671,8 +1724,7 @@ if ($action === 'encrypt_batch') {
 
         // 生成简短、高熵且防篡改的短 Token（10位，基于 HMAC-SHA256）
         // 哈希因子不再包含班型：学生换班型后仍得到同一个稳定链接，历史不断档
-        $rawHash = hash_hmac('sha256', "{$subject}_{$grade}_{$studentKey}", $secretKey, true);
-        $shortToken = substr(str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($rawHash)), 0, 10);
+        $shortToken = deriveRetestToken($subject, $grade, $studentKey);
 
         // 记录短 Token 映射条目
         $batchTokenMapEntries[$shortToken] = [
@@ -1686,7 +1738,7 @@ if ($action === 'encrypt_batch') {
             'k' => $studentKey, // 唯一标识（定位历史库中该学生的独立档案）
             'id' => $studentId, // 学号
             'year' => $year,
-            'season' => $season,
+            'season' => $normalizedSeason,
             'u' => time(),
             '_has_pv' => $studentHasPreview,
             '_has_hw' => $hasHomeworkData
@@ -1718,6 +1770,7 @@ if ($action === 'encrypt_batch') {
                     "`preview_score` = COALESCE(VALUES(`preview_score`), `preview_score`)",
                     "`preview_error_questions` = COALESCE(VALUES(`preview_error_questions`), `preview_error_questions`)",
                     "`preview_comment` = COALESCE(VALUES(`preview_comment`), `preview_comment`)",
+                    "`preview_submission_status` = COALESCE(VALUES(`preview_submission_status`), `preview_submission_status`)",
                     "`retest_token` = VALUES(`retest_token`)",
                     "`created_by` = IF(VALUES(`created_by`) != '', VALUES(`created_by`), `created_by`)",
                     "`updated_at` = CURRENT_TIMESTAMP"
@@ -1731,7 +1784,8 @@ if ($action === 'encrypt_batch') {
                             "`total_score` = COALESCE(VALUES(`total_score`), `total_score`)",
                             "`error_count` = VALUES(`error_count`)",
                             "`error_questions` = VALUES(`error_questions`)",
-                            "`teacher_comment` = IF(VALUES(`teacher_comment`) != '', VALUES(`teacher_comment`), `teacher_comment`)"
+                            "`teacher_comment` = IF(VALUES(`teacher_comment`) != '', VALUES(`teacher_comment`), `teacher_comment`)",
+                            "`submission_status` = VALUES(`submission_status`)"
                         );
                     } else {
                         array_unshift($updateParts,
@@ -1741,15 +1795,16 @@ if ($action === 'encrypt_batch') {
                             "`total_score` = VALUES(`total_score`)",
                             "`error_count` = VALUES(`error_count`)",
                             "`error_questions` = VALUES(`error_questions`)",
-                            "`teacher_comment` = VALUES(`teacher_comment`)"
+                            "`teacher_comment` = VALUES(`teacher_comment`)",
+                            "`submission_status` = VALUES(`submission_status`)"
                         );
                     }
                 }
                 $updateClause = implode(",\n                            ", $updateParts);
                 $db->execute(
                     "INSERT INTO student_records
-                        (`batch_id`, `batch_code`, `source_files`, `student_id`, `student_name`, `student_key`, `week_num`, `preview_week_num`, `homework_score`, `preview_score`, `total_score`, `error_count`, `error_questions`, `preview_error_questions`, `teacher_comment`, `preview_comment`, `retest_token`, `created_by`)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (`batch_id`, `batch_code`, `source_files`, `student_id`, `student_name`, `student_key`, `week_num`, `preview_week_num`, `homework_score`, `preview_score`, `total_score`, `error_count`, `error_questions`, `preview_error_questions`, `teacher_comment`, `preview_comment`, `submission_status`, `preview_submission_status`, `retest_token`, `created_by`)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON DUPLICATE KEY UPDATE
                             {$updateClause}",
                     [
@@ -1769,6 +1824,8 @@ if ($action === 'encrypt_batch') {
                         $previewErrJson,
                         $comment,
                         $previewCommentForDb,
+                        $hwSubmissionStatus,
+                        $pvSubmissionStatus,
                         $shortToken,
                         $currentTeacher
                     ]
@@ -1777,9 +1834,9 @@ if ($action === 'encrypt_batch') {
                 if ($studentHasPreview && $previewWeekValue > 0) {
                     $db->execute(
                         "UPDATE `student_records`
-                         SET `preview_error_questions` = ?, `updated_at` = CURRENT_TIMESTAMP
+                         SET `preview_error_questions` = ?, `preview_submission_status` = COALESCE(?, `preview_submission_status`), `updated_at` = CURRENT_TIMESTAMP
                          WHERE `batch_id` = ? AND `student_key` = ? AND `preview_week_num` = ? AND `week_num` != ?",
-                        [$previewErrJson, $batchId, $studentKey, $previewWeekValue, $week]
+                        [$previewErrJson, $pvSubmissionStatus, $batchId, $studentKey, $previewWeekValue, $week]
                     );
                 }
                 $validStudentCount++;
@@ -1935,7 +1992,7 @@ if ($action === 'encrypt_batch') {
         }
     }
 
-    // 原子更新短 Token 映射表 ($tokenMapFile) 并加排他锁 (flock LOCK_EX)
+    // 原子更新短 Token 映射表 ($tokenMapFile) 并加排他锁 (flock LOCK_EX)，去除 JSON_PRETTY_PRINT 压缩体积
     if (!empty($batchTokenMapEntries)) {
         $fp = @fopen($tokenMapFile, 'c+');
         if ($fp) {
@@ -1966,7 +2023,7 @@ if ($action === 'encrypt_batch') {
                 $tokenMapOutput = !empty($existingTokenMap) ? $existingTokenMap : (object)[];
                 ftruncate($fp, 0);
                 rewind($fp);
-                fwrite($fp, json_encode($tokenMapOutput, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+                fwrite($fp, json_encode($tokenMapOutput, JSON_UNESCAPED_UNICODE));
                 fflush($fp);
                 flock($fp, LOCK_UN);
             }
@@ -2019,60 +2076,63 @@ if ($action === 'decrypt') {
         exit;
     }
 
-    $tokenMapFile = $historyDir . '/token_map.json';
-    $tokenMap = file_exists($tokenMapFile) ? (json_decode(file_get_contents($tokenMapFile), true) ?: []) : [];
-
     $data = null;
-    if (isset($tokenMap[$rawToken])) {
-        // 1. 优先从短 Token 索引中解析
-        $data = $tokenMap[$rawToken];
-    } else {
-        // 2. 兼容旧版 AES-256 长 Token
-        $token = str_replace(['-', '_'], ['+', '/'], $rawToken);
-        $mod4 = strlen($token) % 4;
-        if ($mod4) {
-            $token .= substr('====', $mod4);
+    // 1. 优先通过 MySQL student_records.retest_token (idx_token B-Tree 索引) 毫秒级定位，避免每次请求加载全量 token_map.json
+    try {
+        $db = Database::getInstance();
+        $record = $db->fetchOne(
+            "SELECT sr.*, cb.year, cb.season, cb.grade, cb.tier, cb.subject
+             FROM student_records sr
+             JOIN class_batches cb ON sr.batch_id = cb.id
+             WHERE sr.retest_token = ?
+             ORDER BY sr.updated_at DESC, sr.id DESC
+             LIMIT 1",
+            [$rawToken]
+        );
+        if ($record) {
+            $peq = json_decode($record['preview_error_questions'] ?? 'null', true);
+            $data = [
+                's' => $record['subject'],
+                'g' => $record['grade'],
+                't' => $record['tier'],
+                'w' => (int)$record['week_num'],
+                'pw' => intval($record['preview_week_num'] ?? 0) > 0 ? (int)$record['preview_week_num'] : (int)$record['week_num'],
+                'pq' => is_array($peq) ? array_values(array_unique(array_filter(array_map('intval', $peq)))) : [],
+                'n' => $record['student_name'],
+                'k' => $record['student_key'],
+                'id' => $record['student_id'] ?: '',
+                'year' => (int)$record['year'],
+                'season' => $record['season'],
+                'u' => strtotime($record['updated_at'] ?: $record['created_at'])
+            ];
         }
-
-        $decoded = base64_decode($token);
-        $ivlen = openssl_cipher_iv_length($cipherAlgo);
-        if ($decoded !== false && strlen($decoded) > $ivlen) {
-            $iv = substr($decoded, 0, $ivlen);
-            $ciphertext = substr($decoded, $ivlen);
-            $decrypted = openssl_decrypt($ciphertext, $cipherAlgo, $secretKey, 0, $iv);
-            if ($decrypted !== false) {
-                $data = json_decode($decrypted, true);
-            }
-        }
+    } catch (Throwable $e) {
+        error_log("DB lookup error: " . $e->getMessage());
     }
 
+    // 2. 若数据库未命中，回退从 token_map.json 或旧版 AES-256 长 Token 解析
     if (!$data) {
-        // 3. 回退从 MySQL student_records 表中查找
-        try {
-            $db = Database::getInstance();
-            $record = $db->fetchOne(
-                "SELECT sr.*, cb.year, cb.season, cb.grade, cb.tier, cb.subject
-                 FROM student_records sr
-                 JOIN class_batches cb ON sr.batch_id = cb.id
-                 WHERE sr.retest_token = ? LIMIT 1",
-                [$rawToken]
-            );
-            if ($record) {
-                $data = [
-                    's' => $record['subject'],
-                    'g' => $record['grade'],
-                    't' => $record['tier'],
-                    'w' => (int)$record['week_num'],
-                    'n' => $record['student_name'],
-                    'k' => $record['student_key'],
-                    'id' => $record['student_id'] ?: '',
-                    'year' => (int)$record['year'],
-                    'season' => $record['season'],
-                    'u' => strtotime($record['created_at'])
-                ];
+        $tokenMapFile = $historyDir . '/token_map.json';
+        $tokenMap = file_exists($tokenMapFile) ? (json_decode(file_get_contents($tokenMapFile), true) ?: []) : [];
+        if (isset($tokenMap[$rawToken])) {
+            $data = $tokenMap[$rawToken];
+        } else {
+            $token = str_replace(['-', '_'], ['+', '/'], $rawToken);
+            $mod4 = strlen($token) % 4;
+            if ($mod4) {
+                $token .= substr('====', $mod4);
             }
-        } catch (Throwable $e) {
-            error_log("DB lookup error: " . $e->getMessage());
+
+            $decoded = base64_decode($token);
+            $ivlen = openssl_cipher_iv_length($cipherAlgo);
+            if ($decoded !== false && strlen($decoded) > $ivlen) {
+                $iv = substr($decoded, 0, $ivlen);
+                $ciphertext = substr($decoded, $ivlen);
+                $decrypted = openssl_decrypt($ciphertext, $cipherAlgo, $secretKey, 0, $iv);
+                if ($decrypted !== false) {
+                    $data = json_decode($decrypted, true);
+                }
+            }
         }
     }
 
@@ -2216,6 +2276,11 @@ if ($action === 'decrypt') {
         }
     }
 
+    // 身份核验与 Session 写入完毕后立即释放 PHP Session 文件锁，避免后续多周次题库查询阻塞并发请求
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
+
     // 检索该学生的历史记录
     // 新写入落在 `学科_年级.json`；旧数据仍在 `学科_年级_班型.json`。
     // 这里把全部相关档案合并读取，学生换班型后历史保持连续。
@@ -2313,7 +2378,7 @@ if ($action === 'decrypt') {
         }
         $dbWhere .= ")";
         $dbRecords = $db->fetchAll(
-            "SELECT sr.batch_id, sr.week_num, sr.preview_week_num, sr.homework_score, sr.preview_score, sr.total_score, sr.error_count, sr.teacher_comment, sr.preview_comment, sr.error_questions, sr.preview_error_questions, cb.tier AS batch_tier
+            "SELECT sr.*, cb.tier AS batch_tier
              FROM student_records sr
              JOIN class_batches cb ON sr.batch_id = cb.id
              WHERE {$dbWhere}
@@ -2323,15 +2388,25 @@ if ($action === 'decrypt') {
         if (!empty($dbRecords)) {
             foreach ($dbRecords as $r) {
                 $wn = (int)$r['week_num'];
-                $eq = json_decode($r['error_questions'], true);
+                $eq = json_decode($r['error_questions'] ?? '[]', true);
                 $errors = is_array($eq) ? array_values(array_unique(array_filter(array_map('intval', $eq)))) : [];
                 $comment = trim((string)($r['teacher_comment'] ?? ''));
+                $explicitSubStatus = trim((string)($r['submission_status'] ?? ''));
+                $isPreviewOnlyRow = ($r['preview_week_num'] !== null || $r['preview_error_questions'] !== null)
+                    && empty($errors)
+                    && $r['homework_score'] === null
+                    && $comment === ''
+                    && (int)($r['error_count'] ?? 0) === 0;
                 // 同一学生同一周可能有多条记录（换班/重复生成）。以后写入的记录为准，
-                // 但仅用“真正带作业数据”的记录覆盖，避免仅预习的空行冲掉历史作业。
-                $hasHomework = !empty($errors)
+                // 即使后台将该周错题清空为 []（无分全对），只要不是仅预习空行，也以 MySQL 为准覆盖 JSON 旧缓存。
+                $hasHomework = !$isPreviewOnlyRow && (
+                    !empty($errors)
                     || ($r['homework_score'] !== null)
                     || $comment !== ''
-                    || ((int)($r['error_count'] ?? 0) > 0);
+                    || $explicitSubStatus !== ''
+                    || ((int)($r['error_count'] ?? 0) > 0)
+                    || ($r['error_questions'] !== null)
+                );
                 if ($hasHomework) {
                     $dbHomeworkErrors[(string)$wn] = $errors;
                     $dbStudentScores[(string)$wn] = [
@@ -2339,7 +2414,8 @@ if ($action === 'decrypt') {
                         'previewScore' => $r['preview_score'],
                         'totalScore' => $r['total_score'],
                         'comment' => $r['teacher_comment'],
-                        'previewComment' => $r['preview_comment'] ?? ''
+                        'previewComment' => $r['preview_comment'] ?? '',
+                        'submissionStatus' => $explicitSubStatus
                     ];
                     $dbWeekTiers[(string)$wn] = trim((string)($r['batch_tier'] ?? ''));
                     $dbWeekBatchIds[(string)$wn] = (int)$r['batch_id'];
@@ -2353,13 +2429,14 @@ if ($action === 'decrypt') {
                         'previewWeek' => intval($r['preview_week_num'] ?? 0) > 0 ? intval($r['preview_week_num']) : $wn,
                         'previewScore' => $r['preview_score'],
                         'previewComment' => $r['preview_comment'] ?? '',
+                        'previewSubmissionStatus' => trim((string)($r['preview_submission_status'] ?? '')),
                         'sourceWeek' => (int)$wn,
                         'hasPreview' => true
                     ];
                 }
             }
 
-            // 数据库最新作业记录优先；文件历史只补齐数据库没有作业记录的周次
+            // 数据库最新作业记录优先；即使数据库将该周错题更新为空数组 []，也会覆盖旧 JSON 档案里的残留错题
             foreach ($dbHomeworkErrors as $wn => $errors) {
                 $studentHistory[(string)$wn] = $errors;
             }
@@ -2500,6 +2577,14 @@ if ($action === 'decrypt') {
         return intval($a) - intval($b);
     });
 
+    // 批量预加载所有相关周次的题库记录，消除 N+1 数据库查询
+    $allTargetWeeks = array_values(array_unique(array_filter(array_merge(
+        array_map('intval', array_keys($studentHistory)),
+        array_map('intval', array_keys($previewByTopic)),
+        [$currWeek]
+    ))));
+    preloadMultiWeekQbankRows($subject, $grade, $allTargetWeeks, $tokenYear, $tokenSeason);
+
     $weeksData = [];
     foreach ($studentHistory as $weekStr => $errors) {
         $wNum = intval($weekStr);
@@ -2531,16 +2616,18 @@ if ($action === 'decrypt') {
             'homeworkScore' => null,
             'avgScore' => null
         ];
+        $explicitSubStatus = '';
         if (isset($dbStudentScores[(string)$wNum])) {
             $hw = $dbStudentScores[(string)$wNum]['homeworkScore'];
             $wEntry['homeworkScore'] = ($hw !== null && $hw !== '') ? (float)$hw : null;
             $wEntry['totalScore'] = $dbStudentScores[(string)$wNum]['totalScore'];
             $wEntry['comment'] = $dbStudentScores[(string)$wNum]['comment'];
+            $explicitSubStatus = (string)($dbStudentScores[(string)$wNum]['submissionStatus'] ?? '');
         }
         $cm = $wEntry['comment'] ?? '';
-        $isUnsub = (!empty($cm) && (mb_strpos($cm, '未交') !== false || mb_strpos($cm, '未提交') !== false || mb_strpos($cm, '缺交') !== false))
-            || (empty($errors) && empty($previewErrors) && ($wEntry['homeworkScore'] === null || $wEntry['homeworkScore'] <= 0));
-        $wEntry['isUnsubmitted'] = $isUnsub;
+        $resolvedStatus = resolveSubmissionStatus($explicitSubStatus, $errors, $wEntry['homeworkScore'], $cm);
+        $wEntry['submissionStatus'] = $resolvedStatus;
+        $wEntry['isUnsubmitted'] = ($resolvedStatus === 'unsubmitted' && empty($previewErrors));
         $weekBatchId = $dbWeekBatchIds[(string)$wNum] ?? 0;
         if ($weekBatchId > 0 && isset($dbWeekAveragesByBatch[$weekBatchId . ':' . $wNum])) {
             $wEntry['avgScore'] = $dbWeekAveragesByBatch[$weekBatchId . ':' . $wNum];
@@ -2569,16 +2656,18 @@ if ($action === 'decrypt') {
             'homeworkScore' => null,
             'avgScore' => null
         ];
+        $explicitSubStatus = '';
         if (isset($dbStudentScores[(string)$currWeek])) {
             $hw = $dbStudentScores[(string)$currWeek]['homeworkScore'];
             $wEntry['homeworkScore'] = ($hw !== null && $hw !== '') ? (float)$hw : null;
             $wEntry['totalScore'] = $dbStudentScores[(string)$currWeek]['totalScore'];
             $wEntry['comment'] = $dbStudentScores[(string)$currWeek]['comment'];
+            $explicitSubStatus = (string)($dbStudentScores[(string)$currWeek]['submissionStatus'] ?? '');
         }
         $cm = $wEntry['comment'] ?? '';
-        $isUnsub = (!empty($cm) && (mb_strpos($cm, '未交') !== false || mb_strpos($cm, '未提交') !== false || mb_strpos($cm, '缺交') !== false))
-            || (empty($currErrors) && empty($fallbackPreviewErrors) && ($wEntry['homeworkScore'] === null || $wEntry['homeworkScore'] <= 0));
-        $wEntry['isUnsubmitted'] = $isUnsub;
+        $resolvedStatus = resolveSubmissionStatus($explicitSubStatus, $currErrors, $wEntry['homeworkScore'], $cm);
+        $wEntry['submissionStatus'] = $resolvedStatus;
+        $wEntry['isUnsubmitted'] = ($resolvedStatus === 'unsubmitted' && empty($fallbackPreviewErrors));
         if (isset($dbWeekAverages[(string)$currWeek])) {
             $wEntry['avgScore'] = $dbWeekAverages[(string)$currWeek];
         }
@@ -2840,6 +2929,7 @@ if ($action === 'revoke_token' || $action === 'unrevoke_token') {
         exit;
     }
     requireAuth();
+    requireNonAssistant('作废或恢复学生错题本链接');
 
     $body = json_decode(file_get_contents('php://input'), true) ?: [];
     $token = trim($body['token'] ?? ($_POST['token'] ?? ''));

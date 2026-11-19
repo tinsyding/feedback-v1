@@ -1211,6 +1211,63 @@ class TestStage6(unittest.TestCase):
         self.assertEqual(res["result"], "sidebar_open")
         mock_sb.assert_called_once()
 
+    def test_archive_key_week_hash_and_history_message_check(self):
+        """测试同名文件跨周/不同话术内容时生成不同归档键，且 HistoryManager.is_sent 支持比对消息正文。"""
+        k_default = archive_key_for_input("高一物理班.json")
+        self.assertEqual(k_default, "高一物理班 [第 1 周]")
+
+        k_week3_file = archive_key_for_input("高一物理班_第3周反馈.json")
+        self.assertEqual(k_week3_file, "高一物理班_第3周反馈 [第 3 周]")
+
+        items_w1 = [{"studentName": "90001张三", "message": "本周（第1周）表现优秀，作业满分！"}]
+        items_w2 = [{"studentName": "90001张三", "message": "本周（第2周）表现良好，第3题需巩固。"}]
+        k1 = archive_key_for_input("反馈话术.json", items_w1)
+        k2 = archive_key_for_input("反馈话术.json", items_w2)
+        self.assertIn("[第 1 周 #", k1)
+        self.assertIn("[第 2 周 #", k2)
+        self.assertNotEqual(k1, k2)
+
+        with tempfile.TemporaryDirectory() as d:
+            hm = HistoryManager(storage_path=os.path.join(d, "history.json"))
+            hm.mark_status("反馈话术 [第 1 周]", "90001张三", "✅已发送", "第一周话术")
+            self.assertTrue(hm.is_sent("反馈话术 [第 1 周]", "90001张三"))
+            self.assertTrue(hm.is_sent("反馈话术 [第 1 周]", "90001张三", "第一周话术"))
+            self.assertFalse(hm.is_sent("反馈话术 [第 1 周]", "90001张三", "第二周新话术"))
+
+    def test_paste_and_send_clears_draft_and_checks_focus(self):
+        """测试 paste_and_send 在粘贴前清空残余草稿，并在失焦时中止发送。"""
+        from sender_py.sender import paste_and_send
+
+        events = []
+        with mock.patch("sender_py.sender.safe_copy", return_value=True), \
+             mock.patch.object(wu, "is_foreground_wecom", return_value=True), \
+             mock.patch.object(wu, "tap_keys", side_effect=lambda *ks: events.append(("keys", ks)) or True), \
+             mock.patch.object(wu, "tap_key", side_effect=lambda k: events.append(("key", k)) or True), \
+             mock.patch("sender_py.sender.time.sleep", return_value=None):
+            ok, msg = paste_and_send("测试话术")
+        self.assertTrue(ok)
+        self.assertEqual(msg, "已发送")
+        # 顺序必须是：Ctrl+A -> Backspace -> Ctrl+V -> Enter
+        self.assertEqual(events, [
+            ("keys", (wu.VK_CONTROL, wu.VK_A)),
+            ("key", 0x08),
+            ("keys", (wu.VK_CONTROL, wu.VK_V)),
+            ("key", wu.VK_RETURN),
+        ])
+
+        # 若粘贴后失焦且重激活失败，绝不按 Enter
+        events_unfocused = []
+        with mock.patch("sender_py.sender.safe_copy", return_value=True), \
+             mock.patch.object(wu, "is_foreground_wecom", side_effect=[True, False]), \
+             mock.patch.object(wu, "find_and_activate_wecom", return_value=False), \
+             mock.patch.object(wu, "tap_keys", side_effect=lambda *ks: events_unfocused.append(("keys", ks)) or True), \
+             mock.patch.object(wu, "tap_key", side_effect=lambda k: events_unfocused.append(("key", k)) or True), \
+             mock.patch("sender_py.sender.time.sleep", return_value=None):
+            ok2, msg2 = paste_and_send("测试话术")
+        self.assertFalse(ok2)
+        self.assertIn("失去前台焦点", msg2)
+        self.assertNotIn(("key", wu.VK_RETURN), events_unfocused)
+
 
 if __name__ == "__main__":
     unittest.main()

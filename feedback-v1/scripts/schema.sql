@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS `admin_users` (
   UNIQUE KEY `username` (`username`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统管理员账号表';
 
--- ---------- 班级教学期次（无唯一键，靠应用层去重；无 updated_at） ----------
+-- ---------- 班级教学期次（带唯一键防重复批次裂变） ----------
 CREATE TABLE IF NOT EXISTS `class_batches` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `year` int(11) NOT NULL COMMENT '年份，如 2026',
@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS `class_batches` (
   `created_by` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT '生成教师账号',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_batch_identity` (`year`,`season`,`grade`,`tier`,`subject`,`class_name`),
   KEY `idx_query` (`year`,`season`,`grade`,`tier`,`subject`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='班级教学期次表';
 
@@ -78,6 +79,8 @@ CREATE TABLE IF NOT EXISTS `student_records` (
   `homework_score` decimal(6,2) DEFAULT '0.00' COMMENT '课后巩固得分',
   `preview_score` decimal(6,2) DEFAULT NULL COMMENT '预习得分',
   `total_score` decimal(6,2) DEFAULT NULL COMMENT '作业满分',
+  `submission_status` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'submitted' COMMENT '课后作业提交状态: submitted/unsubmitted/exempt',
+  `preview_submission_status` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'submitted' COMMENT '预习作业提交状态: submitted/unsubmitted/exempt',
   `error_count` int(11) NOT NULL DEFAULT '0' COMMENT '错题总道数',
   `error_questions` json NOT NULL COMMENT '课后巩固错题具体题号数组，如 [1, 3, 5]',
   `preview_error_questions` json DEFAULT NULL COMMENT '预习错题具体题号数组，如 [2, 4]',

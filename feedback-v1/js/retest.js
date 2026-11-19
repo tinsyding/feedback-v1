@@ -443,9 +443,14 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                 const cm = (wData && wData.comment) ? String(wData.comment) : '';
                 const rawHw = (wData && wData.homeworkScore !== null && wData.homeworkScore !== undefined && wData.homeworkScore !== '')
                     ? Number(wData.homeworkScore) : null;
-                const isWeekUnsub = (wData && wData.isUnsubmitted) ||
-                    cm.includes('未交') || cm.includes('未提交') || cm.includes('缺交') ||
-                    (errCount === 0 && (rawHw === null || rawHw <= 0));
+                const hasExplicitUnsubComment = cm.includes('未交') || cm.includes('未提交') || cm.includes('缺交');
+                const isWeekUnsub = hasExplicitUnsubComment
+                    ? true
+                    : (wData && (wData.submissionStatus === 'submitted' || wData.submissionStatus === 'unsubmitted'))
+                        ? (wData.submissionStatus === 'unsubmitted' && errCount === 0)
+                        : (wData && typeof wData.isUnsubmitted === 'boolean')
+                            ? wData.isUnsubmitted
+                            : (errCount === 0 && (rawHw === null || rawHw <= 0));
 
                 // 1. Horizontal Scroll Tab
                 const tab = document.createElement('button');
@@ -558,9 +563,14 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             ? Number(weekData.homeworkScore)
             : null;
         const commentText = (weekData && weekData.comment) ? String(weekData.comment) : '';
-        const isUnsubmitted = (weekData && weekData.isUnsubmitted) ||
-            commentText.includes('未交') || commentText.includes('未提交') || commentText.includes('缺交') ||
-            (errorCount === 0 && (rawHwScore === null || rawHwScore <= 0));
+        const hasExplicitUnsubText = commentText.includes('未交') || commentText.includes('未提交') || commentText.includes('缺交');
+        const isUnsubmitted = hasExplicitUnsubText
+            ? true
+            : (weekData && (weekData.submissionStatus === 'submitted' || weekData.submissionStatus === 'unsubmitted'))
+                ? (weekData.submissionStatus === 'unsubmitted' && errorCount === 0)
+                : (weekData && typeof weekData.isUnsubmitted === 'boolean')
+                    ? weekData.isUnsubmitted
+                    : (errorCount === 0 && (rawHwScore === null || rawHwScore <= 0));
 
         if (scoreEl) {
             if (isUnsubmitted) {

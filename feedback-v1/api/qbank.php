@@ -30,30 +30,6 @@ if (file_exists($configFile)) {
 
 $defaultSemesterYear = intval($config['semesterYear'] ?? 2026);
 $defaultSeasonCode = strval($config['defaultSeason'] ?? 'autumn');
-
-/**
- * 规范化学期字符串为中文枚举 (春/暑/秋/寒)
- */
-function normalizeSeason($season, $fallback = '秋') {
-    if (empty($season)) return $fallback;
-    $map = [
-        'spring' => '春',
-        'summer' => '暑',
-        'autumn' => '秋',
-        'winter' => '寒',
-        '春季'   => '春',
-        '暑假'   => '暑',
-        '秋季'   => '秋',
-        '寒假'   => '寒',
-        '春'     => '春',
-        '暑'     => '暑',
-        '秋'     => '秋',
-        '寒'     => '寒',
-    ];
-    $lower = strtolower(trim($season));
-    return $map[$lower] ?? $map[$season] ?? $fallback;
-}
-
 $defaultSeasonZh = normalizeSeason($defaultSeasonCode, '春');
 
 /**
@@ -419,29 +395,41 @@ function loadHomeworkTopicMapFromDb($year, $season, $subject, $grade, $tier, $we
 }
 
 /**
- * 课后巩固保存后，级联刷新同专题变式题的知识点，避免变式题继续显示旧考点。
+ * 课后巩固保存后，级联刷新同专题变式题的知识点（同时支持单原题 parent_question_num 与多原题 parent_question_nums），避免变式题继续显示旧考点。
  */
 function cascadeHomeworkTopicsToVariations($db, $year, $season, $subject, $grade, $tier, $week, $questions) {
     if (!$db) return 0;
-    $stmt = $db->prepare(
-        "UPDATE `qbank_questions`
-         SET `topic` = ?, `updated_at` = `updated_at`
+    $topicMap = buildHomeworkTopicMap($questions);
+    if (empty($topicMap)) return 0;
+
+    $varRows = DB::fetchAll(
+        "SELECT `id`, `parent_question_num` AS `parentQuestionNum`, `parent_question_nums` AS `parentQuestionNums`, `topic`
+         FROM `qbank_questions`
          WHERE `bank_type` = 'variation'
-           AND `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ?
-           AND `parent_question_num` = ?
-           AND (`topic` IS NULL OR `topic` <> ?)"
+           AND `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ?",
+        [$year, $season, $subject, $grade, $tier, intval($week)]
     );
-    if (!$stmt) return 0;
+    if (empty($varRows)) return 0;
+
+    $stmtUpdate = $db->prepare(
+        "UPDATE `qbank_questions` SET `topic` = ?, `updated_at` = `updated_at` WHERE `id` = ?"
+    );
+    if (!$stmtUpdate) return 0;
 
     $changed = 0;
-    foreach ($questions as $q) {
-        if (!is_array($q)) continue;
-        $qNum = intval($q['id'] ?? ($q['question_num'] ?? ($q['num'] ?? 0)));
-        if ($qNum <= 0) continue;
-        $topic = trim((string)($q['topic'] ?? ''));
-        if ($topic === '') continue;
-        $stmt->execute([$topic, $year, $season, $subject, $grade, $tier, intval($week), $qNum, $topic]);
-        $changed += $stmt->rowCount();
+    foreach ($varRows as $vr) {
+        $parentNums = getVariationParentNums($vr);
+        $newTopic = '';
+        foreach ($parentNums as $pNum) {
+            if (!empty($topicMap[$pNum])) {
+                $newTopic = $topicMap[$pNum];
+                break;
+            }
+        }
+        if ($newTopic !== '' && $newTopic !== (string)($vr['topic'] ?? '')) {
+            $stmtUpdate->execute([$newTopic, intval($vr['id'])]);
+            $changed += $stmtUpdate->rowCount();
+        }
     }
     return $changed;
 }
@@ -666,10 +654,12 @@ try {
                     }
 
                     if ($qbank) {
+                        $excludeThumbs = !empty($_GET['exclude_thumbs']);
+                        $thumbCols = $excludeThumbs ? "'' AS `exercise_thumb`, '' AS `answer_thumb`" : "`exercise_thumb`, `answer_thumb`";
                         $qRows = DB::fetchAll(
                             "SELECT `question_num` AS `id`, `parent_question_num` AS `parentQuestionNum`, `parent_question_nums` AS `parentQuestionNums`, `sub_num` AS `subNum`,
-                                    `topic`, `video_url`, `question_meta`, `exercise_pdf`, `exercise_name`, `exercise_thumb`,
-                                    `answer_pdf`, `answer_name`, `answer_thumb`
+                                    `topic`, `video_url`, `question_meta`, `exercise_pdf`, `exercise_name`,
+                                    `answer_pdf`, `answer_name`, {$thumbCols}
                              FROM `qbank_questions`
                              WHERE `qbank_id` = ?
                              ORDER BY `question_num` ASC",
@@ -678,8 +668,8 @@ try {
                         if (DB::getLastError() !== null) {
                             $qRows = DB::fetchAll(
                                 "SELECT `question_num` AS `id`, `parent_question_num` AS `parentQuestionNum`, `sub_num` AS `subNum`,
-                                        `topic`, `video_url`, `exercise_pdf`, `exercise_name`, `exercise_thumb`,
-                                        `answer_pdf`, `answer_name`, `answer_thumb`
+                                        `topic`, `video_url`, `exercise_pdf`, `exercise_name`,
+                                        `answer_pdf`, `answer_name`, {$thumbCols}
                                  FROM `qbank_questions`
                                  WHERE `qbank_id` = ?
                                  ORDER BY `question_num` ASC",
@@ -884,8 +874,20 @@ try {
 
             $currentTimeMs = round(microtime(true) * 1000);
 
+            // 0. 将 Base64 缩略图自动落盘为静态图片文件，大幅降低 MySQL MEDIUMTEXT 与 JSON 体积
+            foreach ($questions as &$qThumbRef) {
+                if (!empty($qThumbRef['exercisePdf']['thumb'])) {
+                    $qThumbRef['exercisePdf']['thumb'] = persistBase64ThumbToFile($qThumbRef['exercisePdf']['thumb']);
+                }
+                if (!empty($qThumbRef['answerPdf']['thumb'])) {
+                    $qThumbRef['answerPdf']['thumb'] = persistBase64ThumbToFile($qThumbRef['answerPdf']['thumb']);
+                }
+            }
+            unset($qThumbRef);
+
             // 1. 同步入库 MySQL
             $dbSaved = false;
+            $removedPdfCandidates = [];
             try {
                 $db = DB::getConnection();
                 if ($db) {
@@ -909,6 +911,18 @@ try {
                     );
 
                     if ($qbankId) {
+                        // 记录覆盖前的旧 PDF URL，以便在提交后清理不再引用的孤儿 PDF
+                        $oldPdfRows = DB::fetchAll(
+                            "SELECT `exercise_pdf`, `answer_pdf` FROM `qbank_questions` WHERE `qbank_id` = ?",
+                            [$qbankId]
+                        );
+                        $oldPdfUrls = [];
+                        foreach ($oldPdfRows as $opr) {
+                            if (!empty($opr['exercise_pdf'])) $oldPdfUrls[] = $opr['exercise_pdf'];
+                            if (!empty($opr['answer_pdf'])) $oldPdfUrls[] = $opr['answer_pdf'];
+                        }
+                        $newPdfUrls = [];
+
                         $keepQnums = [];
                         $stmtQuestion = $db->prepare("
                             INSERT INTO `qbank_questions`
@@ -977,6 +991,9 @@ try {
                             $ansName = $q['answerPdf']['name'] ?? '';
                             $ansThumb = $q['answerPdf']['thumb'] ?? '';
 
+                            if ($exUrl !== '') $newPdfUrls[] = $exUrl;
+                            if ($ansUrl !== '') $newPdfUrls[] = $ansUrl;
+
                             $stmtQuestion->execute([
                                 $qbankId, $bankType, $year, $season, $subject, $grade, $tier, $week,
                                 $qNum, $parentQNum, $parentNumsStr, $subNum, $topic, $videoUrl, $metaJsonStr, $exUrl, $exName, $exThumb, $ansUrl, $ansName, $ansThumb,
@@ -984,16 +1001,20 @@ try {
                             ]);
                         }
 
-                        // 清除本次已删除的题目题号
+                        // 清除本次已删除的题目题号（使用预处理占位符）
                         if (!empty($keepQnums)) {
-                            $inNums = implode(',', array_map('intval', $keepQnums));
-                            $db->exec("DELETE FROM `qbank_questions` WHERE `qbank_id` = {$qbankId} AND `question_num` NOT IN ({$inNums})");
+                            $cleanKeepNums = array_values(array_map('intval', $keepQnums));
+                            $placeholders = implode(',', array_fill(0, count($cleanKeepNums), '?'));
+                            $stmtDelRemoved = $db->prepare("DELETE FROM `qbank_questions` WHERE `qbank_id` = ? AND `question_num` NOT IN ({$placeholders})");
+                            $stmtDelRemoved->execute(array_merge([intval($qbankId)], $cleanKeepNums));
                         } else {
-                            $db->exec("DELETE FROM `qbank_questions` WHERE `qbank_id` = {$qbankId}");
+                            $stmtDelAll = $db->prepare("DELETE FROM `qbank_questions` WHERE `qbank_id` = ?");
+                            $stmtDelAll->execute([intval($qbankId)]);
                         }
 
                         $db->commit();
                         $dbSaved = true;
+                        $removedPdfCandidates = array_values(array_diff(array_unique($oldPdfUrls), array_unique($newPdfUrls)));
                     } else {
                         $db->rollBack();
                     }
@@ -1003,6 +1024,10 @@ try {
                     $db->rollBack();
                 }
                 error_log("DB qbank save error: " . $e->getMessage());
+            }
+
+            if (!empty($removedPdfCandidates)) {
+                cleanupUnreferencedPdfs($removedPdfCandidates);
             }
 
             // 1.5 课后巩固知识点变化后，级联刷新同专题举一反三变式题的知识点
@@ -1088,7 +1113,8 @@ try {
                 exit;
             }
 
-            // 1. 从 MySQL 级联删除
+            // 1. 从 MySQL 级联删除并清理不再被任何题库引用的孤儿 PDF
+            $deletedPdfCandidates = [];
             try {
                 if ($year !== null && $season !== null) {
                     $qbankId = DB::fetchValue(
@@ -1103,11 +1129,23 @@ try {
                 }
 
                 if ($qbankId) {
+                    $oldPdfRows = DB::fetchAll(
+                        "SELECT `exercise_pdf`, `answer_pdf` FROM `qbank_questions` WHERE `qbank_id` = ?",
+                        [$qbankId]
+                    );
+                    foreach ($oldPdfRows as $opr) {
+                        if (!empty($opr['exercise_pdf'])) $deletedPdfCandidates[] = $opr['exercise_pdf'];
+                        if (!empty($opr['answer_pdf'])) $deletedPdfCandidates[] = $opr['answer_pdf'];
+                    }
                     DB::execute("DELETE FROM `qbank_questions` WHERE `qbank_id` = ?", [$qbankId]);
                     DB::execute("DELETE FROM `qbank_weeks` WHERE `id` = ?", [$qbankId]);
                 }
             } catch (Throwable $e) {
                 error_log("DB qbank delete error: " . $e->getMessage());
+            }
+
+            if (!empty($deletedPdfCandidates)) {
+                cleanupUnreferencedPdfs($deletedPdfCandidates);
             }
 
             // 2. 从文件系统删除

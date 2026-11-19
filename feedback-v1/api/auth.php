@@ -129,7 +129,9 @@ switch ($action) {
         exit;
 
     case 'check':
-        $requireCaptcha = !empty($_SESSION['front_login_fail_count']) && $_SESSION['front_login_fail_count'] > 0;
+        $clientIp = getClientIp();
+        $ipRate = getAuthRateLimitStatus('front_login_ip', $clientIp, 600);
+        $requireCaptcha = (!empty($_SESSION['front_login_fail_count']) && $_SESSION['front_login_fail_count'] > 0) || ($ipRate['count'] > 0);
         $hasAdminSession = function_exists('isAdminLoggedIn') ? isAdminLoggedIn() : !empty($_SESSION['admin_logged_in']);
         if (!empty($_SESSION['user_logged_in']) && $_SESSION['user_logged_in'] === true) {
             $uRole = $_SESSION['user_role'] ?? 'teacher';
@@ -174,10 +176,21 @@ switch ($action) {
         $input = json_decode(file_get_contents('php://input'), true) ?: [];
         $username = trim($input['username'] ?? '');
         $password = trim((string)($input['password'] ?? ''));
+        $clientIp = getClientIp();
 
-        $requireCaptcha = !empty($_SESSION['front_login_fail_count']) && $_SESSION['front_login_fail_count'] > 0;
+        $ipRate = getAuthRateLimitStatus('front_login_ip', $clientIp, 600);
+        $userRate = $username !== '' ? getAuthRateLimitStatus('front_login_user', $username, 600) : ['count' => 0, 'locked' => false, 'remaining_seconds' => 0];
 
-        // 如果之前输错一次，必须校验图形验证码
+        if ($ipRate['locked'] || $userRate['locked']) {
+            $remainSec = max($ipRate['remaining_seconds'], $userRate['remaining_seconds'], 1);
+            sendAuthResponse(false, ['require_captcha' => true], "登录失败次数过多，请 {$remainSec} 秒后再试", 429);
+        }
+
+        $requireCaptcha = (!empty($_SESSION['front_login_fail_count']) && $_SESSION['front_login_fail_count'] > 0)
+            || ($ipRate['count'] > 0)
+            || ($userRate['count'] > 0);
+
+        // 如果之前输错一次（含同 IP 无 Cookie 重试），必须校验图形验证码
         if ($requireCaptcha) {
             $captchaInput = strtolower(trim((string)($input['captcha'] ?? '')));
             $sessionCaptcha = $_SESSION['front_captcha_code'] ?? '';
@@ -188,6 +201,7 @@ switch ($action) {
             if ($sessionCaptcha === '' || $captchaInput !== $sessionCaptcha) {
                 unset($_SESSION['front_captcha_code']);
                 $_SESSION['front_login_fail_count'] = ($_SESSION['front_login_fail_count'] ?? 0) + 1;
+                recordAuthRateLimitFailure('front_login_ip', $clientIp, 10, 600, 600);
                 sendAuthResponse(false, ['require_captcha' => true], '验证码错误，请重新输入', 400);
             }
         }
@@ -200,6 +214,7 @@ switch ($action) {
         if ($username === '0') {
             $_SESSION['front_login_fail_count'] = ($_SESSION['front_login_fail_count'] ?? 0) + 1;
             unset($_SESSION['front_captcha_code']);
+            recordAuthRateLimitFailure('front_login_ip', $clientIp, 10, 600, 600);
             sendAuthResponse(false, ['require_captcha' => true], '测试账号已退出历史舞台，请使用已分配的教师专属账号登录', 403);
         }
 
@@ -222,9 +237,11 @@ switch ($action) {
         if (!$user && !$adminUser) {
             $_SESSION['front_login_fail_count'] = ($_SESSION['front_login_fail_count'] ?? 0) + 1;
             unset($_SESSION['front_captcha_code']);
+            recordAuthRateLimitFailure('front_login_ip', $clientIp, 10, 600, 600);
+            recordAuthRateLimitFailure('front_login_user', $username, 5, 600, 600);
             recordServerLog('warn', 'user_auth', 'login_failed_not_found', [
                 'username' => $username,
-                'ip'       => getClientIp(),
+                'ip'       => $clientIp,
                 'message'  => "账号不存在: {$username}"
             ]);
             sendAuthResponse(false, ['require_captcha' => true], '账号或密码错误', 401);
@@ -235,9 +252,11 @@ switch ($action) {
         if (!$userActive && !$adminActive) {
             $_SESSION['front_login_fail_count'] = ($_SESSION['front_login_fail_count'] ?? 0) + 1;
             unset($_SESSION['front_captcha_code']);
+            recordAuthRateLimitFailure('front_login_ip', $clientIp, 10, 600, 600);
+            recordAuthRateLimitFailure('front_login_user', $username, 5, 600, 600);
             recordServerLog('warn', 'user_auth', 'login_failed_disabled', [
                 'username' => $username,
-                'ip'       => getClientIp(),
+                'ip'       => $clientIp,
                 'message'  => "账号已停用: {$username}"
             ]);
             sendAuthResponse(false, ['require_captcha' => true], '该账号已被停用，请联系管理员', 403);
@@ -262,9 +281,11 @@ switch ($action) {
         if (!$userValid && !$adminValid) {
             $_SESSION['front_login_fail_count'] = ($_SESSION['front_login_fail_count'] ?? 0) + 1;
             unset($_SESSION['front_captcha_code']);
+            recordAuthRateLimitFailure('front_login_ip', $clientIp, 10, 600, 600);
+            recordAuthRateLimitFailure('front_login_user', $username, 5, 600, 600);
             recordServerLog('warn', 'user_auth', 'login_failed_wrong_password', [
                 'username' => $username,
-                'ip'       => getClientIp(),
+                'ip'       => $clientIp,
                 'message'  => "密码错误: {$username}"
             ]);
             sendAuthResponse(false, ['require_captcha' => true], '账号或密码错误', 401);
@@ -272,9 +293,10 @@ switch ($action) {
 
         // 登录成功：重置失败计数与验证码
         unset($_SESSION['front_login_fail_count'], $_SESSION['front_captcha_code']);
+        clearAuthRateLimitFailures('front_login_ip', $clientIp);
+        clearAuthRateLimitFailures('front_login_user', $username);
 
         session_regenerate_id(true);
-        $clientIp = getClientIp();
 
         if ($userValid) {
             $_SESSION['user_logged_in'] = true;
@@ -351,8 +373,7 @@ switch ($action) {
 
     case 'logout':
         $uname = $_SESSION['username'] ?? $_SESSION['admin_username'] ?? 'unknown';
-        $_SESSION['user_logged_in'] = false;
-        $_SESSION['admin_logged_in'] = false;
+        $hadUserSession = !empty($_SESSION['user_logged_in']);
         unset(
             $_SESSION['user_logged_in'],
             $_SESSION['user_id'],
@@ -361,13 +382,18 @@ switch ($action) {
             $_SESSION['user_role'],
             $_SESSION['user_teacher_id'],
             $_SESSION['user_created_by'],
-            $_SESSION['user_login_time'],
-            $_SESSION['admin_logged_in'],
-            $_SESSION['admin_username'],
-            $_SESSION['admin_realname'],
-            $_SESSION['admin_role'],
-            $_SESSION['login_time']
+            $_SESSION['user_login_time']
         );
+        // 仅当前台是以纯管理员会话登录（无独立教师会话）时，才一并清除管理员会话，避免误伤同浏览器打开的后台管理标签页
+        if (!$hadUserSession) {
+            unset(
+                $_SESSION['admin_logged_in'],
+                $_SESSION['admin_username'],
+                $_SESSION['admin_realname'],
+                $_SESSION['admin_role'],
+                $_SESSION['login_time']
+            );
+        }
 
         recordServerLog('action', 'user_auth', 'logout', [
             'username' => $uname,
@@ -384,29 +410,28 @@ switch ($action) {
         }
 
         $clientIp = getClientIp();
-
-        // 1. IP / 会话层面的频率限制 (10分钟内最多允许失败尝试 5 次)
-        $rateKey = 'reset_pwd_rate_' . md5($clientIp);
-        $rateInfo = $_SESSION[$rateKey] ?? ['count' => 0, 'first_attempt' => time()];
-        if (time() - $rateInfo['first_attempt'] > 600) {
-            $rateInfo = ['count' => 0, 'first_attempt' => time()];
-        }
-        if ($rateInfo['count'] >= 5) {
-            recordServerLog('warn', 'user_auth', 'reset_pwd_rate_limit_exceeded', [
-                'ip'      => $clientIp,
-                'message' => '密码重置尝试过于频繁，已触发限频锁定'
-            ]);
-            sendAuthResponse(false, ['require_captcha' => true], '密码重置尝试过于频繁，请10分钟后再试', 429);
-        }
-
         $input = json_decode(file_get_contents('php://input'), true) ?: [];
         $username = trim((string)($input['username'] ?? ''));
         $oldPassword = trim((string)($input['old_password'] ?? ''));
         $newPassword = trim((string)($input['new_password'] ?? ''));
         $confirmPassword = trim((string)($input['confirm_password'] ?? ''));
 
-        // 2. 输错后强制校验图形验证码
-        $requireCaptcha = !empty($_SESSION['reset_pwd_fail_count']) && $_SESSION['reset_pwd_fail_count'] > 0;
+        // 1. 持久化 IP + 账号频率限制 (10分钟内最多允许失败尝试 5 次，防止不带 PHPSESSID 绕过)
+        $ipRate = getAuthRateLimitStatus('reset_pwd_ip', $clientIp, 600);
+        $userRate = $username !== '' ? getAuthRateLimitStatus('reset_pwd_user', $username, 600) : ['count' => 0, 'locked' => false, 'remaining_seconds' => 0];
+        if ($ipRate['locked'] || $userRate['locked']) {
+            recordServerLog('warn', 'user_auth', 'reset_pwd_rate_limit_exceeded', [
+                'ip'       => $clientIp,
+                'username' => $username,
+                'message'  => '密码重置尝试过于频繁，已触发限频锁定'
+            ]);
+            sendAuthResponse(false, ['require_captcha' => true], '密码重置尝试过于频繁，请10分钟后再试', 429);
+        }
+
+        // 2. 输错后强制校验图形验证码（结合服务端持久化计数与 Session 计数）
+        $requireCaptcha = (!empty($_SESSION['reset_pwd_fail_count']) && $_SESSION['reset_pwd_fail_count'] > 0)
+            || ($ipRate['count'] > 0)
+            || ($userRate['count'] > 0);
         if ($requireCaptcha) {
             $captchaInput = strtolower(trim((string)($input['captcha'] ?? '')));
             $sessionCaptcha = $_SESSION['front_captcha_code'] ?? '';
@@ -414,8 +439,10 @@ switch ($action) {
             if ($captchaInput === '' || $sessionCaptcha === '' || $captchaInput !== $sessionCaptcha) {
                 unset($_SESSION['front_captcha_code']);
                 $_SESSION['reset_pwd_fail_count'] = ($_SESSION['reset_pwd_fail_count'] ?? 0) + 1;
-                $rateInfo['count']++;
-                $_SESSION[$rateKey] = $rateInfo;
+                recordAuthRateLimitFailure('reset_pwd_ip', $clientIp, 5, 600, 600);
+                if ($username !== '') {
+                    recordAuthRateLimitFailure('reset_pwd_user', $username, 5, 600, 600);
+                }
                 sendAuthResponse(false, ['require_captcha' => true], '验证码错误，请重新输入', 400);
             }
         }
@@ -472,8 +499,8 @@ switch ($action) {
 
         if ($isAuthFailed) {
             $_SESSION['reset_pwd_fail_count'] = ($_SESSION['reset_pwd_fail_count'] ?? 0) + 1;
-            $rateInfo['count']++;
-            $_SESSION[$rateKey] = $rateInfo;
+            recordAuthRateLimitFailure('reset_pwd_ip', $clientIp, 5, 600, 600);
+            recordAuthRateLimitFailure('reset_pwd_user', $username, 5, 600, 600);
             unset($_SESSION['front_captcha_code']);
 
             recordServerLog('warn', 'user_auth', 'reset_pwd_failed_auth', [
@@ -495,7 +522,9 @@ switch ($action) {
         }
 
         // 改密成功：清除失败计数与频率锁
-        unset($_SESSION['reset_pwd_fail_count'], $_SESSION['front_captcha_code'], $_SESSION[$rateKey]);
+        unset($_SESSION['reset_pwd_fail_count'], $_SESSION['front_captcha_code']);
+        clearAuthRateLimitFailures('reset_pwd_ip', $clientIp);
+        clearAuthRateLimitFailures('reset_pwd_user', $username);
 
         recordServerLog('action', 'user_auth', 'password_reset_success', [
             'username'  => $user['username'],

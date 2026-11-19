@@ -264,10 +264,13 @@ class HistoryManager:
         with open(self.storage_path, "w", encoding="utf-8") as f:
             json.dump(self._data, f, ensure_ascii=False, indent=2)
 
-    def is_sent(self, archive_key: str, student_name: str) -> bool:
+    def is_sent(self, archive_key: str, student_name: str, message: str = None) -> bool:
         entry = self._data["classes"].get(archive_key, {})
         for s in entry.get("students", []):
             if s.get("name") == student_name and ("已发送" in s.get("status", "") or "✓" in s.get("status", "")):
+                saved_msg = s.get("message")
+                if message is not None and saved_msg and str(saved_msg).strip() != str(message).strip():
+                    return False
                 return True
         return False
 

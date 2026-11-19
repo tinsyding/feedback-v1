@@ -161,10 +161,48 @@ def run_candidate_outcomes(judgments: list) -> dict:
             "reason": "3 候选均未 MATCH", "notes": notes}
 
 
-def archive_key_for_input(input_path: str) -> str:
-    """存档键：输入文件名（去扩展名）+ [第 1 周]，兼容旧 classes 结构。"""
+def _extract_week_label_from_text(text: str) -> int:
+    """从文件名或反馈正文中提取周次/课次（如 '第2周'、'第3次'），未命中时返回 0。"""
+    import re
+    if not text:
+        return 0
+    m = re.search(r"第\s*(\d+)\s*[周次讲]", str(text))
+    if m:
+        try:
+            w = int(m.group(1))
+            if 1 <= w <= 60:
+                return w
+        except Exception:
+            pass
+    return 0
+
+
+def archive_key_for_input(input_path: str, items: list = None) -> str:
+    """存档键：输入文件名（去扩展名）+ [第 N 周]（当传入 items 时附带 8 位内容摘要哈希，防止跨周同名文件误判已发）。"""
+    import hashlib
     base = os.path.splitext(os.path.basename(input_path or "未命名"))[0]
-    return f"{base} [第 1 周]"
+    week_num = _extract_week_label_from_text(base)
+    if items and isinstance(items, list):
+        if week_num <= 0:
+            for it in items:
+                if isinstance(it, dict):
+                    w = _extract_week_label_from_text(it.get("message", ""))
+                    if w > 0:
+                        week_num = w
+                        break
+        if week_num <= 0:
+            week_num = 1
+        h = hashlib.sha256()
+        for it in items:
+            if isinstance(it, dict):
+                s_name = str(it.get("studentName") or it.get("sname") or "").strip()
+                s_msg = str(it.get("message") or "").strip()
+                h.update(f"{s_name}:{s_msg}\n".encode("utf-8", errors="ignore"))
+        digest = h.hexdigest()[:8]
+        return f"{base} [第 {week_num} 周 #{digest}]"
+    if week_num <= 0:
+        week_num = 1
+    return f"{base} [第 {week_num} 周]"
 
 
 def load_feedback_inputs(paths) -> tuple:
@@ -182,7 +220,15 @@ def load_feedback_inputs(paths) -> tuple:
     for path in paths:
         loaded = load_feedback_items(path)
         file_counts.append((path, len(loaded)))
-        key = archive_key_for_input(path)
+        base_name = os.path.splitext(os.path.basename(path or "未命名"))[0]
+        detected_week = _extract_week_label_from_text(base_name)
+        if detected_week <= 0:
+            for it in loaded:
+                w = _extract_week_label_from_text(it.get("message", ""))
+                if w > 0:
+                    detected_week = w
+                    break
+        key = f"{base_name} [第 {detected_week if detected_week > 0 else 1} 周]"
         for item in loaded:
             sid = (item.get("sid") or "").strip()
             sname = (item.get("sname") or "").strip()
@@ -192,6 +238,7 @@ def load_feedback_inputs(paths) -> tuple:
                 continue
             seen.add(identity)
             item["_archive_key"] = key
+            item["_source_path"] = path
             merged.append(item)
     return merged, file_counts, duplicate_count
 
@@ -298,7 +345,7 @@ def search_and_enter(
 
 
 def paste_and_send(message: str) -> tuple:
-    """剪贴板粘贴发送（含前后核验 + 焦点守护）。返回 (ok, reason)。"""
+    """剪贴板粘贴发送（含前后核验 + 焦点守护 + 输入框残留草稿清理）。返回 (ok, reason)。"""
     try:
         from sender_py import window_utils as wu
     except ModuleNotFoundError:
@@ -309,6 +356,12 @@ def paste_and_send(message: str) -> tuple:
         time.sleep(0.2)
     if not safe_copy(message):
         return (False, "剪贴板写入核验失败")
+    if not wu.is_foreground_wecom():
+        return (False, "粘贴前企微失去前台焦点，已中止发送")
+    # 清理输入框可能残留的草稿，防止新反馈拼接到旧草稿末尾
+    wu.tap_keys(wu.VK_CONTROL, wu.VK_A)
+    time.sleep(0.05)
+    wu.tap_key(0x08)  # Backspace
     time.sleep(0.05)
     wu.tap_keys(wu.VK_CONTROL, wu.VK_V)
     time.sleep(0.35)
@@ -318,6 +371,8 @@ def paste_and_send(message: str) -> tuple:
             return (False, "粘贴后剪贴板被篡改，停止发送")
     except Exception:
         pass
+    if not wu.is_foreground_wecom():
+        return (False, "回车发送前企微失去前台焦点，已中止发送")
     wu.tap_key(wu.VK_RETURN)
     return (True, "已发送")
 
@@ -3423,7 +3478,7 @@ class SenderApp:
                     self.emit(f"⏭ [{name}] 该学生已发送成功，安全跳过，防止重复打扰家长")
                     continue
 
-                if SKIP_SENT and self._history and self._history.is_sent(item_key, name):
+                if SKIP_SENT and self._history and self._history.is_sent(item_key, name, item.get("message")):
                     self.set_status(item, "已跳过（已发送）")
                     item["_last_result"] = "skipped_sent"
                     item["_last_reason"] = "已发送过，自动跳过"

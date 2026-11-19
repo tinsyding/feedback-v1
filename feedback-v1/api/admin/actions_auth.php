@@ -17,13 +17,13 @@ switch ($action) {
                 sendResponse(false, null, '请输入用户名和密码', 400);
             }
 
-            // 登录防爆破频率限制：10分钟内失败超过5次限制登录
+            // 登录防爆破频率限制：10分钟内失败超过5次限制登录（服务端落盘，防止不带 PHPSESSID 绕过）
             $clientIp = getClientIP();
             $rateKey = 'admin_login_fail_' . md5($clientIp . '_' . $username);
-            $failCount = $_SESSION[$rateKey] ?? 0;
-            $lastFailTime = $_SESSION[$rateKey . '_time'] ?? 0;
-            if ($failCount >= 5 && (time() - $lastFailTime) < 600) {
-                $remainSec = 600 - (time() - $lastFailTime);
+            $userRate = getAuthRateLimitStatus('admin_login_user', $clientIp . '_' . $username, 600);
+            $ipRate = getAuthRateLimitStatus('admin_login_ip', $clientIp, 600);
+            if ($userRate['locked'] || $ipRate['locked']) {
+                $remainSec = max($userRate['remaining_seconds'], $ipRate['remaining_seconds'], 1);
                 sendResponse(false, null, "登录失败次数过多，该账号已被临时锁定，请 {$remainSec} 秒后再试", 429);
             }
 
@@ -79,6 +79,8 @@ switch ($action) {
             if ($authenticated) {
                 // 登录成功，清除失败计数
                 unset($_SESSION[$rateKey], $_SESSION[$rateKey . '_time']);
+                clearAuthRateLimitFailures('admin_login_user', $clientIp . '_' . $username);
+                clearAuthRateLimitFailures('admin_login_ip', $clientIp);
 
                 session_regenerate_id(true); // 防御会话固定攻击
                 $_SESSION['admin_logged_in'] = true;
@@ -105,8 +107,8 @@ switch ($action) {
                     'message' => '登录成功'
                 ]);
             } else {
-                $_SESSION[$rateKey] = $failCount + 1;
-                $_SESSION[$rateKey . '_time'] = time();
+                recordAuthRateLimitFailure('admin_login_user', $clientIp . '_' . $username, 5, 600, 600);
+                recordAuthRateLimitFailure('admin_login_ip', $clientIp, 10, 600, 600);
 
                 recordServerLog('warn', 'admin', 'admin_login_failed', [
                     'username' => $username,
@@ -123,7 +125,17 @@ switch ($action) {
                 'username' => $adminUser,
                 'message' => '管理员安全退出登录'
             ]);
-            session_destroy();
+            unset(
+                $_SESSION['admin_logged_in'],
+                $_SESSION['admin_username'],
+                $_SESSION['admin_realname'],
+                $_SESSION['admin_role'],
+                $_SESSION['login_time']
+            );
+            // 仅当同一浏览器不存在活跃的前台教师会话时才销毁整个 Session，避免将正在使用的前台教师踢下线
+            if (empty($_SESSION['user_logged_in'])) {
+                session_destroy();
+            }
             sendResponse(true, ['message' => '已登出']);
             break;
             

@@ -129,7 +129,7 @@ function setupPageTransition() {
 }
 
 function shouldForceIntegerScores() {
-    return true; // 系统强制开启四舍五入强行取整，统一以整型规范存储与计算
+    return window.forceIntegerScores !== false; // 默认开启四舍五入取整，可通过 window.forceIntegerScores = false 切换为保留小数
 }
 
 /**
