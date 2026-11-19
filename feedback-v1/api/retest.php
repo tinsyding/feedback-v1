@@ -1708,7 +1708,7 @@ if ($action === 'encrypt_batch') {
         }
         $pvSubmissionStatus = $studentHasPreview
             ? resolveSubmissionStatus($rawPvStatus, $previewErrors, $preScore, $previewComment)
-            : null;
+            : 'submitted';
 
         // 归档到本次批次变更集：以唯一 studentKey 隔离存储
         $batchNameMap[$studentKey] = $name;
@@ -1770,11 +1770,13 @@ if ($action === 'encrypt_batch') {
                     "`preview_score` = COALESCE(VALUES(`preview_score`), `preview_score`)",
                     "`preview_error_questions` = COALESCE(VALUES(`preview_error_questions`), `preview_error_questions`)",
                     "`preview_comment` = COALESCE(VALUES(`preview_comment`), `preview_comment`)",
-                    "`preview_submission_status` = COALESCE(VALUES(`preview_submission_status`), `preview_submission_status`)",
                     "`retest_token` = VALUES(`retest_token`)",
                     "`created_by` = IF(VALUES(`created_by`) != '', VALUES(`created_by`), `created_by`)",
                     "`updated_at` = CURRENT_TIMESTAMP"
                 ];
+                if ($studentHasPreview) {
+                    $updateParts[] = "`preview_submission_status` = VALUES(`preview_submission_status`)";
+                }
                 if ($hasHomeworkData) {
                     if ($isErrorsOnly) {
                         array_unshift($updateParts,
