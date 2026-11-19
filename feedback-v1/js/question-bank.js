@@ -6660,4 +6660,12 @@ window.addEventListener('resize', () => {
             }
         });
     }
+
+    // 防止误触返回/刷新/关闭标签导致未保存的题目或知识点配置丢失
+    window.addEventListener('beforeunload', (e) => {
+        if (typeof isDirty !== 'undefined' && isDirty) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
 })();
