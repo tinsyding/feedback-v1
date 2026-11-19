@@ -4181,6 +4181,25 @@ function openMergeDialog(index) {
 
 // ========== Step 4 Big Question Group Helpers ==========
 const expandedBigQuestionSubTopicGroups = new Set();
+const bigGroupDistinctTopicSnapshots = new Map();
+
+function getBigGroupUnifiedPlaceholder(hasDistinct, isPreview) {
+    if (hasDistinct) {
+        return '已按小问细分考点，此处留空即可（输入内容将统一覆盖各小问）...';
+    }
+    return isPreview
+        ? '输入本篇大题知识点（如：阅读理解A篇·记叙文，留空则仅显示题号）...'
+        : '输入本篇大题统一知识点（如：阅读理解A篇·细节与主旨，必填）...';
+}
+
+function getBigGroupTopicState(firstIndex) {
+    const indices = getBigQuestionGroupMemberIndices(firstIndex);
+    const firstQ = currentQuestions[firstIndex];
+    const groupKey = (firstQ ? getQuestionGroupKey(firstQ) : null) || String(firstIndex);
+    const memberTopics = indices.map(idx => (currentQuestions[idx]?.topic || '').trim());
+    const hasDistinct = memberTopics.some(t => t !== memberTopics[0]);
+    return { indices, groupKey, hasDistinct };
+}
 
 function getQuestionGroupKey(q) {
     if (!q || !q.questionMeta || !Array.isArray(q.questionMeta.groupNums) || q.questionMeta.groupNums.length <= 1) {
@@ -4204,7 +4223,31 @@ function getBigQuestionGroupMemberIndices(index) {
 }
 
 function onBigGroupTopicChange(firstIndex, value) {
-    const indices = getBigQuestionGroupMemberIndices(firstIndex);
+    const { indices, groupKey, hasDistinct } = getBigGroupTopicState(firstIndex);
+    const trimmed = (value || '').trim();
+
+    if (trimmed === '' && (hasDistinct || bigGroupDistinctTopicSnapshots.has(groupKey))) {
+        const snapshot = bigGroupDistinctTopicSnapshots.get(groupKey);
+        if (Array.isArray(snapshot) && snapshot.length === indices.length) {
+            indices.forEach((idx, i) => {
+                if (currentQuestions[idx]) {
+                    currentQuestions[idx].topic = snapshot[i];
+                    const subInput = questionItems ? questionItems.querySelector(`.question-topic-input[data-sub-index="${idx}"]`) : null;
+                    if (subInput && subInput.value !== snapshot[i]) {
+                        subInput.value = snapshot[i];
+                    }
+                }
+            });
+        }
+        isDirty = true;
+        updateStatus();
+        return;
+    }
+
+    if (trimmed !== '' && hasDistinct && !bigGroupDistinctTopicSnapshots.has(groupKey)) {
+        bigGroupDistinctTopicSnapshots.set(groupKey, indices.map(idx => currentQuestions[idx]?.topic || ''));
+    }
+
     indices.forEach(idx => {
         if (currentQuestions[idx]) {
             currentQuestions[idx].topic = value;
@@ -4220,12 +4263,20 @@ function onBigGroupTopicChange(firstIndex, value) {
 window.onBigGroupTopicChange = onBigGroupTopicChange;
 
 function onBigGroupTopicBlur(firstIndex, inputEl) {
-    const indices = getBigQuestionGroupMemberIndices(firstIndex);
-    const raw = inputEl ? inputEl.value : (currentQuestions[firstIndex]?.topic || '');
+    const { indices, groupKey, hasDistinct } = getBigGroupTopicState(firstIndex);
+    const raw = inputEl ? inputEl.value : '';
+    if (raw.trim() === '' && (hasDistinct || bigGroupDistinctTopicSnapshots.has(groupKey))) {
+        if (inputEl && inputEl.value !== '') {
+            inputEl.value = '';
+            autoResizeTopicTextarea(inputEl);
+        }
+        return;
+    }
+    const targetRaw = inputEl ? inputEl.value : (currentQuestions[firstIndex]?.topic || '');
     const cleaned = typeof cleanTopicTrailingPunctuation === 'function'
-        ? cleanTopicTrailingPunctuation(raw)
-        : raw.replace(/[\s,，.。;；:：、\-_—]+$/u, '').trim();
-    if (cleaned !== raw && inputEl) {
+        ? cleanTopicTrailingPunctuation(targetRaw)
+        : targetRaw.replace(/[\s,，.。;；:：、\-_—]+$/u, '').trim();
+    if (cleaned !== targetRaw && inputEl) {
         inputEl.value = cleaned;
         autoResizeTopicTextarea(inputEl);
     }
@@ -4242,6 +4293,27 @@ window.onBigGroupTopicBlur = onBigGroupTopicBlur;
 function onBigGroupSubTopicChange(subIndex, firstIndex, value) {
     if (currentQuestions[subIndex]) {
         currentQuestions[subIndex].topic = value;
+        const { indices, groupKey, hasDistinct } = getBigGroupTopicState(firstIndex);
+        const card = findQuestionCardDomByIndex(firstIndex);
+        const unifiedInput = card ? card.querySelector('.question-topic-row .question-topic-input') : null;
+        const isPreview = typeof getBankType === 'function' && getBankType() === 'preview';
+
+        if (hasDistinct) {
+            bigGroupDistinctTopicSnapshots.set(groupKey, indices.map(idx => currentQuestions[idx]?.topic || ''));
+            if (unifiedInput) {
+                if (unifiedInput.value !== '') unifiedInput.value = '';
+                unifiedInput.placeholder = getBigGroupUnifiedPlaceholder(true, isPreview);
+                autoResizeTopicTextarea(unifiedInput);
+            }
+        } else {
+            bigGroupDistinctTopicSnapshots.delete(groupKey);
+            if (unifiedInput) {
+                const sharedVal = currentQuestions[firstIndex]?.topic || '';
+                if (unifiedInput.value !== sharedVal) unifiedInput.value = sharedVal;
+                unifiedInput.placeholder = getBigGroupUnifiedPlaceholder(false, isPreview);
+                autoResizeTopicTextarea(unifiedInput);
+            }
+        }
         isDirty = true;
         updateStatus();
     }
@@ -4717,9 +4789,8 @@ function renderQuestionList() {
             const topicLabelHtml = isPreviewBank
                 ? `<label class="question-field-label topic-label">统一考点<span class="qb-optional-tag">(选填)</span>：</label>`
                 : `<label class="question-field-label topic-label">统一考点：</label>`;
-            const topicPlaceholder = isPreviewBank
-                ? '输入本篇大题知识点（如：阅读理解A篇·记叙文，留空则仅显示题号）...'
-                : '输入本篇大题统一知识点（如：阅读理解A篇·细节与主旨，必填）...';
+            const unifiedTopicVal = hasDistinctSubTopics ? '' : (firstQ.topic || '');
+            const topicPlaceholder = getBigGroupUnifiedPlaceholder(hasDistinctSubTopics, isPreviewBank);
 
             const subPillsHtml = memberIndices.map(idx => {
                 const mq = currentQuestions[idx];
@@ -4784,7 +4855,7 @@ function renderQuestionList() {
                                    rows="1"
                                    oninput="onBigGroupTopicChange(${firstIdx}, this.value); autoResizeTopicTextarea(this);"
                                    onfocus="autoResizeTopicTextarea(this)"
-                                   onblur="onBigGroupTopicBlur(${firstIdx}, this)" ${readonlyAttr}>${escapeHtml(firstQ.topic || '')}</textarea>
+                                   onblur="onBigGroupTopicBlur(${firstIdx}, this)" ${readonlyAttr}>${escapeHtml(unifiedTopicVal)}</textarea>
                         </div>
                         ${videoRowHtml}
                     </div>
