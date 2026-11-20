@@ -953,3 +953,160 @@ def pick_files_foreground(master=None, **dialog_kwargs):
                 own_root.destroy()
             except Exception:
                 pass
+
+
+def pick_folder_foreground(master=None, **dialog_kwargs) -> str:
+    """置顶并激活前台唤起系统原生文件夹选择框。"""
+    import tkinter as tk
+    from tkinter import filedialog
+
+    own_root = None
+    helper = None
+    timer = None
+    try:
+        if master is None:
+            own_root = tk.Tk()
+            helper = own_root
+        else:
+            helper = tk.Toplevel(master)
+        try:
+            helper.withdraw()
+            helper.overrideredirect(True)
+        except Exception:
+            pass
+        try:
+            helper.attributes("-alpha", 0.0)
+        except Exception:
+            pass
+        try:
+            sw = int(helper.winfo_screenwidth() or 1920)
+            sh = int(helper.winfo_screenheight() or 1080)
+            helper.geometry(f"1x1+{max(0, sw // 2)}+{max(0, sh // 2)}")
+        except Exception:
+            pass
+        bring_tk_window_to_front(helper, topmost=True)
+
+        title_kw = str(dialog_kwargs.get("title") or "")
+        if sys.platform == "win32":
+            timer = threading.Timer(
+                0.18,
+                lambda: promote_process_dialog_to_front(title_keyword=title_kw, topmost=True),
+            )
+            timer.daemon = True
+            timer.start()
+
+        return str(filedialog.askdirectory(parent=helper, **dialog_kwargs) or "")
+    finally:
+        if timer is not None:
+            try:
+                timer.cancel()
+            except Exception:
+                pass
+        if helper is not None:
+            try:
+                helper.destroy()
+            except Exception:
+                pass
+        if own_root is not None and own_root is not helper:
+            try:
+                own_root.destroy()
+            except Exception:
+                pass
+
+
+def build_cf_hdrop_bytes(file_paths: list) -> bytes:
+    """构建 Windows CF_HDROP (DROPFILES) 剪贴板二进制结构（20 字节头 + UTF-16LE 双空终止路径序列）。"""
+    import os
+    import struct
+    cleaned = [os.path.normpath(str(p).strip()) for p in (file_paths or []) if str(p or "").strip()]
+    if not cleaned:
+        raise ValueError("file_paths 不能为空")
+    # DROPFILES: DWORD pFiles=20, POINT pt=(0,0), BOOL fNC=0, BOOL fWide=1
+    header = struct.pack("<IiiII", 20, 0, 0, 0, 1)
+    body = ("\0".join(cleaned) + "\0\0").encode("utf-16le")
+    return header + body
+
+
+def parse_cf_hdrop_bytes(raw_bytes: bytes) -> list:
+    """从 DROPFILES 字节流解析文件路径列表（供单测与剪贴板校验）。"""
+    import struct
+    if not raw_bytes or len(raw_bytes) < 22:
+        return []
+    p_files, _x, _y, _fnc, f_wide = struct.unpack("<IiiII", raw_bytes[:20])
+    payload = raw_bytes[p_files:]
+    if f_wide:
+        text = payload.decode("utf-16le", errors="ignore")
+    else:
+        text = payload.decode("mbcs", errors="ignore")
+    parts = []
+    for item in text.split("\0"):
+        if not item:
+            break
+        parts.append(item)
+    return parts
+
+
+def read_clipboard_files() -> list:
+    """读取 Windows 剪贴板中的 CF_HDROP 文件列表；非 Windows 或无文件时返回空列表。"""
+    import os
+    try:
+        import win32clipboard
+        import win32con
+    except Exception:
+        return []
+    try:
+        win32clipboard.OpenClipboard()
+        try:
+            if not win32clipboard.IsClipboardFormatAvailable(win32con.CF_HDROP):
+                return []
+            data = win32clipboard.GetClipboardData(win32con.CF_HDROP)
+            if isinstance(data, (tuple, list)):
+                return [os.path.normpath(str(p)) for p in data if p]
+            if isinstance(data, (bytes, bytearray)):
+                return [os.path.normpath(p) for p in parse_cf_hdrop_bytes(bytes(data))]
+            return []
+        finally:
+            win32clipboard.CloseClipboard()
+    except Exception:
+        return []
+
+
+def copy_files_to_clipboard(file_paths: list, retries: int = 5) -> bool:
+    """将多个本地文件的绝对路径以 CF_HDROP 格式写入 Windows 剪贴板并读回核验。"""
+    import os
+    valid_paths = []
+    for p in (file_paths or []):
+        s = str(p or "").strip()
+        if not s:
+            continue
+        abs_p = os.path.normpath(os.path.abspath(s))
+        if not os.path.isfile(abs_p):
+            return False
+        valid_paths.append(abs_p)
+    if not valid_paths:
+        return False
+
+    raw_payload = build_cf_hdrop_bytes(valid_paths)
+    expected_norm = [os.path.normcase(os.path.normpath(p)) for p in valid_paths]
+
+    try:
+        import win32clipboard
+        import win32con
+    except Exception:
+        return False
+
+    for _ in range(max(1, int(retries))):
+        try:
+            win32clipboard.OpenClipboard()
+            try:
+                win32clipboard.EmptyClipboard()
+                win32clipboard.SetClipboardData(win32con.CF_HDROP, raw_payload)
+            finally:
+                win32clipboard.CloseClipboard()
+            time.sleep(0.05)
+            read_back = [os.path.normcase(os.path.normpath(p)) for p in read_clipboard_files()]
+            if read_back == expected_norm:
+                return True
+        except Exception:
+            time.sleep(0.05)
+    return False

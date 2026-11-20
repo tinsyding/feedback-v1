@@ -19,8 +19,8 @@ import subprocess
 os.environ["PYTHONUTF8"] = "1"
 os.environ["PYTHONIOENCODING"] = "utf-8"
 
-APP_VERSION = "2.0.6.0"
-APP_VERSION_SHORT = "2.0.6"
+APP_VERSION = "2.1.0.0"
+APP_VERSION_SHORT = "2.1.0"
 
 WINRT_PROJECTION_PACKAGES = [
     "winrt",
@@ -73,6 +73,7 @@ def get_paths():
     sender_py = os.path.join(cur_dir, "sender.py")
     web_main_py = os.path.join(cur_dir, "web_main.py")
     web_ui = os.path.join(cur_dir, "web_ui.html")
+    xlsx_js = os.path.join(repo_root, "js", "libs", "xlsx.full.min.js")
     requirements = os.path.join(cur_dir, "requirements.txt")
 
     dist_nuitka = os.path.join(cur_dir, "dist_nuitka")
@@ -89,6 +90,7 @@ def get_paths():
         "sender_py": sender_py,
         "web_main_py": web_main_py,
         "web_ui": web_ui,
+        "xlsx_js": xlsx_js,
         "requirements": requirements,
         "dist_nuitka": dist_nuitka,
         "dist_nuitka_web": dist_nuitka_web,
@@ -165,6 +167,8 @@ def build_standalone(paths):
         f"--include-data-files={paths['example']}=sender_py/example.png",
         f"--include-data-files={paths['web_ui']}=sender_py/web_ui.html",
         f"--include-data-files={paths['web_ui']}=web_ui.html",
+        f"--include-data-files={paths['xlsx_js']}=sender_py/xlsx.full.min.js",
+        f"--include-data-files={paths['xlsx_js']}=xlsx.full.min.js",
     ]
     if os.path.isfile(os.path.join(paths["cur_dir"], "sender_token.py")):
         cmd_web.append("--include-module=sender_py.sender_token")
@@ -248,6 +252,8 @@ def build_onefile(paths):
         f"--include-data-files={paths['example']}=sender_py/example.png",
         f"--include-data-files={paths['web_ui']}=sender_py/web_ui.html",
         f"--include-data-files={paths['web_ui']}=web_ui.html",
+        f"--include-data-files={paths['xlsx_js']}=sender_py/xlsx.full.min.js",
+        f"--include-data-files={paths['xlsx_js']}=xlsx.full.min.js",
     ]
     if os.path.isfile(os.path.join(paths["cur_dir"], "sender_token.py")):
         cmd_web.append("--include-module=sender_py.sender_token")

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>极方每周反馈程序 · Web版</title>
   <link rel="icon" href="/favicon.ico">
+  <script src="/xlsx.full.min.js" defer></script>
   <style>
     :root {
       --primary: #2563eb;
@@ -255,8 +256,82 @@
     .col-sid { width: 90px; font-family: monospace; font-weight: 600; color: #3b82f6; }
     .col-name { width: 110px; font-weight: 600; color: #1e293b; }
     .col-status { width: 105px; }
-    .col-msg { max-width: 450px; }
-    .col-actions { width: 220px; text-align: right; }
+    .col-msg { max-width: 380px; }
+    .col-files { width: 240px; }
+    .col-actions { width: 210px; text-align: right; }
+    /* 附件管理栏与胶囊 */
+    .attach-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+    .attach-bar-left,
+    .attach-bar-right {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .attach-cell-wrap {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 4px;
+    }
+    .attach-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      max-width: 184px;
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      background: #f1f5f9;
+      border: 1px solid var(--border);
+      color: #334155;
+    }
+    .attach-pill.is-global {
+      background: #eff6ff;
+      border-color: #bfdbfe;
+      color: #1d4ed8;
+    }
+    .attach-pill-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .attach-pill-del {
+      cursor: pointer;
+      color: #94a3b8;
+      font-weight: 600;
+      line-height: 1;
+    }
+    .attach-pill-del:hover {
+      color: var(--danger);
+    }
+    .attach-add-mini {
+      height: 24px;
+      padding: 0 6px;
+      border-radius: 4px;
+      border: 1px dashed #cbd5e1;
+      background: transparent;
+      color: #64748b;
+      font-size: 12px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+    }
+    .attach-add-mini:hover {
+      border-color: var(--primary);
+      color: var(--primary);
+      background: #eff6ff;
+    }
     /* 状态徽章 */
     .badge {
       display: inline-flex;
@@ -563,6 +638,536 @@
       background: #16a34a;
       color: #fff;
     }
+
+    /* ========== 表格/模板生成器弹窗（Unslop 精修版） ========== */
+    .tpl-modal-card {
+      width: 96vw;
+      max-width: 1360px;
+      height: 88vh;
+      max-height: 88vh;
+      display: flex;
+      flex-direction: column;
+      border-radius: 12px;
+      overflow: hidden;
+      padding: 0;
+    }
+    .tpl-topbar {
+      height: 52px;
+      padding: 0 16px;
+      background: var(--card-bg);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+    .tpl-topbar-left,
+    .tpl-topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .tpl-upload-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: 32px;
+      padding: 0 12px;
+      border: 1px dashed #94a3b8;
+      border-radius: 6px;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background-color 0.15s ease, border-color 0.15s ease;
+    }
+    .tpl-upload-pill:hover,
+    .tpl-upload-pill.dragover {
+      border-color: var(--primary);
+      background: #eff6ff;
+    }
+    .tpl-upload-pill input {
+      display: none;
+    }
+    .tpl-meta-text {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .tpl-select {
+      height: 32px;
+      padding: 0 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 12px;
+      color: var(--text);
+      background: var(--card-bg);
+      outline: none;
+    }
+    .tpl-select:focus {
+      border-color: var(--primary);
+    }
+    .tpl-workspace {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 320px 1fr 400px;
+      gap: 12px;
+      padding: 12px;
+      background: var(--bg);
+      overflow: hidden;
+    }
+    .tpl-panel {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .tpl-panel-header {
+      height: 40px;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+      flex-shrink: 0;
+    }
+    .tpl-panel-body {
+      flex: 1;
+      min-height: 0;
+      padding: 12px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .tpl-section-title {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .tpl-chip-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .tpl-chip,
+    .tpl-token {
+      display: inline-flex;
+      align-items: center;
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      user-select: none;
+      border: 1px solid transparent;
+    }
+    .tpl-chip {
+      cursor: pointer;
+      transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+    }
+    .tpl-chip:hover {
+      filter: brightness(0.96);
+    }
+    .tpl-chip:active {
+      transform: scale(0.97);
+    }
+    .tpl-token {
+      margin: 0 2px;
+      height: 22px;
+      padding: 0 6px;
+      vertical-align: baseline;
+      cursor: default;
+    }
+    /* 克制的纸墨色系字段标签 */
+    .tok-combined { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+    .tok-id       { background: #f0f9ff; color: #0369a1; border-color: #bae6fd; }
+    .tok-fullname { background: #f0fdf4; color: #15803d; border-color: #bbf7d0; }
+    .tok-surname  { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+    .tok-xiao     { background: #fff1f2; color: #be123c; border-color: #fecdd3; }
+    .tok-lasttwo  { background: #f5f3ff; color: #6d28d9; border-color: #ddd6fe; }
+    .tok-custom-0 { background: #f0fdfa; color: #0f766e; border-color: #99f6e4; }
+    .tok-custom-1 { background: #fff7ed; color: #c2410c; border-color: #fed7aa; }
+    .tok-custom-2 { background: #fdf4ff; color: #a21caf; border-color: #f5d0fe; }
+    .tok-custom-3 { background: #f7fee7; color: #4d7c0f; border-color: #d9f99d; }
+    .tok-custom-4 { background: #eef2ff; color: #3730a3; border-color: #c7d2fe; }
+    .tok-custom-5 { background: #fdf2f8; color: #be185d; border-color: #fbcfe8; }
+
+    .tpl-tab-group {
+      display: inline-flex;
+      background: var(--header-bg);
+      padding: 2px;
+      border-radius: 6px;
+      gap: 2px;
+    }
+    .tpl-tab-btn {
+      height: 26px;
+      padding: 0 10px;
+      border: none;
+      background: transparent;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .tpl-tab-btn.active {
+      background: var(--card-bg);
+      color: var(--text);
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+    }
+    .tpl-detect-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      color: #166534;
+      font-size: 12px;
+    }
+    .tpl-col-filters {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .tpl-filter-box {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px;
+      background: var(--bg);
+    }
+    .tpl-filter-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+    .tpl-filter-options {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      max-height: 96px;
+      overflow-y: auto;
+    }
+    .tpl-filter-pill {
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      border: 1px solid var(--border);
+      background: var(--card-bg);
+      color: var(--text);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      user-select: none;
+      font-variant-numeric: tabular-nums;
+      transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+    }
+    .tpl-filter-pill:hover {
+      border-color: #94a3b8;
+    }
+    .tpl-filter-pill.active {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+    .tpl-filter-pill small {
+      opacity: 0.72;
+    }
+    .tpl-student-list {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      flex: 1;
+      min-height: 120px;
+      overflow-y: auto;
+    }
+    .tpl-student-item {
+      height: 32px;
+      padding: 0 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      border-bottom: 1px solid var(--header-bg);
+      cursor: pointer;
+    }
+    .tpl-student-item:last-child {
+      border-bottom: none;
+    }
+    .tpl-student-item:hover {
+      background: var(--row-hover);
+    }
+    .tpl-student-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .tpl-student-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-variant-numeric: tabular-nums;
+    }
+    .tpl-field-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .tpl-field-row label {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      width: 88px;
+      flex-shrink: 0;
+    }
+    .tpl-rich-single {
+      flex: 1;
+      min-height: 32px;
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 13px;
+      background: var(--bg);
+      outline: none;
+      white-space: nowrap;
+      overflow-x: auto;
+      transition: border-color 0.15s ease, background-color 0.15s ease;
+    }
+    .tpl-rich-editor {
+      width: 100%;
+      flex: 1;
+      min-height: 220px;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 13px;
+      line-height: 1.7;
+      color: var(--text);
+      outline: none;
+      background: var(--bg);
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      transition: border-color 0.15s ease, background-color 0.15s ease;
+    }
+    .tpl-rich-editor:focus,
+    .tpl-rich-single:focus {
+      border-color: var(--primary);
+      background: var(--card-bg);
+    }
+    .tpl-rich-editor:empty::before {
+      content: attr(data-placeholder);
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+    .tpl-excel-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .tpl-excel-hint {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .tpl-add-col-bar {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    .tpl-add-col-bar.show {
+      display: flex;
+    }
+    .tpl-excel-wrap {
+      flex: 1;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: auto;
+      background: var(--card-bg);
+      min-height: 200px;
+    }
+    .tpl-excel-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .tpl-excel-table th,
+    .tpl-excel-table td {
+      border-right: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 0;
+      min-width: 88px;
+      height: 32px;
+      vertical-align: middle;
+    }
+    .tpl-excel-table th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: var(--header-bg);
+      color: var(--text);
+      font-weight: 500;
+      padding: 0 8px;
+      text-align: left;
+      white-space: nowrap;
+    }
+    .tpl-excel-table th.row-num-col,
+    .tpl-excel-table td.row-num-col {
+      min-width: 40px;
+      width: 40px;
+      text-align: center;
+      background: var(--bg);
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+      padding: 0 4px;
+    }
+    .tpl-excel-table th.action-col,
+    .tpl-excel-table td.action-col {
+      min-width: 36px;
+      width: 36px;
+      text-align: center;
+    }
+    .tpl-th-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4px;
+    }
+    .tpl-th-actions {
+      display: inline-flex;
+      gap: 2px;
+      opacity: 0.55;
+    }
+    .tpl-excel-table th:hover .tpl-th-actions {
+      opacity: 1;
+    }
+    .tpl-icon-btn {
+      width: 22px;
+      height: 22px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      border-radius: 4px;
+      color: var(--text-muted);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .tpl-icon-btn:hover {
+      background: var(--border);
+      color: var(--text);
+    }
+    .tpl-icon-btn.danger:hover {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+    .tpl-excel-cell {
+      width: 100%;
+      height: 32px;
+      border: 2px solid transparent;
+      padding: 0 8px;
+      font-size: 12px;
+      color: var(--text);
+      background: transparent;
+      outline: none;
+    }
+    .tpl-excel-cell:focus {
+      border-color: var(--primary);
+      background: #eff6ff;
+    }
+    .tpl-excel-empty {
+      text-align: center;
+      padding: 36px 16px;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+    .tpl-preview-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .tpl-preview-card {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      background: var(--bg);
+    }
+    .tpl-preview-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .tpl-preview-name {
+      font-weight: 500;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      color: #1d4ed8;
+      background: #eff6ff;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-variant-numeric: tabular-nums;
+    }
+    .tpl-preview-msg {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 12px;
+      color: var(--text);
+      line-height: 1.6;
+    }
+    .tpl-json-raw {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 12px;
+      border-radius: 6px;
+      flex: 1;
+      overflow-y: auto;
+      margin: 0;
+    }
+    @media (max-width: 1120px) {
+      .tpl-workspace {
+        grid-template-columns: 1fr;
+        overflow-y: auto;
+      }
+      .tpl-panel {
+        min-height: 300px;
+      }
+    }
   </style>
 </head>
 <body>
@@ -572,7 +1177,7 @@
     <div class="brand" onclick="onBrandBadgeClick()" style="cursor:pointer;" title="极方每周反馈程序">
       <img src="/favicon.ico" class="logo-badge" alt="极方每周反馈" style="object-fit:contain; background:transparent; box-shadow:none;" onerror="this.outerHTML='<div class=\'logo-badge\'>极</div>'">
       <div class="brand-title">极方每周反馈程序</div>
-      <div class="brand-badge">Web版 v2.0.6</div>
+      <div class="brand-badge">Web版 v2.1.0</div>
     </div>
     <div class="nav-actions">
       <div style="display:inline-flex; align-items:center; gap:5px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; padding:3px 8px;" title="可选：填写您的姓名备注，方便管理员在云端日志中识别您的电脑（失焦或回车自动保存）">
@@ -601,14 +1206,60 @@
           <input type="file" id="filePicker" multiple accept=".json,.html,.htm" style="display:none" onchange="handleFileSelect(event)">
           <input type="file" id="folderPicker" webkitdirectory style="display:none" onchange="handleFolderSelect(event)">
           <button class="btn btn-primary btn-sm" id="addFilesBtn" onclick="chooseFiles()">添加文件</button>
+          <button class="btn btn-sm" id="openTplGenBtn" onclick="openTplGenModal()" title="导入 CSV / Excel 或在线制作表格，通过模板生成反馈话术并导入队列">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+              <line x1="3" y1="9" x2="21" y2="9"></line>
+              <line x1="3" y1="15" x2="21" y2="15"></line>
+              <line x1="9" y1="3" x2="9" y2="21"></line>
+            </svg>
+            <span>从表格/模板生成</span>
+          </button>
           <button class="btn btn-sm" id="addFolderBtn" onclick="document.getElementById('folderPicker').click()">选择文件夹</button>
           <button class="btn btn-sm" id="clearFilesBtn" onclick="clearAllFiles()" disabled>清空</button>
         </div>
       </div>
       <div class="drop-zone" id="dropZone" onclick="chooseFiles()">
-        <span style="font-size:13px; color:#64748b;">提示：支持按住 Ctrl+A 多选所有文件，或点击“选择文件夹”一次导入整目录，也支持将 JSON / HTML 文件拖拽至此处</span>
+        <span style="font-size:13px; color:#64748b;">支持多选 JSON / HTML 反馈文件、拖拽 CSV / Excel 制作模板话术，或直接拖拽学生附件（如 90001张三.pdf）自动匹配/建队</span>
       </div>
       <div class="file-chips" id="fileChipsContainer" style="display:none;"></div>
+
+      <!-- 附件挂载与发送模式栏 -->
+      <div class="attach-bar">
+        <div class="attach-bar-left">
+          <input type="file" id="attachFilesFallback" multiple style="display:none" onchange="handleAttachFallbackSelect(event)">
+          <input type="file" id="attachFolderFallback" webkitdirectory style="display:none" onchange="handleAttachFolderFallbackSelect(event)">
+          <button class="btn btn-sm" id="matchAttachFolderBtn" type="button" onclick="chooseAttachmentFolder()" title="选择装有『学号姓名.pdf/图片』的文件夹：已有学员时自动匹配，列表为空时直接生成发送队列">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span>匹配附件文件夹</span>
+          </button>
+          <button class="btn btn-sm" id="matchAttachFilesBtn" type="button" onclick="chooseAttachmentFiles('match')" title="多选学生专属文件（按学号+姓名自动匹配，或直接生成队列）">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+            </svg>
+            <span>匹配多文件</span>
+          </button>
+          <button class="btn btn-sm" id="addGlobalAttachBtn" type="button" onclick="chooseAttachmentFiles('global')" title="添加全员公共附件（所有勾选学员均会附带发送）">
+            <span>+ 公共附件</span>
+          </button>
+          <button class="btn btn-sm" id="clearAttachBtn" type="button" onclick="clearAllAttachments()" style="display:none;">清空附件</button>
+          <span class="summary-text" id="attachSummaryText" style="font-size:12px;"></span>
+        </div>
+        <div class="attach-bar-right">
+          <select class="filter-select" id="sendModeSelect" style="padding:4px 8px; font-size:12px;" onchange="onSendModeChange(this.value)" title="选择发送内容模式">
+            <option value="both">发送模式：文字 + 附件（先文字后文件）</option>
+            <option value="files_only">发送模式：仅发附件（不发文字）</option>
+            <option value="text_only">发送模式：仅发文字（暂不发附件）</option>
+          </select>
+          <div style="display:inline-flex; align-items:center; gap:4px;">
+            <input type="text" id="defaultFileMsgInput" placeholder="可选：为纯文件队列统一设置话术" style="height:28px; width:220px; padding:0 8px; border:1px solid var(--border); border-radius:6px; font-size:12px; outline:none;" onkeydown="if(event.key==='Enter'){applyDefaultFileMessage();}">
+            <button class="btn btn-sm" id="applyDefaultMsgBtn" type="button" onclick="applyDefaultFileMessage()">应用话术</button>
+          </div>
+        </div>
+      </div>
+      <div class="file-chips" id="globalAttachChipsContainer" style="display:none;"></div>
     </section>
 
     <!-- 云控公告 / 版本门禁 / 维护锁定横幅（由服务端下发，空时自动隐藏） -->
@@ -631,6 +1282,7 @@
         <button class="btn btn-sm" onclick="setSelectAction('all')">全选</button>
         <button class="btn btn-sm" onclick="setSelectAction('none')">全不选</button>
         <button class="btn btn-sm" onclick="setSelectAction('invert')">反选</button>
+        <button class="btn btn-sm" onclick="setSelectAction('has_attachments')" title="仅勾选已挂载专属附件或公共附件的学员">只选有附件</button>
         <button class="btn btn-sm" onclick="retryFailedStudents()">重发失败</button>
         <button class="btn btn-sm" onclick="copyFailedList()">复制失败名单</button>
       </div>
@@ -650,12 +1302,13 @@
               <th class="col-name">姓名</th>
               <th class="col-status">状态</th>
               <th class="col-msg">反馈话术</th>
+              <th class="col-files">附件</th>
               <th class="col-actions">操作</th>
             </tr>
           </thead>
           <tbody id="studentTableBody">
             <tr>
-              <td colspan="6">
+              <td colspan="7">
                 <div class="empty-state">
                   <div class="empty-icon" style="font-size:32px; color:#94a3b8; margin-bottom:8px;">-</div>
                   <div>暂未加载任何学员反馈数据</div>
@@ -1047,6 +1700,146 @@
     </div>
   </div>
 
+  <!-- 弹窗 9：表格与模板话术生成器 -->
+  <div class="modal-overlay" id="tplGenModal">
+    <div class="modal-card tpl-modal-card">
+      <div class="tpl-topbar">
+        <div class="tpl-topbar-left">
+          <label class="tpl-upload-pill" id="tplDropZone">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            <span>导入 CSV / Excel</span>
+            <input type="file" id="tplFileInput" accept=".csv,.xls,.xlsx" />
+          </label>
+          <button class="btn btn-sm" id="tplDownloadSampleBtn" type="button" title="下载 XLSX 示例模板（学号姓名 + 待发送内容）">下载模板</button>
+          <span class="tpl-meta-text" id="tplFileStatus">未上传表格</span>
+          <select class="tpl-select" id="tplSheetSelect" style="display:none;" title="选择工作表"></select>
+        </div>
+        <div class="tpl-topbar-right">
+          <button class="btn btn-sm" id="tplCopyJsonBtn" type="button">复制 JSON</button>
+          <button class="btn btn-sm" id="tplDownloadJsonBtn" type="button">导出 JSON</button>
+          <button class="btn btn-primary btn-sm" id="tplImportQueueBtn" type="button">导入发送队列</button>
+          <button class="modal-close" onclick="closeModal('tplGenModal')" title="关闭">&times;</button>
+        </div>
+      </div>
+
+      <div class="tpl-workspace">
+        <!-- 左栏：字段模块、列筛选与学生勾选 -->
+        <section class="tpl-panel">
+          <div class="tpl-panel-header">
+            <span>字段与筛选</span>
+            <span class="tpl-meta-text">点击标签插入模板</span>
+          </div>
+          <div class="tpl-panel-body">
+            <div>
+              <div class="tpl-section-title">
+                <span>姓名 / 学号模块</span>
+              </div>
+              <div class="tpl-chip-group" id="tplIdentityChips">
+                <span class="tpl-chip tok-combined" data-insert="{学号姓名}">{学号姓名}</span>
+                <span class="tpl-chip tok-id" data-insert="{学号}">{学号}</span>
+                <span class="tpl-chip tok-fullname" data-insert="{全名}">{全名}</span>
+                <span class="tpl-chip tok-surname" data-insert="{姓氏}">{姓氏}</span>
+                <span class="tpl-chip tok-xiao" data-insert="{小姓}">{小姓}</span>
+                <span class="tpl-chip tok-lasttwo" data-insert="{名字后两个字}">{名字后两个字}</span>
+              </div>
+            </div>
+
+            <div>
+              <div class="tpl-section-title">
+                <span>扩展字段模块</span>
+                <button class="btn btn-sm" id="tplQuickAddColBtn" type="button">+ 新增字段</button>
+              </div>
+              <div class="tpl-chip-group" id="tplCustomColChips"></div>
+            </div>
+
+            <div id="tplColFilterSection" style="display:none;">
+              <div class="tpl-section-title">
+                <span>按列筛选</span>
+                <button class="btn btn-sm" id="tplResetFiltersBtn" type="button">重置</button>
+              </div>
+              <div class="tpl-col-filters" id="tplColFiltersContainer"></div>
+            </div>
+
+            <div style="flex:1; display:flex; flex-direction:column; min-height:120px;">
+              <div class="tpl-section-title">
+                <span>学生列表 (<span id="tplSelectedCount" style="font-variant-numeric:tabular-nums;">0</span>/<span id="tplTotalCount" style="font-variant-numeric:tabular-nums;">0</span>)</span>
+                <div style="display:flex; gap:4px;">
+                  <button class="btn btn-sm" id="tplSelectAllBtn" type="button">全选</button>
+                  <button class="btn btn-sm" id="tplInvertSelectBtn" type="button">反选</button>
+                </div>
+              </div>
+              <div class="tpl-student-list" id="tplStudentList"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 中栏：模板编辑器 & 在线表格 -->
+        <section class="tpl-panel">
+          <div class="tpl-panel-header">
+            <div class="tpl-tab-group">
+              <button class="tpl-tab-btn active" id="tplTabTemplateBtn" type="button">模板编辑</button>
+              <button class="tpl-tab-btn" id="tplTabTableBtn" type="button">数据表格 <span id="tplTableBadgeCount" style="font-variant-numeric:tabular-nums; opacity:0.75;">(0人)</span></button>
+            </div>
+            <button class="btn btn-sm" id="tplClearBtn" type="button">清空正文</button>
+          </div>
+
+          <div class="tpl-panel-body" id="tplTemplatePane">
+            <div class="tpl-detect-banner" id="tplMsgColBanner" style="display:none;">
+              <span id="tplMsgColBannerText"></span>
+              <button class="btn btn-primary btn-sm" id="tplApplyMsgColBtn" type="button">一键应用</button>
+            </div>
+            <div class="tpl-field-row">
+              <label>studentName</label>
+              <div id="tplStudentNameEditor" class="tpl-rich-single" contenteditable="true" spellcheck="false"></div>
+            </div>
+            <div id="tplMessageEditor" class="tpl-rich-editor" contenteditable="true" data-placeholder="输入话术正文，点击左侧字段标签即可插入对应变量" spellcheck="false"></div>
+          </div>
+
+          <div class="tpl-panel-body" id="tplTablePane" style="display:none;">
+            <div class="tpl-excel-toolbar">
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <button class="btn btn-primary btn-sm" id="tplTableAddColBtn" type="button">+ 新增字段列</button>
+                <button class="btn btn-sm" id="tplTableAddRowBtn" type="button">+ 新增学生行</button>
+                <button class="btn btn-sm" id="tplExportTableXlsxBtn" type="button">导出表格</button>
+              </div>
+              <span class="tpl-excel-hint">支持方向键切换单元格与 Excel 多行粘贴</span>
+            </div>
+            <div class="tpl-add-col-bar" id="tplAddColBar">
+              <input type="text" id="tplNewColNameInput" placeholder="字段名称，如：分数、评语" style="flex:1; height:28px; padding:0 8px; border:1px solid var(--border); border-radius:6px; font-size:12px;" />
+              <button class="btn btn-primary btn-sm" id="tplConfirmAddColBtn" type="button">添加</button>
+              <button class="btn btn-sm" id="tplCancelAddColBtn" type="button">取消</button>
+            </div>
+            <div class="tpl-excel-wrap" id="tplExcelTableWrap"></div>
+          </div>
+        </section>
+
+        <!-- 右栏：实时预览 -->
+        <section class="tpl-panel">
+          <div class="tpl-panel-header">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span>实时预览</span>
+              <select class="tpl-select" id="tplPreviewLimitSelect" style="height:24px; font-size:12px;">
+                <option value="3">前 3 条</option>
+                <option value="5" selected>前 5 条</option>
+                <option value="10">前 10 条</option>
+                <option value="99999">全部</option>
+              </select>
+            </div>
+            <div class="tpl-tab-group">
+              <button class="tpl-tab-btn active" id="tplViewCardBtn" type="button">卡片</button>
+              <button class="tpl-tab-btn" id="tplViewJsonBtn" type="button">JSON</button>
+            </div>
+          </div>
+          <div class="tpl-panel-body" id="tplPreviewContainer"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
   <!-- 轻量气泡通知 Toast -->
   <div id="toast">已复制到剪贴板</div>
 
@@ -1375,7 +2168,18 @@
           }
         }
         if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-          uploadFileList(e.dataTransfer.files);
+          const filesArr = Array.from(e.dataTransfer.files);
+          const feedbackFiles = filesArr.filter(f => /\.(json|html|htm)$/i.test(f.name));
+          if (feedbackFiles.length > 0) {
+            uploadFileList(feedbackFiles);
+            return;
+          }
+          const sheetFile = filesArr.find(f => /\.(csv|xls|xlsx)$/i.test(f.name) && filesArr.length === 1);
+          if (sheetFile) {
+            openTplGenModalWithFile(sheetFile);
+            return;
+          }
+          uploadAttachmentFiles(filesArr, "match");
         }
       });
     }
@@ -1461,6 +2265,173 @@
       } catch (err) {
         alert(`清空失败: ${err}`);
       }
+    }
+
+    // ========== 附件选择与管理前端函数 ==========
+    let _pendingAttachFallbackMode = "match";
+    let _pendingAttachStudentId = "";
+
+    async function chooseAttachmentFolder() {
+      if (appState.running) return;
+      try {
+        const res = await fetch("/api/attachments/choose_folder", { method: "POST" });
+        const data = await res.json();
+        if (data && data.success) return;
+      } catch (e) {}
+      document.getElementById("attachFolderFallback").click();
+    }
+
+    async function chooseAttachmentFiles(mode = "match", studentId = "") {
+      if (appState.running) return;
+      _pendingAttachFallbackMode = mode;
+      _pendingAttachStudentId = studentId;
+      try {
+        const res = await fetch("/api/attachments/choose_files", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: mode, student_id: studentId })
+        });
+        const data = await res.json();
+        if (data && data.success) return;
+      } catch (e) {}
+      document.getElementById("attachFilesFallback").click();
+    }
+
+    function chooseStudentAttachment(studentId) {
+      chooseAttachmentFiles("student", studentId);
+    }
+
+    function handleAttachFallbackSelect(event) {
+      const files = Array.from(event.target.files || []);
+      if (files.length > 0) {
+        uploadAttachmentFiles(files, _pendingAttachFallbackMode, _pendingAttachStudentId);
+      }
+      event.target.value = "";
+    }
+
+    function handleAttachFolderFallbackSelect(event) {
+      const files = Array.from(event.target.files || []);
+      if (files.length > 0) {
+        uploadAttachmentFiles(files, "match", "");
+      }
+      event.target.value = "";
+    }
+
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const res = String(reader.result || "");
+          const commaIdx = res.indexOf(",");
+          resolve(commaIdx >= 0 ? res.slice(commaIdx + 1) : res);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function uploadAttachmentFiles(fileList, mode = "match", studentId = "") {
+      const payloadFiles = [];
+      for (let i = 0; i < fileList.length; i++) {
+        const f = fileList[i];
+        if (!f || f.name.startsWith("~$") || f.name.startsWith(".")) continue;
+        const b64 = await fileToBase64(f);
+        payloadFiles.push({ name: f.name, content_base64: b64 });
+      }
+      if (payloadFiles.length === 0) return;
+      try {
+        const res = await fetch("/api/attachments/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: mode, student_id: studentId, files: payloadFiles })
+        });
+        const data = await res.json();
+        if (data && data.success) {
+          showToast(data.message || `已挂载 ${payloadFiles.length} 个附件`);
+          fetchState();
+        } else {
+          alert(`挂载附件失败: ${(data && data.message) || "未知异常"}`);
+        }
+      } catch (err) {
+        alert(`上传附件异常: ${err}`);
+      }
+    }
+
+    async function removeStudentAttachment(studentId, filePath) {
+      if (appState.running) return;
+      try {
+        await fetch("/api/attachments/manage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "student_remove", student_id: studentId, path: filePath })
+        });
+        fetchState();
+      } catch (err) {}
+    }
+
+    async function removeGlobalAttachment(filePath) {
+      if (appState.running) return;
+      try {
+        await fetch("/api/attachments/manage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "remove_global", path: filePath })
+        });
+        fetchState();
+      } catch (err) {}
+    }
+
+    async function clearAllAttachments() {
+      if (appState.running) return;
+      if (!confirm("确认移除当前已挂载的所有专属附件与公共附件？")) return;
+      try {
+        await fetch("/api/attachments/manage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "clear_all" })
+        });
+        showToast("已清空所有附件");
+        fetchState();
+      } catch (err) {}
+    }
+
+    async function onSendModeChange(mode) {
+      try {
+        await fetch("/api/attachments/manage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "set_options", send_mode: mode })
+        });
+        const labelMap = {
+          both: "已切换为：文字 + 附件",
+          files_only: "已切换为：仅发附件（不发文字）",
+          text_only: "已切换为：仅发文字（暂不发附件）"
+        };
+        showToast(labelMap[mode] || "已更新发送模式");
+        fetchState();
+      } catch (err) {}
+    }
+
+    async function applyDefaultFileMessage() {
+      const input = document.getElementById("defaultFileMsgInput");
+      if (!input) return;
+      const msg = input.value.trim();
+      try {
+        const res = await fetch("/api/attachments/manage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "set_options",
+            default_file_message: msg,
+            apply_message_to_all: true
+          })
+        });
+        const data = await res.json();
+        if (data && data.success) {
+          showToast(msg ? "已将统一话术应用到当前队列全员" : "已清空全员话术");
+          fetchState();
+        }
+      } catch (err) {}
     }
 
     // 获取完整状态
@@ -1574,10 +2545,16 @@
       }
 
       if (!appState.files || appState.files.length === 0) {
-        poolSummary.innerText = "尚未选择文件（0 个文件 · 0 人）";
+        const totalPeople = appState.summary ? appState.summary.total : 0;
+        if (totalPeople > 0) {
+          poolSummary.innerText = `已由附件直接生成队列 · 共 ${totalPeople} 人`;
+          clearBtn.disabled = appState.running;
+        } else {
+          poolSummary.innerText = "尚未选择文件（0 个文件 · 0 人）";
+          clearBtn.disabled = true;
+        }
         chips.style.display = "none";
         chips.innerHTML = "";
-        clearBtn.disabled = true;
       } else {
         const totalPeople = appState.summary ? appState.summary.total : 0;
         let s = `已载入 ${appState.files.length} 个文件 · 共 ${totalPeople} 人`;
@@ -1594,6 +2571,55 @@
             </div>
           `;
         }).join("");
+      }
+
+      // 1.5 附件状态栏与公共附件渲染
+      const globalAttach = appState.global_attachments || [];
+      const matchedAttachCount = (appState.summary && appState.summary.matched_attachments) || 0;
+      const totalPeopleForAttach = (appState.summary && appState.summary.total) || 0;
+      const attachSummaryEl = document.getElementById("attachSummaryText");
+      const clearAttachBtn = document.getElementById("clearAttachBtn");
+      const globalChipsEl = document.getElementById("globalAttachChipsContainer");
+      const sendModeEl = document.getElementById("sendModeSelect");
+      const defaultMsgEl = document.getElementById("defaultFileMsgInput");
+
+      if (sendModeEl && document.activeElement !== sendModeEl) {
+        sendModeEl.value = appState.send_mode || "both";
+        sendModeEl.disabled = appState.running;
+      }
+      if (defaultMsgEl && document.activeElement !== defaultMsgEl && appState.default_file_message !== undefined) {
+        if (!defaultMsgEl.value) defaultMsgEl.value = appState.default_file_message || "";
+        defaultMsgEl.disabled = appState.running;
+      }
+      ["matchAttachFolderBtn", "matchAttachFilesBtn", "addGlobalAttachBtn", "applyDefaultMsgBtn"].forEach(btnId => {
+        const b = document.getElementById(btnId);
+        if (b) b.disabled = appState.running;
+      });
+
+      const hasAnyAttachment = matchedAttachCount > 0 || globalAttach.length > 0;
+      if (clearAttachBtn) {
+        clearAttachBtn.style.display = hasAnyAttachment ? "inline-flex" : "none";
+        clearAttachBtn.disabled = appState.running;
+      }
+      if (attachSummaryEl) {
+        const parts = [];
+        if (matchedAttachCount > 0) parts.push(`专属附件已匹配 ${matchedAttachCount}/${totalPeopleForAttach} 人`);
+        if (globalAttach.length > 0) parts.push(`公共附件 ${globalAttach.length} 个`);
+        attachSummaryEl.innerText = parts.join(" · ");
+      }
+      if (globalChipsEl) {
+        if (globalAttach.length === 0) {
+          globalChipsEl.style.display = "none";
+          globalChipsEl.innerHTML = "";
+        } else {
+          globalChipsEl.style.display = "flex";
+          globalChipsEl.innerHTML = globalAttach.map(gf => `
+            <div class="file-chip" style="background:#eff6ff; border-color:#bfdbfe; color:#1d4ed8;" title="${escapeHtmlInline(gf.path)}">
+              <span>[公共] ${escapeHtmlInline(gf.name)}</span>
+              ${!appState.running ? `<span class="chip-del" onclick="removeGlobalAttachment('${escapeJs(gf.path)}')">&times;</span>` : ''}
+            </div>
+          `).join("");
+        }
       }
 
       // 2. 待回角标
@@ -1682,10 +2708,10 @@
       if (!appState.students || appState.students.length === 0) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="6">
+            <td colspan="7">
               <div class="empty-state">
                 <div style="font-size:14px; font-weight:600; color:#334155; margin-bottom:4px;">暂未加载任何学员反馈数据</div>
-                <div style="font-size:12px; color:#94a3b8;">请点击上方“添加文件”或“选择文件夹”载入反馈数据</div>
+                <div style="font-size:12px; color:#94a3b8;">可点击上方“添加文件”、“从表格/模板生成”或“匹配附件文件夹”载入发送队列</div>
               </div>
             </td>
           </tr>
@@ -1696,12 +2722,17 @@
       }
 
       const filtered = getFilteredStudents();
-      const currentSignature = filtered.map(st => st.id).join(",");
+      const globalAttachLen = (appState.global_attachments || []).length;
+      const sendMode = appState.send_mode || "both";
+      const currentSignature = filtered.map(st => {
+        const fNames = (st.files || []).map(f => f.name).join("|");
+        return `${st.id}:${fNames}:${globalAttachLen}:${sendMode}:${st.message ? st.message.length : 0}:${st.text_sent ? 1 : 0}`;
+      }).join(",");
 
       if (filtered.length === 0) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="6">
+            <td colspan="7">
               <div class="empty-state">
                 <div style="font-size:14px; font-weight:600; color:#334155; margin-bottom:4px;">未找到符合条件的学员</div>
                 <div style="font-size:12px; color:#94a3b8;">请尝试清除搜索关键词或切换状态筛选下拉框</div>
@@ -1716,6 +2747,25 @@
         tbody.innerHTML = filtered.map((st, idx) => {
           const badgeClass = getBadgeClass(st.status);
           const isChecked = !!st.selected;
+          const stFiles = st.files || [];
+          const filePillsHtml = stFiles.map(f => `
+            <span class="attach-pill" title="${escapeHtmlInline(f.path)}">
+              <span class="attach-pill-name">${escapeHtmlInline(f.name)}</span>
+              ${!appState.running ? `<span class="attach-pill-del" title="移除此附件" onclick="event.stopPropagation(); removeStudentAttachment('${escapeJs(st.id)}', '${escapeJs(f.path)}')">&times;</span>` : ''}
+            </span>
+          `).join("");
+          const globalPillHtml = globalAttachLen > 0
+            ? `<span class="attach-pill is-global" title="全员公共附件 (${globalAttachLen}个)"><span class="attach-pill-name">+${globalAttachLen} 公共</span></span>`
+            : "";
+          const addBtnHtml = !appState.running
+            ? `<button type="button" class="attach-add-mini" title="为该学员单独添加附件" onclick="event.stopPropagation(); chooseStudentAttachment('${escapeJs(st.id)}')">+</button>`
+            : "";
+          const hasAnyFile = stFiles.length > 0 || globalAttachLen > 0;
+          const msgDisplay = (sendMode === "files_only")
+            ? `<span style="color:#64748b; font-size:12px;">（仅发附件模式${st.message ? ' · 已隐藏话术' : ''}）</span>`
+            : (st.message
+                ? `<div class="msg-preview" title="点击查看全文" onclick="openMsgPreviewModal('${escapeJs(st.studentName)}', '${escapeJs(st.message)}')">${escapeHtmlInline(st.message)}</div>`
+                : (hasAnyFile ? `<span style="color:#64748b; font-size:12px;">（无文字话术，仅发送附件）</span>` : `<span style="color:#94a3b8; font-size:12px;">-</span>`));
           return `
             <tr id="row_${st.id}" class="${isChecked ? 'selected-row' : ''}" style="cursor:pointer;" onclick="handleRowClick(event, '${st.id}', ${idx})">
               <td class="col-check">
@@ -1723,9 +2773,10 @@
               </td>
               <td class="col-sid">${st.sid || '-'}</td>
               <td class="col-name">${st.sname || st.studentName || '-'}</td>
-              <td class="col-status"><span id="badge_${st.id}" class="badge ${badgeClass}">${st.status}</span></td>
-              <td class="col-msg">
-                <div class="msg-preview" title="点击查看全文" onclick="openMsgPreviewModal('${escapeJs(st.studentName)}', '${escapeJs(st.message)}')">${st.message || ''}</div>
+              <td class="col-status"><span id="badge_${st.id}" class="badge ${badgeClass}" title="${escapeHtmlInline(st.last_reason || '')}">${st.status}</span></td>
+              <td class="col-msg">${msgDisplay}</td>
+              <td class="col-files" onclick="event.stopPropagation();">
+                <div class="attach-cell-wrap">${filePillsHtml}${globalPillHtml}${addBtnHtml}</div>
               </td>
               <td class="col-actions">
                 <button class="btn btn-sm" onclick="sendSingleStudent('${st.id}')" ${appState.running ? 'disabled' : ''}>发送</button>
@@ -2753,6 +3804,1001 @@
       if (!str) return "";
       return String(str).replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "");
     }
+
+    // ========== 内嵌表格/模板话术生成器 ==========
+    (function initTplGenerator() {
+      const COMPOUND_SURNAMES = [
+        "欧阳","太史","端木","上官","司马","东方","独孤","南宫","万俟","闻人",
+        "夏侯","诸葛","尉迟","公羊","赫连","澹台","皇甫","宗政","濮阳","公冶",
+        "太叔","申屠","公孙","慕容","仲孙","钟离","长孙","宇文","司徒","鲜于",
+        "司空","闾丘","子车","亓官","司寇","巫马","公西","颛孙","壤驷","公良",
+        "漆雕","乐正","宰父","谷梁","拓跋","夹谷","轩辕","令狐","段干","百里",
+        "呼延","东郭","南门","羊舌","微生","左丘","西门","第五","南荣","东里",
+        "东宫","仲长","子书","子桑","即墨","达奚","褚师"
+      ];
+      const TOKEN_STYLES = {
+        "{学号姓名}": "tok-combined",
+        "{学号}": "tok-id",
+        "{全名}": "tok-fullname",
+        "{姓氏}": "tok-surname",
+        "{小姓}": "tok-xiao",
+        "{名字后两个字}": "tok-lasttwo"
+      };
+      const BUILTIN_TOKEN_NAMES = new Set(["学号姓名", "学号", "全名", "姓氏", "小姓", "名字后两个字"]);
+      const MSG_COL_REGEX = /^(待发送内容|发送内容|消息内容|文案|评语内容|message|content)/i;
+      const ICON_RENAME = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"></path></svg>';
+      const ICON_DELETE = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+
+      const tplState = {
+        workbook: null,
+        fileName: "模板生成反馈.json",
+        students: [],
+        otherColMeta: [],
+        activeColFilters: {},
+        collapsedFilterCols: new Set(),
+        uncheckedIndices: new Set(),
+        previewMode: "card",
+        centerMode: "template",
+        activeEditor: null,
+        savedRange: null,
+        nextColId: 1000,
+        nextRowIdx: 1,
+        detectedMsgColLabel: null,
+        editingColKey: null,
+        initialized: false
+      };
+
+      const g = id => document.getElementById(id);
+      const el = {
+        modal: g("tplGenModal"),
+        dropZone: g("tplDropZone"),
+        fileInput: g("tplFileInput"),
+        downloadSampleBtn: g("tplDownloadSampleBtn"),
+        fileStatus: g("tplFileStatus"),
+        sheetSelect: g("tplSheetSelect"),
+        copyJsonBtn: g("tplCopyJsonBtn"),
+        downloadJsonBtn: g("tplDownloadJsonBtn"),
+        importQueueBtn: g("tplImportQueueBtn"),
+        identityChips: g("tplIdentityChips"),
+        customColChips: g("tplCustomColChips"),
+        quickAddColBtn: g("tplQuickAddColBtn"),
+        colFilterSection: g("tplColFilterSection"),
+        colFiltersContainer: g("tplColFiltersContainer"),
+        resetFiltersBtn: g("tplResetFiltersBtn"),
+        studentList: g("tplStudentList"),
+        selectedCount: g("tplSelectedCount"),
+        totalCount: g("tplTotalCount"),
+        selectAllBtn: g("tplSelectAllBtn"),
+        invertSelectBtn: g("tplInvertSelectBtn"),
+        tabTemplateBtn: g("tplTabTemplateBtn"),
+        tabTableBtn: g("tplTabTableBtn"),
+        tableBadgeCount: g("tplTableBadgeCount"),
+        templatePane: g("tplTemplatePane"),
+        tablePane: g("tplTablePane"),
+        msgColBanner: g("tplMsgColBanner"),
+        msgColBannerText: g("tplMsgColBannerText"),
+        applyMsgColBtn: g("tplApplyMsgColBtn"),
+        studentNameEditor: g("tplStudentNameEditor"),
+        messageEditor: g("tplMessageEditor"),
+        clearBtn: g("tplClearBtn"),
+        tableAddColBtn: g("tplTableAddColBtn"),
+        tableAddRowBtn: g("tplTableAddRowBtn"),
+        exportTableXlsxBtn: g("tplExportTableXlsxBtn"),
+        addColBar: g("tplAddColBar"),
+        newColNameInput: g("tplNewColNameInput"),
+        confirmAddColBtn: g("tplConfirmAddColBtn"),
+        cancelAddColBtn: g("tplCancelAddColBtn"),
+        excelTableWrap: g("tplExcelTableWrap"),
+        previewLimitSelect: g("tplPreviewLimitSelect"),
+        viewCardBtn: g("tplViewCardBtn"),
+        viewJsonBtn: g("tplViewJsonBtn"),
+        previewContainer: g("tplPreviewContainer")
+      };
+
+      function splitChineseName(fullName) {
+        const clean = String(fullName ?? "").trim();
+        if (!clean) return { surname: "", xiaoSurname: "", lastTwo: "" };
+        const matchedCompound = COMPOUND_SURNAMES.find(cs => clean.startsWith(cs) && clean.length > cs.length);
+        const surname = matchedCompound || clean.slice(0, 1);
+        const lastTwo = clean.length >= 2 ? clean.slice(-2) : clean;
+        return { surname, xiaoSurname: surname ? `小${surname}` : "", lastTwo };
+      }
+
+      function makeStudent(studentId, fullName, otherCols) {
+        const { surname, xiaoSurname, lastTwo } = splitChineseName(fullName);
+        return {
+          idx: tplState.nextRowIdx++,
+          studentId,
+          fullName,
+          combined: `${studentId}${fullName}`,
+          surname,
+          xiaoSurname,
+          lastTwo,
+          otherCols: otherCols || {}
+        };
+      }
+
+      function getTokenClass(tokenStr) {
+        if (TOKEN_STYLES[tokenStr]) return TOKEN_STYLES[tokenStr];
+        const name = tokenStr.replace(/^\{|\}$/g, "");
+        const col = tplState.otherColMeta.find(c => c.label === name);
+        return col ? `tok-custom-${col.colorIdx % 6}` : null;
+      }
+
+      function refreshOtherColMetaCounts() {
+        tplState.otherColMeta.forEach(col => {
+          const counts = new Map();
+          tplState.students.forEach(s => {
+            const v = (s.otherCols[col.key] ?? "").trim() || "(空)";
+            counts.set(v, (counts.get(v) || 0) + 1);
+          });
+          col.values = Array.from(counts.entries()).map(([val, count]) => ({ val, count }));
+        });
+      }
+
+      function renderCustomColChips() {
+        if (tplState.otherColMeta.length === 0) {
+          el.customColChips.innerHTML = `<span class="tpl-meta-text">导入表格或点击「+ 新增字段」后自动生成</span>`;
+          return;
+        }
+        el.customColChips.innerHTML = tplState.otherColMeta.map(col => {
+          const token = `{${col.label}}`;
+          return `<span class="tpl-chip tok-custom-${col.colorIdx % 6}" data-insert="${escapeHtml(token)}" title="点击插入">${escapeHtml(token)}</span>`;
+        }).join("");
+      }
+
+      function parseSheet2D(rows2D, fileName) {
+        const nonEmptyRows = rows2D
+          .map(r => (Array.isArray(r) ? r.map(c => String(c ?? "").trim()) : []))
+          .filter(r => r.some(c => c !== ""));
+
+        if (nonEmptyRows.length === 0) {
+          tplState.students = [];
+          tplState.otherColMeta = [];
+          tplState.detectedMsgColLabel = null;
+          el.msgColBanner.style.display = "none";
+          renderCustomColChips();
+          renderColumnFilters();
+          updateAll();
+          return;
+        }
+
+        const maxCols = Math.max(...nonEmptyRows.map(r => r.length));
+        const combinedRegex1 = /^(\d{4,10})[\s\-_.、，,;；:：]*([\u4e00-\u9fa5·]{2,10})$/;
+        const combinedRegex2 = /^([\u4e00-\u9fa5·]{2,10})[\s\-_.、，,;；:：]*(\d{4,10})$/;
+        const idRegex = /^\d{4,10}$/;
+        const chineseNameRegex = /^[\u4e00-\u9fa5·]{2,5}$/;
+
+        const rowHasStudentId = row => row.some(cell => combinedRegex1.test(cell) || combinedRegex2.test(cell) || idRegex.test(cell));
+        const hasHeader = !rowHasStudentId(nonEmptyRows[0]) && nonEmptyRows.slice(1).some(rowHasStudentId);
+        const headerRow = hasHeader ? nonEmptyRows[0] : [];
+        const dataRows = hasHeader ? nonEmptyRows.slice(1) : nonEmptyRows;
+
+        let bestCombinedCol = -1, bestCombinedCount = 0, bestIdCol = -1, bestIdCount = 0;
+        for (let c = 0; c < maxCols; c++) {
+          let combCnt = 0, idCnt = 0;
+          for (const r of dataRows) {
+            const val = r[c] || "";
+            if (combinedRegex1.test(val) || combinedRegex2.test(val)) combCnt++;
+            if (idRegex.test(val)) idCnt++;
+          }
+          if (combCnt > bestCombinedCount) { bestCombinedCount = combCnt; bestCombinedCol = c; }
+          if (idCnt > bestIdCount) { bestIdCount = idCnt; bestIdCol = c; }
+        }
+
+        let mode = "combined";
+        const usedCols = new Set();
+        let nameCol = -1;
+
+        if (bestCombinedCount > 0 && bestCombinedCount >= bestIdCount) {
+          usedCols.add(bestCombinedCol);
+        } else if (bestIdCount > 0) {
+          mode = "split";
+          usedCols.add(bestIdCol);
+          let bestNameScore = -1;
+          for (let c = 0; c < maxCols; c++) {
+            if (c === bestIdCol) continue;
+            const vals = dataRows.map(r => r[c] || "").filter(Boolean);
+            if (vals.length === 0) continue;
+            const validNameCnt = vals.filter(v => chineseNameRegex.test(v) && !/[班级组男女第周]/.test(v)).length;
+            const ratio = validNameCnt / vals.length;
+            if (ratio < 0.3) continue;
+            const uniqueRatio = new Set(vals).size / vals.length;
+            const adjacentBonus = Math.abs(c - bestIdCol) === 1 ? 0.5 : 0;
+            const headerBonus = /姓名|名字|学生/.test(headerRow[c] || "") ? 0.5 : 0;
+            const score = ratio * 2 + uniqueRatio + adjacentBonus + headerBonus;
+            if (score > bestNameScore) { bestNameScore = score; nameCol = c; }
+          }
+          if (nameCol !== -1) usedCols.add(nameCol);
+        }
+
+        const otherColIndices = [];
+        for (let c = 0; c < maxCols; c++) {
+          if (usedCols.has(c)) continue;
+          const hasAnyVal = dataRows.some(r => (r[c] || "") !== "");
+          if (hasAnyVal || (headerRow[c] || "").trim()) otherColIndices.push(c);
+        }
+
+        const students = [];
+        dataRows.forEach(r => {
+          let studentId = "", fullName = "";
+          if (mode === "combined" && bestCombinedCol !== -1) {
+            const raw = r[bestCombinedCol] || "";
+            const m1 = raw.match(combinedRegex1), m2 = raw.match(combinedRegex2);
+            if (m1) { studentId = m1[1]; fullName = m1[2]; }
+            else if (m2) { fullName = m2[1]; studentId = m2[2]; }
+          } else if (mode === "split" && bestIdCol !== -1) {
+            const rawId = r[bestIdCol] || "";
+            if (idRegex.test(rawId)) {
+              studentId = rawId;
+              fullName = nameCol !== -1 ? (r[nameCol] || "") : "";
+            }
+          }
+          if (!studentId) return;
+          const otherCols = {};
+          otherColIndices.forEach(c => { otherCols[`col_${c}`] = r[c] || ""; });
+          students.push(makeStudent(studentId, fullName, otherCols));
+        });
+
+        const otherColMeta = [];
+        tplState.activeColFilters = {};
+        tplState.collapsedFilterCols = new Set();
+        const usedLabels = new Set(BUILTIN_TOKEN_NAMES);
+        otherColIndices.forEach((c, i) => {
+          const key = `col_${c}`;
+          let label = (headerRow[c] || "").trim().replace(/[{}]/g, "") || `第${c + 1}列`;
+          if (usedLabels.has(label)) label = `${label}_${c + 1}`;
+          usedLabels.add(label);
+          otherColMeta.push({ key, label, colorIdx: i, values: [] });
+          tplState.activeColFilters[key] = new Set();
+        });
+
+        tplState.students = students;
+        tplState.otherColMeta = otherColMeta;
+        tplState.uncheckedIndices.clear();
+        refreshOtherColMetaCounts();
+        otherColMeta.forEach(col => { if (col.values.length > 20) tplState.collapsedFilterCols.add(col.key); });
+        tplState.fileName = fileName.replace(/\.(csv|xls|xlsx)$/i, "") + ".json";
+
+        const msgCol = otherColMeta.find(col => MSG_COL_REGEX.test(col.label));
+        const msgHasValues = msgCol && students.some(s => (s.otherCols[msgCol.key] || "").trim() !== "");
+        let toastMsg = `已识别 ${students.length} 名学生`;
+        if (msgCol && msgHasValues) {
+          tplState.detectedMsgColLabel = msgCol.label;
+          const currentMsg = extractEditorTemplate(el.messageEditor).trim();
+          if (!currentMsg || /^\{[^}]+\}$/.test(currentMsg)) {
+            el.messageEditor.innerHTML = templateToHtml(`{${msgCol.label}}`);
+            saveTemplatesToStorage();
+            el.msgColBanner.style.display = "none";
+            toastMsg = `已识别 ${students.length} 人，并自动应用「${msgCol.label}」列`;
+          } else {
+            el.msgColBannerText.textContent = `检测到表格中的「${msgCol.label}」列已有文案`;
+            el.msgColBanner.style.display = "flex";
+          }
+        } else {
+          tplState.detectedMsgColLabel = null;
+          el.msgColBanner.style.display = "none";
+        }
+
+        el.studentNameEditor.innerHTML = templateToHtml(extractEditorTemplate(el.studentNameEditor));
+        el.messageEditor.innerHTML = templateToHtml(extractEditorTemplate(el.messageEditor));
+        el.fileStatus.textContent = `${fileName} · ${mode === "combined" ? "合并列" : "分列"}/${hasHeader ? "有表头" : "无表头"} (${students.length}人)`;
+
+        renderCustomColChips();
+        renderColumnFilters();
+        updateAll();
+        showToast(toastMsg);
+      }
+
+      function renderColumnFilters() {
+        if (tplState.otherColMeta.length === 0) {
+          el.colFilterSection.style.display = "none";
+          el.colFiltersContainer.innerHTML = "";
+          return;
+        }
+        el.colFilterSection.style.display = "";
+        el.colFiltersContainer.innerHTML = tplState.otherColMeta.map(col => {
+          const selectedSet = tplState.activeColFilters[col.key] || new Set();
+          const isCollapsed = tplState.collapsedFilterCols.has(col.key);
+          const pillsHtml = isCollapsed ? "" : col.values.map(item => {
+            const isActive = selectedSet.has(item.val) ? "active" : "";
+            return `<span class="tpl-filter-pill ${isActive}" data-col="${col.key}" data-val="${escapeHtml(item.val)}">${escapeHtml(item.val)}<small>(${item.count})</small></span>`;
+          }).join("");
+          const statusText = selectedSet.size > 0 ? `已选 ${selectedSet.size} 项` : `全部 (${col.values.length})`;
+          return `
+            <div class="tpl-filter-box">
+              <div class="tpl-filter-header">
+                <span>${escapeHtml(col.label)}</span>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span class="tpl-meta-text">${statusText}</span>
+                  <button class="btn btn-sm tpl-toggle-filter-btn" type="button" data-col="${col.key}">${isCollapsed ? "展开" : "收起"}</button>
+                </div>
+              </div>
+              ${isCollapsed ? "" : `<div class="tpl-filter-options">${pillsHtml}</div>`}
+            </div>`;
+        }).join("");
+      }
+
+      function getFilteredStudents() {
+        return tplState.students.filter(s => {
+          for (const col of tplState.otherColMeta) {
+            const sel = tplState.activeColFilters[col.key];
+            if (sel && sel.size > 0) {
+              const val = (s.otherCols[col.key] ?? "").trim() || "(空)";
+              if (!sel.has(val)) return false;
+            }
+          }
+          return true;
+        });
+      }
+
+      function getActiveStudents() {
+        return getFilteredStudents().filter(s => !tplState.uncheckedIndices.has(s.idx));
+      }
+
+      function renderStudentList() {
+        const filtered = getFilteredStudents();
+        el.totalCount.textContent = filtered.length;
+        el.selectedCount.textContent = filtered.filter(s => !tplState.uncheckedIndices.has(s.idx)).length;
+        el.tableBadgeCount.textContent = `(${tplState.students.length}人)`;
+        el.studentList.innerHTML = filtered.map(s => {
+          const checked = !tplState.uncheckedIndices.has(s.idx) ? "checked" : "";
+          return `
+            <label class="tpl-student-item">
+              <div class="tpl-student-left">
+                <input type="checkbox" data-idx="${s.idx}" ${checked} />
+                <span>${escapeHtml(s.fullName || s.combined || "(未命名)")}</span>
+              </div>
+              <span class="tpl-student-meta">${escapeHtml(s.studentId || "-")}</span>
+            </label>`;
+        }).join("");
+      }
+
+      function renderExcelTable() {
+        const students = getFilteredStudents();
+        const customCols = tplState.otherColMeta;
+        if (students.length === 0 && customCols.length === 0) {
+          el.excelTableWrap.innerHTML = `<div class="tpl-excel-empty">暂无学生数据。可导入 CSV/Excel，或点击上方「+ 新增学生行」「+ 新增字段列」在线录入。</div>`;
+          return;
+        }
+        const thCols = customCols.map(col => {
+          if (tplState.editingColKey === col.key) {
+            return `<th><input type="text" class="tpl-rename-col-input" data-col-key="${col.key}" value="${escapeHtml(col.label)}" style="width:104px; height:24px; padding:0 6px; border:1px solid var(--primary); border-radius:4px; font-size:12px;" /></th>`;
+          }
+          return `<th><div class="tpl-th-inner"><span>${escapeHtml(col.label)}</span><span class="tpl-th-actions">
+            <button class="tpl-icon-btn tpl-rename-col-btn" type="button" data-col-key="${col.key}" title="重命名列">${ICON_RENAME}</button>
+            <button class="tpl-icon-btn danger tpl-delete-col-btn" type="button" data-col-key="${col.key}" title="删除列">${ICON_DELETE}</button></span></div></th>`;
+        }).join("");
+
+        const rowsHtml = students.map((s, rPos) => {
+          let cPos = 0;
+          const base = `data-row-idx="${s.idx}" data-row-pos="${rPos}"`;
+          const idCell = `<td><input type="text" class="tpl-excel-cell" ${base} data-col-pos="${cPos++}" data-field="studentId" value="${escapeHtml(s.studentId)}" placeholder="学号" /></td>`;
+          const nameCell = `<td><input type="text" class="tpl-excel-cell" ${base} data-col-pos="${cPos++}" data-field="fullName" value="${escapeHtml(s.fullName)}" placeholder="姓名" /></td>`;
+          const customCells = customCols.map(col =>
+            `<td><input type="text" class="tpl-excel-cell" ${base} data-col-pos="${cPos++}" data-col-key="${col.key}" value="${escapeHtml(s.otherCols[col.key] ?? "")}" /></td>`
+          ).join("");
+          return `<tr><td class="row-num-col">${rPos + 1}</td>${idCell}${nameCell}${customCells}
+            <td class="action-col"><button class="tpl-icon-btn danger tpl-delete-row-btn" type="button" data-row-idx="${s.idx}" title="删除行">${ICON_DELETE}</button></td></tr>`;
+        }).join("");
+
+        el.excelTableWrap.innerHTML = `
+          <table class="tpl-excel-table">
+            <thead><tr><th class="row-num-col">#</th><th>学号</th><th>姓名</th>${thCols}<th class="action-col">删</th></tr></thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>`;
+
+        if (tplState.editingColKey) {
+          const ri = el.excelTableWrap.querySelector(".tpl-rename-col-input");
+          if (ri) { ri.focus(); ri.select(); }
+        }
+      }
+
+      function addCustomColumn(rawName) {
+        const name = String(rawName ?? "").trim().replace(/[{}]/g, "");
+        if (!name) { showToast("请输入字段名称"); return false; }
+        if (BUILTIN_TOKEN_NAMES.has(name) || tplState.otherColMeta.some(c => c.label === name)) {
+          showToast(`字段「${name}」已存在`);
+          return false;
+        }
+        const key = `col_${tplState.nextColId++}`;
+        tplState.students.forEach(s => { s.otherCols[key] = ""; });
+        tplState.otherColMeta.push({ key, label: name, colorIdx: tplState.otherColMeta.length, values: [] });
+        tplState.activeColFilters[key] = new Set();
+        refreshOtherColMetaCounts();
+        renderCustomColChips();
+        renderColumnFilters();
+        if (tplState.centerMode === "table") renderExcelTable();
+        renderPreview();
+        showToast(`已新增字段 {${name}}`);
+        return true;
+      }
+
+      function renameCustomColumn(colKey, rawNewLabel) {
+        const newLabel = String(rawNewLabel ?? "").trim().replace(/[{}]/g, "");
+        const col = tplState.otherColMeta.find(c => c.key === colKey);
+        tplState.editingColKey = null;
+        const rerender = () => { if (tplState.centerMode === "table") renderExcelTable(); };
+        if (!col || !newLabel || newLabel === col.label) { rerender(); return; }
+        if (BUILTIN_TOKEN_NAMES.has(newLabel) || tplState.otherColMeta.some(c => c.key !== colKey && c.label === newLabel)) {
+          showToast(`字段「${newLabel}」已存在`);
+          rerender();
+          return;
+        }
+        const oldToken = `{${col.label}}`;
+        col.label = newLabel;
+        const swap = tpl => tpl.split(oldToken).join(`{${newLabel}}`);
+        el.studentNameEditor.innerHTML = templateToHtml(swap(extractEditorTemplate(el.studentNameEditor)));
+        el.messageEditor.innerHTML = templateToHtml(swap(extractEditorTemplate(el.messageEditor)));
+        saveTemplatesToStorage();
+        renderCustomColChips();
+        renderColumnFilters();
+        rerender();
+        renderPreview();
+        showToast(`已重命名为 {${newLabel}}`);
+      }
+
+      function deleteCustomColumn(colKey) {
+        const idx = tplState.otherColMeta.findIndex(c => c.key === colKey);
+        if (idx === -1) return;
+        const removed = tplState.otherColMeta.splice(idx, 1)[0];
+        delete tplState.activeColFilters[colKey];
+        tplState.collapsedFilterCols.delete(colKey);
+        tplState.students.forEach(s => { delete s.otherCols[colKey]; });
+        renderCustomColChips();
+        renderColumnFilters();
+        if (tplState.centerMode === "table") renderExcelTable();
+        renderPreview();
+        showToast(`已删除列「${removed.label}」`);
+      }
+
+      function addStudentRow() {
+        const otherCols = {};
+        tplState.otherColMeta.forEach(c => { otherCols[c.key] = ""; });
+        const s = makeStudent("", "", otherCols);
+        tplState.students.push(s);
+        return s;
+      }
+
+      function applyStudentValue(s, field, colKey, value) {
+        if (field === "studentId") {
+          s.studentId = value.trim();
+          s.combined = `${s.studentId}${s.fullName}`;
+        } else if (field === "fullName") {
+          s.fullName = value.trim();
+          s.combined = `${s.studentId}${s.fullName}`;
+          const { surname, xiaoSurname, lastTwo } = splitChineseName(s.fullName);
+          s.surname = surname; s.xiaoSurname = xiaoSurname; s.lastTwo = lastTwo;
+        } else if (colKey) {
+          s.otherCols[colKey] = value;
+        }
+      }
+
+      function updateStudentField(rowIdx, field, colKey, value) {
+        const s = tplState.students.find(item => item.idx === rowIdx);
+        if (!s) return;
+        applyStudentValue(s, field, colKey, value);
+        renderStudentList();
+        renderPreview();
+      }
+
+      function templateToHtml(tplStr) {
+        return escapeHtml(tplStr).replace(/\{([^}]+)\}/g, match => {
+          const cls = getTokenClass(match);
+          if (!cls) return match;
+          return `<span class="tpl-token ${cls}" contenteditable="false" data-token="${match}">${match}</span>`;
+        });
+      }
+
+      function extractEditorTemplate(editorEl) {
+        let result = "";
+        function walk(node) {
+          if (node.nodeType === Node.TEXT_NODE) {
+            result += node.nodeValue;
+          } else if (node.nodeType === Node.ELEMENT_NODE) {
+            if (node.dataset && node.dataset.token) {
+              result += node.dataset.token;
+            } else if (node.tagName === "BR") {
+              result += "\n";
+            } else {
+              const isBlock = node.tagName === "DIV" || node.tagName === "P";
+              if (isBlock && result.length > 0 && !result.endsWith("\n")) result += "\n";
+              node.childNodes.forEach(walk);
+            }
+          }
+        }
+        editorEl.childNodes.forEach(walk);
+        return result.replace(/\u00A0/g, " ");
+      }
+
+      function createTokenNode(tokenStr) {
+        const span = document.createElement("span");
+        span.className = `tpl-token ${getTokenClass(tokenStr) || "tok-combined"}`;
+        span.contentEditable = "false";
+        span.dataset.token = tokenStr;
+        span.textContent = tokenStr;
+        return span;
+      }
+
+      function saveSelection(editorEl) {
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0) {
+          const range = sel.getRangeAt(0);
+          if (editorEl.contains(range.commonAncestorContainer)) {
+            tplState.activeEditor = editorEl;
+            tplState.savedRange = range.cloneRange();
+          }
+        }
+      }
+
+      function insertTokenIntoEditor(tokenStr) {
+        if (tplState.centerMode !== "template") switchCenterTab("template");
+        const target = tplState.activeEditor || el.messageEditor;
+        target.focus();
+        const tokenNode = createTokenNode(tokenStr);
+        const sel = window.getSelection();
+        if (tplState.savedRange && target.contains(tplState.savedRange.commonAncestorContainer)) {
+          sel.removeAllRanges();
+          sel.addRange(tplState.savedRange);
+        }
+        if (sel && sel.rangeCount > 0 && target.contains(sel.anchorNode)) {
+          const range = sel.getRangeAt(0);
+          range.deleteContents();
+          range.insertNode(tokenNode);
+          range.setStartAfter(tokenNode);
+          range.setEndAfter(tokenNode);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          tplState.savedRange = range.cloneRange();
+        } else {
+          target.appendChild(tokenNode);
+        }
+        saveTemplatesToStorage();
+        renderPreview();
+      }
+
+      function evaluateTemplate(tpl, student, depth = 0) {
+        let hasNested = false;
+        const out = String(tpl ?? "").replace(/\{([^}]+)\}/g, (match, k) => {
+          if (k === "学号姓名") return student.combined;
+          if (k === "学号") return student.studentId;
+          if (k === "全名") return student.fullName;
+          if (k === "姓氏") return student.surname;
+          if (k === "小姓") return student.xiaoSurname;
+          if (k === "名字后两个字") return student.lastTwo;
+          const col = tplState.otherColMeta.find(c => c.label === k);
+          if (col) {
+            const val = student.otherCols[col.key] ?? "";
+            if (depth === 0 && /\{[^}]+\}/.test(val)) hasNested = true;
+            return val;
+          }
+          return match;
+        });
+        return depth === 0 && hasNested ? evaluateTemplate(out, student, 1) : out;
+      }
+
+      function buildResultJson() {
+        const nameTpl = extractEditorTemplate(el.studentNameEditor).trim() || "{学号姓名}";
+        const msgTpl = extractEditorTemplate(el.messageEditor);
+        return getActiveStudents().map(s => ({
+          studentName: evaluateTemplate(nameTpl, s),
+          message: evaluateTemplate(msgTpl, s)
+        }));
+      }
+
+      function renderPreview() {
+        const sliced = buildResultJson().slice(0, parseInt(el.previewLimitSelect.value, 10) || 5);
+        if (tplState.previewMode === "json") {
+          el.previewContainer.innerHTML = `<pre class="tpl-json-raw">${escapeHtml(JSON.stringify(sliced, null, 2))}</pre>`;
+          return;
+        }
+        if (sliced.length === 0) {
+          el.previewContainer.innerHTML = `<div class="tpl-excel-empty">暂无预览数据</div>`;
+          return;
+        }
+        el.previewContainer.innerHTML = `<div class="tpl-preview-list">${sliced.map((item, i) => `
+          <div class="tpl-preview-card">
+            <div class="tpl-preview-header">
+              <span class="tpl-preview-name">${escapeHtml(item.studentName || "(未命名)")}</span>
+              <span class="tpl-meta-text">#${i + 1}</span>
+            </div>
+            <div class="tpl-preview-msg">${escapeHtml(item.message)}</div>
+          </div>`).join("")}</div>`;
+      }
+
+      function updateAll() {
+        renderStudentList();
+        if (tplState.centerMode === "table") renderExcelTable();
+        renderPreview();
+      }
+
+      function switchCenterTab(mode) {
+        tplState.centerMode = mode;
+        const isTpl = mode === "template";
+        el.tabTemplateBtn.classList.toggle("active", isTpl);
+        el.tabTableBtn.classList.toggle("active", !isTpl);
+        el.templatePane.style.display = isTpl ? "flex" : "none";
+        el.tablePane.style.display = isTpl ? "none" : "flex";
+        el.clearBtn.style.display = isTpl ? "" : "none";
+        if (!isTpl) renderExcelTable();
+      }
+
+      function downloadExcelTemplate() {
+        if (typeof XLSX === "undefined") { showToast("XLSX 解析库尚未就绪"); return; }
+        let aoa;
+        let fileName = "学生信息模板.xlsx";
+        if (tplState.students.length > 0) {
+          const msgCol = tplState.otherColMeta.find(c => MSG_COL_REGEX.test(c.label));
+          aoa = [["学号姓名", "待发送内容"]];
+          tplState.students.forEach(s => {
+            aoa.push([s.combined || `${s.studentId}${s.fullName}`, msgCol ? (s.otherCols[msgCol.key] ?? "") : ""]);
+          });
+          fileName = (tplState.fileName || "学生数据").replace(/\.json$/i, "") + "_模板.xlsx";
+        } else {
+          aoa = [
+            ["学号姓名", "待发送内容"],
+            ["10001张三", "张三同学你好，你的本次分数为95分，继续保持。"],
+            ["10002李四", "李四同学你好，你的本次分数为88分，继续加油。"],
+            ["10003欧阳修", "欧阳修同学你好，你的本次分数为92分，表现优秀。"]
+          ];
+        }
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        ws["!cols"] = [{ wch: 18 }, { wch: 48 }];
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "学生模板");
+        XLSX.writeFile(wb, fileName);
+        showToast(`已下载模板 ${fileName}`);
+      }
+
+      function exportCurrentTableXlsx() {
+        if (typeof XLSX === "undefined") { showToast("XLSX 解析库尚未就绪"); return; }
+        if (tplState.students.length === 0) { showToast("当前表格为空"); return; }
+        const headers = ["学号", "姓名", ...tplState.otherColMeta.map(c => c.label)];
+        const aoa = [headers, ...tplState.students.map(s => [s.studentId, s.fullName, ...tplState.otherColMeta.map(c => s.otherCols[c.key] ?? "")])];
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        ws["!cols"] = headers.map(() => ({ wch: 16 }));
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "学生数据");
+        const outName = (tplState.fileName || "学生数据").replace(/\.json$/i, "") + ".xlsx";
+        XLSX.writeFile(wb, outName);
+        showToast(`已导出 ${outName}`);
+      }
+
+      function handleSheetFile(file) {
+        if (!file) return;
+        const ext = file.name.split(".").pop().toLowerCase();
+        const reader = new FileReader();
+        if (ext === "csv") {
+          reader.onload = e => {
+            const buffer = e.target.result;
+            let text = new TextDecoder("utf-8").decode(buffer);
+            if (text.includes("\uFFFD")) text = new TextDecoder("gb18030").decode(buffer);
+            parseWorkbook(text, true, file.name);
+          };
+        } else {
+          reader.onload = e => parseWorkbook(new Uint8Array(e.target.result), false, file.name);
+        }
+        reader.readAsArrayBuffer(file);
+      }
+
+      function parseWorkbook(data, isCsvText, fileName) {
+        if (typeof XLSX === "undefined") { showToast("XLSX 解析库尚未就绪"); return; }
+        const wb = XLSX.read(data, { type: isCsvText ? "string" : "array", raw: false });
+        tplState.workbook = wb;
+        if (wb.SheetNames.length > 1) {
+          el.sheetSelect.style.display = "";
+          el.sheetSelect.innerHTML = wb.SheetNames.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
+        } else {
+          el.sheetSelect.style.display = "none";
+        }
+        loadSheet(wb.SheetNames[0], fileName);
+      }
+
+      function loadSheet(sheetName, fileName) {
+        const sheet = tplState.workbook.Sheets[sheetName];
+        const rows2D = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false });
+        parseSheet2D(rows2D, fileName || tplState.fileName);
+      }
+
+      function saveTemplatesToStorage() {
+        try {
+          localStorage.setItem("sender_tpl_student_v1", extractEditorTemplate(el.studentNameEditor));
+          localStorage.setItem("sender_tpl_msg_v1", extractEditorTemplate(el.messageEditor));
+        } catch (_) {}
+      }
+
+      function restoreTemplatesFromStorage() {
+        try {
+          el.studentNameEditor.innerHTML = templateToHtml(localStorage.getItem("sender_tpl_student_v1") || "{学号姓名}");
+          el.messageEditor.innerHTML = templateToHtml(localStorage.getItem("sender_tpl_msg_v1") || "");
+        } catch (_) {
+          el.studentNameEditor.innerHTML = templateToHtml("{学号姓名}");
+          el.messageEditor.innerHTML = "";
+        }
+      }
+
+      function bindEventsOnce() {
+        if (tplState.initialized) return;
+        tplState.initialized = true;
+
+        el.fileInput.addEventListener("change", e => {
+          handleSheetFile(e.target.files[0]);
+          e.target.value = "";
+        });
+        el.downloadSampleBtn.addEventListener("click", downloadExcelTemplate);
+
+        el.dropZone.addEventListener("dragover", e => { e.preventDefault(); el.dropZone.classList.add("dragover"); });
+        el.dropZone.addEventListener("dragleave", () => el.dropZone.classList.remove("dragover"));
+        el.dropZone.addEventListener("drop", e => {
+          e.preventDefault();
+          el.dropZone.classList.remove("dragover");
+          if (e.dataTransfer.files.length) handleSheetFile(e.dataTransfer.files[0]);
+        });
+
+        el.sheetSelect.addEventListener("change", () => loadSheet(el.sheetSelect.value, tplState.fileName));
+
+        [el.studentNameEditor, el.messageEditor].forEach(ed => {
+          ed.addEventListener("focus", () => { tplState.activeEditor = ed; });
+          ed.addEventListener("keyup", () => saveSelection(ed));
+          ed.addEventListener("mouseup", () => saveSelection(ed));
+          ed.addEventListener("input", () => { saveSelection(ed); saveTemplatesToStorage(); renderPreview(); });
+        });
+        tplState.activeEditor = el.messageEditor;
+
+        [el.identityChips, el.customColChips].forEach(container => {
+          container.addEventListener("click", e => {
+            const chip = e.target.closest(".tpl-chip");
+            if (chip && chip.dataset.insert) insertTokenIntoEditor(chip.dataset.insert);
+          });
+        });
+
+        const openAddColBar = () => {
+          if (tplState.centerMode !== "table") switchCenterTab("table");
+          el.addColBar.classList.add("show");
+          el.newColNameInput.value = "";
+          el.newColNameInput.focus();
+        };
+        el.quickAddColBtn.addEventListener("click", openAddColBar);
+        el.tableAddColBtn.addEventListener("click", openAddColBar);
+        const confirmAddCol = () => { if (addCustomColumn(el.newColNameInput.value)) el.addColBar.classList.remove("show"); };
+        el.confirmAddColBtn.addEventListener("click", confirmAddCol);
+        el.cancelAddColBtn.addEventListener("click", () => el.addColBar.classList.remove("show"));
+        el.newColNameInput.addEventListener("keydown", e => {
+          if (e.key === "Enter") { e.preventDefault(); confirmAddCol(); }
+          else if (e.key === "Escape") el.addColBar.classList.remove("show");
+        });
+
+        el.tableAddRowBtn.addEventListener("click", () => {
+          addStudentRow();
+          updateAll();
+          const inputs = el.excelTableWrap.querySelectorAll('input[data-field="studentId"]');
+          if (inputs.length) inputs[inputs.length - 1].focus();
+        });
+        el.exportTableXlsxBtn.addEventListener("click", exportCurrentTableXlsx);
+
+        el.tabTemplateBtn.addEventListener("click", () => switchCenterTab("template"));
+        el.tabTableBtn.addEventListener("click", () => switchCenterTab("table"));
+
+        el.applyMsgColBtn.addEventListener("click", () => {
+          if (!tplState.detectedMsgColLabel) return;
+          el.messageEditor.innerHTML = templateToHtml(`{${tplState.detectedMsgColLabel}}`);
+          saveTemplatesToStorage();
+          renderPreview();
+          el.msgColBanner.style.display = "none";
+          showToast(`已应用 {${tplState.detectedMsgColLabel}}`);
+        });
+
+        el.excelTableWrap.addEventListener("input", e => {
+          if (e.target.classList.contains("tpl-excel-cell")) {
+            updateStudentField(Number(e.target.dataset.rowIdx), e.target.dataset.field, e.target.dataset.colKey, e.target.value);
+          }
+        });
+
+        el.excelTableWrap.addEventListener("blur", e => {
+          if (e.target.classList.contains("tpl-excel-cell")) {
+            refreshOtherColMetaCounts();
+            renderColumnFilters();
+          } else if (e.target.classList.contains("tpl-rename-col-input")) {
+            renameCustomColumn(e.target.dataset.colKey, e.target.value);
+          }
+        }, true);
+
+        el.excelTableWrap.addEventListener("keydown", e => {
+          if (e.target.classList.contains("tpl-rename-col-input")) {
+            if (e.key === "Enter") { e.preventDefault(); renameCustomColumn(e.target.dataset.colKey, e.target.value); }
+            else if (e.key === "Escape") { tplState.editingColKey = null; renderExcelTable(); }
+            return;
+          }
+          if (!e.target.classList.contains("tpl-excel-cell")) return;
+          const rPos = Number(e.target.dataset.rowPos);
+          const cPos = Number(e.target.dataset.colPos);
+          const t = e.target;
+          let nextR = rPos, nextC = cPos, move = false;
+          if (e.key === "Enter" || e.key === "ArrowDown") { nextR++; move = true; }
+          else if (e.key === "ArrowUp") { nextR--; move = true; }
+          else if (e.key === "ArrowLeft" && t.selectionStart === 0 && t.selectionEnd === 0) { nextC--; move = true; }
+          else if (e.key === "ArrowRight" && t.selectionStart === t.value.length && t.selectionEnd === t.value.length) { nextC++; move = true; }
+          if (move) {
+            e.preventDefault();
+            const next = el.excelTableWrap.querySelector(`.tpl-excel-cell[data-row-pos="${nextR}"][data-col-pos="${nextC}"]`);
+            if (next) { next.focus(); next.select(); }
+          }
+        });
+
+        el.excelTableWrap.addEventListener("paste", e => {
+          if (!e.target.classList.contains("tpl-excel-cell")) return;
+          const text = (e.clipboardData || window.clipboardData).getData("text");
+          if (!text || (!text.includes("\n") && !text.includes("\t"))) return;
+          e.preventDefault();
+          const rows = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+          if (rows.length > 1 && rows[rows.length - 1] === "") rows.pop();
+          const matrix = rows.map(r => r.split("\t"));
+          const startR = Number(e.target.dataset.rowPos);
+          const startC = Number(e.target.dataset.colPos);
+          const filtered = getFilteredStudents();
+          const colFields = [{ field: "studentId" }, { field: "fullName" }, ...tplState.otherColMeta.map(c => ({ colKey: c.key }))];
+          let filled = 0;
+          matrix.forEach((rowVals, rOff) => {
+            let student = filtered[startR + rOff];
+            if (!student) { student = addStudentRow(); filtered.push(student); }
+            rowVals.forEach((val, cOff) => {
+              const target = colFields[startC + cOff];
+              if (!target) return;
+              applyStudentValue(student, target.field, target.colKey, val.trim());
+              filled++;
+            });
+          });
+          refreshOtherColMetaCounts();
+          renderColumnFilters();
+          updateAll();
+          showToast(`已从剪贴板批量填充 ${filled} 个单元格`);
+        });
+
+        el.excelTableWrap.addEventListener("click", e => {
+          const renameBtn = e.target.closest(".tpl-rename-col-btn");
+          if (renameBtn) { tplState.editingColKey = renameBtn.dataset.colKey; renderExcelTable(); return; }
+          const delColBtn = e.target.closest(".tpl-delete-col-btn");
+          if (delColBtn) { deleteCustomColumn(delColBtn.dataset.colKey); return; }
+          const delRowBtn = e.target.closest(".tpl-delete-row-btn");
+          if (delRowBtn) {
+            const rowIdx = Number(delRowBtn.dataset.rowIdx);
+            tplState.students = tplState.students.filter(s => s.idx !== rowIdx);
+            tplState.uncheckedIndices.delete(rowIdx);
+            refreshOtherColMetaCounts();
+            renderColumnFilters();
+            updateAll();
+          }
+        });
+
+        el.colFiltersContainer.addEventListener("click", e => {
+          const toggleBtn = e.target.closest(".tpl-toggle-filter-btn");
+          if (toggleBtn) {
+            const k = toggleBtn.dataset.col;
+            if (tplState.collapsedFilterCols.has(k)) tplState.collapsedFilterCols.delete(k);
+            else tplState.collapsedFilterCols.add(k);
+            renderColumnFilters();
+            return;
+          }
+          const pill = e.target.closest(".tpl-filter-pill");
+          if (!pill) return;
+          const set = tplState.activeColFilters[pill.dataset.col];
+          if (!set) return;
+          const val = pill.dataset.val;
+          if (set.has(val)) set.delete(val); else set.add(val);
+          renderColumnFilters();
+          updateAll();
+        });
+
+        el.resetFiltersBtn.addEventListener("click", () => {
+          Object.values(tplState.activeColFilters).forEach(s => s.clear());
+          renderColumnFilters();
+          updateAll();
+        });
+
+        el.studentList.addEventListener("change", e => {
+          if (e.target.matches('input[type="checkbox"]')) {
+            const idx = Number(e.target.dataset.idx);
+            if (e.target.checked) tplState.uncheckedIndices.delete(idx);
+            else tplState.uncheckedIndices.add(idx);
+            updateAll();
+          }
+        });
+
+        el.selectAllBtn.addEventListener("click", () => { tplState.uncheckedIndices.clear(); updateAll(); });
+        el.invertSelectBtn.addEventListener("click", () => {
+          getFilteredStudents().forEach(s => {
+            if (tplState.uncheckedIndices.has(s.idx)) tplState.uncheckedIndices.delete(s.idx);
+            else tplState.uncheckedIndices.add(s.idx);
+          });
+          updateAll();
+        });
+
+        el.clearBtn.addEventListener("click", () => {
+          el.messageEditor.innerHTML = "";
+          saveTemplatesToStorage();
+          renderPreview();
+        });
+
+        el.previewLimitSelect.addEventListener("change", renderPreview);
+        el.viewCardBtn.addEventListener("click", () => {
+          tplState.previewMode = "card";
+          el.viewCardBtn.classList.add("active");
+          el.viewJsonBtn.classList.remove("active");
+          renderPreview();
+        });
+        el.viewJsonBtn.addEventListener("click", () => {
+          tplState.previewMode = "json";
+          el.viewJsonBtn.classList.add("active");
+          el.viewCardBtn.classList.remove("active");
+          renderPreview();
+        });
+
+        el.copyJsonBtn.addEventListener("click", () => {
+          navigator.clipboard.writeText(JSON.stringify(buildResultJson(), null, 2)).then(() => showToast("JSON 已复制到剪贴板"));
+        });
+
+        el.downloadJsonBtn.addEventListener("click", () => {
+          const blob = new Blob([JSON.stringify(buildResultJson(), null, 2)], { type: "application/json;charset=utf-8" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = tplState.fileName || "模板生成反馈.json";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          showToast(`已导出 ${a.download}`);
+        });
+
+        el.importQueueBtn.addEventListener("click", async () => {
+          const payload = buildResultJson().filter(item => item.studentName && item.message.trim() !== "");
+          if (payload.length === 0) {
+            showToast("暂无可导入的有效学员话术，请先确认已选中学员并填写话术正文");
+            return;
+          }
+          el.importQueueBtn.disabled = true;
+          try {
+            const res = await fetch("/api/upload", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                files: [{
+                  name: tplState.fileName || "模板生成反馈.json",
+                  content: JSON.stringify(payload, null, 2)
+                }]
+              })
+            });
+            const data = await res.json();
+            if (data && data.success) {
+              closeModal("tplGenModal");
+              showToast(`已导入 ${data.count || payload.length} 位学员到发送队列`);
+              fetchState();
+            } else {
+              alert(`导入失败: ${(data && data.message) || "未知异常"}`);
+            }
+          } catch (err) {
+            alert(`网络异常: ${err}`);
+          } finally {
+            el.importQueueBtn.disabled = false;
+          }
+        });
+
+        restoreTemplatesFromStorage();
+        renderCustomColChips();
+        updateAll();
+      }
+
+      window.openTplGenModal = function() {
+        bindEventsOnce();
+        openModal("tplGenModal");
+      };
+
+      window.openTplGenModalWithFile = function(file) {
+        bindEventsOnce();
+        openModal("tplGenModal");
+        handleSheetFile(file);
+      };
+    })();
   </script>
 </body>
 </html>

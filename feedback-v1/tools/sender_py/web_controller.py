@@ -23,7 +23,11 @@ try:
         open_sample_chat_for_calibration, safe_copy, send_student, summarize_status_counts
     )
     from sender_py.store import HistoryManager, SentFilesManager
-    from sender_py.utils import parse_student_identifier
+    from sender_py.utils import (
+        build_items_from_attachment_files,
+        match_files_to_students,
+        parse_student_identifier,
+    )
     from sender_py.window_utils import GlobalEscWatcher
     from sender_py.cloud_control import get_cloud_control_manager
     from sender_py.file_logger import (
@@ -44,7 +48,11 @@ except ModuleNotFoundError:
         open_sample_chat_for_calibration, safe_copy, send_student, summarize_status_counts
     )
     from store import HistoryManager, SentFilesManager
-    from utils import parse_student_identifier
+    from utils import (
+        build_items_from_attachment_files,
+        match_files_to_students,
+        parse_student_identifier,
+    )
     try:
         from cloud_control import get_cloud_control_manager
     except Exception:
@@ -90,6 +98,9 @@ class WebController:
         self.file_counts = {}    # path -> count
         self.duplicate_count = 0 # 去重条数
         self.reply_notes = []    # 待回学员条目
+        self.global_attachments = []   # 全员公共附件绝对路径列表
+        self.send_mode = "both"        # "both" (文字+附件) | "files_only" (仅发附件) | "text_only" (仅发文字)
+        self.default_file_message = "" # 直接从附件构建队列时的可选统一话术
 
         self.history = HistoryManager()
         self.sent_files = SentFilesManager()
@@ -352,11 +363,17 @@ class WebController:
             return {"success": False, "message": f"文件解析失败: {exc}"}
 
         with self._lock:
+            prev_files_map = {}
+            for old_it in self.items:
+                old_key = ((old_it.get("sid") or "").strip(), (old_it.get("sname") or "").strip())
+                if any(old_key) and old_it.get("files"):
+                    prev_files_map[old_key] = list(old_it.get("files") or [])
+
             self.input_paths = target_paths
             self.file_counts = dict(file_counts)
             self.duplicate_count = duplicates
 
-            # 为每个 item 赋予唯一 ID 与默认选中状态
+            # 为每个 item 赋予唯一 ID 与默认选中状态，并保留此前已挂载的专属附件
             for idx, it in enumerate(items):
                 sid = (it.get("sid") or "").strip()
                 sname = (it.get("sname") or "").strip()
@@ -365,6 +382,12 @@ class WebController:
                 it["_status"] = it.get("_status") or "待发送"
                 it["_last_reason"] = it.get("_last_reason") or ""
                 it["_last_result"] = it.get("_last_result") or ""
+                it["_text_sent"] = bool(it.get("_text_sent", False))
+                merged_files = list(it.get("files") or [])
+                for old_f in prev_files_map.get((sid, sname), []):
+                    if old_f not in merged_files:
+                        merged_files.append(old_f)
+                it["files"] = merged_files
             self.items = items
 
         try:
@@ -404,6 +427,7 @@ class WebController:
             self.items.clear()
             self.file_counts.clear()
             self.duplicate_count = 0
+            self.global_attachments.clear()
             self.progress["processed"] = 0
             self.progress["total"] = 0
             self.progress["current_name"] = ""
@@ -415,6 +439,243 @@ class WebController:
         self.emit("已清空文件池与学员列表。")
         self._notify_state_change()
         return {"success": True}
+
+    # ================= 附件管理与智能匹配 =================
+
+    def _get_effective_files(self, item: dict) -> list:
+        """获取某位学员最终应发送的附件列表（专属附件 + 全员公共附件，去重保序）。"""
+        out = []
+        seen = set()
+        for p in list(item.get("files") or []) + list(self.global_attachments or []):
+            s = str(p or "").strip()
+            if not s:
+                continue
+            norm = os.path.normpath(s)
+            key = os.path.normcase(norm)
+            if key not in seen:
+                seen.add(key)
+                out.append(norm)
+        return out
+
+    def _expand_attachment_paths(self, paths: list) -> list:
+        """将传入的文件或文件夹路径展开为有效本地文件绝对路径列表（忽略临时文件与隐藏文件）。"""
+        expanded = []
+        seen = set()
+        ignored_names = {"thumbs.db", ".ds_store", "desktop.ini"}
+        for raw in (paths or []):
+            s = str(raw or "").strip()
+            if not s:
+                continue
+            norm = os.path.normpath(os.path.abspath(s))
+            if os.path.isdir(norm):
+                try:
+                    entries = sorted(os.listdir(norm))
+                except Exception:
+                    entries = []
+                for fname in entries:
+                    if fname.startswith(".") or fname.startswith("~$") or fname.lower() in ignored_names:
+                        continue
+                    fpath = os.path.join(norm, fname)
+                    if os.path.isfile(fpath):
+                        key = os.path.normcase(fpath)
+                        if key not in seen:
+                            seen.add(key)
+                            expanded.append(fpath)
+            elif os.path.isfile(norm):
+                fname = os.path.basename(norm)
+                if fname.startswith("~$") or fname.lower() in ignored_names:
+                    continue
+                key = os.path.normcase(norm)
+                if key not in seen:
+                    seen.add(key)
+                    expanded.append(norm)
+        return expanded
+
+    def attach_and_match_files(
+        self,
+        paths: list,
+        create_items_if_empty: bool = True,
+        default_message: str = None,
+    ) -> dict:
+        """智能匹配专属附件；当队列为空且 create_items_if_empty=True 时直接从附件文件名构建发送队列。"""
+        if self._running:
+            return {"success": False, "message": "正在发送中，无法修改附件"}
+
+        valid_files = self._expand_attachment_paths(paths)
+        if not valid_files:
+            return {"success": False, "message": "未找到有效的附件文件"}
+
+        with self._lock:
+            if default_message is not None:
+                self.default_file_message = str(default_message)
+            eff_default_msg = self.default_file_message
+
+            if not self.items and create_items_if_empty:
+                built_items, unmatched = build_items_from_attachment_files(
+                    valid_files, default_message=eff_default_msg
+                )
+                if not built_items:
+                    return {
+                        "success": False,
+                        "message": f"所选 {len(valid_files)} 个文件的文件名中均未识别出『学号+姓名』（如 90001张三.pdf）",
+                    }
+                for idx, it in enumerate(built_items):
+                    sid = (it.get("sid") or "").strip()
+                    sname = (it.get("sname") or "").strip()
+                    it["_id"] = f"{sid}_{sname}_{idx}"
+                    it["_selected"] = True
+                    it["_status"] = "待发送"
+                    it["_last_reason"] = ""
+                    it["_last_result"] = ""
+                    it["_text_sent"] = False
+                    it["_archive_key"] = "附件直发队列 [第 1 周]"
+                self.items = built_items
+                matched_files_cnt = len(valid_files) - len(unmatched)
+                if not eff_default_msg.strip():
+                    self.send_mode = "files_only"
+                msg = f"已从附件文件名自动生成 {len(built_items)} 位学员队列（共挂载 {matched_files_cnt} 个文件"
+                if unmatched:
+                    msg += f"，{len(unmatched)} 个文件未识别出学号姓名"
+                msg += "）。"
+                res_payload = {
+                    "success": True,
+                    "mode": "created_queue",
+                    "matched_students": len(built_items),
+                    "matched_files": matched_files_cnt,
+                    "unmatched_count": len(unmatched),
+                    "unmatched_files": [os.path.basename(p) for p in unmatched[:20]],
+                    "message": msg,
+                }
+            else:
+                match_res = match_files_to_students(valid_files, self.items)
+                unmatched = match_res["unmatched_files"]
+                msg = (
+                    f"附件匹配完成：成功为 {match_res['matched_students']}/{len(self.items)} 位学员"
+                    f"挂载 {match_res['matched_files']} 个专属文件"
+                )
+                if unmatched:
+                    msg += f"（另有 {len(unmatched)} 个文件未匹配到当前名单）"
+                res_payload = {
+                    "success": True,
+                    "mode": "matched_existing",
+                    "matched_students": match_res["matched_students"],
+                    "matched_files": match_res["matched_files"],
+                    "unmatched_count": len(unmatched),
+                    "unmatched_files": [os.path.basename(p) for p in unmatched[:20]],
+                    "message": msg,
+                }
+
+        self.emit(res_payload["message"])
+        self._notify_state_change()
+        return res_payload
+
+    def add_global_attachments(self, paths: list) -> dict:
+        """添加全员公共附件。"""
+        if self._running:
+            return {"success": False, "message": "正在发送中，无法修改公共附件"}
+        valid_files = self._expand_attachment_paths(paths)
+        if not valid_files:
+            return {"success": False, "message": "未找到有效的公共附件文件"}
+        added = 0
+        with self._lock:
+            existing_norm = {os.path.normcase(p) for p in self.global_attachments}
+            for p in valid_files:
+                if os.path.normcase(p) not in existing_norm:
+                    self.global_attachments.append(p)
+                    existing_norm.add(os.path.normcase(p))
+                    added += 1
+            total_global = len(self.global_attachments)
+        self.emit(f"已添加 {added} 个全员公共附件（当前共 {total_global} 个公共附件）。")
+        self._notify_state_change()
+        return {"success": True, "added": added, "total": total_global}
+
+    def remove_global_attachment(self, path: str) -> dict:
+        """移除指定的全员公共附件。"""
+        if self._running:
+            return {"success": False, "message": "正在发送中，无法移除公共附件"}
+        target = os.path.normcase(os.path.normpath(str(path or "").strip()))
+        with self._lock:
+            before = len(self.global_attachments)
+            self.global_attachments = [
+                p for p in self.global_attachments if os.path.normcase(os.path.normpath(p)) != target
+            ]
+            after = len(self.global_attachments)
+        if before != after:
+            self.emit(f"已移除公共附件：{os.path.basename(path)}")
+        self._notify_state_change()
+        return {"success": True, "total": after}
+
+    def clear_all_attachments(self) -> dict:
+        """清空所有公共附件与学员专属附件。"""
+        if self._running:
+            return {"success": False, "message": "正在发送中，无法清空附件"}
+        with self._lock:
+            self.global_attachments.clear()
+            for it in self.items:
+                it["files"] = []
+                it["_text_sent"] = False
+            if self.send_mode == "files_only":
+                self.send_mode = "both"
+        self.emit("已清空所有专属附件与公共附件。")
+        self._notify_state_change()
+        return {"success": True}
+
+    def update_student_attachments(
+        self, student_id: str, action: str, paths: list = None, path: str = ""
+    ) -> dict:
+        """针对单个学员添加、移除或清空专属附件。"""
+        if self._running:
+            return {"success": False, "message": "正在发送中，无法修改学员附件"}
+        sid_target = str(student_id or "").strip()
+        with self._lock:
+            target_item = next((it for it in self.items if it.get("_id") == sid_target), None)
+            if target_item is None:
+                return {"success": False, "message": "未找到对应的学员条目"}
+            cur_files = list(target_item.get("files") or [])
+            if action == "add":
+                valid = self._expand_attachment_paths(paths or ([path] if path else []))
+                existing = {os.path.normcase(p) for p in cur_files}
+                for p in valid:
+                    if os.path.normcase(p) not in existing:
+                        cur_files.append(p)
+                        existing.add(os.path.normcase(p))
+                target_item["files"] = cur_files
+            elif action == "remove":
+                rm_norm = os.path.normcase(os.path.normpath(str(path or "").strip()))
+                target_item["files"] = [
+                    p for p in cur_files if os.path.normcase(os.path.normpath(p)) != rm_norm
+                ]
+            elif action == "clear":
+                target_item["files"] = []
+        self._notify_state_change()
+        return {"success": True, "files": [os.path.basename(p) for p in target_item.get("files", [])]}
+
+    def set_attachment_options(
+        self,
+        send_mode: str = None,
+        default_file_message: str = None,
+        apply_message_to_all: bool = False,
+    ) -> dict:
+        """设置附件发送模式（both / files_only / text_only）或统一补充话术。"""
+        if self._running:
+            return {"success": False, "message": "正在发送中，无法修改发送设置"}
+        with self._lock:
+            if send_mode in ("both", "files_only", "text_only"):
+                self.send_mode = send_mode
+            if default_file_message is not None:
+                self.default_file_message = str(default_file_message)
+                if apply_message_to_all:
+                    for it in self.items:
+                        it["message"] = self.default_file_message
+                        it["_text_sent"] = False
+                    if self.default_file_message.strip() and self.send_mode == "files_only":
+                        self.send_mode = "both"
+        self._notify_state_change()
+        return {
+            "success": True,
+            "send_mode": self.send_mode,
+            "default_file_message": self.default_file_message,
+        }
 
     # ================= 勾选与筛选管理 =================
 
@@ -437,6 +698,9 @@ class WebController:
             elif action == "invert":
                 for it in self.items:
                     it["_selected"] = not it.get("_selected", True)
+            elif action == "has_attachments":
+                for it in self.items:
+                    it["_selected"] = bool(self._get_effective_files(it))
             elif action == "select_ids" and ids is not None:
                 id_set = set(ids)
                 for it in self.items:
@@ -660,6 +924,8 @@ class WebController:
                 name = item.get("studentName", "")
                 sid = item.get("sid", "")
                 msg_len = len(item.get("message", ""))
+                eff_files = self._get_effective_files(item)
+                eff_send_mode = self.send_mode
 
                 # 保护机制：如果当前学生已被标记为已发送，安全跳过
                 if item.get("_status") == "已发送":
@@ -668,12 +934,14 @@ class WebController:
 
                 with self._lock:
                     item["_status"] = "发送中"
+                    item["_effective_files"] = eff_files
                     self.progress["current_name"] = name
                     self.progress["step_text"] = f"正在发送：{name} ({processed + 1}/{selected_count})"
                 self._sync_runtime_context()
                 self._notify_state_change()
 
-                self.emit(f"▶ 正在处理 [{processed + 1}/{selected_count}]: {name} (学号: {sid}) | 话术字数: {msg_len} 字")
+                file_info_str = f" | 附件: {len(eff_files)} 个" if eff_files else ""
+                self.emit(f"▶ 正在处理 [{processed + 1}/{selected_count}]: {name} (学号: {sid}) | 话术字数: {msg_len} 字{file_info_str}")
 
                 try:
                     res = send_student(
@@ -688,6 +956,7 @@ class WebController:
                         snapshot_policy=eff_snapshot_policy,
                         check_sidebar=(not sidebar_checked),
                         roi_cache=roi_cache,
+                        send_mode=eff_send_mode,
                     )
                 except Exception as exc:
                     res = {"result": "error", "reason": f"异常: {exc}", "notes": []}
@@ -717,8 +986,12 @@ class WebController:
                     item["_last_result"] = "paused" if result == "sidebar_open" else result
                     item["_last_reason"] = reason
                     if result == "sent":
-                        # 成功发送后自动取消勾选
+                        # 成功发送后自动取消勾选并清除半成功标记
                         item["_selected"] = False
+                        item["_text_sent"] = False
+                    elif res.get("text_sent"):
+                        # 文字已发但附件失败：记录半成功标记，重试时仅补发附件不重复发文字
+                        item["_text_sent"] = True
                     if result not in ("stopped", "sidebar_open"):
                         processed += 1
                     self.progress["processed"] = processed
@@ -1013,6 +1286,12 @@ class WebController:
                     "sname": it.get("sname", ""),
                     "studentName": it.get("studentName", ""),
                     "message": it.get("message", ""),
+                    "files": [
+                        {"path": p, "name": os.path.basename(p)}
+                        for p in (it.get("files") or [])
+                    ],
+                    "effective_files_count": len(self._get_effective_files(it)),
+                    "text_sent": bool(it.get("_text_sent", False)),
                     "status": it.get("_status", "待发送"),
                     "last_reason": it.get("_last_reason", ""),
                     "selected": it.get("_selected", True),
@@ -1020,6 +1299,11 @@ class WebController:
                 }
                 for it in self.items
             ]
+            global_files_list = [
+                {"path": p, "name": os.path.basename(p)}
+                for p in self.global_attachments
+            ]
+            matched_students_count = sum(1 for it in self.items if it.get("files"))
             return {
                 "running": self._running,
                 "stop_requested": self._stop_requested,
@@ -1032,8 +1316,12 @@ class WebController:
                     "unmatched": counts["未匹配"],
                     "blocked": counts["已拦截"],
                     "skipped": counts["已跳过"],
+                    "matched_attachments": matched_students_count,
                 },
                 "files": files_list,
+                "global_attachments": global_files_list,
+                "send_mode": self.send_mode,
+                "default_file_message": self.default_file_message,
                 "duplicate_count": self.duplicate_count,
                 "students": students_list,
                 "reply_notes_count": len(actionable(self.reply_notes)),

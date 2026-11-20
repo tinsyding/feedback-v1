@@ -58,7 +58,7 @@ def get_web_ui_html_path() -> str:
 class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
     """处理 WebUI 静态资源与 REST API 请求。"""
 
-    server_version = "JiFangFeedbackWeb/2.0.6"
+    server_version = "JiFangFeedbackWeb/2.1.0"
 
     def log_message(self, format, *args):
         # 静默常规 HTTP 请求，避免终端滚屏刷屏
@@ -132,6 +132,47 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
                     content = f.read()
                 self.send_response(200)
                 self.send_header("Content-Type", "image/x-icon")
+                self.send_header("Content-Length", str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+            else:
+                self.send_response(404)
+                self.end_headers()
+            return
+
+        if path == "/xlsx.full.min.js":
+            xlsx_path = ""
+            nuitka_dir = os.environ.get("NUITKA_ONEFILE_DIRECTORY")
+            if nuitka_dir:
+                for c in (os.path.join(nuitka_dir, "xlsx.full.min.js"), os.path.join(nuitka_dir, "sender_py", "xlsx.full.min.js")):
+                    if os.path.isfile(c):
+                        xlsx_path = c
+                        break
+            if not xlsx_path and getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", None):
+                for c in (os.path.join(sys._MEIPASS, "xlsx.full.min.js"), os.path.join(sys._MEIPASS, "sender_py", "xlsx.full.min.js")):
+                    if os.path.isfile(c):
+                        xlsx_path = c
+                        break
+            if not xlsx_path and (getattr(sys, "frozen", False) or "__compiled__" in globals()):
+                exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+                for c in (os.path.join(exe_dir, "xlsx.full.min.js"), os.path.join(exe_dir, "sender_py", "xlsx.full.min.js")):
+                    if os.path.isfile(c):
+                        xlsx_path = c
+                        break
+            if not xlsx_path:
+                here = os.path.dirname(os.path.abspath(__file__))
+                for c in (
+                    os.path.join(here, "xlsx.full.min.js"),
+                    os.path.normpath(os.path.join(here, "..", "..", "js", "libs", "xlsx.full.min.js")),
+                ):
+                    if os.path.isfile(c):
+                        xlsx_path = c
+                        break
+            if os.path.isfile(xlsx_path):
+                with open(xlsx_path, "rb") as f:
+                    content = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/javascript; charset=utf-8")
                 self.send_header("Content-Length", str(len(content)))
                 self.end_headers()
                 self.wfile.write(content)
@@ -359,6 +400,55 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
         except Exception as exc:
             self.controller.emit(f"⚠️ 打开本地文件选择器失败：{exc}")
 
+    def _choose_native_attachment_folder(self):
+        try:
+            try:
+                from sender_py import window_utils as wu
+            except ModuleNotFoundError:
+                import window_utils as wu
+            folder = wu.pick_folder_foreground(
+                master=None,
+                title="选择学生专属附件文件夹（按学号/姓名自动匹配，或直接生成发送队列）",
+            )
+            if folder:
+                self.controller.attach_and_match_files([folder], create_items_if_empty=True)
+        except Exception as exc:
+            self.controller.emit(f"⚠️ 打开附件文件夹选择器失败：{exc}")
+
+    def _choose_native_attachment_files(self, mode: str = "match", student_id: str = ""):
+        try:
+            try:
+                from sender_py import window_utils as wu
+            except ModuleNotFoundError:
+                import window_utils as wu
+            title_map = {
+                "match": "选择学生专属附件（可按 Ctrl+A 多选，自动按学号/姓名匹配或建队）",
+                "global": "选择全员公共附件（所有勾选学员均会附带发送）",
+                "student": "为该学员选择专属附件文件",
+            }
+            paths = wu.pick_files_foreground(
+                master=None,
+                title=title_map.get(mode, "选择附件文件"),
+                filetypes=[
+                    ("常用教学附件", "*.pdf *.doc *.docx *.xls *.xlsx *.png *.jpg *.jpeg *.zip *.rar *.txt *.md"),
+                    ("PDF 文档", "*.pdf"),
+                    ("图片文件", "*.png *.jpg *.jpeg *.webp *.bmp"),
+                    ("Office 文档", "*.doc *.docx *.xls *.xlsx *.ppt *.pptx"),
+                    ("所有文件", "*.*"),
+                ],
+            )
+            if not paths:
+                return
+            path_list = list(paths)
+            if mode == "global":
+                self.controller.add_global_attachments(path_list)
+            elif mode == "student" and student_id:
+                self.controller.update_student_attachments(student_id, "add", paths=path_list)
+            else:
+                self.controller.attach_and_match_files(path_list, create_items_if_empty=True)
+        except Exception as exc:
+            self.controller.emit(f"⚠️ 打开附件文件选择器失败：{exc}")
+
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
@@ -402,6 +492,41 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({"success": False, "message": "未能提取有效的文件内容"}, 400)
             return
 
+        # 1.5 浏览器端拖拽/上传二进制附件兜底接口
+        if path == "/api/attachments/upload":
+            import base64
+            body = self._read_json_body()
+            mode = str(body.get("mode") or "match").strip()
+            student_id = str(body.get("student_id") or "").strip()
+            attach_dir = os.path.join(self.controller.get_upload_dir(), "attachments")
+            os.makedirs(attach_dir, exist_ok=True)
+            saved_paths = []
+            for f in body.get("files", []):
+                fname = os.path.basename(str(f.get("name") or "attachment.bin").strip())
+                if not fname:
+                    continue
+                b64 = f.get("content_base64")
+                if b64 is not None:
+                    raw_bytes = base64.b64decode(b64)
+                else:
+                    raw = f.get("content", "")
+                    raw_bytes = raw.encode("utf-8") if isinstance(raw, str) else bytes(raw)
+                dest = os.path.join(attach_dir, fname)
+                with open(dest, "wb") as wf:
+                    wf.write(raw_bytes)
+                saved_paths.append(dest)
+            if not saved_paths:
+                self._send_json({"success": False, "message": "未收到有效的附件文件"}, 400)
+                return
+            if mode == "global":
+                res = self.controller.add_global_attachments(saved_paths)
+            elif mode == "student" and student_id:
+                res = self.controller.update_student_attachments(student_id, "add", paths=saved_paths)
+            else:
+                res = self.controller.attach_and_match_files(saved_paths, create_items_if_empty=True)
+            self._send_json(res)
+            return
+
         body = self._read_json_body()
 
         # 2. 从已有路径添加本地文件
@@ -431,6 +556,56 @@ class FeedbackHttpHandler(http.server.BaseHTTPRequestHandler):
         # 4. 清空文件池
         if path == "/api/files/clear":
             res = self.controller.clear_all_files()
+            self._send_json(res)
+            return
+
+        # 4.5 附件选择与管理接口
+        if path == "/api/attachments/choose_folder":
+            threading.Thread(target=self._choose_native_attachment_folder, daemon=True).start()
+            self._send_json({"success": True})
+            return
+
+        if path == "/api/attachments/choose_files":
+            mode = str(body.get("mode") or "match").strip()
+            student_id = str(body.get("student_id") or "").strip()
+            threading.Thread(
+                target=self._choose_native_attachment_files,
+                args=(mode, student_id),
+                daemon=True,
+            ).start()
+            self._send_json({"success": True})
+            return
+
+        if path == "/api/attachments/manage":
+            action = str(body.get("action") or "").strip()
+            if action == "match_paths":
+                res = self.controller.attach_and_match_files(
+                    body.get("paths") or [],
+                    create_items_if_empty=bool(body.get("create_items_if_empty", True)),
+                    default_message=body.get("default_message"),
+                )
+            elif action == "add_global":
+                res = self.controller.add_global_attachments(body.get("paths") or [])
+            elif action == "remove_global":
+                res = self.controller.remove_global_attachment(body.get("path") or "")
+            elif action == "clear_all":
+                res = self.controller.clear_all_attachments()
+            elif action in ("student_add", "student_remove", "student_clear"):
+                sub = action.replace("student_", "")
+                res = self.controller.update_student_attachments(
+                    student_id=body.get("student_id") or "",
+                    action=sub,
+                    paths=body.get("paths") or [],
+                    path=body.get("path") or "",
+                )
+            elif action == "set_options":
+                res = self.controller.set_attachment_options(
+                    send_mode=body.get("send_mode"),
+                    default_file_message=body.get("default_file_message"),
+                    apply_message_to_all=bool(body.get("apply_message_to_all", False)),
+                )
+            else:
+                res = {"success": False, "message": f"未知附件操作: {action}"}
             self._send_json(res)
             return
 

@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "2.0.6"
+APP_VERSION = "2.1.0"
 
 
 def asset_path(filename: str) -> str:
@@ -375,6 +375,58 @@ def paste_and_send(message: str) -> tuple:
         return (False, "回车发送前企微失去前台焦点，已中止发送")
     wu.tap_key(wu.VK_RETURN)
     return (True, "已发送")
+
+
+def paste_files_and_send(file_paths: list) -> tuple:
+    """将本地文件列表以 CF_HDROP 格式写入剪贴板并粘贴发送（含文件存在核验 + 剪贴板读回核验 + 焦点守护）。返回 (ok, reason)。"""
+    try:
+        from sender_py import window_utils as wu
+    except ModuleNotFoundError:
+        import window_utils as wu
+
+    valid_paths = []
+    for p in (file_paths or []):
+        s = str(p or "").strip()
+        if not s:
+            continue
+        abs_p = os.path.normpath(os.path.abspath(s))
+        if not os.path.isfile(abs_p):
+            return (False, f"附件文件不存在: {os.path.basename(abs_p)}")
+        valid_paths.append(abs_p)
+    if not valid_paths:
+        return (False, "未提供有效的附件文件路径")
+
+    if not wu.is_foreground_wecom():
+        if not wu.find_and_activate_wecom():
+            return (False, "企微不在前台且唤起失败")
+        time.sleep(0.2)
+
+    if not wu.copy_files_to_clipboard(valid_paths):
+        return (False, "文件写入剪贴板 (CF_HDROP) 核验失败")
+
+    if not wu.is_foreground_wecom():
+        return (False, "粘贴附件前企微失去前台焦点，已中止发送")
+
+    # 清理输入框可能残留的文字草稿，避免粘贴文件时混入旧草稿
+    wu.tap_keys(wu.VK_CONTROL, wu.VK_A)
+    time.sleep(0.05)
+    wu.tap_key(0x08)  # Backspace
+    time.sleep(0.05)
+    wu.tap_keys(wu.VK_CONTROL, wu.VK_V)
+    time.sleep(0.45)
+
+    try:
+        expected = [os.path.normcase(os.path.normpath(p)) for p in valid_paths]
+        actual = [os.path.normcase(os.path.normpath(p)) for p in wu.read_clipboard_files()]
+        if actual and actual != expected:
+            return (False, "粘贴附件后剪贴板被篡改，停止发送")
+    except Exception:
+        pass
+
+    if not wu.is_foreground_wecom():
+        return (False, "回车发送附件前企微失去前台焦点，已中止发送")
+    wu.tap_key(wu.VK_RETURN)
+    return (True, f"已发送 {len(valid_paths)} 个附件")
 
 
 class CalibrationLoadingDialog:
@@ -1039,16 +1091,27 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
                  parent=None, log=print, should_stop=None, reply_analyzer=None,
                  verify_mode: str = "auto", search_wait: float = 1.5, enter_wait: float = 1.2,
                  enable_reply_analysis: bool = True, snapshot_policy: str = None,
-                 check_sidebar: bool = False, roi_cache: dict = None) -> dict:
+                 check_sidebar: bool = False, roi_cache: dict = None,
+                 send_mode: str = "both") -> dict:
     """单个学生全流程：最多 3 候选机械 1→2→3。返回 {result, notes, ...}（notes 供待回名单）。"""
     try:
         from sender_py import window_utils as wu
     except ModuleNotFoundError:
         import window_utils as wu
-    name, sid, sname, message = item["studentName"], item["sid"], item["sname"], item["message"]
+    name, sid, sname, message = item["studentName"], item["sid"], item["sname"], item.get("message", "")
+    eff_files = list(item.get("_effective_files") if "_effective_files" in item else (item.get("files") or []))
+    eff_msg = "" if send_mode == "files_only" else str(message or "").strip()
+    already_text_sent = bool(item.get("_text_sent")) and bool(eff_files) and (send_mode != "text_only")
+    need_text = bool(eff_msg) and not already_text_sent
+    need_files = bool(eff_files) and (send_mode != "text_only")
     notes = []
     sidebar_checked_here = False
     eff_roi_cache = roi_cache if isinstance(roi_cache, dict) else {}
+
+    if not need_text and not need_files:
+        reason_empty = "未挂载附件（仅发附件模式）" if send_mode == "files_only" else "无待发送话术或附件"
+        log(f"  ⚠ [{name}] {reason_empty}，跳过发送")
+        return {"result": "error", "reason": reason_empty, "notes": notes}
 
     # 清理之前可能遗留的企业微信“全局搜索”弹窗
     old_search = wu.find_wecom_search_tab_wnd()
@@ -1305,18 +1368,69 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
                     log("  ✓ 未检测到右侧边栏，继续执行发送...")
             if enable_reply_analysis and reply_analyzer is not None and chat_img is not None:
                 reply_analyzer.submit(name, cand, sid, sname, chat_title, True, chat_img)
-                log("  └ 已将聊天区截图投递至后台分析家长留言，立即开始发送反馈话术...")
+                log("  └ 已将聊天区截图投递至后台分析家长留言，立即开始发送...")
             elif not enable_reply_analysis:
                 log("  └ 云控已关闭后台家长留言分析，跳过 Qwen3.8-Max 识别，立即开始发送...")
-            ok, why = paste_and_send(message)
-            if ok:
+
+            text_sent_flag = bool(already_text_sent)
+            if already_text_sent:
+                log(f"  ℹ [{name}] 文字话术此前已发送成功，本次仅补发 {len(eff_files)} 个附件...")
+
+            if need_text:
+                ok_txt, why_txt = paste_and_send(eff_msg)
+                if not ok_txt:
+                    log(f"  ✗ [{name}] 反馈话术发送失败：{why_txt}")
+                    return {
+                        "result": "error",
+                        "at_candidate": cand,
+                        "reason": why_txt,
+                        "text_sent": False,
+                        "files_sent": False,
+                        "sidebar_checked": sidebar_checked_here,
+                        "notes": notes,
+                    }
+                text_sent_flag = True
                 log(f"  ✓ [{name}] 反馈话术已成功粘贴并回车发送！")
-            else:
-                log(f"  ✗ [{name}] 反馈话术发送失败：{why}")
+                if need_files:
+                    if not _interruptible_sleep(0.4, should_stop):
+                        stop_reason = "文字已发，附件发送前被手动停止"
+                        log(f"  ⏹ [{name}] {stop_reason}")
+                        return {
+                            "result": "error",
+                            "at_candidate": cand,
+                            "reason": stop_reason,
+                            "text_sent": True,
+                            "files_sent": False,
+                            "sidebar_checked": sidebar_checked_here,
+                            "notes": notes,
+                        }
+
+            if need_files:
+                file_names_str = "、".join(os.path.basename(p) for p in eff_files[:3])
+                if len(eff_files) > 3:
+                    file_names_str += f" 等{len(eff_files)}个文件"
+                log(f"  └ 正在粘贴并发送附件: {file_names_str}...")
+                ok_f, why_f = paste_files_and_send(eff_files)
+                if not ok_f:
+                    err_reason = f"文字已发，附件发送失败：{why_f}" if text_sent_flag else f"附件发送失败：{why_f}"
+                    log(f"  ✗ [{name}] {err_reason}")
+                    return {
+                        "result": "error",
+                        "at_candidate": cand,
+                        "reason": err_reason,
+                        "text_sent": text_sent_flag,
+                        "files_sent": False,
+                        "sidebar_checked": sidebar_checked_here,
+                        "notes": notes,
+                    }
+                log(f"  ✓ [{name}] 附件已成功粘贴并回车发送（共 {len(eff_files)} 个文件）！")
+
             if should_stop is None or not should_stop():
                 _paced(AFTER_SEND_GAP)
-            return {"result": "sent" if ok else "error",
-                    "at_candidate": cand, "reason": why,
+            done_reason = "已发送（文字+附件）" if (text_sent_flag and need_files) else ("已发送附件" if need_files else "已发送")
+            return {"result": "sent",
+                    "at_candidate": cand, "reason": done_reason,
+                    "text_sent": text_sent_flag, "files_sent": bool(need_files),
                     "sidebar_checked": sidebar_checked_here, "notes": notes}
         if decision["action"] == "intercept":
             log(f"  ✗ 候选 {cand} 命中安全红线拦截：检测为群聊 (窗口标题: [{chat_title or '未知'}])，安全拦截！")

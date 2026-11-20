@@ -15,6 +15,7 @@ set EXAMPLE=%REPO_ROOT%\tools\example.png
 set VERSION_FILE=%~dp0version_info.txt
 set WEB_MAIN_PY=%~dp0web_main.py
 set WEB_UI=%~dp0web_ui.html
+set XLSX_JS=%REPO_ROOT%\js\libs\xlsx.full.min.js
 set "PYTHONPATH=%REPO_ROOT%\tools;%~dp0;%PYTHONPATH%"
 
 echo [1/3] 检查 Python 环境及依赖...
@@ -54,6 +55,8 @@ python -m PyInstaller --noconfirm --clean --noupx --windowed --onedir ^
     --add-data "%EXAMPLE%;sender_py" ^
     --add-data "%WEB_UI%;sender_py" ^
     --add-data "%WEB_UI%;." ^
+    --add-data "%XLSX_JS%;sender_py" ^
+    --add-data "%XLSX_JS%;." ^
     --paths "%REPO_ROOT%\tools" ^
     --paths "%~dp0" ^
     --collect-submodules sender_py ^
