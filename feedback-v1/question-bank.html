@@ -16,10 +16,8 @@
     <link rel="stylesheet" href="css/question-bank.css?v=20261120-154810">
     <link rel="stylesheet" href="css/auth.css?v=20261120-154810">
     <link rel="stylesheet" href="css/tokens.css?v=20261120-154810">
-    <!-- PDF 核心库：PDF-Lib (切片合并) + PDF.js (页面缩略图高清晰渲染) -->
+    <!-- PDF 核心库（PDF-Lib / PDF.js）改为按需及空闲懒加载，避免阻塞首屏与返回交互 -->
     <script defer src="js/libs/polyfill-at.js"></script>
-    <script defer src="js/libs/pdf-lib.min.js"></script>
-    <script defer src="js/libs/pdfjs/pdf.min.js"></script>
     <script defer src="js/logger.js?v=20261120-154810"></script>
     <script defer src="js/common.js?v=20261120-154810"></script>
     <script defer src="js/auth.js?v=20261120-154810"></script>

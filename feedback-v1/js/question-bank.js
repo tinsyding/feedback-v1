@@ -1,4 +1,42 @@
 // ========== Question Bank Management Logic (PHP API) ==========
+const _scriptLoadCache = new Map();
+function loadExternalScriptOnce(src) {
+    if (_scriptLoadCache.has(src)) return _scriptLoadCache.get(src);
+    const promise = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = src;
+        s.async = true;
+        s.onload = () => resolve();
+        s.onerror = () => {
+            _scriptLoadCache.delete(src);
+            reject(new Error(`Failed to load ${src}`));
+        };
+        document.head.appendChild(s);
+    });
+    _scriptLoadCache.set(src, promise);
+    return promise;
+}
+
+async function ensurePdfJs() {
+    if (!window.pdfjsLib) {
+        await loadExternalScriptOnce('js/libs/pdfjs/pdf.min.js');
+    }
+    if (window.pdfjsLib && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'js/libs/pdfjs/pdf.worker.min.js';
+    }
+    return window.pdfjsLib;
+}
+
+async function ensurePdfLib() {
+    if (!window.PDFLib) {
+        await loadExternalScriptOnce('js/libs/pdf-lib.min.js');
+    }
+    return window.PDFLib;
+}
+
+window.ensurePdfJs = ensurePdfJs;
+window.ensurePdfLib = ensurePdfLib;
+
 if (window.pdfjsLib) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'js/libs/pdfjs/pdf.worker.min.js';
 }
@@ -239,12 +277,29 @@ async function generateFingerprint() {
 
 let maxWeeks = 30; // Default max weeks
 
+function scheduleIdleTask(fn, fallbackDelay = 800) {
+    if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(fn, { timeout: 2000 });
+    } else {
+        setTimeout(fn, fallbackDelay);
+    }
+}
+
 async function initQuestionBank() {
     updateBankTypeUi();
-    browserFingerprint = await generateFingerprint();
-    if (window.Logger) {
-        Logger.setContext({ fingerprint: browserFingerprint });
-    }
+    // 延迟生成设备指纹与预热 PDF 库，避免阻塞首屏渲染及返回按钮响应
+    scheduleIdleTask(async () => {
+        try {
+            browserFingerprint = await generateFingerprint();
+            if (window.Logger) {
+                Logger.setContext({ fingerprint: browserFingerprint });
+            }
+        } catch (_) {}
+    }, 800);
+    scheduleIdleTask(() => {
+        ensurePdfJs().catch(() => {});
+        ensurePdfLib().catch(() => {});
+    }, 1500);
     
     // Load semester weeks from config (via脱敏公开接口；config.json 已被 nginx 禁止直读)
     fetch('api/public_config.php')
@@ -1106,6 +1161,7 @@ let currentMappingView = 'split'; // 强制左右分栏对照
 let currentThumbSize = 'large'; // 预览大小强制为大
 
 async function renderPdfToThumbs(file) {
+    await ensurePdfJs();
     if (typeof pdfjsLib === 'undefined') {
         throw new Error('PDF.js 组件未正确加载，请刷新页面后重试');
     }
@@ -4276,6 +4332,9 @@ async function openStep4BigQuestionBoxModal(firstIndex) {
         showToast('请先为该题上传题目 PDF，再框选大题小问', 'warn');
         return;
     }
+    try {
+        await ensurePdfJs();
+    } catch (_) {}
     if (!window.pdfjsLib) {
         showToast('PDF 渲染组件未就绪，请刷新页面重试', 'warn');
         return;
@@ -5319,6 +5378,8 @@ function applySavedDataFilter() {
     const currentTier = tierSelect ? tierSelect.value : '';
     const currentWeek = weekSelect ? weekSelect.value : '';
 
+    const fragment = document.createDocumentFragment();
+
     filtered.forEach(item => {
         const itemYear = item.year || 2026;
         const itemSeason = item.season || '春';
@@ -5373,8 +5434,9 @@ function applySavedDataFilter() {
                 </button>`}
             </div>
         `;
-        grid.appendChild(card);
+        fragment.appendChild(card);
     });
+    grid.appendChild(fragment);
 }
 
 let isEnteringSavedItem = false;
@@ -5752,7 +5814,14 @@ async function previewSlicedRegions(pdfUrl, regions, title, fallbackName) {
         showToast('暂无可预览的 PDF');
         return;
     }
-    if (!Array.isArray(regions) || regions.length === 0 || !window.PDFLib) {
+    if (!Array.isArray(regions) || regions.length === 0) {
+        previewPdf(pdfUrl, title || fallbackName || 'PDF 预览');
+        return;
+    }
+    try {
+        await ensurePdfLib();
+    } catch (_) {}
+    if (!window.PDFLib) {
         previewPdf(pdfUrl, title || fallbackName || 'PDF 预览');
         return;
     }
@@ -6066,6 +6135,9 @@ async function startBackgroundSlicing(exerciseSrc, answerSrc, groups, sliceNums,
 }
 
 async function importWithLabels(exerciseFile, answerFile) {
+    try {
+        await ensurePdfLib();
+    } catch (_) {}
     if (typeof PDFLib === 'undefined') {
         showToast('PDF 处理组件未完全就绪，请刷新重试');
         return false;
@@ -6286,6 +6358,9 @@ async function doBatchImportPdfs(exerciseFile, answerFile) {
         }
     }
 
+    try {
+        await ensurePdfLib();
+    } catch (_) {}
     if (typeof PDFLib === 'undefined') {
         showToast('PDF 处理组件未完全就绪，请刷新重试');
         return;

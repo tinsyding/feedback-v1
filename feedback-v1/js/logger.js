@@ -246,13 +246,13 @@ const Logger = (() => {
         if (flushTimer) clearInterval(flushTimer);
         flushTimer = setInterval(flush, FLUSH_INTERVAL);
 
-        // 页面关闭时兜底上报
+        // 页面关闭/离开时兜底上报（使用 pagehide 避免破坏浏览器 BFCache 往返缓存）
         window.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'hidden') {
                 flushBeacon();
             }
         });
-        window.addEventListener('beforeunload', flushBeacon);
+        window.addEventListener('pagehide', flushBeacon);
 
         // 注册全局错误捕获
         setupGlobalErrorHandlers();

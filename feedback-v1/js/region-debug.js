@@ -1355,6 +1355,7 @@
     }
 
     async function loadPdfFromUrlToFile(url, fallbackName) {
+        if (typeof window.ensurePdfJs === 'function') await window.ensurePdfJs();
         const resp = await fetch(url, { cache: 'no-cache' });
         if (!resp.ok) throw new Error('原卷 PDF 下载失败');
         const blob = await resp.blob();
@@ -1620,6 +1621,7 @@
         const file = inputEl && inputEl.files && inputEl.files[0];
         if (!file) return;
         try {
+            if (typeof window.ensurePdfJs === 'function') await window.ensurePdfJs();
             const buf = await file.arrayBuffer();
             const pdfDoc = await pdfjsLib.getDocument({ data: buf }).promise;
             const tabState = getTabState(tab);
