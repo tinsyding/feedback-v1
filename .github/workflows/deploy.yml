@@ -58,7 +58,16 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: backend-go/go.mod
-          cache: false
+          cache: true
+          cache-dependency-path: backend-go/go.sum
+
+      - name: Cache Go build (GOCACHE)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-go-build-${{ hashFiles('backend-go/go.mod', 'backend-go/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-build-
 
       - name: Build and test Go backend
         id: build-go

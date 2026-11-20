@@ -25,6 +25,16 @@ const (
 	DefaultIdentifyFastModel = "qwen3.8-flash"
 )
 
+// DBConfig holds MySQL connection parameters matching feedback-v1/api/db.php.
+type DBConfig struct {
+	Host     string
+	Port     int
+	DBName   string
+	Username string
+	Password string
+	Charset  string
+}
+
 // Secrets holds sensitive credentials loaded from env, optional JSON file, or secret_key.local.php.
 type Secrets struct {
 	SenderApiToken    string `json:"senderApiToken"`
@@ -248,7 +258,7 @@ func parsePHPSecretArray(src string) Secrets {
 }
 
 type phpToken struct {
-	kind string // "str", "arrow", "other"
+	kind string // "str", "num", "arrow", "other"
 	val  string
 }
 
@@ -262,6 +272,80 @@ func extractPHPStringPairs(src string) map[string]string {
 		}
 	}
 	return out
+}
+
+func extractPHPScalarPairs(src string) map[string]string {
+	out := make(map[string]string)
+	tokens := scanPHPTokens(src)
+	for i := 0; i+2 < len(tokens); i++ {
+		if tokens[i].kind == "str" && tokens[i+1].kind == "arrow" && (tokens[i+2].kind == "str" || tokens[i+2].kind == "num") {
+			out[tokens[i].val] = tokens[i+2].val
+			i += 2
+		}
+	}
+	return out
+}
+
+// LoadDBConfig resolves MySQL configuration following db.php precedence:
+// defaults -> <FeedbackRoot>/api/db.local.php -> OS env overrides (DB_HOST, DB_PORT, DB_DATABASE, DB_USERNAME, DB_PASSWORD, DB_CHARSET).
+func (l *Loader) LoadDBConfig() DBConfig {
+	cfg := DBConfig{
+		Host:     "127.0.0.1",
+		Port:     3306,
+		DBName:   "feedback",
+		Username: "root",
+		Password: "",
+		Charset:  "utf8mb4",
+	}
+
+	if l.FeedbackRoot != "" {
+		if raw, err := os.ReadFile(filepath.Join(l.FeedbackRoot, "api", "db.local.php")); err == nil {
+			pairs := extractPHPScalarPairs(string(raw))
+			if v, ok := pairs["host"]; ok && v != "" {
+				cfg.Host = v
+			}
+			if v, ok := pairs["port"]; ok {
+				if p, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && p > 0 {
+					cfg.Port = p
+				}
+			}
+			if v, ok := pairs["dbname"]; ok && v != "" {
+				cfg.DBName = v
+			}
+			if v, ok := pairs["username"]; ok && v != "" {
+				cfg.Username = v
+			}
+			if v, ok := pairs["password"]; ok {
+				cfg.Password = v
+			}
+			if v, ok := pairs["charset"]; ok && v != "" {
+				cfg.Charset = v
+			}
+		}
+	}
+
+	if v := os.Getenv("DB_HOST"); v != "" {
+		cfg.Host = v
+	}
+	if v := os.Getenv("DB_PORT"); v != "" {
+		if p, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && p > 0 {
+			cfg.Port = p
+		}
+	}
+	if v := os.Getenv("DB_DATABASE"); v != "" {
+		cfg.DBName = v
+	}
+	if v := os.Getenv("DB_USERNAME"); v != "" {
+		cfg.Username = v
+	}
+	if v, ok := os.LookupEnv("DB_PASSWORD"); ok {
+		cfg.Password = v
+	}
+	if v := os.Getenv("DB_CHARSET"); v != "" {
+		cfg.Charset = v
+	}
+
+	return cfg
 }
 
 func scanPHPTokens(src string) []phpToken {
@@ -343,6 +427,15 @@ func scanPHPTokens(src string) []phpToken {
 		if ch == '=' && i+1 < n && src[i+1] == '>' {
 			tokens = append(tokens, phpToken{kind: "arrow", val: "=>"})
 			i += 2
+			continue
+		}
+		// Unquoted integer literals (e.g. 'port' => 3306)
+		if ch >= '0' && ch <= '9' {
+			start := i
+			for i < n && src[i] >= '0' && src[i] <= '9' {
+				i++
+			}
+			tokens = append(tokens, phpToken{kind: "num", val: src[start:i]})
 			continue
 		}
 		tokens = append(tokens, phpToken{kind: "other"})

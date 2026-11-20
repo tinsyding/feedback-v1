@@ -1627,6 +1627,90 @@ def register_and_run_all_tests(harness: ParityHarness) -> None:
             ),
         )
 
+    # 26. changelog.php public actions & unknown action (400) & unauth write actions (401)
+    def test_changelog_public_and_unauth() -> None:
+        ch_file = harness.feedback_root / "data" / "changelog.json"
+        if ch_file.exists():
+            ch_file.unlink()
+
+        def check_active(engine: str, resp: HttpResponse, _: list[RecordedVisionRequest], __: set[str]) -> None:
+            assert_eq(resp.status, 200, f"[{engine}] getActive status")
+            j = resp.json()
+            assert_eq(j.get("success"), True, f"[{engine}] getActive success")
+            assert_true(isinstance(j.get("data"), dict) and j["data"].get("id") == "update_2026_11_12", f"[{engine}] getActive data={j!r}")
+
+        harness.execute_across_engines(
+            "changelog_getActive",
+            lambda u: http_request(u, "GET", "/api/changelog.php?action=getActive"),
+            check_active,
+        )
+
+        def check_all(engine: str, resp: HttpResponse, _: list[RecordedVisionRequest], __: set[str]) -> None:
+            assert_eq(resp.status, 200, f"[{engine}] getAll status")
+            j = resp.json()
+            assert_eq(j.get("success"), True, f"[{engine}] getAll success")
+            assert_true(isinstance(j.get("data"), list) and len(j["data"]) >= 1, f"[{engine}] getAll data={j!r}")
+
+        harness.execute_across_engines(
+            "changelog_getAll",
+            lambda u: http_request(u, "GET", "/api/changelog.php?action=getAll"),
+            check_all,
+        )
+
+        harness.execute_across_engines(
+            "changelog_unknown_action_400",
+            lambda u: http_request(u, "GET", "/api/changelog.php?action=unknown_op"),
+            lambda e, r, _, __: (
+                assert_eq(r.status, 400, f"[{e}] unknown action status"),
+                assert_json_values_match({"success": False, "error": "未知的操作"}, r.json(), f"[{e}] unknown action"),
+            ),
+        )
+
+        for act in ("save", "delete", "setActive"):
+            harness.execute_across_engines(
+                f"changelog_unauth_{act}_401",
+                lambda u, a=act: http_request(
+                    u,
+                    "POST",
+                    f"/api/changelog.php?action={a}",
+                    headers={"Content-Type": "application/json"},
+                    body=b"{}",
+                ),
+                lambda e, r, _, __, a=act: (
+                    assert_eq(r.status, 401, f"[{e}] changelog {a} unauth status"),
+                    assert_json_values_match(
+                        {"success": False, "data": None, "error": "未登录或会话已过期，需管理员权限"},
+                        r.json(),
+                        f"[{e}] changelog {a} unauth",
+                    ),
+                ),
+            )
+
+    # 27. upload_pdf.php unauthenticated GET/POST -> 401
+    def test_upload_pdf_unauth_401() -> None:
+        expected = {"success": False, "data": None, "error": "未登录或登录会话已过期，请重新登录"}
+        for method in ("GET", "POST"):
+            harness.execute_across_engines(
+                f"upload_pdf_unauth_{method}_401",
+                lambda u, m=method: http_request(u, m, "/api/upload_pdf.php"),
+                lambda e, r, _, __, m=method: (
+                    assert_eq(r.status, 401, f"[{e}] upload_pdf {m} unauth status"),
+                    assert_json_values_match(expected, r.json(), f"[{e}] upload_pdf {m} unauth"),
+                ),
+            )
+
+    # 28. upload_capture.php unauthenticated POST -> 401
+    def test_upload_capture_unauth_401() -> None:
+        expected = {"success": False, "data": None, "error": "未登录或登录会话已过期，请重新登录"}
+        harness.execute_across_engines(
+            "upload_capture_unauth_POST_401",
+            lambda u: http_request(u, "POST", "/api/upload_capture.php"),
+            lambda e, r, _, __: (
+                assert_eq(r.status, 401, f"[{e}] upload_capture unauth status"),
+                assert_json_values_match(expected, r.json(), f"[{e}] upload_capture unauth"),
+            ),
+        )
+
     tests: list[tuple[str, Callable[[], None]]] = [
         ("public_config_defaults", test_public_config_defaults),
         ("public_config_clamped_and_no_secrets", test_public_config_clamped_and_no_secrets),
@@ -1653,6 +1737,9 @@ def register_and_run_all_tests(harness: ParityHarness) -> None:
         ("identify_reply_mode_and_archive", test_identify_reply_mode_and_archive),
         ("identify_sidebar_mode_and_archive", test_identify_sidebar_mode_and_archive),
         ("identify_upstream_errors_and_non_json", test_identify_upstream_errors_and_non_json),
+        ("changelog_public_and_unauth", test_changelog_public_and_unauth),
+        ("upload_pdf_unauth_401", test_upload_pdf_unauth_401),
+        ("upload_capture_unauth_401", test_upload_capture_unauth_401),
     ]
 
     for name, fn in tests:
@@ -1742,6 +1829,8 @@ def main(argv: list[str] | None = None) -> int:
                 go_port = alloc_free_port()
 
             base_env = clean_subprocess_env()
+            php_env = base_env.copy()
+            php_env["FEEDBACK_SESSION_DRIVER"] = "files"
             php_log = tmp_path / "php.log"
             go_log = tmp_path / "go.log"
 
@@ -1763,7 +1852,7 @@ def main(argv: list[str] | None = None) -> int:
                     php_cmd,
                     stdout=php_log_f,
                     stderr=subprocess.STDOUT,
-                    env=base_env,
+                    env=php_env,
                 )
             php_url = f"http://127.0.0.1:{php_port}"
             wait_for_server(php_proc, php_log, php_url, "/api/calibrate_roi.php", "php -S")

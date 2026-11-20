@@ -1,19 +1,21 @@
 # feedback-api (`backend-go`)
 
-`feedback-api` 是 `feedback-v1` 后端接口的渐进式 Go 重写服务（纯 Go 标准库实现，零第三方依赖），通过 Nginx 精确 `location =` 反代逐接口灰度接管现有 PHP 接口。
+`feedback-api` 是 `feedback-v1` 后端接口的渐进式 Go 重写服务，通过 Nginx 精确 `location =` 反代逐接口灰度接管现有 PHP 接口，并与 PHP 共用 MySQL `app_sessions` 会话表实现登录态无缝互通。
 
 ## 目录结构
 
 ```text
 backend-go/
-├── .env.example                    # 本地/生产环境变量示例
-├── go.mod                          # Go module 定义（仅标准库）
+├── .env.example                    # 本地/生产环境变量示例（含 DB_* 覆盖项）
+├── go.mod / go.sum                 # Go module 定义（仅引入 go-sql-driver/mysql）
 ├── cmd/feedback-api/main.go        # 服务入口与路由注册
 ├── internal/
-│   ├── config/                     # .env / config.json 动态读取、凭据解析与 SenderControl 策略
+│   ├── config/                     # .env / config.json / db.local.php 动态读取与 SenderControl 策略
+│   ├── db/                         # MySQL 连接池初始化（mysql.Config）
+│   ├── session/                    # app_sessions 共享会话读取与 RequireAuth/RequireAdmin 中间件
 │   ├── httpx/                      # CORS、同源 CSRF、真实 IP、Bearer/Form 鉴权与统一 JSON 响应
 │   ├── vision/                     # PNG/JPEG 校验与 OpenAI 兼容多模态客户端
-│   └── handler/                    # /healthz 与 Phase 1 业务端点实现
+│   └── handler/                    # /healthz 与 Phase 1/2 业务端点实现
 ├── deploy/
 │   ├── feedback-api.service        # systemd 服务单元模板
 │   ├── install_go_service.sh       # systemd 幂等安装脚本（支持 --user/--group/--root/--bin）
@@ -22,12 +24,15 @@ backend-go/
     └── parity_test.py              # PHP vs Go 差分一致性测试脚本（Python 3 stdlib）
 ```
 
-## 当前已接管接口（Phase 1）
+## 当前已接管接口（Phase 1 + Phase 2）
 
 - `GET /healthz`：服务健康探针（返回 `{"success":true,"data":{"service":"feedback-api","engine":"go","status":"ok"},"error":null}`）。
 - `GET /api/public_config.php`：公开脱敏系统配置（含字段裁剪与区间收敛）。
 - `GET|POST /api/calibrate_roi.php`：企业微信整窗截图多模态自动 ROI 校准。
 - `POST /api/identify.php`：标题/回复/侧边栏视觉判定与 `data/identify_archive/` 举证存档（14 天滚动清理）。
+- `POST /api/upload_pdf.php`：题库知识点 PDF 上传（需教师/管理员登录态，拦截助教，校验 `%PDF` 魔数与 20MB 限制）。
+- `POST /api/upload_capture.php`：前端原始采集文件归档（需登录态，写 `data/uploads/` 与 `index.jsonl`，30 天概率清理）。
+- `GET|POST /api/changelog.php`：系统更新日志读取（`getAll`/`getActive` 公开）与管理维护（`save`/`delete`/`setActive` 需管理员会话）。
 
 所有 Go 响应均携带响应头 `X-Backend-Engine: go`，便于联调与灰度假期核验。
 

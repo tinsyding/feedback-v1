@@ -323,6 +323,7 @@ fi
 for domain in $SITES; do
     probe_endpoint "$domain" "/api/public_config.php" "$expect_go" || fail=1
     probe_endpoint "$domain" "/api/calibrate_roi.php" "$expect_go" || fail=1
+    probe_endpoint "$domain" "/api/changelog.php?action=getActive" "$expect_go" || fail=1
 done
 
 if [ "$fail" -ne 0 ]; then

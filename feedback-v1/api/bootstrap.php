@@ -10,7 +10,7 @@
  * 5. 客户端真实 IP 提取
  */
 
-// 1. 安全 Session 初始化
+// 1. 安全 Session 初始化（优先挂载 MySQL 共享会话表，DB 离线时自动回退原生 Session）
 if (session_status() === PHP_SESSION_NONE && !headers_sent()) {
     ini_set('session.cookie_httponly', 1);
     ini_set('session.use_only_cookies', 1);
@@ -18,6 +18,8 @@ if (session_status() === PHP_SESSION_NONE && !headers_sent()) {
     if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
         ini_set('session.cookie_secure', 1);
     }
+    require_once __DIR__ . '/session_mysql.php';
+    registerSharedMySqlSessionHandler();
     session_start();
 }
 

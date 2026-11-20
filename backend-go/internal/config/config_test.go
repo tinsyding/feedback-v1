@@ -259,3 +259,48 @@ func TestNormalizeGlobalSenderControl(t *testing.T) {
 		t.Fatalf("batch break = (%d, %v, %v)", sc2.BatchBreakEvery, sc2.BatchBreakMin, sc2.BatchBreakMax)
 	}
 }
+
+func TestLoadDBConfigPrecedence(t *testing.T) {
+	root := t.TempDir()
+	apiDir := filepath.Join(root, "api")
+	if err := os.MkdirAll(apiDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	phpDB := `<?php
+return [
+    'host' => '10.0.0.5',
+    'port' => 3307,
+    'dbname' => 'feedback_local',
+    'username' => 'tinsy',
+    'password' => 'secret#123',
+    'charset' => 'utf8mb4',
+];
+`
+	if err := os.WriteFile(filepath.Join(apiDir, "db.local.php"), []byte(phpDB), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("DB_HOST", "")
+	t.Setenv("DB_PORT", "")
+	t.Setenv("DB_DATABASE", "")
+	t.Setenv("DB_USERNAME", "")
+	t.Setenv("DB_CHARSET", "")
+
+	loader := NewLoader(root, "")
+	cfg := loader.LoadDBConfig()
+	if cfg.Host != "10.0.0.5" || cfg.Port != 3307 || cfg.DBName != "feedback_local" || cfg.Username != "tinsy" || cfg.Password != "secret#123" || cfg.Charset != "utf8mb4" {
+		t.Fatalf("unexpected db config from db.local.php: %+v", cfg)
+	}
+
+	t.Setenv("DB_HOST", "127.0.0.2")
+	t.Setenv("DB_PORT", "3308")
+	t.Setenv("DB_DATABASE", "feedback_env")
+	t.Setenv("DB_USERNAME", "envuser")
+	t.Setenv("DB_PASSWORD", "") // explicit empty password overrides db.local.php per db.php:39
+
+	cfg2 := loader.LoadDBConfig()
+	if cfg2.Host != "127.0.0.2" || cfg2.Port != 3308 || cfg2.DBName != "feedback_env" || cfg2.Username != "envuser" || cfg2.Password != "" {
+		t.Fatalf("unexpected env-overridden db config: %+v", cfg2)
+	}
+}

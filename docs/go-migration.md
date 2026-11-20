@@ -19,7 +19,7 @@
 
 [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) 已集成 Go 自动化构建与发布，且保证在服务器尚未切流时安全无副作用：
 
-1. **Runner 构建与测试**：使用 `actions/setup-go@v5`（对齐 `backend-go/go.mod` 版本），运行 `go test -race -count=1 ./...`，并交叉编译静态二进制 `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/feedback-api ./cmd/feedback-api`。
+1. **Runner 构建与测试（含 `GOCACHE` 缓存）**：使用 `actions/setup-go@v5`（`cache: true`）配合 `actions/cache@v4` 缓存 `~/.cache/go-build`，运行 `go test -race -count=1 ./...`，并交叉编译静态二进制 `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/feedback-api ./cmd/feedback-api`。
 2. **原子替换二进制**：通过 `scp` 上传至 `/opt/feedback-go/feedback-api.new`，设置 `www:www` 与 `755` 后原子 `mv -f` 覆盖 `/opt/feedback-go/feedback-api`。
 3. **条件重启与探活**：仅当 `systemctl is-enabled feedback-api` 成功时才重启 `feedback-api`；仅当服务处于 `active` 状态时探测 `http://127.0.0.1:8090/healthz` 返回 HTTP 200。未安装 systemd unit 前推送 `deploy.yml` 不会中断生产 PHP 链路。
 4. **PHP 发布链路保留**：原有代码检出、`.user.ini` 加解锁、`scripts/migrate.php migrate`、`php-fpm-82 reload` 及 10 项全量冒烟测试保持不变。
@@ -181,8 +181,8 @@ sudo systemctl disable --now feedback-api
 
 | 阶段 | 范围与核心目标 | 对应现有 PHP 模块 / 基础设施 | 切流与验证策略 |
 | :--- | :--- | :--- | :--- |
-| **Phase 0**<br>底座与工具链 | 搭建纯标准库 `feedback-api` 骨架、动态 `config.json` / `secret_key.local.php` 读取、CORS/CSRF/IP/JSON 中间件、`/healthz`、systemd/Nginx 脚本、CI 构建与差分测试框架 | `api/bootstrap.php`<br>`api/secret_key.php`<br>`api/sender_control_helper.php`<br>`.github/workflows/deploy.yml` | `go test -race` + `parity_test.py --php-only` 与双端比对；CI 仅预置二进制不改动线上流量 |
-| **Phase 1**<br>无状态配置与 AI 视觉接口 *(当前)* | 接管无数据库连接的高延迟/高并发外部模型调用与公开配置接口，释放 PHP-FPM Worker 阻塞 | `api/public_config.php`<br>`api/calibrate_roi.php`<br>`api/identify.php`<br>`data/identify_archive/` | `parity_test.py` 全量对齐 + `zz-feedback-go-proxy.conf` 精确 `location =` 灰度切流 + `X-Backend-Engine: go` 校验 |
-| **Phase 2**<br>文件、日志与云控辅助接口 | 迁移无复杂事务的文件型/轻量状态接口（PDF 上传、采集归档、更新日志、Tier-2 单机远程云控指令） | `api/upload_pdf.php`<br>`api/upload_capture.php`<br>`api/changelog.php`<br>`api/sender_control_helper.php`（`data/sender_control/clients/`） | 按接口逐个追加 `location =` 至 `zz-feedback-go-proxy.conf`，补齐 `parity_test.py` 上传/文件流测试用例 |
-| **Phase 3**<br>MySQL 核心业务与后台管理 | 引入标准 SQL 驱动接入 MySQL `feedback` 库；迁移会话鉴权、日志审计、题库 CRUD、管理后台与版本历史 | `api/db.php`、`api/auth.php`、`api/logs.php`、`api/qbank.php`、`api/admin.php`（`api/admin/*`）；涉及 `users`、`admin_users`、`class_batches`、`student_records`、`student_record_history`、`qbank_weeks`、`qbank_questions`、`system_logs` | 与 PHP 共用统一 Session/Cookie 策略或切换签名 Token；针对分页、排序、事务回滚与权限拦截建立 DB 差分用例 |
-| **Phase 4**<br>错题本重练域与 PHP 下线 | 迁移最复杂的家长端错题本域（Token 三级解析、SVG 验证码、临时 PDF 暂存下载、清理任务），完成全量切换并下线 PHP-FPM | `api/retest.php`、`api/lib_retest_keys.php`、`api/lib_retest_cleanup.php`、`api/lib_normalize.php`、`retest_access_logs`、`retest_revoked_tokens`、`generation_batches` | 双轨并行观测稳定周期后，移除 `enable-php-82.conf` 与 PHP-FPM 依赖，由 Go 直接承接全部 `/api/*` |
+| **Phase 0**<br>底座与工具链 *(已完成)* | 搭建 `feedback-api` 骨架、动态 `config.json` / `secret_key.local.php` 读取、CORS/CSRF/IP/JSON 中间件、`/healthz`、systemd/Nginx 脚本、CI 构建（含 `GOCACHE`）与差分测试框架 | `api/bootstrap.php`<br>`api/secret_key.php`<br>`api/sender_control_helper.php`<br>`.github/workflows/deploy.yml` | `go test -race` + `parity_test.py --php-only` 与双端比对；CI 仅预置二进制不改动线上流量 |
+| **Phase 1**<br>无状态配置与 AI 视觉接口 *(已完成)* | 接管无数据库连接的高延迟/高并发外部模型调用与公开配置接口，释放 PHP-FPM Worker 阻塞 | `api/public_config.php`<br>`api/calibrate_roi.php`<br>`api/identify.php`<br>`data/identify_archive/` | `parity_test.py` 全量对齐 + `zz-feedback-go-proxy.conf` 精确 `location =` 灰度切流 + `X-Backend-Engine: go` 校验 |
+| **Phase 2**<br>共享 Session 与文件/日志接口 *(当前)* | 落地 MySQL `app_sessions` 共享会话底座（消除 PHP 文件 Session 攻击面）；接管 PDF 上传、前端采集归档与更新日志 | `api/session_mysql.php` (`008_app_sessions_table.sql`)<br>`api/upload_pdf.php`<br>`api/upload_capture.php`<br>`api/changelog.php` | Go 引入 `go-sql-driver/mysql` 只读校验 `app_sessions.payload_json`；`zz-feedback-go-proxy.conf` 扩展 6 个 `location =` 并用真实 PHP 会话跨引擎验证 |
+| **Phase 3**<br>MySQL 核心业务与后台管理 | 迁移教师认证、系统日志审计、题库 CRUD、管理后台与版本历史 | `api/auth.php`、`api/logs.php`、`api/sender_control_helper.php`、`api/qbank.php`、`api/admin.php`（`api/admin/*`） | 复用 `app_sessions` 与 `db.local.php`；针对分页、排序、事务回滚与权限拦截建立 DB 差分用例 |
+| **Phase 4**<br>错题本重练域与 PHP 下线 | 迁移最复杂的家长端错题本域（Token 三级解析、SVG 验证码、临时 PDF 暂存下载、清理任务）与迁移运行器，完成全量切换并下线 PHP-FPM | `api/retest.php`、`api/lib_retest_*.php`、`api/lib_normalize.php`、`scripts/migrate.php` | 双轨并行观测稳定周期后，移除 `enable-php-82.conf` 与 PHP-FPM 依赖，由 Go 直接承接全部 `/api/*` |
