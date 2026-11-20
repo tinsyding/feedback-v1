@@ -746,12 +746,9 @@ switch ($action) {
             if ($table === 'qbank_questions' && !empty($input['qbank_id'])) {
                 try {
                     DB::execute("UPDATE `qbank_weeks` SET `question_count` = (SELECT COUNT(*) FROM `qbank_questions` WHERE `qbank_id` = ?), `updated_at` = NOW() WHERE `id` = ?", [$input['qbank_id'], $input['qbank_id']]);
-                    syncQbankJsonBackup((int)$input['qbank_id']);
                 } catch (Throwable $e) {
                     error_log("Post-insert qbank_questions sync error: " . $e->getMessage());
                 }
-            } elseif ($table === 'qbank_weeks') {
-                syncQbankJsonBackup((int)$newId);
             }
 
             recordServerLog('action', 'admin', 'db_record_created', [
@@ -958,12 +955,12 @@ switch ($action) {
             $stmt = DB::query($sql, $values);
             if (!$stmt) sendResponse(false, null, '更新失败: ' . (DB::getLastError() ?: '请检查数据格式'), 500);
 
-            // 若更新的是 qbank_weeks 表，级联同步更新 qbank_questions 明细表与 JSON 灾备文件
+            // 若更新的是 qbank_weeks 表，级联同步更新 qbank_questions 明细表
             if ($table === 'qbank_weeks') {
                 try {
                     $newWeek = DB::fetchOne("SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$id]);
                     if ($newWeek) {
-                        // 1. 级联同步 qbank_questions 冗余字段
+                        // 级联同步 qbank_questions 冗余字段
                         DB::execute("
                             UPDATE `qbank_questions`
                             SET `bank_type` = ?, `year` = ?, `season` = ?, `subject` = ?, `grade` = ?, `tier` = ?, `week` = ?, `updated_at` = NOW()
@@ -978,24 +975,9 @@ switch ($action) {
                             $newWeek['week'],
                             $id
                         ]);
-
-                        // 2. 同步灾备 JSON 镜像文件
-                        syncQbankJsonBackup((int)$id, $oldWeekRec);
                     }
                 } catch (Throwable $e) {
                     error_log("Cascade update qbank_weeks error: " . $e->getMessage());
-                }
-            }
-
-            // 若更新的是 qbank_questions 表，同步刷新所属期次的 JSON 灾备文件
-            if ($table === 'qbank_questions') {
-                try {
-                    $curQ = DB::fetchOne("SELECT `qbank_id` FROM `qbank_questions` WHERE `id` = ?", [$id]);
-                    if ($curQ && !empty($curQ['qbank_id'])) {
-                        syncQbankJsonBackup((int)$curQ['qbank_id']);
-                    }
-                } catch (Throwable $e) {
-                    error_log("Sync qbank_questions JSON error: " . $e->getMessage());
                 }
             }
 
@@ -1050,10 +1032,6 @@ switch ($action) {
             $affectedQbankIds = [];
             if ($table === 'qbank_weeks') {
                 try {
-                    foreach ($ids as $delId) {
-                        $wRec = DB::fetchOne("SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ?", [$delId]);
-                        deleteQbankJsonBackup($wRec);
-                    }
                     $inPlaceholders = implode(',', array_fill(0, count($ids), '?'));
                     DB::execute("DELETE FROM `qbank_questions` WHERE `qbank_id` IN ({$inPlaceholders})", array_values($ids));
                 } catch (Throwable $e) {
@@ -1080,7 +1058,6 @@ switch ($action) {
                 try {
                     foreach ($affectedQbankIds as $wId) {
                         DB::execute("UPDATE `qbank_weeks` SET `question_count` = (SELECT COUNT(*) FROM `qbank_questions` WHERE `qbank_id` = ?), `updated_at` = NOW() WHERE `id` = ?", [$wId, $wId]);
-                        syncQbankJsonBackup($wId);
                     }
                 } catch (Throwable $e) {
                     error_log("Post-delete qbank_questions error: " . $e->getMessage());
@@ -1096,8 +1073,7 @@ switch ($action) {
 
             sendResponse(true, [
                 'deleted' => $stmt->rowCount(),
-                'message' => "已成功删除 {$stmt->rowCount()} 条记录",
-                'retest_cleanup' => $retestCleanup
+                'message' => "已成功删除 {$stmt->rowCount()} 条记录"
             ]);
             break;
 

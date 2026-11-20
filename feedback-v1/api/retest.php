@@ -12,7 +12,6 @@ require_once __DIR__ . '/logs.php';
 $action = $_GET['action'] ?? '';
 
 // Directories
-$qbankDir = __DIR__ . '/../data/qbank';
 $tempDir = __DIR__ . '/../data/temp';
 
 if (!is_dir($tempDir)) {
@@ -263,12 +262,12 @@ function preloadMultiWeekQbankRows(string $subject, string $grade, array $weeks,
     }
 }
 
-function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $year = null, $season = null, $bankType = 'homework') {
+function getWeekPdfs($subject, $grade, $tier, $weekNum, $errorNums, $year = null, $season = null, $bankType = 'homework') {
     $bankType = $bankType === 'preview' ? 'preview' : 'homework';
     $pdfList = [];
     $uniquePdfs = []; // 映射 exerciseUrl => $pdfList 索引，支持同篇大题多错题聚合与去重
 
-    // 1. 优先从 MySQL qbank_questions（或批量预加载内存缓存）查询
+    // 从 MySQL qbank_questions（或批量预加载内存缓存）查询
     try {
         $db = Database::getInstance();
         if ($db && !empty($errorNums)) {
@@ -576,168 +575,6 @@ function getWeekPdfs($qbankDir, $subject, $grade, $tier, $weekNum, $errorNums, $
         error_log("DB getWeekPdfs error: " . $e->getMessage());
     }
 
-    // 2. 备用回退: 查找本地 JSON 文件
-    //    课后巩固沿用旧文件名；预习使用带 _preview 的文件名，两类题库不互相回退。
-    $typeSegment = $bankType === 'preview' ? '_preview' : '';
-    $qbankFile = null;
-    if ($year && $season) {
-        $candidate = $qbankDir . '/' . rawurlencode($year) . '_' . rawurlencode($season) . '_' . rawurlencode($subject) . '_' . rawurlencode($grade) . '_' . rawurlencode($tier) . $typeSegment . '_week' . intval($weekNum) . '.json';
-        if (file_exists($candidate)) {
-            $qbankFile = $candidate;
-        }
-    }
-    if (!$qbankFile) {
-        $safeName = rawurlencode($subject) . '_' . rawurlencode($grade) . '_' . rawurlencode($tier) . $typeSegment . '_week' . intval($weekNum);
-        $candidate = $qbankDir . '/' . $safeName . '.json';
-        if (file_exists($candidate)) {
-            $qbankFile = $candidate;
-        }
-    }
-
-    $foundEntry = null;
-    if ($qbankFile && file_exists($qbankFile)) {
-        $foundEntry = json_decode(file_get_contents($qbankFile), true);
-    } elseif ($bankType === 'homework') {
-        $legacyFile = $qbankDir . '/../qbank.json';
-        if (file_exists($legacyFile)) {
-            $qbankData = json_decode(file_get_contents($legacyFile), true) ?: [];
-            foreach ($qbankData as $entry) {
-                if (($entry['bankType'] ?? 'homework') !== 'homework') continue;
-                if ($entry['subject'] === $subject &&
-                    $entry['grade'] === $grade &&
-                    $entry['tier'] === $tier &&
-                    (int)$entry['week'] === (int)$weekNum) {
-                    $foundEntry = $entry;
-                    break;
-                }
-            }
-        }
-    }
-
-    if ($foundEntry && isset($foundEntry['questions'])) {
-        $jsonSharedMap = [];
-        foreach ($foundEntry['questions'] as $jq) {
-            $jExUrl = $jq['exercisePdf']['url'] ?? '';
-            $jIds = array_filter(array_map('intval', explode(',', str_replace(['，', '、'], ',', (string)($jq['id'] ?? '')))));
-            $jqMeta = parseRetestQuestionMeta($jq['questionMeta'] ?? ($jq['question_meta'] ?? null), $jIds[0] ?? 0);
-            if ($jExUrl !== '' && !empty($jIds) && ($jqMeta['mode'] ?? null) !== 'region_crop') {
-                if (!isset($jsonSharedMap[$jExUrl])) $jsonSharedMap[$jExUrl] = [];
-                $jsonSharedMap[$jExUrl] = array_values(array_unique(array_merge($jsonSharedMap[$jExUrl], $jIds)));
-                sort($jsonSharedMap[$jExUrl]);
-            }
-        }
-        foreach ($errorNums as $errNum) {
-            $qNum = intval($errNum);
-            foreach ($foundEntry['questions'] as $q) {
-                $ids = array_map('trim', explode(',', str_replace(['，', '、'], ',', (string)$q['id'])));
-                if (in_array((string)$errNum, $ids)) {
-                    $exerciseUrl = $q['exercisePdf']['url'] ?? null;
-                    $metaParsed = parseRetestQuestionMeta($q['questionMeta'] ?? ($q['question_meta'] ?? null), $qNum);
-                    $curMode = $metaParsed['mode'] ?? null;
-                    $inferredGroup = !empty($metaParsed['groupNums'])
-                        ? $metaParsed['groupNums']
-                        : (($curMode !== 'region_crop' && $exerciseUrl && !empty($jsonSharedMap[$exerciseUrl]))
-                            ? $jsonSharedMap[$exerciseUrl]
-                            : array_map('intval', $ids));
-                    sort($inferredGroup);
-                    $curTopic = trim($q['topic'] ?? '');
-
-                    $curMode = $metaParsed['mode'] ?? null;
-                    $uniqueKey = $exerciseUrl;
-                    if ($exerciseUrl && $curMode === 'region_crop') {
-                        $uniqueKey = count($inferredGroup) > 1
-                            ? ($exerciseUrl . '::group::' . implode(',', $inferredGroup))
-                            : ($exerciseUrl . '::q::' . $qNum);
-                    }
-
-                    if ($exerciseUrl && !isset($uniquePdfs[$uniqueKey])) {
-                        $newIdx = count($pdfList);
-                        $pdfList[] = [
-                            'errorNum' => $qNum,
-                            'errorNums' => [$qNum],
-                            'groupNums' => $inferredGroup,
-                            'mode' => $curMode,
-                            'regions' => $metaParsed['regions'] ?? [],
-                            'answerRegions' => $metaParsed['answerRegions'] ?? [],
-                            'errorBoxes' => $metaParsed['box'] ? [$metaParsed['box']] : [],
-                            'answerErrorBoxes' => $metaParsed['answerBox'] ? [$metaParsed['answerBox']] : [],
-                            'stemBoxes' => $metaParsed['stemBoxes'] ?? [],
-                            'subTopics' => $curTopic !== '' ? [$qNum => $curTopic] : [],
-                            'topic' => $curTopic,
-                            'videoUrl' => $q['videoUrl'] ?? ($q['video_url'] ?? null),
-                            'exercisePdf' => $exerciseUrl,
-                            'answerPdf' => $q['answerPdf']['url'] ?? null,
-                            'sourceType' => $bankType
-                        ];
-                        $uniquePdfs[$uniqueKey] = $newIdx;
-                    } elseif ($exerciseUrl && isset($uniquePdfs[$uniqueKey]) && is_int($uniquePdfs[$uniqueKey])) {
-                        $existIdx = $uniquePdfs[$uniqueKey];
-                        if (!in_array($qNum, $pdfList[$existIdx]['errorNums'], true)) {
-                            $pdfList[$existIdx]['errorNums'][] = $qNum;
-                            sort($pdfList[$existIdx]['errorNums']);
-                        }
-                        $mergedGroup = array_values(array_unique(array_merge($pdfList[$existIdx]['groupNums'] ?? [], $inferredGroup)));
-                        sort($mergedGroup);
-                        $pdfList[$existIdx]['groupNums'] = $mergedGroup;
-                        if ($curMode && empty($pdfList[$existIdx]['mode'])) {
-                            $pdfList[$existIdx]['mode'] = $curMode;
-                        }
-                        if (!empty($metaParsed['regions'])) {
-                            $existingRegions = $pdfList[$existIdx]['regions'] ?? [];
-                            foreach ($metaParsed['regions'] as $rg) {
-                                $dup = false;
-                                foreach ($existingRegions as $erg) {
-                                    if ($erg['pageOffset'] === $rg['pageOffset'] && abs($erg['x'] - $rg['x']) < 0.002 && abs($erg['y'] - $rg['y']) < 0.002 && abs($erg['w'] - $rg['w']) < 0.002 && abs($erg['h'] - $rg['h']) < 0.002) {
-                                        $dup = true;
-                                        break;
-                                    }
-                                }
-                                if (!$dup) $existingRegions[] = $rg;
-                            }
-                            $pdfList[$existIdx]['regions'] = $existingRegions;
-                        }
-                        if (!empty($metaParsed['answerRegions'])) {
-                            $existingAnsRegions = $pdfList[$existIdx]['answerRegions'] ?? [];
-                            foreach ($metaParsed['answerRegions'] as $arg) {
-                                $dup = false;
-                                foreach ($existingAnsRegions as $earg) {
-                                    if ($earg['pageOffset'] === $arg['pageOffset'] && abs($earg['x'] - $arg['x']) < 0.002 && abs($earg['y'] - $arg['y']) < 0.002 && abs($earg['w'] - $arg['w']) < 0.002 && abs($earg['h'] - $arg['h']) < 0.002) {
-                                        $dup = true;
-                                        break;
-                                    }
-                                }
-                                if (!$dup) $existingAnsRegions[] = $arg;
-                            }
-                            $pdfList[$existIdx]['answerRegions'] = $existingAnsRegions;
-                        }
-                        if ($metaParsed['box']) {
-                            $pdfList[$existIdx]['errorBoxes'][] = $metaParsed['box'];
-                        }
-                        if ($metaParsed['answerBox']) {
-                            $pdfList[$existIdx]['answerErrorBoxes'][] = $metaParsed['answerBox'];
-                        }
-                        if (empty($pdfList[$existIdx]['stemBoxes']) && !empty($metaParsed['stemBoxes'])) {
-                            $pdfList[$existIdx]['stemBoxes'] = $metaParsed['stemBoxes'];
-                        }
-                        if ($curTopic !== '') {
-                            $pdfList[$existIdx]['subTopics'][$qNum] = $curTopic;
-                            $uniqueTopics = array_values(array_unique(array_values($pdfList[$existIdx]['subTopics'])));
-                            if (count($uniqueTopics) === 1) {
-                                $pdfList[$existIdx]['topic'] = $uniqueTopics[0];
-                            } else {
-                                $topicParts = [];
-                                foreach ($pdfList[$existIdx]['subTopics'] as $sNum => $sTpc) {
-                                    $topicParts[] = "[{$sNum}] {$sTpc}";
-                                }
-                                $pdfList[$existIdx]['topic'] = implode(' · ', $topicParts);
-                            }
-                        }
-                    }
-                    break;
-                }
-            }
-        }
-    }
     return $pdfList;
 }
 
@@ -2241,7 +2078,7 @@ if ($action === 'decrypt') {
         // 历史周次可能属于旧班型：按该周实际所在班型取 PDF，保证换班后旧周错题仍可下载
         $weekTier = $dbWeekTiers[(string)$wNum] ?? '';
         if ($weekTier === '') $weekTier = $tier;
-        $pdfList = getWeekPdfs($qbankDir, $subject, $grade, $weekTier, $wNum, $errors, $tokenYear, $tokenSeason, 'homework');
+        $pdfList = getWeekPdfs($subject, $grade, $weekTier, $wNum, $errors, $tokenYear, $tokenSeason, 'homework');
 
         $previewEntry = $previewByTopic[$wNum] ?? null;
         $previewErrors = is_array($previewEntry['errors'] ?? null) ? $previewEntry['errors'] : [];
@@ -2250,7 +2087,7 @@ if ($action === 'decrypt') {
         if ($previewTier === '') $previewTier = $weekTier;
         $previewErrors = array_values(array_unique(array_filter(array_map('intval', $previewErrors))));
         $previewPdfList = !empty($previewErrors)
-            ? getWeekPdfs($qbankDir, $subject, $grade, $previewTier, $previewWeekNum, $previewErrors, $tokenYear, $tokenSeason, 'preview')
+            ? getWeekPdfs($subject, $grade, $previewTier, $previewWeekNum, $previewErrors, $tokenYear, $tokenSeason, 'preview')
             : [];
 
         $wEntry = [
@@ -2296,9 +2133,9 @@ if ($action === 'decrypt') {
         $wEntry = [
             'week' => $currWeek,
             'errors' => $currErrors,
-            'pdfs' => getWeekPdfs($qbankDir, $subject, $grade, $currWeekTier, $currWeek, $currErrors, $tokenYear, $tokenSeason, 'homework'),
+            'pdfs' => getWeekPdfs($subject, $grade, $currWeekTier, $currWeek, $currErrors, $tokenYear, $tokenSeason, 'homework'),
             'previewErrors' => $fallbackPreviewErrors,
-            'previewPdfs' => !empty($fallbackPreviewErrors) ? getWeekPdfs($qbankDir, $subject, $grade, $fallbackPreviewTier, $currWeek, $fallbackPreviewErrors, $tokenYear, $tokenSeason, 'preview') : [],
+            'previewPdfs' => !empty($fallbackPreviewErrors) ? getWeekPdfs($subject, $grade, $fallbackPreviewTier, $currWeek, $fallbackPreviewErrors, $tokenYear, $tokenSeason, 'preview') : [],
             'previewWeek' => $currWeek,
             'previewScore' => $fallbackPreviewEntry['previewScore'] ?? null,
             'previewComment' => $fallbackPreviewEntry['previewComment'] ?? '',

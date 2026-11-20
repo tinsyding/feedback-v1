@@ -1,6 +1,6 @@
 <?php
 /**
- * 题库知识点管理 API (MySQL 优先 + JSON 灾备)
+ * 题库知识点管理 API (纯 MySQL 数据库存储)
  *
  * GET    ?action=list[&year=2026][&season=春][&subject=数学][&grade=七年级][&search=关键词] -> 获取题目列表
  * GET    ?action=get&subject=数学&grade=七年级&tier=S+&week=3[&year=2026][&season=春]       -> 获取指定题目数据
@@ -13,12 +13,6 @@ require_once __DIR__ . '/bootstrap.php';
 // 引入数据库核心模块
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/logs.php';
-
-// Data directory for JSON backup
-$dataDir = __DIR__ . '/../data/qbank';
-if (!is_dir($dataDir)) {
-    mkdir($dataDir, 0755, true);
-}
 
 // 读取系统配置中的默认年份和学期（_comment 为合法 JSON 字段，直接解码后忽略）
 $configFile = __DIR__ . '/../config.json';
@@ -107,197 +101,12 @@ function sanitizeQuestionMeta($rawMeta) {
 }
 
 /**
- * 自动检测并补齐 qbank_questions 表结构 (004_shared_topic_variation & 005_big_question_meta)
- * 若此前因缺少字段导致 MySQL 事务回滚而仅写入了 JSON 灾备文件，自动将近期 JSON 灾备恢复回数据库。
- */
-function ensureQbankSchema($dataDir, $defaultYear, $defaultSeason) {
-    $flagFile = $dataDir . '/.schema_v5_migrated';
-    if (file_exists($flagFile)) {
-        return;
-    }
-    try {
-        $db = DB::getConnection();
-        if (!$db) {
-            return;
-        }
-        $col = DB::fetchOne("SHOW COLUMNS FROM `qbank_questions` LIKE 'parent_question_nums'");
-        if (!$col) {
-            $db->exec("ALTER TABLE `qbank_questions` ADD COLUMN `parent_question_nums` VARCHAR(128) NULL DEFAULT NULL COMMENT '举一反三关联的多个原题号（逗号分隔，如 2,5）' AFTER `parent_question_num`");
-        }
-        try {
-            $db->exec("INSERT IGNORE INTO `schema_migrations` (`version`) VALUES ('004_shared_topic_variation')");
-        } catch (Throwable $ignore) {}
-
-        $colMeta = DB::fetchOne("SHOW COLUMNS FROM `qbank_questions` LIKE 'question_meta'");
-        if (!$colMeta) {
-            $db->exec("ALTER TABLE `qbank_questions` ADD COLUMN `question_meta` TEXT NULL DEFAULT NULL COMMENT '大题分组及小问框选坐标JSON(groupNums/box)' AFTER `video_url`");
-        }
-        try {
-            $db->exec("INSERT IGNORE INTO `schema_migrations` (`version`) VALUES ('005_big_question_meta')");
-        } catch (Throwable $ignore) {}
-
-        // 扫描最近 48 小时内写入的 JSON 灾备文件，恢复因字段缺失回滚而未入库的专题数据
-        $files = glob($dataDir . '/*.json') ?: [];
-        $cutoff = time() - 172800;
-        foreach ($files as $file) {
-            if (@filemtime($file) < $cutoff) {
-                continue;
-            }
-            $content = @json_decode(@file_get_contents($file), true);
-            if (!is_array($content) || empty($content['questions']) || !is_array($content['questions'])) {
-                continue;
-            }
-            $meta = parseFileName(basename($file), $defaultYear, $defaultSeason);
-            $bType = normalizeBankType($content['bankType'] ?? ($meta['bankType'] ?? 'homework'));
-            $yr = intval($content['year'] ?? ($meta['year'] ?? $defaultYear));
-            $sn = normalizeSeason($content['season'] ?? ($meta['season'] ?? $defaultSeason), $defaultSeason);
-            $sub = trim($content['subject'] ?? ($meta['subject'] ?? ''));
-            $grd = trim($content['grade'] ?? ($meta['grade'] ?? ''));
-            $tr = trim($content['tier'] ?? ($meta['tier'] ?? ''));
-            $wk = intval($content['week'] ?? ($meta['week'] ?? 0));
-            if (!$sub || !$grd || !$tr || $wk <= 0) {
-                continue;
-            }
-            $existingWeek = DB::fetchOne(
-                "SELECT `id`, ROUND(UNIX_TIMESTAMP(`updated_at`)*1000) AS `updatedAt` FROM `qbank_weeks`
-                 WHERE `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? AND `bank_type` = ? LIMIT 1",
-                [$yr, $sn, $sub, $grd, $tr, $wk, $bType]
-            );
-            $jsonUpdatedAt = floatval($content['updatedAt'] ?? (@filemtime($file) * 1000));
-            $needRecover = !$existingWeek || ($jsonUpdatedAt > floatval($existingWeek['updatedAt']) + 2000);
-            if (!$needRecover && $existingWeek) {
-                $qCnt = intval(DB::fetchValue("SELECT COUNT(*) FROM `qbank_questions` WHERE `qbank_id` = ?", [$existingWeek['id']]));
-                if ($qCnt === 0 && count($content['questions']) > 0) {
-                    $needRecover = true;
-                }
-            }
-            if ($needRecover) {
-                $db->beginTransaction();
-                try {
-                    $stmtW = $db->prepare("
-                        INSERT INTO `qbank_weeks` (`bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week`, `question_count`, `created_by`, `updated_by`, `updated_at`)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', CURRENT_TIMESTAMP)
-                        ON DUPLICATE KEY UPDATE
-                            `question_count` = VALUES(`question_count`),
-                            `updated_at` = CURRENT_TIMESTAMP
-                    ");
-                    $stmtW->execute([$bType, $yr, $sn, $sub, $grd, $tr, $wk, count($content['questions'])]);
-                    $qbId = DB::fetchValue(
-                        "SELECT `id` FROM `qbank_weeks` WHERE `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? AND `bank_type` = ? LIMIT 1",
-                        [$yr, $sn, $sub, $grd, $tr, $wk, $bType]
-                    );
-                    if ($qbId) {
-                        $stmtQ = $db->prepare("
-                            INSERT INTO `qbank_questions`
-                                (`qbank_id`, `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week`, `question_num`, `parent_question_num`, `parent_question_nums`, `sub_num`, `topic`, `video_url`,
-                                 `exercise_pdf`, `exercise_name`, `exercise_thumb`,
-                                 `answer_pdf`, `answer_name`, `answer_thumb`, `created_by`, `updated_by`, `updated_at`)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', CURRENT_TIMESTAMP)
-                            ON DUPLICATE KEY UPDATE
-                                `parent_question_num` = VALUES(`parent_question_num`),
-                                `parent_question_nums` = VALUES(`parent_question_nums`),
-                                `sub_num` = VALUES(`sub_num`),
-                                `topic` = VALUES(`topic`),
-                                `video_url` = VALUES(`video_url`),
-                                `exercise_pdf` = VALUES(`exercise_pdf`),
-                                `exercise_name` = VALUES(`exercise_name`),
-                                `exercise_thumb` = VALUES(`exercise_thumb`),
-                                `answer_pdf` = VALUES(`answer_pdf`),
-                                `answer_name` = VALUES(`answer_name`),
-                                `answer_thumb` = VALUES(`answer_thumb`),
-                                `updated_at` = CURRENT_TIMESTAMP
-                        ");
-                        foreach ($content['questions'] as $q) {
-                            $qNum = intval($q['id'] ?? ($q['question_num'] ?? ($q['num'] ?? 0)));
-                            if ($qNum <= 0) continue;
-                            $rawPNums = $q['parentQuestionNums'] ?? ($q['parent_question_nums'] ?? null);
-                            $pArr = [];
-                            if (is_array($rawPNums)) {
-                                $pArr = array_values(array_unique(array_filter(array_map('intval', $rawPNums))));
-                                sort($pArr);
-                            } elseif (is_string($rawPNums) && trim($rawPNums) !== '') {
-                                $pArr = array_values(array_unique(array_filter(array_map('intval', explode(',', $rawPNums)))));
-                                sort($pArr);
-                            }
-                            $pQNum = isset($q['parentQuestionNum']) && $q['parentQuestionNum'] !== null && $q['parentQuestionNum'] !== ''
-                                ? intval($q['parentQuestionNum'])
-                                : null;
-                            if (empty($pArr) && $pQNum !== null && $pQNum > 0) {
-                                $pArr = [$pQNum];
-                            }
-                            if ($pQNum === null && !empty($pArr)) {
-                                $pQNum = $pArr[0];
-                            }
-                            $pNumsStr = !empty($pArr) ? implode(',', $pArr) : null;
-                            $sNum = intval($q['subNum'] ?? ($q['sub_num'] ?? 1));
-                            $tpc = trim($q['topic'] ?? '');
-                            $vUrl = trim($q['videoUrl'] ?? ($q['video_url'] ?? ''));
-                            $exU = $q['exercisePdf']['url'] ?? '';
-                            $exN = $q['exercisePdf']['name'] ?? '';
-                            $exT = $q['exercisePdf']['thumb'] ?? '';
-                            $anU = $q['answerPdf']['url'] ?? '';
-                            $anN = $q['answerPdf']['name'] ?? '';
-                            $anT = $q['answerPdf']['thumb'] ?? '';
-                            $stmtQ->execute([
-                                $qbId, $bType, $yr, $sn, $sub, $grd, $tr, $wk,
-                                $qNum, $pQNum, $pNumsStr, $sNum, $tpc, $vUrl, $exU, $exN, $exT, $anU, $anN, $anT
-                            ]);
-                        }
-                    }
-                    $db->commit();
-                } catch (Throwable $recErr) {
-                    if ($db->inTransaction()) {
-                        $db->rollBack();
-                    }
-                    error_log("Recover qbank JSON error: " . $recErr->getMessage());
-                }
-            }
-        }
-
-        $colVerify = DB::fetchOne("SHOW COLUMNS FROM `qbank_questions` LIKE 'parent_question_nums'");
-        if ($colVerify) {
-            @file_put_contents($flagFile, date('Y-m-d H:i:s'));
-        }
-    } catch (Throwable $e) {
-        error_log("ensureQbankSchema error: " . $e->getMessage());
-    }
-}
-
-/**
  * 规范题库类型：homework=课后巩固（旧数据默认），preview=预习，variation=课后举一反三
  */
 function normalizeBankType($bankType) {
     if ($bankType === 'preview') return 'preview';
     if ($bankType === 'variation') return 'variation';
     return 'homework';
-}
-
-/**
- * 获取备份 JSON 文件路径 (兼容带年份/学期与老版不带年份/学期格式)
- * 课后巩固沿用旧文件名，预习使用带 _preview，举一反三使用带 _variation 的新文件名。
- */
-function getFilePath($dataDir, $subject, $grade, $tier, $week, $year = null, $season = null, $bankType = 'homework') {
-    $bankType = normalizeBankType($bankType);
-    $typeSegment = $bankType === 'preview' ? '_preview' : ($bankType === 'variation' ? '_variation' : '');
-    if ($year !== null && $season !== null) {
-        $yearSeasonName = rawurlencode($year) . '_' . rawurlencode($season) . '_' . rawurlencode($subject) . '_' . rawurlencode($grade) . '_' . rawurlencode($tier) . $typeSegment . '_week' . intval($week);
-        $fullPath = $dataDir . '/' . $yearSeasonName . '.json';
-        if (file_exists($fullPath)) {
-            return $fullPath;
-        }
-    }
-    // 兼容原版无年份学期文件名
-    $legacyName = rawurlencode($subject) . '_' . rawurlencode($grade) . '_' . rawurlencode($tier) . $typeSegment . '_week' . intval($week);
-    $legacyPath = $dataDir . '/' . $legacyName . '.json';
-    if (file_exists($legacyPath)) {
-        return $legacyPath;
-    }
-    // 默认写入路径（若指定了年份学期则采用新命名，否则老命名）
-    if ($year !== null && $season !== null) {
-        $yearSeasonName = rawurlencode($year) . '_' . rawurlencode($season) . '_' . rawurlencode($subject) . '_' . rawurlencode($grade) . '_' . rawurlencode($tier) . $typeSegment . '_week' . intval($week);
-        return $dataDir . '/' . $yearSeasonName . '.json';
-    }
-    return $legacyPath;
 }
 
 /**
@@ -437,84 +246,8 @@ function cascadeHomeworkTopicsToVariations($db, $year, $season, $subject, $grade
 /**
  * 同步刷新举一反三 JSON 灾备镜像中的知识点。
  */
-function cascadeHomeworkTopicsToVariationJson($dataDir, $year, $season, $subject, $grade, $tier, $week, $questions) {
-    $path = getFilePath($dataDir, $subject, $grade, $tier, $week, $year, $season, 'variation');
-    if (!file_exists($path)) return false;
-
-    $content = json_decode(@file_get_contents($path), true);
-    if (!is_array($content) || empty($content['questions']) || !is_array($content['questions'])) return false;
-
-    $topicMap = buildHomeworkTopicMap($questions);
-    if (empty($topicMap)) return false;
-
-    $before = $content['questions'];
-    $content['questions'] = syncVariationTopicsToHomework($content['questions'], $topicMap);
-    if ($content['questions'] === $before) return false;
-
-    @file_put_contents($path, json_encode($content, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
-    return true;
-}
-
-/**
- * 解析文件名以备回退
- */
-function parseFileName($filename, $defaultYear, $defaultSeason) {
-    $name = pathinfo($filename, PATHINFO_FILENAME);
-    // 新版格式: {year}_{season}_{subject}_{grade}_{tier}_(preview|homework|variation)_week{N}.json
-    if (preg_match('/^(\d+)_(.+)_(.+)_(.+)_(.+?)_(preview|homework|variation)_week(\d+)$/', $name, $matches)) {
-        return [
-            'year' => intval($matches[1]),
-            'season' => normalizeSeason(rawurldecode($matches[2])),
-            'subject' => rawurldecode($matches[3]),
-            'grade' => rawurldecode($matches[4]),
-            'tier' => rawurldecode($matches[5]),
-            'bankType' => normalizeBankType($matches[6]),
-            'week' => intval($matches[7])
-        ];
-    }
-    // 新版格式（课后巩固，旧文件名没有类型段）: {year}_{season}_{subject}_{grade}_{tier}_week{N}.json
-    if (preg_match('/^(\d+)_(.+)_(.+)_(.+)_(.+)_week(\d+)$/', $name, $matches)) {
-        return [
-            'year' => intval($matches[1]),
-            'season' => normalizeSeason(rawurldecode($matches[2])),
-            'subject' => rawurldecode($matches[3]),
-            'grade' => rawurldecode($matches[4]),
-            'tier' => rawurldecode($matches[5]),
-            'bankType' => 'homework',
-            'week' => intval($matches[6])
-        ];
-    }
-    // 原版格式: {subject}_{grade}_{tier}_week{N}.json
-    if (preg_match('/^(.+)_(.+)_(.+)_week(\d+)$/', $name, $matches)) {
-        return [
-            'year' => $defaultYear,
-            'season' => $defaultSeason,
-            'subject' => rawurldecode($matches[1]),
-            'grade' => rawurldecode($matches[2]),
-            'tier' => rawurldecode($matches[3]),
-            'bankType' => 'homework',
-            'week' => intval($matches[4])
-        ];
-    }
-    // 早期遗留格式: {subject}_{tier}_week{N}.json
-    if (preg_match('/^(.+)_(.+)_week(\d+)$/', $name, $matches)) {
-        return [
-            'year' => $defaultYear,
-            'season' => $defaultSeason,
-            'subject' => rawurldecode($matches[1]),
-            'grade' => '未指定年级',
-            'tier' => rawurldecode($matches[2]),
-            'bankType' => 'homework',
-            'week' => intval($matches[3])
-        ];
-    }
-    return null;
-}
-
 // ========== 路由请求 ==========
 $method = $_SERVER['REQUEST_METHOD'];
-
-ensureQbankSchema($dataDir, $defaultSemesterYear, $defaultSeasonZh);
 
 try {
     switch ($method) {
@@ -582,38 +315,8 @@ try {
                     exit;
                 }
 
-                // 数据库异常时的备用逻辑: 读取本地 JSON 文件
-                $files = glob($dataDir . '/*.json');
-                $items = [];
-                if ($files) {
-                    foreach ($files as $file) {
-                        $meta = parseFileName(basename($file), $defaultSemesterYear, $defaultSeasonZh);
-                        if ($meta) {
-                            if ($yearFilter !== null && $meta['year'] !== $yearFilter) continue;
-                            if ($seasonFilter !== null && $meta['season'] !== $seasonFilter) continue;
-                            if ($subjectFilter !== null && $meta['subject'] !== $subjectFilter) continue;
-                            if ($gradeFilter !== null && $meta['grade'] !== $gradeFilter) continue;
-                            if ($bankTypeFilter !== null && ($meta['bankType'] ?? 'homework') !== $bankTypeFilter) continue;
-
-                            $content = json_decode(file_get_contents($file), true);
-                            $items[] = [
-                                'year' => $meta['year'],
-                                'season' => $meta['season'],
-                                'subject' => $meta['subject'],
-                                'grade' => $meta['grade'] ?? '未指定年级',
-                                'tier' => $meta['tier'],
-                                'bankType' => $meta['bankType'] ?? 'homework',
-                                'week' => $meta['week'],
-                                'questionCount' => count($content['questions'] ?? []),
-                                'updatedAt' => $content['updatedAt'] ?? filemtime($file) * 1000
-                            ];
-                        }
-                    }
-                }
-                usort($items, function($a, $b) {
-                    return ($b['updatedAt'] ?? 0) - ($a['updatedAt'] ?? 0);
-                });
-                echo json_encode(['success' => true, 'data' => $items, 'fallback' => true], JSON_UNESCAPED_UNICODE);
+                http_response_code(500);
+                echo json_encode(['success' => false, 'error' => '题库数据库查询失败，请稍后重试'], JSON_UNESCAPED_UNICODE);
 
             } elseif ($action === 'get') {
                 $subject = trim($_GET['subject'] ?? '');
@@ -763,46 +466,12 @@ try {
                     }
                 } catch (Throwable $e) {
                     error_log("DB qbank get error: " . $e->getMessage());
+                    http_response_code(500);
+                    echo json_encode(['success' => false, 'error' => '题库数据库查询失败，请稍后重试'], JSON_UNESCAPED_UNICODE);
+                    exit;
                 }
 
-                // 2. 数据库中未找到时，回退检查本地 JSON 文件
-                $filePath = getFilePath($dataDir, $subject, $grade, $tier, $week, $year, $season, $bankType);
-                if (file_exists($filePath)) {
-                    $content = json_decode(file_get_contents($filePath), true);
-                    if ($content) {
-                        $content['bankType'] = normalizeBankType($content['bankType'] ?? $bankType);
-                        $content['year'] = $content['year'] ?? $year;
-                        $content['season'] = $content['season'] ?? $season;
-                        $content['questionCount'] = count($content['questions'] ?? []);
-                        if (empty($content['updatedAtFormatted']) && !empty($content['updatedAt'])) {
-                            $content['updatedAtFormatted'] = date('Y-m-d H:i', round($content['updatedAt'] / 1000));
-                        }
-
-                        // 灾备文件同样让变式题知识点跟随当前课后巩固原题
-                        if ($content['bankType'] === 'variation' && !empty($content['questions'])) {
-                            $hwPath = getFilePath(
-                                $dataDir,
-                                $content['subject'] ?? $subject,
-                                $content['grade'] ?? $grade,
-                                $content['tier'] ?? $tier,
-                                intval($content['week'] ?? $week),
-                                $content['year'],
-                                $content['season'],
-                                'homework'
-                            );
-                            if (file_exists($hwPath)) {
-                                $hwContent = json_decode(@file_get_contents($hwPath), true);
-                                $hwTopicMap = buildHomeworkTopicMap($hwContent['questions'] ?? []);
-                                if (!empty($hwTopicMap)) {
-                                    $content['questions'] = syncVariationTopicsToHomework($content['questions'], $hwTopicMap);
-                                }
-                            }
-                        }
-                    }
-                    echo json_encode(['success' => true, 'data' => $content], JSON_UNESCAPED_UNICODE);
-                } else {
-                    echo json_encode(['success' => true, 'data' => null], JSON_UNESCAPED_UNICODE);
-                }
+                echo json_encode(['success' => true, 'data' => null], JSON_UNESCAPED_UNICODE);
             } else {
                 http_response_code(400);
                 echo json_encode(['success' => false, 'error' => '未知操作: ' . $action], JSON_UNESCAPED_UNICODE);
@@ -1026,12 +695,21 @@ try {
                 error_log("DB qbank save error: " . $e->getMessage());
             }
 
+            if (!$dbSaved) {
+                http_response_code(500);
+                echo json_encode([
+                    'success' => false,
+                    'error' => '题库保存到数据库失败，请稍后重试'
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+
             if (!empty($removedPdfCandidates)) {
                 cleanupUnreferencedPdfs($removedPdfCandidates);
             }
 
             // 1.5 课后巩固知识点变化后，级联刷新同专题举一反三变式题的知识点
-            if ($bankType === 'homework' && $dbSaved && isset($db) && $db) {
+            if ($bankType === 'homework' && isset($db) && $db) {
                 try {
                     cascadeHomeworkTopicsToVariations($db, $year, $season, $subject, $grade, $tier, $week, $questions);
                 } catch (Throwable $e) {
@@ -1039,7 +717,6 @@ try {
                 }
             }
 
-            // 2. 同步写入 JSON 文件作为灾备和静态镜像
             $data = [
                 'bankType' => $bankType,
                 'year' => $year,
@@ -1051,18 +728,6 @@ try {
                 'questions' => $questions,
                 'updatedAt' => $currentTimeMs
             ];
-
-            $filePath = getFilePath($dataDir, $subject, $grade, $tier, $week, $year, $season, $bankType);
-            @file_put_contents($filePath, json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
-
-            // 2.1 同步刷新举一反三 JSON 灾备镜像中的知识点
-            if ($bankType === 'homework') {
-                try {
-                    cascadeHomeworkTopicsToVariationJson($dataDir, $year, $season, $subject, $grade, $tier, $week, $questions);
-                } catch (Throwable $e) {
-                    error_log("Cascade variation JSON topic error: " . $e->getMessage());
-                }
-            }
 
             // 记录保存题库的审计日志
             if (function_exists('recordServerLog')) {
@@ -1146,12 +811,6 @@ try {
 
             if (!empty($deletedPdfCandidates)) {
                 cleanupUnreferencedPdfs($deletedPdfCandidates);
-            }
-
-            // 2. 从文件系统删除
-            $filePath = getFilePath($dataDir, $subject, $grade, $tier, $week, $year, $season, $bankType);
-            if (file_exists($filePath)) {
-                @unlink($filePath);
             }
 
             // 记录删除题库的审计日志

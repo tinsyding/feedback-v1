@@ -150,8 +150,8 @@ jobs:
           echo "🚀 正在从生产服务器打包拉取老师上传的 PDF 与重要数据..."
           SSH="ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 $DEPLOY_USER@$DEPLOY_HOST"
 
-          # 压缩打包 data 目录下的 pdfs, uploads, history, qbank 为整体归档文件，避开解压数万个小文件导致 Google Drive API 超频卡死与严重超时
-          $SSH "cd /www/wwwroot/JF/feedback-git/feedback-v1 && tar -czf - data/pdfs data/uploads data/history data/qbank 2>/dev/null || true" > ./staging/materials/feedback_materials_${BACKUP_TIME}.tar.gz
+          # 压缩打包 data 目录下的 pdfs, uploads 为整体归档文件（history/qbank 已完全走 MySQL 备份），避开解压数万个小文件导致 Google Drive API 超频卡死与严重超时
+          $SSH "cd /www/wwwroot/JF/feedback-git/feedback-v1 && tar -czf - data/pdfs data/uploads 2>/dev/null || true" > ./staging/materials/feedback_materials_${BACKUP_TIME}.tar.gz
 
           if [ -s ./staging/materials/feedback_materials_${BACKUP_TIME}.tar.gz ]; then
             echo "✅ 材料归档完成，大小: $(ls -lh ./staging/materials/feedback_materials_${BACKUP_TIME}.tar.gz | awk '{print $5}')"
