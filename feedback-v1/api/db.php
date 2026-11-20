@@ -64,9 +64,10 @@ class DB {
      * 一次性轻量数据库结构自愈升级（通过 lock 文件标记，仅在首次连接时执行一次，零运行时开销）
      * 1. 为 student_records 补齐 submission_status / preview_submission_status 显式提交状态字段
      * 2. 归一化 class_batches.season，归并历史重复批次并添加 uk_batch_identity 唯一索引
+     * 3. 创建 retest_revoked_tokens 错题本吊销黑名单表，并将旧 revoked_tokens.json 一次性迁入数据库
      */
     private static function ensureSchemaUpgrades(PDO $pdo): void {
-        $lockFile = dirname(__DIR__) . '/data/.schema_v202611_migrated.lock';
+        $lockFile = dirname(__DIR__) . '/data/.schema_v202611_db_only.lock';
         if (is_file($lockFile)) {
             return;
         }
@@ -109,6 +110,33 @@ class DB {
                 }
 
                 $pdo->exec("ALTER TABLE `class_batches` ADD UNIQUE KEY `uk_batch_identity` (`year`, `season`, `grade`, `tier`, `subject`, `class_name`)");
+            }
+
+            // 3. 创建 retest_revoked_tokens 表并迁移遗留的 revoked_tokens.json
+            $pdo->exec("CREATE TABLE IF NOT EXISTS `retest_revoked_tokens` (
+                `token` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '被吊销的错题本Token',
+                `revoked_by` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT '执行作废的操作人',
+                `reason` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT '作废原因',
+                `revoked_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '作废时间',
+                PRIMARY KEY (`token`),
+                KEY `idx_revoked_at` (`revoked_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='错题本吊销Token黑名单表'");
+
+            $legacyRevokedFile = dirname(__DIR__) . '/data/history/revoked_tokens.json';
+            if (is_file($legacyRevokedFile)) {
+                $legacyMap = json_decode((string)@file_get_contents($legacyRevokedFile), true);
+                if (is_array($legacyMap) && !empty($legacyMap)) {
+                    $insStmt = $pdo->prepare("INSERT IGNORE INTO `retest_revoked_tokens` (`token`, `revoked_by`, `reason`, `revoked_at`) VALUES (?, ?, ?, ?)");
+                    foreach ($legacyMap as $tok => $info) {
+                        $tokStr = substr(trim((string)$tok), 0, 64);
+                        if ($tokStr === '') continue;
+                        $by = is_array($info) ? substr(trim((string)($info['by'] ?? '')), 0, 50) : '';
+                        $reason = is_array($info) ? substr(trim((string)($info['reason'] ?? '')), 0, 255) : '';
+                        $at = is_array($info) && !empty($info['at']) ? (string)$info['at'] : date('Y-m-d H:i:s');
+                        $insStmt->execute([$tokStr, $by, $reason, $at]);
+                    }
+                }
+                @unlink($legacyRevokedFile);
             }
 
             $dataDir = dirname($lockFile);

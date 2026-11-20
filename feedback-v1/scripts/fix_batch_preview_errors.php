@@ -228,61 +228,6 @@ function main(array $argv): void {
         exit(1);
     }
 
-    // 2. 更新历史档案 JSON 文件 (按学科_年级_preview.json)
-    $previewUpdatesByFile = [];
-    foreach ($previewFixList as $item) {
-        $r = $item['record'];
-        $b = $getBatchInfo($r['batch_code']);
-        if (!$b) continue;
-        $c = $getClassInfo((int)$b['class_id']);
-        if (!$c) continue;
-
-        $subject = $c['subject'];
-        $grade = $c['grade'];
-        $targetFile = $historyDir . '/' . rawurlencode($subject) . '_' . rawurlencode($grade) . '_preview.json';
-
-        $stKey = $r['student_key'] ?: ($r['student_name'] . '_' . $grade . '_' . $subject);
-        $hwWeek = (string)($r['week_num'] ?: $b['week_num']);
-        $pWeek = (int)($r['preview_week_num'] ?: ($b['week_num'] + 1));
-
-        $previewUpdatesByFile[$targetFile][$stKey][$hwWeek] = [
-            'errors' => $item['extracted'],
-            'previewWeek' => $pWeek
-        ];
-    }
-
-    foreach ($previewUpdatesByFile as $filePath => $studentsData) {
-        $existing = [];
-        if (is_file($filePath)) {
-            // 先备份
-            @copy($filePath, $filePath . '.bak.' . date('Ymd_His'));
-            $content = (string)@file_get_contents($filePath);
-            $existing = json_decode($content, true) ?: [];
-        }
-
-        foreach ($studentsData as $stKey => $weeks) {
-            if (!isset($existing[$stKey])) {
-                $existing[$stKey] = [];
-            }
-            foreach ($weeks as $w => $entry) {
-                $existing[$stKey][$w] = $entry;
-            }
-        }
-
-        $fp = @fopen($filePath, 'c+');
-        if ($fp && flock($fp, LOCK_EX)) {
-            ftruncate($fp, 0);
-            rewind($fp);
-            fwrite($fp, json_encode($existing, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
-            fflush($fp);
-            flock($fp, LOCK_UN);
-            fclose($fp);
-            echo "✅ 预习历史档案已更新: " . basename($filePath) . " (已自动生成 .bak 备份)\n";
-        } else {
-            echo "⚠️ 无法锁定写入预习历史档案: " . basename($filePath) . "\n";
-        }
-    }
-
     echo "\n🎉 修复完成！\n";
     echo "  - 已成功修复 {$targetBatch} 批次中的 " . count($previewFixList) . " 位学生的预习错题。\n";
     echo "  - 学生错题本、知识点与微课已即时恢复，无需助教重传或重新制卡！\n";

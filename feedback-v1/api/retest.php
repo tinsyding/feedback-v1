@@ -13,12 +13,8 @@ $action = $_GET['action'] ?? '';
 
 // Directories
 $qbankDir = __DIR__ . '/../data/qbank';
-$historyDir = __DIR__ . '/../data/history';
 $tempDir = __DIR__ . '/../data/temp';
 
-if (!is_dir($historyDir)) {
-    mkdir($historyDir, 0755, true);
-}
 if (!is_dir($tempDir)) {
     mkdir($tempDir, 0755, true);
 }
@@ -79,32 +75,55 @@ function logRetestAccess($token, $studentName, $action, $details = '') {
 }
 
 /**
- * Token 吊销黑名单（持久有效）
+ * Token 吊销黑名单（持久有效，存储于 MySQL retest_revoked_tokens 表）
  * 背景：短 Token 由 HMAC 确定性派生，重生成会得到同一 Token；
- * 因此吊销必须独立于映射表，重生成后仍不可用，直到管理员恢复。
- * 存储：data/history/revoked_tokens.json { token: {by, at, reason} }
+ * 因此吊销独立于 student_records，重生成后仍不可用，直到管理员恢复。
  */
-function getRevokedTokensFile() {
-    return __DIR__ . '/../data/history/revoked_tokens.json';
+function isTokenRevoked(string $token): bool {
+    $token = trim($token);
+    if ($token === '') return false;
+    try {
+        $db = Database::getInstance();
+        $row = $db->fetchOne("SELECT `token` FROM `retest_revoked_tokens` WHERE `token` = ? LIMIT 1", [$token]);
+        return !empty($row);
+    } catch (Throwable $e) {
+        error_log("isTokenRevoked error: " . $e->getMessage());
+        return false;
+    }
 }
-function loadRevokedTokens() {
-    $f = getRevokedTokensFile();
-    if (!file_exists($f)) return [];
-    $d = json_decode(@file_get_contents($f), true);
-    return is_array($d) ? $d : [];
+
+function revokeRetestToken(string $token, string $operator, string $reason = ''): bool {
+    $token = substr(trim($token), 0, 64);
+    if ($token === '') return false;
+    try {
+        $db = Database::getInstance();
+        $db->execute(
+            "INSERT INTO `retest_revoked_tokens` (`token`, `revoked_by`, `reason`, `revoked_at`)
+             VALUES (?, ?, ?, NOW())
+             ON DUPLICATE KEY UPDATE
+                 `revoked_by` = VALUES(`revoked_by`),
+                 `reason` = VALUES(`reason`),
+                 `revoked_at` = NOW()",
+            [$token, substr(trim($operator), 0, 50), substr(trim($reason), 0, 255)]
+        );
+        return true;
+    } catch (Throwable $e) {
+        error_log("revokeRetestToken error: " . $e->getMessage());
+        return false;
+    }
 }
-function saveRevokedTokens(array $map) {
-    $f = getRevokedTokensFile();
-    $fp = @fopen($f, 'c+');
-    if (!$fp) return false;
-    if (!flock($fp, LOCK_EX)) { fclose($fp); return false; }
-    ftruncate($fp, 0);
-    rewind($fp);
-    fwrite($fp, json_encode($map ?: (object)[], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
-    fflush($fp);
-    flock($fp, LOCK_UN);
-    fclose($fp);
-    return true;
+
+function unrevokeRetestToken(string $token): bool {
+    $token = substr(trim($token), 0, 64);
+    if ($token === '') return false;
+    try {
+        $db = Database::getInstance();
+        $db->execute("DELETE FROM `retest_revoked_tokens` WHERE `token` = ?", [$token]);
+        return true;
+    } catch (Throwable $e) {
+        error_log("unrevokeRetestToken error: " . $e->getMessage());
+        return false;
+    }
 }
 
 /**
@@ -1139,39 +1158,6 @@ if ($action === 'get_student_week_record') {
                 }
             }
 
-            // 文件历史兜底补充
-            $historyFile = $historyDir . '/' . rawurlencode($subject) . '_' . rawurlencode($grade) . '.json';
-            if (is_file($historyFile)) {
-                $histJson = json_decode((string)@file_get_contents($historyFile), true);
-                if (is_array($histJson)) {
-                    foreach (array_keys($histJson) as $rawKey) {
-                        $rawKey = trim((string)$rawKey);
-                        if ($rawKey === '') continue;
-                        $suffix = "_{$grade}_{$subject}";
-                        $coreKey = str_ends_with($rawKey, $suffix)
-                            ? substr($rawKey, 0, -strlen($suffix))
-                            : $rawKey;
-                        $sId = '';
-                        $sName = $coreKey;
-                        if (preg_match('/^(\d+)_(.+)$/u', $coreKey, $m)) {
-                            $sId = trim($m[1]);
-                            $sName = trim($m[2]);
-                        }
-                        if ($sName === '') continue;
-                        $dedupKey = $sId !== '' ? "{$sId}_{$sName}" : $sName;
-                        if (!isset($seenMap[$dedupKey])) {
-                            $seenMap[$dedupKey] = [
-                                'id' => $sId,
-                                'name' => $sName,
-                                'key' => build_student_key($sId, $sName, $grade, $subject),
-                                'tier' => '',
-                                'tiers' => []
-                            ];
-                        }
-                    }
-                }
-            }
-
             $studentsRoster = array_values($seenMap);
         }
 
@@ -1249,24 +1235,6 @@ if ($action === 'get_student_week_record') {
                         if ($hasHw) break;
                     }
                 }
-
-                // JSON 档案兜底
-                if (!$hasHwRecord) {
-                    $historyFile = $historyDir . '/' . rawurlencode($subject) . '_' . rawurlencode($grade) . '.json';
-                    if (is_file($historyFile)) {
-                        $histJson = json_decode((string)@file_get_contents($historyFile), true);
-                        if (is_array($histJson)) {
-                            $merged = merge_history_for_keys($histJson, $candidateKeys);
-                            if (array_key_exists((string)$week, $merged) && is_array($merged[(string)$week])) {
-                                $hwErrors = array_values(array_unique(array_filter(array_map('intval', $merged[(string)$week]))));
-                                sort($hwErrors, SORT_NUMERIC);
-                                $hasHwRecord = true;
-                                $isHwUnsubmitted = false;
-                                $isHwFullScore = empty($hwErrors);
-                            }
-                        }
-                    }
-                }
             }
 
             $pvErrors = [];
@@ -1310,35 +1278,6 @@ if ($action === 'get_student_week_record') {
                         $isPvUnsubmitted = ($resolvedPvStatus === 'unsubmitted');
                         $isPvFullScore = (!$isPvUnsubmitted && empty($pvErrors));
                         break;
-                    }
-                }
-
-                // 预习 JSON 档案兜底
-                if (!$hasPvRecord) {
-                    $previewHistoryFile = $historyDir . '/' . rawurlencode($subject) . '_' . rawurlencode($grade) . '_preview.json';
-                    if (is_file($previewHistoryFile)) {
-                        $pvHistJson = json_decode((string)@file_get_contents($previewHistoryFile), true);
-                        if (is_array($pvHistJson)) {
-                            foreach ($candidateKeys as $ck) {
-                                if (empty($pvHistJson[$ck]) || !is_array($pvHistJson[$ck])) continue;
-                                foreach ($pvHistJson[$ck] as $wkKey => $pvEntry) {
-                                    $entryPvWeek = is_array($pvEntry) && isset($pvEntry['previewWeek'])
-                                        ? intval($pvEntry['previewWeek'])
-                                        : intval($wkKey);
-                                    if ($entryPvWeek === $targetPvWeek) {
-                                        $rawPvErrs = (is_array($pvEntry) && array_key_exists('errors', $pvEntry))
-                                            ? $pvEntry['errors']
-                                            : (is_array($pvEntry) ? $pvEntry : []);
-                                        $pvErrors = array_values(array_unique(array_filter(array_map('intval', $rawPvErrs))));
-                                        sort($pvErrors, SORT_NUMERIC);
-                                        $hasPvRecord = true;
-                                        $isPvUnsubmitted = false;
-                                        $isPvFullScore = empty($pvErrors);
-                                        break 2;
-                                    }
-                                }
-                            }
-                        }
                     }
                 }
             }
@@ -1458,17 +1397,6 @@ if ($action === 'encrypt_batch') {
         ], JSON_UNESCAPED_UNICODE);
         exit;
     }
-
-    // 班级历史错题档案路径与短 Token 索引路径（文件系统，双写保证向下兼容）
-    // 错题本按学生身份聚合，不再按班型分档：新写入统一落到 `学科_年级.json`；
-    // 读取时会同时合并旧的 `学科_年级_班型.json`，保证换班型后历史不断档。
-    $historyFile = $historyDir . '/' . rawurlencode($subject) . '_' . rawurlencode($grade) . '.json';
-    $previewHistoryFile = $historyDir . '/' . rawurlencode($subject) . '_' . rawurlencode($grade) . '_preview.json';
-    $tokenMapFile = $historyDir . '/token_map.json';
-    $batchHistoryUpdates = [];
-    $batchPreviewHistoryUpdates = [];
-    $batchNameMap = [];
-    $batchTokenMapEntries = [];
 
     // 生成当次操作的唯一批次编号（老师每一次生成就生成一次，作为一次完整的批次）
     // 幂等与防抖保护：如果 60 秒内已有同一教师针对同班级、同周次且学生人数完全一致的生成记录，
@@ -1710,39 +1638,9 @@ if ($action === 'encrypt_batch') {
             ? resolveSubmissionStatus($rawPvStatus, $previewErrors, $preScore, $previewComment)
             : 'submitted';
 
-        // 归档到本次批次变更集：以唯一 studentKey 隔离存储
-        $batchNameMap[$studentKey] = $name;
-        if ($hasHomeworkData) {
-            $batchHistoryUpdates[$studentKey][(string)$week] = $errors;
-        }
-        if ($studentHasPreview) {
-            $batchPreviewHistoryUpdates[$studentKey][(string)$week] = [
-                'errors' => $previewErrors,
-                'previewWeek' => $previewWeekValue
-            ];
-        }
-
         // 生成简短、高熵且防篡改的短 Token（10位，基于 HMAC-SHA256）
         // 哈希因子不再包含班型：学生换班型后仍得到同一个稳定链接，历史不断档
         $shortToken = deriveRetestToken($subject, $grade, $studentKey);
-
-        // 记录短 Token 映射条目
-        $batchTokenMapEntries[$shortToken] = [
-            's' => $subject,
-            'g' => $grade,
-            't' => $tier,
-            'w' => $week,
-            'pw' => $previewWeekValue, // 预习周次（可与课后巩固不同）
-            'pq' => $previewErrors,    // 当前周预习错题，数据库不可用时兜底
-            'n' => $name,       // 真实姓名（供家长核验输入）
-            'k' => $studentKey, // 唯一标识（定位历史库中该学生的独立档案）
-            'id' => $studentId, // 学号
-            'year' => $year,
-            'season' => $normalizedSeason,
-            'u' => time(),
-            '_has_pv' => $studentHasPreview,
-            '_has_hw' => $hasHomeworkData
-        ];
 
         // 同步写入或更新 MySQL student_records 表（即使 0 错题也同步更新最新成绩、评语和 0 错题，避免残留旧批改数据！）
         if ($batchId) {
@@ -1902,137 +1800,6 @@ if ($action === 'encrypt_batch') {
         $pdo->commit();
     }
 
-    // 原子更新班级历史错题档案 ($historyFile) 并加排他锁 (flock LOCK_EX)
-    if (!empty($batchHistoryUpdates)) {
-        $fp = @fopen($historyFile, 'c+');
-        if ($fp) {
-            if (flock($fp, LOCK_EX)) {
-                $content = '';
-                while (!feof($fp)) {
-                    $content .= fread($fp, 8192);
-                }
-                $existingHistory = json_decode($content, true) ?: [];
-                foreach ($batchHistoryUpdates as $stKey => $weekUpdates) {
-                    if (!isset($existingHistory[$stKey])) {
-                        $existingHistory[$stKey] = [];
-                    }
-                    foreach ($weekUpdates as $wk => $errs) {
-                        if (empty($errs)) {
-                            unset($existingHistory[$stKey][(string)$wk]);
-                            $stName = $batchNameMap[$stKey] ?? '';
-                            if ($stName !== '' && isset($existingHistory[$stName][(string)$wk])) {
-                                unset($existingHistory[$stName][(string)$wk]);
-                            }
-                            if (empty($existingHistory[$stKey])) {
-                                unset($existingHistory[$stKey]);
-                            }
-                        } else {
-                            $existingHistory[$stKey][(string)$wk] = $errs;
-                        }
-                    }
-                }
-                $historyOutput = !empty($existingHistory) ? $existingHistory : (object)[];
-                ftruncate($fp, 0);
-                rewind($fp);
-                fwrite($fp, json_encode($historyOutput, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
-                fflush($fp);
-                flock($fp, LOCK_UN);
-            }
-            fclose($fp);
-        }
-    }
-
-    // 原子更新预习错题档案 ($previewHistoryFile)：与课后巩固档案分开，避免两类错题混写
-    if (!empty($batchPreviewHistoryUpdates)) {
-        $fp = @fopen($previewHistoryFile, 'c+');
-        if ($fp) {
-            if (flock($fp, LOCK_EX)) {
-                $content = '';
-                while (!feof($fp)) {
-                    $content .= fread($fp, 8192);
-                }
-                $existingPreviewHistory = json_decode($content, true) ?: [];
-                foreach ($batchPreviewHistoryUpdates as $stKey => $weekUpdates) {
-                    if (!isset($existingPreviewHistory[$stKey])) {
-                        $existingPreviewHistory[$stKey] = [];
-                    }
-                    foreach ($weekUpdates as $wk => $previewEntry) {
-                        $previewErrs = $previewEntry['errors'] ?? [];
-                        $targetPvWeek = intval($previewEntry['previewWeek'] ?? $week);
-                        if (empty($previewErrs)) {
-                            unset($existingPreviewHistory[$stKey][(string)$wk]);
-                            // 同时清理该生名下指向同一 previewWeek 的其它周次槽位，确保全对清零生效
-                            if ($targetPvWeek > 0 && is_array($existingPreviewHistory[$stKey])) {
-                                foreach ($existingPreviewHistory[$stKey] as $existWk => $existEntry) {
-                                    $epw = is_array($existEntry) && isset($existEntry['previewWeek'])
-                                        ? intval($existEntry['previewWeek'])
-                                        : intval($existWk);
-                                    if ($epw === $targetPvWeek) {
-                                        unset($existingPreviewHistory[$stKey][$existWk]);
-                                    }
-                                }
-                            }
-                            if (empty($existingPreviewHistory[$stKey])) {
-                                unset($existingPreviewHistory[$stKey]);
-                            }
-                        } else {
-                            $existingPreviewHistory[$stKey][(string)$wk] = [
-                                'errors' => $previewErrs,
-                                'previewWeek' => $targetPvWeek
-                            ];
-                        }
-                    }
-                }
-                $previewHistoryOutput = !empty($existingPreviewHistory) ? $existingPreviewHistory : (object)[];
-                ftruncate($fp, 0);
-                rewind($fp);
-                fwrite($fp, json_encode($previewHistoryOutput, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
-                fflush($fp);
-                flock($fp, LOCK_UN);
-            }
-            fclose($fp);
-        }
-    }
-
-    // 原子更新短 Token 映射表 ($tokenMapFile) 并加排他锁 (flock LOCK_EX)，去除 JSON_PRETTY_PRINT 压缩体积
-    if (!empty($batchTokenMapEntries)) {
-        $fp = @fopen($tokenMapFile, 'c+');
-        if ($fp) {
-            if (flock($fp, LOCK_EX)) {
-                $content = '';
-                while (!feof($fp)) {
-                    $content .= fread($fp, 8192);
-                }
-                $existingTokenMap = json_decode($content, true) ?: [];
-                foreach ($batchTokenMapEntries as $tok => $entry) {
-                    $hasPvEntry = !empty($entry['_has_pv']);
-                    $hasHwEntry = !empty($entry['_has_hw']);
-                    unset($entry['_has_pv'], $entry['_has_hw']);
-                    if (isset($existingTokenMap[$tok]) && is_array($existingTokenMap[$tok])) {
-                        $oldEntry = $existingTokenMap[$tok];
-                        if (!$hasPvEntry) {
-                            if (isset($oldEntry['pw'])) $entry['pw'] = $oldEntry['pw'];
-                            if (isset($oldEntry['pq'])) $entry['pq'] = $oldEntry['pq'];
-                        }
-                        if (!$hasHwEntry) {
-                            if (isset($oldEntry['w']) && intval($oldEntry['w']) > 0) {
-                                $entry['w'] = $oldEntry['w'];
-                            }
-                        }
-                    }
-                    $existingTokenMap[$tok] = $entry;
-                }
-                $tokenMapOutput = !empty($existingTokenMap) ? $existingTokenMap : (object)[];
-                ftruncate($fp, 0);
-                rewind($fp);
-                fwrite($fp, json_encode($tokenMapOutput, JSON_UNESCAPED_UNICODE));
-                fflush($fp);
-                flock($fp, LOCK_UN);
-            }
-            fclose($fp);
-        }
-    }
-
     // 记录生成反馈的审计日志 - 仅在非防抖新批次时写入
     if (!$isDebouncedBatch && function_exists('recordServerLog')) {
         recordServerLog('action', 'retest', 'generate_feedback', [
@@ -2079,7 +1846,7 @@ if ($action === 'decrypt') {
     }
 
     $data = null;
-    // 1. 优先通过 MySQL student_records.retest_token (idx_token B-Tree 索引) 毫秒级定位，避免每次请求加载全量 token_map.json
+    // 通过 MySQL student_records.retest_token (idx_token B-Tree 索引) 毫秒级定位
     try {
         $db = Database::getInstance();
         $record = $db->fetchOne(
@@ -2110,32 +1877,9 @@ if ($action === 'decrypt') {
         }
     } catch (Throwable $e) {
         error_log("DB lookup error: " . $e->getMessage());
-    }
-
-    // 2. 若数据库未命中，回退从 token_map.json 或旧版 AES-256 长 Token 解析
-    if (!$data) {
-        $tokenMapFile = $historyDir . '/token_map.json';
-        $tokenMap = file_exists($tokenMapFile) ? (json_decode(file_get_contents($tokenMapFile), true) ?: []) : [];
-        if (isset($tokenMap[$rawToken])) {
-            $data = $tokenMap[$rawToken];
-        } else {
-            $token = str_replace(['-', '_'], ['+', '/'], $rawToken);
-            $mod4 = strlen($token) % 4;
-            if ($mod4) {
-                $token .= substr('====', $mod4);
-            }
-
-            $decoded = base64_decode($token);
-            $ivlen = openssl_cipher_iv_length($cipherAlgo);
-            if ($decoded !== false && strlen($decoded) > $ivlen) {
-                $iv = substr($decoded, 0, $ivlen);
-                $ciphertext = substr($decoded, $ivlen);
-                $decrypted = openssl_decrypt($ciphertext, $cipherAlgo, $secretKey, 0, $iv);
-                if ($decrypted !== false) {
-                    $data = json_decode($decrypted, true);
-                }
-            }
-        }
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => '数据库查询服务异常，请稍后重试'], JSON_UNESCAPED_UNICODE);
+        exit;
     }
 
     if (!$data) {
@@ -2145,8 +1889,7 @@ if ($action === 'decrypt') {
     }
 
     // 黑名单吊销检查（失败前置：被作废的链接连核验门都不展示）
-    $revokedMap = loadRevokedTokens();
-    if (isset($revokedMap[$rawToken])) {
+    if (isTokenRevoked($rawToken)) {
         logRetestAccess($rawToken, $data['n'] ?? '', 'access_revoked', '链接已被作废');
         http_response_code(403);
         echo json_encode(['success' => false, 'error' => '该错题本链接已被老师作废，请联系老师重新获取'], JSON_UNESCAPED_UNICODE);
@@ -2283,85 +2026,10 @@ if ($action === 'decrypt') {
         session_write_close();
     }
 
-    // 检索该学生的历史记录
-    // 新写入落在 `学科_年级.json`；旧数据仍在 `学科_年级_班型.json`。
-    // 这里把全部相关档案合并读取，学生换班型后历史保持连续。
-    $studentHistory = [];
-    $historyWeekTiers = [];
-    $historyByTier = [];
-    $tierlessWeeks = [];
-    $historyFiles = [];
-    $tierlessHistoryFile = $historyDir . '/' . rawurlencode($subject) . '_' . rawurlencode($grade) . '.json';
-    if (is_file($tierlessHistoryFile)) {
-        $historyFiles[] = $tierlessHistoryFile;
-    }
-    $legacyHistoryFiles = glob($historyDir . '/' . rawurlencode($subject) . '_' . rawurlencode($grade) . '_*.json') ?: [];
-    // 新的档案优先；旧班型档案按修改时间从新到旧合并
-    usort($legacyHistoryFiles, static function ($a, $b) {
-        return (filemtime($b) ?: 0) <=> (filemtime($a) ?: 0);
-    });
-    $historyFiles = array_merge($historyFiles, $legacyHistoryFiles);
-    foreach ($historyFiles as $hf) {
-        // 预习档案结构不同，由下方单独的 previewHistory 逻辑读取
-        if (substr(basename($hf), -strlen('_preview.json')) === '_preview.json') continue;
-        $rawHistory = @file_get_contents($hf);
-        if ($rawHistory === false) continue;
-        $historyData = json_decode($rawHistory, true);
-        if (!is_array($historyData)) continue;
-        // 旧档案文件名末尾带班型：用于在数据库缺行时仍按原班型定位 PDF
-        $hfParts = explode('_', basename($hf, '.json'));
-        $hfTier = count($hfParts) >= 3 ? rawurldecode(implode('_', array_slice($hfParts, 2))) : '';
-        foreach (merge_history_for_keys($historyData, $studentKeyCandidates) as $histWeek => $histErrors) {
-            $histWeek = (string)$histWeek;
-            if (!array_key_exists($histWeek, $studentHistory)) {
-                $studentHistory[$histWeek] = $histErrors;
-            }
-            if ($hfTier !== '') {
-                if (!isset($historyByTier[$hfTier][$histWeek])) {
-                    $historyByTier[$hfTier][$histWeek] = $histErrors;
-                }
-            } else {
-                // 无班型后缀的是迁移后新写入的档案，优先级最高
-                $tierlessWeeks[$histWeek] = true;
-            }
-            if ($hfTier !== '' && !isset($historyWeekTiers[$histWeek])) {
-                $historyWeekTiers[$histWeek] = $hfTier;
-            }
-        }
-    }
-
-    // 预习错题历史档案：结构与课后巩固分开，按“课后巩固周次”关联，内部记录预习周次
-    $previewHistory = [];
-    $previewHistoryFile = $historyDir . '/' . rawurlencode($subject) . '_' . rawurlencode($grade) . '_preview.json';
-    if (is_file($previewHistoryFile)) {
-        $previewHistoryData = json_decode((string)@file_get_contents($previewHistoryFile), true);
-        if (is_array($previewHistoryData)) {
-            foreach ($studentKeyCandidates as $candidateKey) {
-                if (empty($previewHistoryData[$candidateKey]) || !is_array($previewHistoryData[$candidateKey])) continue;
-                foreach ($previewHistoryData[$candidateKey] as $previewWeekKey => $previewEntry) {
-                    $pErrs = [];
-                    $pWeek = intval($previewWeekKey);
-                    if (is_array($previewEntry) && array_key_exists('errors', $previewEntry)) {
-                        $pErrs = is_array($previewEntry['errors']) ? $previewEntry['errors'] : [];
-                        $pWeek = intval($previewEntry['previewWeek'] ?? $previewWeekKey);
-                    } elseif (is_array($previewEntry)) {
-                        $pErrs = $previewEntry;
-                    }
-                    if (!isset($previewHistory[(string)$previewWeekKey])) {
-                        $previewHistory[(string)$previewWeekKey] = [
-                            'errors' => array_values(array_unique(array_filter(array_map('intval', $pErrs)))),
-                            'previewWeek' => $pWeek > 0 ? $pWeek : intval($previewWeekKey)
-                        ];
-                    }
-                }
-            }
-        }
-    }
-    // 预习错题在数据库查询后按“预习周次”统一归档，见下方 $previewByTopic
-
-    // 尝试从 MySQL student_records 查询该学生的历史周次数据及成绩评语进行双向融合
+    // 从 MySQL student_records 查询该学生的全部历史周次数据及成绩评语
     // 匹配只认身份 Key（新/旧格式），不再按姓名 OR 匹配，杜绝同名学生串档；
     // 仅无学号旧数据允许受控的姓名兜底。
+    $studentHistory = [];
     $dbStudentScores = [];
     $dbHomeworkErrors = [];
     $dbPreviewData = [];
@@ -2480,24 +2148,13 @@ if ($action === 'decrypt') {
         error_log("DB studentHistory query error: " . $e->getMessage());
     }
 
-    // 同一周可能在多个班型都有记录：数据库已有最新作业记录的周次以数据库为准；
-    // 数据库缺该周作业数据时，再回退到最新班型的历史档案。
-    foreach ($dbWeekTiers as $dbWeek => $dbTier) {
-        $dbWeek = (string)$dbWeek;
-        if ($dbTier === '' || isset($tierlessWeeks[$dbWeek])) continue;
-        if (isset($dbHomeworkErrors[$dbWeek])) continue;
-        if (isset($historyByTier[$dbTier][$dbWeek])) {
-            $studentHistory[$dbWeek] = $historyByTier[$dbTier][$dbWeek];
-        }
-    }
-
     // 如果未指定有效当前周，默认采用历史记录中的最大周次
     if ($currWeek <= 0 && !empty($studentHistory)) {
         $currWeek = max(array_map('intval', array_keys($studentHistory)));
     }
 
     // 预习错题按“预习周次”重新归档：教师可以把专题二的预习随专题一作业一起生成，
-    // 错题本中必须落在专题二，不能串到专题一。数据库优先于文件档案。
+    // 错题本中必须落在专题二，不能串到专题一。
     $previewByTopic = [];
     foreach ($dbPreviewData as $wn => $entry) {
         if (empty($entry['hasPreview'])) continue;
@@ -2506,15 +2163,6 @@ if ($action === 'decrypt') {
         $entry['topic'] = $topic;
         $entry['tier'] = trim((string)($dbWeekTiers[(string)$wn] ?? ''));
         $previewByTopic[$topic] = $entry;
-    }
-    foreach ($previewHistory as $previewWeekKey => $entry) {
-        $topic = intval($entry['previewWeek'] ?? 0);
-        if ($topic <= 0) $topic = intval($previewWeekKey);
-        if (!isset($previewByTopic[$topic])) {
-            $entry['topic'] = $topic;
-            $entry['sourceWeek'] = intval($previewWeekKey);
-            $previewByTopic[$topic] = $entry;
-        }
     }
 
     // Token 内的当前周数据只在访问签发周次时生效
@@ -2592,7 +2240,6 @@ if ($action === 'decrypt') {
         $wNum = intval($weekStr);
         // 历史周次可能属于旧班型：按该周实际所在班型取 PDF，保证换班后旧周错题仍可下载
         $weekTier = $dbWeekTiers[(string)$wNum] ?? '';
-        if ($weekTier === '') $weekTier = $historyWeekTiers[(string)$wNum] ?? '';
         if ($weekTier === '') $weekTier = $tier;
         $pdfList = getWeekPdfs($qbankDir, $subject, $grade, $weekTier, $wNum, $errors, $tokenYear, $tokenSeason, 'homework');
 
@@ -2641,7 +2288,7 @@ if ($action === 'decrypt') {
 
     // 兜底（如果没有任何周次数据，至少放当前周）
     if (empty($weeksData) && $currWeek > 0) {
-        $currWeekTier = (($dbWeekTiers[(string)$currWeek] ?? '') ?: (($historyWeekTiers[(string)$currWeek] ?? '') ?: $tier));
+        $currWeekTier = ($dbWeekTiers[(string)$currWeek] ?? '') ?: $tier;
         $fallbackPreviewEntry = $previewByTopic[$currWeek] ?? null;
         $fallbackPreviewErrors = is_array($fallbackPreviewEntry['errors'] ?? null) ? $fallbackPreviewEntry['errors'] : [];
         $fallbackPreviewTier = trim((string)($fallbackPreviewEntry['tier'] ?? ''));
@@ -2941,17 +2588,16 @@ if ($action === 'revoke_token' || $action === 'unrevoke_token') {
         exit;
     }
 
-    // 仅允许操作真实存在的 Token（短映射或 DB 记录），防止黑名单被垃圾填满
-    $tokenMapFile = $historyDir . '/token_map.json';
-    $tokenMap = file_exists($tokenMapFile) ? (json_decode(@file_get_contents($tokenMapFile), true) ?: []) : [];
-    $exists = isset($tokenMap[$token]);
-    if (!$exists) {
-        try {
-            $db = Database::getInstance();
-            $exists = (bool)$db->fetchOne("SELECT id FROM student_records WHERE retest_token = ? LIMIT 1", [$token]);
-        } catch (Throwable $e) {
-            $exists = false;
+    // 仅允许操作数据库中真实存在的 Token（student_records 或已在吊销表中的记录），防止黑名单被垃圾填满
+    $exists = false;
+    try {
+        $db = Database::getInstance();
+        $exists = (bool)$db->fetchOne("SELECT id FROM student_records WHERE retest_token = ? LIMIT 1", [$token]);
+        if (!$exists && $action === 'unrevoke_token') {
+            $exists = isTokenRevoked($token);
         }
+    } catch (Throwable $e) {
+        $exists = false;
     }
     if (!$exists) {
         http_response_code(404);
@@ -2960,20 +2606,19 @@ if ($action === 'revoke_token' || $action === 'unrevoke_token') {
     }
 
     $operator = trim($_SESSION['username'] ?? 'unknown');
-    $map = loadRevokedTokens();
     if ($action === 'revoke_token') {
         $reason = substr(trim($body['reason'] ?? ($_POST['reason'] ?? '')), 0, 200);
-        $map[$token] = ['by' => $operator, 'at' => date('Y-m-d H:i:s'), 'reason' => $reason];
+        $ok = revokeRetestToken($token, $operator, $reason);
         $event = 'revoke_token';
         $msg = '已作废该错题本链接（重生成同一 Token 仍不可用，直至恢复）';
     } else {
-        unset($map[$token]);
+        $ok = unrevokeRetestToken($token);
         $event = 'unrevoke_token';
         $msg = '已恢复该错题本链接';
     }
-    if (!saveRevokedTokens($map)) {
+    if (!$ok) {
         http_response_code(500);
-        echo json_encode(['success' => false, 'error' => '黑名单写入失败'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => '黑名单数据库写入失败'], JSON_UNESCAPED_UNICODE);
         exit;
     }
 

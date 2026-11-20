@@ -4,7 +4,6 @@
  */
 
 require_once __DIR__ . '/../lib_retest_keys.php';
-require_once __DIR__ . '/../lib_retest_cleanup.php';
 
 switch ($action) {
         case 'db_list':
@@ -753,12 +752,6 @@ switch ($action) {
                 }
             } elseif ($table === 'qbank_weeks') {
                 syncQbankJsonBackup((int)$newId);
-            } elseif ($table === 'student_records') {
-                try {
-                    retest_sync_student_record_to_json((int)$newId);
-                } catch (Throwable $e) {
-                    error_log("Post-insert student_records JSON sync error: " . $e->getMessage());
-                }
             }
 
             recordServerLog('action', 'admin', 'db_record_created', [
@@ -965,15 +958,6 @@ switch ($action) {
             $stmt = DB::query($sql, $values);
             if (!$stmt) sendResponse(false, null, '更新失败: ' . (DB::getLastError() ?: '请检查数据格式'), 500);
 
-            // 若更新的是 student_records 表，同步更新 JSON 历史档案与 token_map.json，防止旧错题在家长端复活
-            if ($table === 'student_records') {
-                try {
-                    retest_sync_student_record_to_json((int)$id);
-                } catch (Throwable $e) {
-                    error_log("Post-update student_records JSON sync error: " . $e->getMessage());
-                }
-            }
-
             // 若更新的是 qbank_weeks 表，级联同步更新 qbank_questions 明细表与 JSON 灾备文件
             if ($table === 'qbank_weeks') {
                 try {
@@ -1087,70 +1071,10 @@ switch ($action) {
                 }
             }
 
-            // 删除前抓取受影响学生，供删除后清理错题本 Token 与历史 JSON。
-            $retestAffectedRows = [];
-            if ($table === 'student_records' || $table === 'class_batches') {
-                try {
-                    $retestIn = implode(',', array_fill(0, count($ids), '?'));
-                    $retestFields = "sr.student_id, sr.student_name, sr.student_key, sr.week_num, cb.subject, cb.grade";
-                    if ($table === 'student_records') {
-                        $retestAffectedRows = DB::fetchAll(
-                            "SELECT {$retestFields}
-                             FROM `student_records` sr
-                             LEFT JOIN `class_batches` cb ON sr.batch_id = cb.id
-                             WHERE sr.id IN ({$retestIn})",
-                            array_values($ids)
-                        );
-                    } else {
-                        $retestAffectedRows = DB::fetchAll(
-                            "SELECT {$retestFields}
-                             FROM `student_records` sr
-                             INNER JOIN `class_batches` cb ON sr.batch_id = cb.id
-                             WHERE sr.batch_id IN ({$retestIn})",
-                            array_values($ids)
-                        );
-                    }
-                } catch (Throwable $e) {
-                    error_log("Pre-delete retest artifact lookup error: " . $e->getMessage());
-                }
-            }
-
             $inPlaceholders = implode(',', array_fill(0, count($ids), '?'));
             $sql = "DELETE FROM `{$table}` WHERE `{$pk}` IN ({$inPlaceholders})";
             $stmt = DB::query($sql, array_values($ids));
             if (!$stmt) sendResponse(false, null, '删除失败', 500);
-
-            // 级联清理错题本档案：仅清数据库行会让旧链接继续从 token_map / 历史 JSON 读取题目。
-            $retestCleanup = null;
-            if (!empty($retestAffectedRows)) {
-                try {
-                    $cleanupGroups = retest_cleanup_after_deleted_records($retestAffectedRows);
-                    // 整班/整科删除时明细可能非常大，日志与响应只保留汇总，避免撑爆日志表。
-                    $retestCleanup = array_map(static function (array $group): array {
-                        return [
-                            'subject' => $group['subject'],
-                            'grade' => $group['grade'],
-                            'students' => $group['students'],
-                            'deleted_weeks' => $group['deleted_weeks'],
-                            'remaining_weeks' => $group['remaining_weeks'],
-                            'db_query_failed' => $group['db_query_failed'],
-                            'history_files' => $group['history']['files'],
-                            'history_keys_removed' => $group['history']['keys_removed'],
-                            'history_weeks_removed' => $group['history']['weeks_removed'],
-                            'tokens_removed' => count($group['tokens']['removed']),
-                            'tokens_updated' => count($group['tokens']['updated']),
-                        ];
-                    }, $cleanupGroups);
-                    recordServerLog('warn', 'admin', 'retest_artifacts_cleaned', [
-                        'table' => $table,
-                        'ids' => array_values($ids),
-                        'groups' => $retestCleanup,
-                        'message' => "删除 {$table} 后已同步清理错题本历史档案与 Token"
-                    ]);
-                } catch (Throwable $e) {
-                    error_log("Post-delete retest artifact cleanup error: " . $e->getMessage());
-                }
-            }
 
             if ($table === 'qbank_questions' && !empty($affectedQbankIds)) {
                 try {

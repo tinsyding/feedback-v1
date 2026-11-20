@@ -247,15 +247,6 @@ switch ($action) {
                 if ($pdo && $pdo->inTransaction()) {
                     $pdo->commit();
                 }
-
-                // 同步更新 data/history/*.json 与 token_map.json，防止回滚后旧错题残留在 JSON 灾备中
-                if (!empty($rollbackTargetId)) {
-                    try {
-                        retest_sync_student_record_to_json((int)$rollbackTargetId);
-                    } catch (Throwable $syncErr) {
-                        error_log("record_rollback JSON sync error: " . $syncErr->getMessage());
-                    }
-                }
             } catch (Throwable $e) {
                 if ($pdo && $pdo->inTransaction()) {
                     $pdo->rollBack();

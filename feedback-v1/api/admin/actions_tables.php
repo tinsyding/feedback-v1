@@ -14,6 +14,7 @@ switch ($action) {
                 'generation_batches'=> '学情生成批次',
                 'class_batches'     => '班级教学期次',
                 'retest_access_logs'=> '重测查阅日志',
+                'retest_revoked_tokens' => '错题本吊销黑名单',
                 'qbank_weeks'       => '题库专题期次',
                 'qbank_questions'   => '题库题目与考点',
                 'admin_users'       => '系统管理员表',

@@ -58,11 +58,6 @@ foreach (array_slice($argv, 1) as $arg) {
     }
 }
 
-$historyDir = realpath(__DIR__ . '/../data/history');
-if ($historyDir === false || !is_dir($historyDir)) {
-    fail('找不到 data/history 目录');
-}
-
 $pdo = DB::getConnection();
 if (!$pdo) {
     fail('数据库连接失败');
@@ -142,91 +137,8 @@ $otherHistoryCount = (int)DB::fetchValue(
 );
 printLine("[student_record_history] 待迁移旧格式: {$legacyHistoryCount}，已是新格式: {$newHistoryCount}，其他未知格式: {$otherHistoryCount}");
 
-// ---------- 3. 历史档案文件 ----------
-$files = glob($historyDir . '/*.json') ?: [];
-sort($files);
-$filePlans = [];
-$fileLegacyKeys = 0;
-$fileCollisions = [];
-foreach ($files as $file) {
-    $base = basename($file, '.json');
-    if ($base === 'token_map') continue;
-
-    $parts = explode('_', $base);
-    if (count($parts) < 2) {
-        $filePlans[] = ['file' => basename($file), 'changed' => 0, 'skip' => '文件名无法解析'];
-        continue;
-    }
-    $fileSubject = rawurldecode($parts[0]);
-    $fileGrade = rawurldecode($parts[1]);
-
-    $raw = @file_get_contents($file);
-    $data = $raw !== false ? json_decode($raw, true) : null;
-    if (!is_array($data)) {
-        $filePlans[] = ['file' => basename($file), 'changed' => 0, 'skip' => 'JSON 解析失败'];
-        continue;
-    }
-
-    [$newData, $changed, $collisions] = rewrite_history_keys($data, $fileGrade, $fileSubject, $knownPairs);
-    $fileLegacyKeys += $changed;
-    foreach ($collisions as $c) {
-        $fileCollisions[] = basename($file) . ': ' . $c;
-    }
-    $filePlans[] = [
-        'file' => basename($file),
-        'changed' => $changed,
-        'data' => $newData,
-        'path' => $file,
-        'mtime' => filemtime($file) ?: time(),
-        'skip' => '',
-    ];
-}
-printLine("[历史档案] 共 " . count($filePlans) . " 个文件，待改写旧 Key: {$fileLegacyKeys}");
-foreach ($filePlans as $plan) {
-    if ($plan['skip'] !== '') {
-        printLine("  - {$plan['file']}：跳过（{$plan['skip']}）");
-    } elseif ($plan['changed'] > 0) {
-        printLine("  - {$plan['file']}：{$plan['changed']} 个 Key");
-    }
-}
-
-// ---------- 4. token_map.json ----------
-$tokenMapPath = $historyDir . '/token_map.json';
-$tokenMapMtime = is_file($tokenMapPath) ? (filemtime($tokenMapPath) ?: time()) : time();
-$tokenMap = [];
-if (is_file($tokenMapPath)) {
-    $raw = @file_get_contents($tokenMapPath);
-    $decoded = $raw !== false ? json_decode($raw, true) : null;
-    if (is_array($decoded)) {
-        $tokenMap = $decoded;
-    } else {
-        fail('token_map.json 解析失败，终止迁移');
-    }
-}
-$tokenPlans = [];
-foreach ($tokenMap as $token => $entry) {
-    if (!is_array($entry)) continue;
-    $entryId = trim((string)($entry['id'] ?? ''));
-    $entryKey = trim((string)($entry['k'] ?? ''));
-    $entryName = trim((string)($entry['n'] ?? ''));
-    if ($entryId === '' || $entryKey === '' || $entryName === '') continue;
-    // 注意 token_map 字段：s = 学科，g = 年级
-    $entrySubject = trim((string)($entry['s'] ?? ''));
-    $entryGrade = trim((string)($entry['g'] ?? ''));
-    $correctKey = build_student_key($entryId, $entryName, $entryGrade, $entrySubject);
-    // 兼容 2026-10-21 首轮迁移中 s/g 传反产生的错误 key
-    $swappedKey = build_student_key($entryId, $entryName, $entrySubject, $entryGrade);
-    $legacyKey = legacy_student_key($entryId, $entryName);
-    $needsRewrite = $entryKey !== $correctKey
-        && ($entryKey === $legacyKey || ($swappedKey !== $correctKey && $entryKey === $swappedKey));
-    if ($needsRewrite) {
-        $tokenPlans[$token] = ['old' => $entryKey, 'new' => $correctKey];
-    }
-}
-printLine("[token_map] 共 " . count($tokenMap) . " 条，待改写: " . count($tokenPlans));
-
 // ---------- 冲突结论 ----------
-$hasBlockingCollision = !empty($recordCollisions) || !empty($fileCollisions);
+$hasBlockingCollision = !empty($recordCollisions);
 if (!empty($recordCollisions)) {
     printLine();
     printLine('[冲突] 数据库存在迁移后同班同周重复 Key（必须人工处理，不能自动迁移）：');
@@ -234,16 +146,9 @@ if (!empty($recordCollisions)) {
         printLine("  batch_id={$c['batch_id']} week={$c['week_num']} key={$c['new_key']} rows={$c['c']}");
     }
 }
-if (!empty($fileCollisions)) {
-    printLine();
-    printLine('[冲突] 历史档案文件内目标 Key 已存在（不能自动迁移）：');
-    foreach (array_slice(array_unique($fileCollisions), 0, 20) as $c) {
-        printLine("  {$c}");
-    }
-}
 
 printLine();
-if ($legacyRecordCount + $legacyHistoryCount + $fileLegacyKeys + count($tokenPlans) === 0) {
+if ($legacyRecordCount + $legacyHistoryCount === 0) {
     printLine('没有需要迁移的数据（可能已经迁移完成）。');
     exit(0);
 }
@@ -261,7 +166,7 @@ if ($hasBlockingCollision) {
     fail('检测到迁移冲突，已拒绝执行。请先处理上面的冲突项。', 3);
 }
 
-// ---------- 5. 备份 ----------
+// ---------- 3. 备份 ----------
 if ($backupDir === '') {
     $backupDir = sys_get_temp_dir() . '/student_keys_backup_' . date('Ymd_His');
 }
@@ -274,11 +179,6 @@ if (!is_writable($backupDir)) {
 
 printLine();
 printLine("备份目录: {$backupDir}");
-foreach ($files as $file) {
-    if (!copy($file, $backupDir . '/' . basename($file))) {
-        fail('备份失败: ' . basename($file));
-    }
-}
 
 $recordBackup = DB::fetchAll(
     "SELECT sr.id, sr.student_key, {$newExprRecords} AS new_key
@@ -300,7 +200,7 @@ file_put_contents(
 );
 printLine("已备份数据库 Key 映射（student_records " . count($recordBackup) . " 行，history " . count($historyBackup) . " 行）");
 
-// ---------- 6. 执行 ----------
+// ---------- 4. 执行 ----------
 printLine();
 $pdo->beginTransaction();
 try {
@@ -326,48 +226,7 @@ try {
     fail('数据库更新失败，已回滚: ' . $e->getMessage());
 }
 
-$rewrittenFiles = 0;
-$rewrittenKeys = 0;
-foreach ($filePlans as $plan) {
-    if ($plan['skip'] !== '' || $plan['changed'] === 0) continue;
-    $tmp = $plan['path'] . '.tmp_' . getmypid();
-    $json = json_encode($plan['data'], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-    if ($json === false || file_put_contents($tmp, $json) === false) {
-        @unlink($tmp);
-        fail('写入临时文件失败: ' . $plan['file']);
-    }
-    @chmod($tmp, 0644);
-    // 档案 mtime 参与家长端跨班型合并排序，改写内容时必须保留原时间。
-    @touch($tmp, $plan['mtime']);
-    if (!rename($tmp, $plan['path'])) {
-        @unlink($tmp);
-        fail('替换档案文件失败: ' . $plan['file']);
-    }
-    $rewrittenFiles++;
-    $rewrittenKeys += $plan['changed'];
-}
-printLine("[档案] 已改写 {$rewrittenFiles} 个文件，共 {$rewrittenKeys} 个 Key");
-
-if (!empty($tokenPlans)) {
-    foreach ($tokenPlans as $token => $change) {
-        $tokenMap[$token]['k'] = $change['new'];
-    }
-    $tmp = $tokenMapPath . '.tmp_' . getmypid();
-    $json = json_encode($tokenMap, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-    if ($json === false || file_put_contents($tmp, $json) === false) {
-        @unlink($tmp);
-        fail('写入 token_map.json 临时文件失败');
-    }
-    @chmod($tmp, 0644);
-    @touch($tmp, $tokenMapMtime);
-    if (!rename($tmp, $tokenMapPath)) {
-        @unlink($tmp);
-        fail('替换 token_map.json 失败');
-    }
-    printLine('[token_map] 已改写 ' . count($tokenPlans) . ' 条');
-}
-
-// ---------- 7. 复核 ----------
+// ---------- 5. 复核 ----------
 $remainingRecords = (int)DB::fetchValue(
     "SELECT COUNT(*) FROM student_records sr
      JOIN class_batches cb ON sr.batch_id = cb.id
@@ -384,4 +243,3 @@ printLine("残留旧格式 Key：student_records {$remainingRecords} 行，stude
 if ($remainingRecords > 0 || $remainingHistory > 0) {
     fail('仍有残留旧 Key，请检查上面的输出', 4);
 }
-printLine('提示：如脚本以 root 运行，请执行 chown -R www:www ' . dirname($historyDir));

@@ -23,6 +23,7 @@ config.local.json
 # v1 生产凭据与密钥（绝不入库；部署时手动放置）
 feedback-v1/config.json
 feedback-v1/data/vision_config.json
+feedback-v1/data/.schema_*.lock
 
 # v1 学生 PII 与派生数据（学情档案/Token映射/题库镜像/上传PDF/原始CSV备份）
 feedback-v1/data/history/*
