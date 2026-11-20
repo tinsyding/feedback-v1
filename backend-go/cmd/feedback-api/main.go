@@ -52,7 +52,11 @@ func main() {
 		sqlDB = openedDB
 		defer func() { _ = sqlDB.Close() }()
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	sessStore := session.NewMySQLStore(sqlDB)
+	sessStore.StartCleanupLoop(ctx, 10*time.Minute)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handler.Health)
@@ -67,13 +71,10 @@ func main() {
 		Addr:              listenAddr,
 		Handler:           httpx.Middleware(mux),
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      90 * time.Second,
+		ReadTimeout:       90 * time.Second,
+		WriteTimeout:      120 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	go func() {
 		log.Printf("feedback-api listening on %s (root=%s, db=%s:%d/%s)", listenAddr, feedbackRoot, dbCfg.Host, dbCfg.Port, dbCfg.DBName)

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -14,6 +15,9 @@ import (
 	"feedback-api/internal/config"
 	"feedback-api/internal/httpx"
 )
+
+// DefaultSessionTTL matches PHP session.gc_maxlifetime minimum (1440s) for sliding expiration.
+const DefaultSessionTTL = 1440 * time.Second
 
 var reValidSessionID = regexp.MustCompile(`^[A-Za-z0-9,_-]{16,128}$`)
 
@@ -86,15 +90,35 @@ type Store interface {
 
 // MySQLStore reads shared PHP/Go sessions from the `app_sessions` MySQL table.
 type MySQLStore struct {
-	db *sql.DB
+	db      *sql.DB
+	ttl     time.Duration
+	nowFunc func() time.Time
 }
 
 // NewMySQLStore creates a Store backed by *sql.DB. If db is nil, Load fails closed.
 func NewMySQLStore(db *sql.DB) *MySQLStore {
-	return &MySQLStore{db: db}
+	return &MySQLStore{
+		db:      db,
+		ttl:     DefaultSessionTTL,
+		nowFunc: time.Now,
+	}
 }
 
-// Load fetches an unexpired session by ID from `app_sessions`.
+func (s *MySQLStore) now() time.Time {
+	if s != nil && s.nowFunc != nil {
+		return s.nowFunc()
+	}
+	return time.Now()
+}
+
+func (s *MySQLStore) effectiveTTL() time.Duration {
+	if s != nil && s.ttl > 0 {
+		return s.ttl
+	}
+	return DefaultSessionTTL
+}
+
+// Load fetches an unexpired session by ID from `app_sessions` and slides its TTL when less than half remains.
 func (s *MySQLStore) Load(ctx context.Context, sessionID string) (*Session, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	if !reValidSessionID.MatchString(sessionID) {
@@ -104,13 +128,15 @@ func (s *MySQLStore) Load(ctx context.Context, sessionID string) (*Session, erro
 		return nil, errors.New("session store database is not configured")
 	}
 
+	now := s.now().Unix()
 	var rawJSON sql.NullString
+	var expiresAt int64
 	err := s.db.QueryRowContext(
 		ctx,
-		"SELECT `payload_json` FROM `app_sessions` WHERE `session_id` = ? AND `expires_at` >= ? LIMIT 1",
+		"SELECT `payload_json`, `expires_at` FROM `app_sessions` WHERE `session_id` = ? AND `expires_at` >= ? LIMIT 1",
 		sessionID,
-		time.Now().Unix(),
-	).Scan(&rawJSON)
+		now,
+	).Scan(&rawJSON, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -127,10 +153,73 @@ func (s *MySQLStore) Load(ctx context.Context, sessionID string) (*Session, erro
 			data = make(map[string]any)
 		}
 	}
-	return &Session{
+
+	sess := &Session{
 		ID:   sessionID,
 		Data: data,
-	}, nil
+	}
+
+	ttlSec := int64(s.effectiveTTL().Seconds())
+	if ttlSec > 0 && sess.IsLoggedIn() && expiresAt-now < ttlSec/2 {
+		newExpires := now + ttlSec
+		updCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		_, _ = s.db.ExecContext(
+			updCtx,
+			"UPDATE `app_sessions` SET `expires_at` = ? WHERE `session_id` = ? AND `expires_at` < ?",
+			newExpires,
+			sessionID,
+			newExpires,
+		)
+		cancel()
+	}
+
+	return sess, nil
+}
+
+// CleanupExpired deletes expired rows from `app_sessions` and returns the deleted row count.
+func (s *MySQLStore) CleanupExpired(ctx context.Context) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, nil
+	}
+	res, err := s.db.ExecContext(ctx, "DELETE FROM `app_sessions` WHERE `expires_at` < ?", s.now().Unix())
+	if err != nil {
+		return 0, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, nil
+	}
+	return affected, nil
+}
+
+// StartCleanupLoop runs an initial expired-session cleanup and repeats at interval until ctx is canceled.
+func (s *MySQLStore) StartCleanupLoop(ctx context.Context, interval time.Duration) {
+	if s == nil || s.db == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = 10 * time.Minute
+	}
+	runOnce := func() {
+		cleanCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if _, err := s.CleanupExpired(cleanCtx); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("warning: app_sessions cleanup failed: %v", err)
+		}
+	}
+	go func() {
+		runOnce()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				runOnce()
+			}
+		}
+	}()
 }
 
 // MemoryStore is an in-memory Store for unit tests.

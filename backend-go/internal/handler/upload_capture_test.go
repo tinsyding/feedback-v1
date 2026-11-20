@@ -13,6 +13,7 @@ import (
 )
 
 func TestUploadCapture(t *testing.T) {
+	t.Cleanup(bgCleanupWG.Wait)
 	root := t.TempDir()
 	store := session.NewMemoryStore()
 	assistSID := "sess_assist_capture_1234"
@@ -81,8 +82,16 @@ func TestUploadCapture(t *testing.T) {
 	if entry.TS <= 0 || !strings.HasPrefix(entry.Rel, "fp-abc/") || entry.Orig != "score(1).csv" || entry.Type != "homework" {
 		t.Fatalf("unexpected index entry: %+v", entry)
 	}
-	if _, err := os.Stat(filepath.Join(root, "data", "uploads", filepath.FromSlash(entry.Rel))); err != nil {
+	savedCapture := filepath.Join(root, "data", "uploads", filepath.FromSlash(entry.Rel))
+	info, err := os.Stat(savedCapture)
+	if err != nil {
 		t.Fatalf("archived upload missing: %v", err)
+	}
+	if info.Mode().Perm() != 0644 {
+		t.Fatalf("archived upload perm = %04o, want 0644", info.Mode().Perm())
+	}
+	if tmps, err := filepath.Glob(filepath.Join(filepath.Dir(savedCapture), ".tmp-*")); err != nil || len(tmps) != 0 {
+		t.Fatalf("unexpected leftover temp files: %v (err=%v)", tmps, err)
 	}
 }
 

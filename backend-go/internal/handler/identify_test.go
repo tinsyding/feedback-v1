@@ -15,6 +15,7 @@ import (
 )
 
 func TestIdentifyEndpointModesGatesAndArchiving(t *testing.T) {
+	t.Cleanup(bgCleanupWG.Wait)
 	t.Setenv("SENDER_API_TOKEN", "")
 	t.Setenv("DASHSCOPE_API_KEY", "")
 	t.Setenv("IDENTIFY_API_BASE", "")

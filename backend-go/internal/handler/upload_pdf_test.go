@@ -118,8 +118,19 @@ func TestUploadPDF(t *testing.T) {
 	if !out.Success || !strings.HasPrefix(out.URL, "data/pdfs/pdf_") || !strings.HasSuffix(out.URL, ".pdf") || out.OriginalName != "topic1.pdf" {
 		t.Fatalf("unexpected response: %+v", out)
 	}
-	saved, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(out.URL)))
+	savedPath := filepath.Join(root, filepath.FromSlash(out.URL))
+	saved, err := os.ReadFile(savedPath)
 	if err != nil || !bytes.Equal(saved, pdfPayload) {
 		t.Fatalf("saved file mismatch: err=%v", err)
+	}
+	info, err := os.Stat(savedPath)
+	if err != nil {
+		t.Fatalf("stat saved PDF failed: %v", err)
+	}
+	if info.Mode().Perm() != 0644 {
+		t.Fatalf("saved PDF perm = %04o, want 0644", info.Mode().Perm())
+	}
+	if tmps, err := filepath.Glob(filepath.Join(root, "data", "pdfs", ".tmp-*")); err != nil || len(tmps) != 0 {
+		t.Fatalf("unexpected leftover temp files: %v (err=%v)", tmps, err)
 	}
 }

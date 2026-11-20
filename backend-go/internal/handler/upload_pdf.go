@@ -137,7 +137,7 @@ func UploadPDF(feedbackRoot string, store session.Store) http.HandlerFunc {
 		safeName := fmt.Sprintf("pdf_%d_%s.pdf", time.Now().Unix(), hex.EncodeToString(randBuf[:]))
 		targetPath := filepath.Join(uploadDir, safeName)
 
-		if err := os.WriteFile(targetPath, data, 0644); err != nil {
+		if err := writeFileAtomic(targetPath, data, 0644); err != nil {
 			httpx.SendJSON(w, http.StatusInternalServerError, map[string]any{
 				"success": false,
 				"error":   "保存文件失败，请检查目录权限",

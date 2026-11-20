@@ -133,7 +133,7 @@ func UploadCapture(feedbackRoot string, store session.Store) http.HandlerFunc {
 		}
 
 		targetFile := filepath.Join(targetDir, filename)
-		if err := os.WriteFile(targetFile, data, 0644); err != nil {
+		if err := writeFileAtomic(targetFile, data, 0644); err != nil {
 			httpx.SendJSON(w, http.StatusOK, map[string]any{
 				"success": false,
 				"error":   "Failed to move",
@@ -153,7 +153,9 @@ func UploadCapture(feedbackRoot string, store session.Store) http.HandlerFunc {
 		})
 
 		if rand.IntN(10) == 0 {
-			cleanupUploadCaptures(uploadDir, time.Now().Add(-30*24*time.Hour))
+			runAsyncCleanup(&captureCleanupRunning, func() {
+				cleanupUploadCaptures(uploadDir, time.Now().Add(-30*24*time.Hour))
+			})
 		}
 	}
 }

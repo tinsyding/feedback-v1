@@ -199,6 +199,13 @@ func Identify(loader *config.Loader, vc *vision.Client) http.HandlerFunc {
 		archiveIdentifyResult(loader.FeedbackRoot, mode, targetId, targetName, detectedTitleIn, model, httpx.GetClientIP(r), assets, out, content)
 
 		httpx.SendResponse(w, true, out, nil, http.StatusOK)
+
+		if loader.FeedbackRoot != "" && mrand.IntN(10) == 0 {
+			archiveRoot := filepath.Join(loader.FeedbackRoot, "data", "identify_archive")
+			runAsyncCleanup(&identifyCleanupRunning, func() {
+				cleanupIdentifyArchive(archiveRoot, time.Now().Add(-14*24*time.Hour))
+			})
+		}
 	}
 }
 
@@ -401,10 +408,6 @@ func archiveIdentifyResult(feedbackRoot, mode, targetId, targetName, detectedTit
 		"raw_content": rawContent,
 	}
 	writePrettyJSON(filepath.Join(dayDir, "response.json"), respDoc)
-
-	if mrand.IntN(10) == 0 {
-		cleanupIdentifyArchive(archiveRoot, time.Now().Add(-14*24*time.Hour))
-	}
 }
 
 func writePrettyJSON(path string, v any) {
