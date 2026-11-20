@@ -201,8 +201,7 @@ switch ($action) {
             if ($search !== '') {
                 $searchConds = [];
                 foreach ($cols as $colName => $colInfo) {
-                    // 跳过大图 base64 字段，避免卡顿
-                    if ($colName === 'exercise_thumb' || $colName === 'answer_thumb' || $colName === 'password_hash') {
+                    if ($colName === 'password_hash') {
                         continue;
                     }
                     $type = strtolower($colInfo['type']);
@@ -223,9 +222,9 @@ switch ($action) {
 
             $total = (int)DB::fetchValue("SELECT COUNT(*) FROM `{$table}` {$whereSql}", $params);
 
-            // 对 qbank_questions 排除巨型 base64 缩略图以提升翻页性能；对 admin_users 脱敏密码哈希
+            // 对 admin_users / users 脱敏密码字段
             if ($table === 'qbank_questions') {
-                $selectFields = "id, qbank_id, bank_type, `year`, `season`, subject, grade, tier, `week`, question_num, topic, video_url, exercise_pdf, exercise_name, (exercise_thumb IS NOT NULL AND exercise_thumb != '') AS has_exercise_thumb, answer_pdf, answer_name, (answer_thumb IS NOT NULL AND answer_thumb != '') AS has_answer_thumb, created_by, updated_by, created_at, updated_at";
+                $selectFields = "id, qbank_id, bank_type, `year`, `season`, subject, grade, tier, `week`, question_num, topic, video_url, exercise_pdf, exercise_name, answer_pdf, answer_name, created_by, updated_by, created_at, updated_at";
                 $rows = DB::fetchAll("SELECT {$selectFields} FROM `{$table}` {$whereSql} ORDER BY `{$sort}` {$order} LIMIT {$offset}, {$pageSize}", $params);
             } elseif ($table === 'admin_users') {
                 $rows = DB::fetchAll("SELECT `id`, `username`, '●●●●●●●●' AS `password_hash`, `real_name`, `role`, `status`, `last_login_at`, `last_login_ip`, `created_at`, `updated_at` FROM `{$table}` {$whereSql} ORDER BY `{$sort}` {$order} LIMIT {$offset}, {$pageSize}", $params);

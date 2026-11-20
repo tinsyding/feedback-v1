@@ -253,45 +253,6 @@ if (!function_exists('parseErrorQuestionsFromCommentPhp')) {
     }
 }
 
-if (!function_exists('persistBase64ThumbToFile')) {
-    /**
-     * 将题库题目的 Base64 缩略图（data:image/...;base64,...）落盘存储为静态图片文件，
-     * 返回相对 URL（如 data/pdfs/thumbs/thumb_xxx.png），避免 MEDIUMTEXT 大字段撑爆数据库与接口响应。
-     * 前端 <img src="..."> 原生兼容 DataURL 与相对路径，完全向后兼容。
-     */
-    function persistBase64ThumbToFile(?string $thumbData): string
-    {
-        $thumb = trim((string)$thumbData);
-        if ($thumb === '' || strpos($thumb, 'data:image/') !== 0) {
-            return $thumb;
-        }
-        if (!preg_match('#^data:image/(png|jpeg|jpg|webp);base64,(.+)$#is', $thumb, $m)) {
-            return $thumb;
-        }
-        $ext = strtolower($m[1]);
-        if ($ext === 'jpeg') {
-            $ext = 'jpg';
-        }
-        $binary = base64_decode($m[2], true);
-        if ($binary === false || strlen($binary) < 16) {
-            return $thumb;
-        }
-        $thumbsDir = dirname(__DIR__) . '/data/pdfs/thumbs';
-        if (!is_dir($thumbsDir)) {
-            @mkdir($thumbsDir, 0755, true);
-        }
-        $hash = substr(sha1($binary), 0, 24);
-        $fileName = "thumb_{$hash}.{$ext}";
-        $fullPath = $thumbsDir . '/' . $fileName;
-        if (!is_file($fullPath)) {
-            if (@file_put_contents($fullPath, $binary) === false) {
-                return $thumb;
-            }
-        }
-        return 'data/pdfs/thumbs/' . $fileName;
-    }
-}
-
 if (!function_exists('cleanupUnreferencedPdfs')) {
     /**
      * 清理被替换或删除后不再被任何 qbank_questions 引用的孤儿 PDF 文件

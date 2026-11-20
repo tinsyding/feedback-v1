@@ -821,12 +821,6 @@ async function loadHomeworkQuestionsForVariation() {
         });
         if (res && res.success && res.data && Array.isArray(res.data.questions) && res.data.questions.length > 0) {
             homeworkQuestionsForVariation = res.data.questions;
-            // 后台异步预热课后原题缩略图，供悬停原题即时预览
-            homeworkQuestionsForVariation.forEach(q => {
-                if (q.exercisePdf && q.exercisePdf.url && !q.exercisePdf.thumb) {
-                    ensurePdfThumbnail(q.exercisePdf).catch(() => {});
-                }
-            });
         } else {
             homeworkQuestionsForVariation = [];
         }
@@ -2955,9 +2949,6 @@ async function loadCurrentData() {
     updateStatus();
     highlightActiveSavedItem();
     updateStep1ButtonState();
-
-    // Background load thumbnails for loaded questions with smooth concurrency throttle (不阻塞主线程)
-    preloadThumbnailsWithThrottle(currentQuestions).catch(() => {});
 }
 
 // 查找某道题对应的卡片 DOM（兼容单题行与大题聚合卡片）
@@ -2971,169 +2962,6 @@ function findQuestionCardDomByIndex(idx) {
         if (list.includes(Number(idx))) return card;
     }
     return questionItems.children[idx] || null;
-}
-
-// 后台平滑预热缩略图：严格限制并发数最大为 2，且每个切片解析完成后让出 25ms 主线程，保障界面交互 60 FPS
-async function preloadThumbnailsWithThrottle(questions) {
-    if (!Array.isArray(questions) || questions.length === 0) return;
-    const tasks = [];
-    const seenUrls = new Map();
-    questions.forEach((q, idx) => {
-        if (q.exercisePdf && q.exercisePdf.url && !q.exercisePdf.thumb) {
-            tasks.push({ q, idx, type: 'exercise', pdfObj: q.exercisePdf });
-        }
-        if (q.answerPdf && q.answerPdf.url && !q.answerPdf.thumb) {
-            tasks.push({ q, idx, type: 'answer', pdfObj: q.answerPdf });
-        }
-    });
-    if (tasks.length === 0) return;
-
-    let cursor = 0;
-    const maxConcurrency = 2;
-    const worker = async () => {
-        while (cursor < tasks.length) {
-            const task = tasks[cursor++];
-            if (!task) break;
-            try {
-                const cropBox = getRegionCropThumbBox(task.q, task.type);
-                let thumb = cropBox ? null : seenUrls.get(task.pdfObj.url);
-                if (!thumb) {
-                    thumb = await ensurePdfThumbnail(task.pdfObj, cropBox);
-                    if (thumb && task.pdfObj.url && !cropBox) {
-                        seenUrls.set(task.pdfObj.url, thumb);
-                    }
-                } else {
-                    task.pdfObj.thumb = thumb;
-                }
-                if (thumb) {
-                    const itemEl = findQuestionCardDomByIndex(task.idx);
-                    if (itemEl) {
-                        const actions = itemEl.querySelector('.question-pdf-actions');
-                        const primaryIdx = parseInt(itemEl.dataset.index, 10);
-                        const primaryQ = !isNaN(primaryIdx) && currentQuestions[primaryIdx] ? currentQuestions[primaryIdx] : task.q;
-                        const renderIdx = !isNaN(primaryIdx) ? primaryIdx : task.idx;
-                        if (actions) {
-                            actions.innerHTML = `${renderPdfBtn(primaryQ, renderIdx, 'exercise')}${renderPdfBtn(primaryQ, renderIdx, 'answer')}`;
-                        }
-                    }
-                }
-            } catch (err) {
-                console.warn('平滑生成缩略图跳过:', err);
-            }
-            // 主动让出 25ms 主线程微任务与渲染时间片
-            await new Promise(resolve => setTimeout(resolve, 25));
-        }
-    };
-
-    const runners = [];
-    for (let i = 0; i < Math.min(maxConcurrency, tasks.length); i++) {
-        runners.push(worker());
-    }
-    await Promise.all(runners);
-}
-
-async function generatePdfThumbnailFromFile(file) {
-    try {
-        if (!window.pdfjsLib) return null;
-        const data = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data }).promise;
-        if (pdf.numPages < 1) return null;
-        const page = await pdf.getPage(1);
-        const base = page.getViewport({ scale: 1 });
-        // 轻量化缩略图：限制在 400px（卡片尺寸 32px，浮窗预览 300px，2x 视网膜高清足够锐利且体积降 95%）
-        const targetWidth = Math.min(420, Math.max(280, Math.floor(base.width)));
-        const scale = targetWidth / base.width;
-        const viewport = page.getViewport({ scale });
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        const ctx = canvas.getContext('2d', { alpha: false });
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        await page.render({ canvasContext: ctx, viewport }).promise;
-        const thumb = canvas.toDataURL('image/jpeg', 0.68);
-        page.cleanup();
-        if (typeof pdf.destroy === 'function') { try { await pdf.destroy(); } catch (_) {} }
-        return thumb;
-    } catch (e) {
-        console.warn('生成本地 PDF 缩略图失败:', e);
-        return null;
-    }
-}
-
-function getRegionCropThumbBox(q, type) {
-    if (!q || !q.questionMeta || q.questionMeta.mode !== 'region_crop') return null;
-    if (type === 'answer') {
-        if (q.questionMeta.answerBox) return q.questionMeta.answerBox;
-        if (Array.isArray(q.questionMeta.answerRegions) && q.questionMeta.answerRegions.length > 0) {
-            return q.questionMeta.answerRegions[0];
-        }
-        return null;
-    }
-    if (q.questionMeta.box) return q.questionMeta.box;
-    if (Array.isArray(q.questionMeta.regions) && q.questionMeta.regions.length > 0) {
-        return q.questionMeta.regions[0];
-    }
-    return null;
-}
-
-async function ensurePdfThumbnail(pdfObj, cropRegion = null) {
-    if (!pdfObj || !pdfObj.url || pdfObj.thumb) return pdfObj ? pdfObj.thumb : null;
-    try {
-        if (!window.pdfjsLib) return null;
-        let data = regionPreviewBytesCache.get(pdfObj.url);
-        if (!data) {
-            const resp = await fetch(pdfObj.url);
-            if (!resp.ok) return null;
-            data = await resp.arrayBuffer();
-            regionPreviewBytesCache.set(pdfObj.url, data);
-        }
-        const pdf = await pdfjsLib.getDocument({ data: data.slice(0) }).promise;
-        if (pdf.numPages < 1) return null;
-        const pageNum = cropRegion
-            ? Math.min(pdf.numPages, Math.max(1, (parseInt(cropRegion.pageOffset, 10) || 0) + 1))
-            : 1;
-        const page = await pdf.getPage(pageNum);
-        const base = page.getViewport({ scale: 1 });
-        const targetWidth = cropRegion
-            ? Math.min(900, Math.max(560, Math.floor(base.width)))
-            : Math.min(420, Math.max(280, Math.floor(base.width)));
-        const scale = targetWidth / base.width;
-        const viewport = page.getViewport({ scale });
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        const ctx = canvas.getContext('2d', { alpha: false });
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        await page.render({ canvasContext: ctx, viewport }).promise;
-
-        if (cropRegion) {
-            const sx = Math.max(0, Math.floor((cropRegion.x ?? 0) * canvas.width));
-            const sy = Math.max(0, Math.floor((cropRegion.y ?? 0) * canvas.height));
-            const sw = Math.max(12, Math.min(canvas.width - sx, Math.ceil((cropRegion.w ?? 1) * canvas.width)));
-            const sh = Math.max(12, Math.min(canvas.height - sy, Math.ceil((cropRegion.h ?? 1) * canvas.height)));
-            const out = document.createElement('canvas');
-            const outW = Math.min(480, sw);
-            const outScale = outW / sw;
-            out.width = outW;
-            out.height = Math.max(12, Math.round(sh * outScale));
-            const octx = out.getContext('2d', { alpha: false });
-            octx.fillStyle = '#ffffff';
-            octx.fillRect(0, 0, out.width, out.height);
-            octx.drawImage(canvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
-            pdfObj.thumb = out.toDataURL('image/jpeg', 0.8);
-        } else {
-            pdfObj.thumb = canvas.toDataURL('image/jpeg', 0.68);
-        }
-
-        page.cleanup();
-        if (typeof pdf.destroy === 'function') { try { await pdf.destroy(); } catch (_) {} }
-        return pdfObj.thumb;
-    } catch (e) {
-        console.warn('ensurePdfThumbnail 失败:', pdfObj.url, e);
-        return null;
-    }
 }
 
 // 0ms 保存按钮 Loading 状态管理（防重复点击与即时交互反馈）
@@ -5662,12 +5490,9 @@ function renderPdfBtn(q, index, type) {
     }
 
     if (data.status === 'uploading') {
-        const thumbContent = data.thumb 
-            ? `<div class="q-pdf-mini-thumb qb-skeleton-wrap"><img class="q-pdf-mini-thumb" src="${data.thumb}" alt="缩略图"><div class="qb-skeleton-shimmer"></div></div>`
-            : `<div class="q-pdf-mini-thumb qb-skeleton"><div class="qb-skeleton-shimmer"></div></div>`;
         return `
             <div class="q-pdf-thumb-card skeleton-card" title="${label}切片生成与上传中...">
-                ${thumbContent}
+                <div class="q-pdf-mini-thumb qb-skeleton"><div class="qb-skeleton-shimmer"></div></div>
                 <div class="q-pdf-info">
                     <span class="q-pdf-tag-title">${label}</span>
                     <span class="q-pdf-status-text skeleton-status">
@@ -5678,10 +5503,8 @@ function renderPdfBtn(q, index, type) {
         `;
     }
 
-    // Uploaded: Has thumbnail preview
-    const thumbImg = data.thumb 
-        ? `<img class="q-pdf-mini-thumb" src="${data.thumb}" alt="${label}缩略图">`
-        : `<span class="q-pdf-mini-thumb" style="display:flex;align-items:center;justify-content:center;background:var(--bg-secondary);"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg></span>`;
+    // Uploaded: 统一展示轻量 PDF 图标，点击即可全屏预览
+    const thumbImg = `<span class="q-pdf-mini-thumb" style="display:flex;align-items:center;justify-content:center;background:var(--bg-secondary);"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg></span>`;
 
     const hasRegionCrop = q && q.questionMeta && q.questionMeta.mode === 'region_crop' &&
         Array.isArray(type === 'answer' ? q.questionMeta.answerRegions : q.questionMeta.regions) &&
@@ -5839,15 +5662,11 @@ async function doUploadPdf(file, index, type) {
     updateQuestionPdfActionsOnly(index);
     
     try {
-        const [result, thumb] = await Promise.all([
-            uploadPdfBlob(file),
-            generatePdfThumbnailFromFile(file)
-        ]);
+        const result = await uploadPdfBlob(file);
         const uploadedObj = {
             url: result.url,
             name: result.originalName,
-            status: 'uploaded',
-            thumb: thumb || null
+            status: 'uploaded'
         };
         memberIndices.forEach(idx => {
             if (currentQuestions[idx]) {
@@ -6117,7 +5936,6 @@ async function startBackgroundSlicing(exerciseSrc, answerSrc, groups, sliceNums,
         const q = currentQuestions[firstIdx];
         if (!q) return;
 
-        const qThumb = batchQuestionThumbs[grp.question[0]] || null;
         const pLabel = Array.isArray(q.parentQuestionNums) && q.parentQuestionNums.length > 1
             ? q.parentQuestionNums.join('_')
             : (q.parentQuestionNum || 1);
@@ -6137,7 +5955,7 @@ async function startBackgroundSlicing(exerciseSrc, answerSrc, groups, sliceNums,
             const exFile = new File([exBlob], exFileName, { type: 'application/pdf' });
             const exRes = await uploadPdfBlob(exFile);
             if (sessionId === currentSlicingSessionId) {
-                const exObj = { url: exRes.url, name: exRes.originalName, status: 'uploaded', thumb: qThumb };
+                const exObj = { url: exRes.url, name: exRes.originalName, status: 'uploaded' };
                 targetIndices.forEach(tIdx => {
                     if (currentQuestions[tIdx]) {
                         currentQuestions[tIdx].exercisePdf = { ...exObj };
@@ -6159,13 +5977,12 @@ async function startBackgroundSlicing(exerciseSrc, answerSrc, groups, sliceNums,
         // 2. 答案切片合并与上传（若有答案页）
         const answerPages = grp.answer;
         if (answerPages && answerPages.length > 0) {
-            const aThumb = batchAnswerThumbs[answerPages[0]] || null;
             try {
                 const anBlob = await mergePages(answerSrc, answerPages);
                 const anFile = new File([anBlob], anFileName, { type: 'application/pdf' });
                 const anRes = await uploadPdfBlob(anFile);
                 if (sessionId === currentSlicingSessionId) {
-                    const anObj = { url: anRes.url, name: anRes.originalName, status: 'uploaded', thumb: aThumb };
+                    const anObj = { url: anRes.url, name: anRes.originalName, status: 'uploaded' };
                     targetIndices.forEach(tIdx => {
                         if (currentQuestions[tIdx]) {
                             currentQuestions[tIdx].answerPdf = { ...anObj };
@@ -6373,8 +6190,7 @@ async function importWithLabels(exerciseFile, answerFile) {
         const key = String(num);
         const grp = groups[key];
         const gInfo = grp.groupInfo || getGroupBoxesInfo(num);
-        const qThumb = batchQuestionThumbs[grp.question[0]] || null;
-        const aThumb = grp.answer.length > 0 ? (batchAnswerThumbs[grp.answer[0]] || null) : null;
+        const hasAnswerPages = grp.answer.length > 0;
 
         if (!isVar && gInfo.isBigQuestion && Array.isArray(gInfo.boxesWithMeta) && gInfo.boxesWithMeta.length > 0) {
             const rangeStr = `${gInfo.startNum}-${gInfo.endNum}`;
@@ -6414,8 +6230,8 @@ async function importWithLabels(exerciseFile, answerFile) {
                     topic: '',
                     videoUrl: '',
                     questionMeta: qMeta,
-                    exercisePdf: { status: 'uploading', name: `题目_第${rangeStr}题.pdf`, thumb: qThumb },
-                    answerPdf: aThumb ? { status: 'uploading', name: `答案_第${rangeStr}题.pdf`, thumb: aThumb } : null
+                    exercisePdf: { status: 'uploading', name: `题目_第${rangeStr}题.pdf` },
+                    answerPdf: hasAnswerPages ? { status: 'uploading', name: `答案_第${rangeStr}题.pdf` } : null
                 });
             });
         } else {
@@ -6433,8 +6249,8 @@ async function importWithLabels(exerciseFile, answerFile) {
                 subNum: 1,
                 topic: topic,
                 videoUrl: '',
-                exercisePdf: { status: 'uploading', name: `题目_第${num}题.pdf`, thumb: qThumb },
-                answerPdf: aThumb ? { status: 'uploading', name: `答案_第${num}题.pdf`, thumb: aThumb } : null
+                exercisePdf: { status: 'uploading', name: `题目_第${num}题.pdf` },
+                answerPdf: hasAnswerPages ? { status: 'uploading', name: `答案_第${num}题.pdf` } : null
             };
             const ansBox = !isVar ? buildAnswerBoxForQNum(num, grp) : null;
             if (ansBox) {
@@ -6562,11 +6378,8 @@ async function doBatchImportPdfs(exerciseFile, answerFile) {
         try {
             const exBlob = await splitSinglePage(exerciseSrc, i);
             const exFile = new File([exBlob], exFileName, { type: 'application/pdf' });
-            const [exRes, exThumb] = await Promise.all([
-                uploadPdfBlob(exFile),
-                generatePdfThumbnailFromFile(exFile)
-            ]);
-            currentQuestions[i].exercisePdf = { url: exRes.url, name: exRes.originalName, status: 'uploaded', thumb: exThumb || null };
+            const exRes = await uploadPdfBlob(exFile);
+            currentQuestions[i].exercisePdf = { url: exRes.url, name: exRes.originalName, status: 'uploaded' };
         } catch (e) {
             console.error('题目页上传失败', no, e);
             currentQuestions[i].exercisePdf = null;
@@ -6576,11 +6389,8 @@ async function doBatchImportPdfs(exerciseFile, answerFile) {
         try {
             const anBlob = await splitSinglePage(answerSrc, i);
             const anFile = new File([anBlob], anFileName, { type: 'application/pdf' });
-            const [anRes, anThumb] = await Promise.all([
-                uploadPdfBlob(anFile),
-                generatePdfThumbnailFromFile(anFile)
-            ]);
-            currentQuestions[i].answerPdf = { url: anRes.url, name: anRes.originalName, status: 'uploaded', thumb: anThumb || null };
+            const anRes = await uploadPdfBlob(anFile);
+            currentQuestions[i].answerPdf = { url: anRes.url, name: anRes.originalName, status: 'uploaded' };
         } catch (e) {
             console.error('答案页上传失败', no, e);
             currentQuestions[i].answerPdf = null;

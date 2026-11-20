@@ -3367,57 +3367,6 @@
         scheduleDraftSave();
     };
 
-    async function generateRegionCropThumb(pdfDoc, region, pageCanvasCache) {
-        if (!pdfDoc || !region) return null;
-        try {
-            const pageNum = Math.min(pdfDoc.numPages, Math.max(1, (parseInt(region.pageOffset, 10) || 0) + 1));
-            let srcCanvas = pageCanvasCache.get(pageNum);
-            if (!srcCanvas) {
-                const page = await pdfDoc.getPage(pageNum);
-                const viewport = page.getViewport({ scale: 1.0 });
-                srcCanvas = document.createElement('canvas');
-                srcCanvas.width = Math.round(viewport.width);
-                srcCanvas.height = Math.round(viewport.height);
-                const ctx = srcCanvas.getContext('2d', { alpha: false });
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(0, 0, srcCanvas.width, srcCanvas.height);
-                await page.render({ canvasContext: ctx, viewport }).promise;
-                page.cleanup();
-                pageCanvasCache.set(pageNum, srcCanvas);
-            }
-            const sx = Math.max(0, Math.floor((region.x ?? 0) * srcCanvas.width));
-            const sy = Math.max(0, Math.floor((region.y ?? 0) * srcCanvas.height));
-            const sw = Math.max(12, Math.min(srcCanvas.width - sx, Math.ceil((region.w ?? 1) * srcCanvas.width)));
-            const sh = Math.max(12, Math.min(srcCanvas.height - sy, Math.ceil((region.h ?? 1) * srcCanvas.height)));
-            const out = document.createElement('canvas');
-            const targetW = Math.min(480, sw);
-            const scale = targetW / sw;
-            out.width = targetW;
-            out.height = Math.max(12, Math.round(sh * scale));
-            const octx = out.getContext('2d', { alpha: false });
-            octx.fillStyle = '#ffffff';
-            octx.fillRect(0, 0, out.width, out.height);
-            octx.drawImage(srcCanvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
-            const dataUrl = out.toDataURL('image/jpeg', 0.82);
-            out.width = 0;
-            out.height = 0;
-            return dataUrl;
-        } catch (err) {
-            return null;
-        }
-    }
-
-    function releaseCanvasCache(cacheMap) {
-        if (!cacheMap) return;
-        cacheMap.forEach(c => {
-            if (c) {
-                c.width = 0;
-                c.height = 0;
-            }
-        });
-        cacheMap.clear();
-    }
-
     function collectExistingStep4FieldMap() {
         const byId = new Map();
         const byVarSig = new Map();
@@ -3538,32 +3487,21 @@
             setBtnLabel(finishBtn, '正在上传原卷并导入');
         }
 
-        const exPageCache = new Map();
-        const ansPageCache = new Map();
-
         try {
             const exUpload = await uploadPdfBlob(rgState.exercise.file);
-            const exThumb = typeof generatePdfThumbnailFromFile === 'function'
-                ? await generatePdfThumbnailFromFile(rgState.exercise.file)
-                : null;
             const exPdfObj = {
                 url: exUpload.url,
                 name: exUpload.originalName || rgState.exercise.file.name,
-                status: 'uploaded',
-                thumb: exThumb || null
+                status: 'uploaded'
             };
 
             let ansPdfObj = null;
             if (rgState.answer.file && rgState.answer.items.length > 0) {
                 const ansUpload = await uploadPdfBlob(rgState.answer.file);
-                const ansThumb = typeof generatePdfThumbnailFromFile === 'function'
-                    ? await generatePdfThumbnailFromFile(rgState.answer.file)
-                    : null;
                 ansPdfObj = {
                     url: ansUpload.url,
                     name: ansUpload.originalName || rgState.answer.file.name,
-                    status: 'uploaded',
-                    thumb: ansThumb || null
+                    status: 'uploaded'
                 };
             }
 
@@ -3572,7 +3510,6 @@
 
             for (const it of exItems) {
                 if (it.isBig) syncAutoStemBoxes(it);
-                const itemExThumb = (await generateRegionCropThumb(rgState.exercise.pdfDoc, it.regions[0], exPageCache)) || exPdfObj.thumb;
 
                 if (bankType === 'variation') {
                     const pNums = [...it.parentNums].sort((a, b) => a - b);
@@ -3584,9 +3521,6 @@
                         .find(item => Number(item.id) === Number(primaryP));
                     const prevVar = prevFields.byVarSig.get(`${pNums.join(',')}#${nextSub}`);
                     const inheritedTopic = (hwQ && hwQ.topic) ? String(hwQ.topic).trim() : (prevVar ? prevVar.topic : '');
-                    const itemAnsThumb = matchedAns && ansPdfObj
-                        ? ((await generateRegionCropThumb(rgState.answer.pdfDoc, matchedAns.regions[0], ansPageCache)) || ansPdfObj.thumb)
-                        : null;
                     imported.push({
                         id: String(imported.length + 1),
                         parentQuestionNum: primaryP,
@@ -3595,8 +3529,8 @@
                         isVariation: true,
                         topic: inheritedTopic,
                         videoUrl: prevVar ? prevVar.videoUrl : '',
-                        exercisePdf: { ...exPdfObj, thumb: itemExThumb },
-                        answerPdf: matchedAns && ansPdfObj ? { ...ansPdfObj, thumb: itemAnsThumb } : null,
+                        exercisePdf: { ...exPdfObj },
+                        answerPdf: matchedAns && ansPdfObj ? { ...ansPdfObj } : null,
                         questionMeta: {
                             mode: 'region_crop',
                             regions: it.regions,
@@ -3613,18 +3547,13 @@
                         const qKey = String(sb.num).trim();
                         const matchedAns = findMatchedAns(it, qKey, null);
                         const matchedAnsSub = ansSubByNum.get(qKey) || null;
-                        const subExThumb = (await generateRegionCropThumb(rgState.exercise.pdfDoc, sb, exPageCache)) || itemExThumb;
-                        const subAnsRegion = matchedAnsSub || (matchedAns && matchedAns.regions ? matchedAns.regions[0] : null);
-                        const itemAnsThumb = matchedAns && ansPdfObj
-                            ? ((await generateRegionCropThumb(rgState.answer.pdfDoc, subAnsRegion, ansPageCache)) || ansPdfObj.thumb)
-                            : null;
                         const prev = prevFields.byId.get(qKey);
                         imported.push({
                             id: qKey,
                             topic: prev ? prev.topic : '',
                             videoUrl: prev ? prev.videoUrl : '',
-                            exercisePdf: { ...exPdfObj, thumb: subExThumb },
-                            answerPdf: matchedAns && ansPdfObj ? { ...ansPdfObj, thumb: itemAnsThumb } : null,
+                            exercisePdf: { ...exPdfObj },
+                            answerPdf: matchedAns && ansPdfObj ? { ...ansPdfObj } : null,
                             questionMeta: {
                                 mode: 'region_crop',
                                 groupNums,
@@ -3641,16 +3570,13 @@
 
                 const qKey = String(it.label || '').trim();
                 const matchedAns = findMatchedAns(it, qKey, null);
-                const itemAnsThumb = matchedAns && ansPdfObj
-                    ? ((await generateRegionCropThumb(rgState.answer.pdfDoc, matchedAns.regions[0], ansPageCache)) || ansPdfObj.thumb)
-                    : null;
                 const prev = prevFields.byId.get(qKey);
                 imported.push({
                     id: qKey,
                     topic: prev ? prev.topic : '',
                     videoUrl: prev ? prev.videoUrl : '',
-                    exercisePdf: { ...exPdfObj, thumb: itemExThumb },
-                    answerPdf: matchedAns && ansPdfObj ? { ...ansPdfObj, thumb: itemAnsThumb } : null,
+                    exercisePdf: { ...exPdfObj },
+                    answerPdf: matchedAns && ansPdfObj ? { ...ansPdfObj } : null,
                     questionMeta: {
                         mode: 'region_crop',
                         regions: it.regions,
@@ -3682,8 +3608,6 @@
             console.error('Region import error:', err);
             showToast('导入失败：' + (err.message || '网络异常'), 'error');
         } finally {
-            releaseCanvasCache(exPageCache);
-            releaseCanvasCache(ansPageCache);
             if (finishBtn) {
                 finishBtn.disabled = false;
                 setBtnLabel(finishBtn, '完成框选并导入第 4 步');

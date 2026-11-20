@@ -357,12 +357,10 @@ try {
                     }
 
                     if ($qbank) {
-                        $excludeThumbs = !empty($_GET['exclude_thumbs']);
-                        $thumbCols = $excludeThumbs ? "'' AS `exercise_thumb`, '' AS `answer_thumb`" : "`exercise_thumb`, `answer_thumb`";
                         $qRows = DB::fetchAll(
                             "SELECT `question_num` AS `id`, `parent_question_num` AS `parentQuestionNum`, `parent_question_nums` AS `parentQuestionNums`, `sub_num` AS `subNum`,
                                     `topic`, `video_url`, `question_meta`, `exercise_pdf`, `exercise_name`,
-                                    `answer_pdf`, `answer_name`, {$thumbCols}
+                                    `answer_pdf`, `answer_name`
                              FROM `qbank_questions`
                              WHERE `qbank_id` = ?
                              ORDER BY `question_num` ASC",
@@ -372,7 +370,7 @@ try {
                             $qRows = DB::fetchAll(
                                 "SELECT `question_num` AS `id`, `parent_question_num` AS `parentQuestionNum`, `sub_num` AS `subNum`,
                                         `topic`, `video_url`, `exercise_pdf`, `exercise_name`,
-                                        `answer_pdf`, `answer_name`, {$thumbCols}
+                                        `answer_pdf`, `answer_name`
                                  FROM `qbank_questions`
                                  WHERE `qbank_id` = ?
                                  ORDER BY `question_num` ASC",
@@ -403,14 +401,12 @@ try {
                                 'exercisePdf' => [
                                     'url' => $qr['exercise_pdf'] ?? '',
                                     'name' => $qr['exercise_name'] ?? '',
-                                    'status' => !empty($qr['exercise_pdf']) ? 'uploaded' : 'empty',
-                                    'thumb' => $qr['exercise_thumb'] ?? ''
+                                    'status' => !empty($qr['exercise_pdf']) ? 'uploaded' : 'empty'
                                 ],
                                 'answerPdf' => [
                                     'url' => $qr['answer_pdf'] ?? '',
                                     'name' => $qr['answer_name'] ?? '',
-                                    'status' => !empty($qr['answer_pdf']) ? 'uploaded' : 'empty',
-                                    'thumb' => $qr['answer_thumb'] ?? ''
+                                    'status' => !empty($qr['answer_pdf']) ? 'uploaded' : 'empty'
                                 ]
                             ];
                             if ($qMeta) {
@@ -543,17 +539,6 @@ try {
 
             $currentTimeMs = round(microtime(true) * 1000);
 
-            // 0. 将 Base64 缩略图自动落盘为静态图片文件，大幅降低 MySQL MEDIUMTEXT 与 JSON 体积
-            foreach ($questions as &$qThumbRef) {
-                if (!empty($qThumbRef['exercisePdf']['thumb'])) {
-                    $qThumbRef['exercisePdf']['thumb'] = persistBase64ThumbToFile($qThumbRef['exercisePdf']['thumb']);
-                }
-                if (!empty($qThumbRef['answerPdf']['thumb'])) {
-                    $qThumbRef['answerPdf']['thumb'] = persistBase64ThumbToFile($qThumbRef['answerPdf']['thumb']);
-                }
-            }
-            unset($qThumbRef);
-
             // 1. 同步入库 MySQL
             $dbSaved = false;
             $removedPdfCandidates = [];
@@ -596,9 +581,9 @@ try {
                         $stmtQuestion = $db->prepare("
                             INSERT INTO `qbank_questions`
                                 (`qbank_id`, `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week`, `question_num`, `parent_question_num`, `parent_question_nums`, `sub_num`, `topic`, `video_url`, `question_meta`,
-                                 `exercise_pdf`, `exercise_name`, `exercise_thumb`,
-                                 `answer_pdf`, `answer_name`, `answer_thumb`, `created_by`, `updated_by`, `updated_at`)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                                 `exercise_pdf`, `exercise_name`,
+                                 `answer_pdf`, `answer_name`, `created_by`, `updated_by`, `updated_at`)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                             ON DUPLICATE KEY UPDATE
                                 `parent_question_num` = VALUES(`parent_question_num`),
                                 `parent_question_nums` = VALUES(`parent_question_nums`),
@@ -608,10 +593,8 @@ try {
                                 `question_meta` = VALUES(`question_meta`),
                                 `exercise_pdf` = VALUES(`exercise_pdf`),
                                 `exercise_name` = VALUES(`exercise_name`),
-                                `exercise_thumb` = VALUES(`exercise_thumb`),
                                 `answer_pdf` = VALUES(`answer_pdf`),
                                 `answer_name` = VALUES(`answer_name`),
-                                `answer_thumb` = VALUES(`answer_thumb`),
                                 `created_by` = IF(`created_by` = '' OR `created_by` IS NULL, VALUES(`created_by`), `created_by`),
                                 `updated_by` = IF(VALUES(`updated_by`) != '', VALUES(`updated_by`), `updated_by`),
                                 `updated_at` = CURRENT_TIMESTAMP
@@ -655,17 +638,15 @@ try {
                             $metaJsonStr = $cleanMeta ? json_encode($cleanMeta, JSON_UNESCAPED_UNICODE) : null;
                             $exUrl = $q['exercisePdf']['url'] ?? '';
                             $exName = $q['exercisePdf']['name'] ?? '';
-                            $exThumb = $q['exercisePdf']['thumb'] ?? '';
                             $ansUrl = $q['answerPdf']['url'] ?? '';
                             $ansName = $q['answerPdf']['name'] ?? '';
-                            $ansThumb = $q['answerPdf']['thumb'] ?? '';
 
                             if ($exUrl !== '') $newPdfUrls[] = $exUrl;
                             if ($ansUrl !== '') $newPdfUrls[] = $ansUrl;
 
                             $stmtQuestion->execute([
                                 $qbankId, $bankType, $year, $season, $subject, $grade, $tier, $week,
-                                $qNum, $parentQNum, $parentNumsStr, $subNum, $topic, $videoUrl, $metaJsonStr, $exUrl, $exName, $exThumb, $ansUrl, $ansName, $ansThumb,
+                                $qNum, $parentQNum, $parentNumsStr, $subNum, $topic, $videoUrl, $metaJsonStr, $exUrl, $exName, $ansUrl, $ansName,
                                 $currentTeacher, $currentTeacher
                             ]);
                         }

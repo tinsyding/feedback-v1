@@ -171,9 +171,9 @@ function cmdMigrate(): void {
                 try {
                     $db->exec($stmt);
                 } catch (PDOException $stmtErr) {
-                    // 兼容幂等重入：1060 Duplicate column name / 1061 Duplicate key name
+                    // 兼容幂等重入：1060 Duplicate column name / 1061 Duplicate key name / 1091 Can't DROP column
                     $driverCode = intval($stmtErr->errorInfo[1] ?? 0);
-                    if (!in_array($driverCode, [1060, 1061], true)) {
+                    if (!in_array($driverCode, [1060, 1061, 1091], true)) {
                         throw $stmtErr;
                     }
                 }
