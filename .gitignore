@@ -116,4 +116,9 @@ files-examples/
 # 编辑器与本地 IDE 插件配置
 .commandcode/
 
+# Go backend (backend-go/) build outputs & local env
+backend-go/bin/
+backend-go/dist/
+backend-go/feedback-api
+backend-go/.env
 

@@ -51,6 +51,23 @@ jobs:
             exit 1
           fi
 
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend-go/go.mod
+          cache: false
+
+      - name: Build and test Go backend
+        id: build-go
+        working-directory: backend-go
+        run: |
+          go test -race -count=1 ./...
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/feedback-api ./cmd/feedback-api
+
       - name: Set up SSH key
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -77,6 +94,43 @@ jobs:
           $SSH "find /www/wwwroot/JF/feedback-git -name '.user.ini' -exec chattr +i {} + 2>/dev/null || true"
           # 5. 自动执行数据库增量迁移（幂等，优先使用 PHP 8.2 避免系统默认老版本语法不兼容）
           $SSH "cd /www/wwwroot/JF/feedback-git/feedback-v1 && PHP_BIN=\$(if [ -x /www/server/php/82/bin/php ]; then echo /www/server/php/82/bin/php; else command -v php; fi) && \$PHP_BIN scripts/migrate.php migrate"
+
+      - name: Upload and roll out Go binary
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          SSH="ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 $DEPLOY_USER@$DEPLOY_HOST"
+          SCP="scp -i ~/.ssh/deploy_key -P $DEPLOY_PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20"
+          $SSH "mkdir -p /opt/feedback-go && chown www:www /opt/feedback-go && chmod 755 /opt/feedback-go"
+          $SCP backend-go/dist/feedback-api "$DEPLOY_USER@$DEPLOY_HOST:/opt/feedback-go/feedback-api.new"
+          $SSH "chown www:www /opt/feedback-go/feedback-api.new && chmod 755 /opt/feedback-go/feedback-api.new && mv -f /opt/feedback-go/feedback-api.new /opt/feedback-go/feedback-api"
+          $SSH '
+            set -e
+            if systemctl is-enabled feedback-api >/dev/null 2>&1; then
+              systemctl restart feedback-api
+            else
+              echo "feedback-api.service not enabled yet; skipping restart"
+            fi
+            if systemctl is-active --quiet feedback-api; then
+              ok=0
+              for _ in 1 2 3 4 5 6 7 8 9 10; do
+                code=$(curl -sS --noproxy "*" --connect-timeout 2 --max-time 5 -o /dev/null -w "%{http_code}" http://127.0.0.1:8090/healthz || true)
+                if [ "$code" = "200" ]; then
+                  echo "feedback-api healthz OK (HTTP 200)"
+                  ok=1
+                  break
+                fi
+                sleep 1
+              done
+              if [ "$ok" -ne 1 ]; then
+                echo "feedback-api healthz failed" >&2
+                systemctl status feedback-api --no-pager >&2 || true
+                exit 1
+              fi
+            fi
+          '
 
       - name: Reload PHP-FPM (clear opcache)
         env:

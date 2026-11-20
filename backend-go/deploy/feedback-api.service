@@ -1,0 +1,39 @@
+# ============================================================
+# Feedback V1 Go API Service (feedback-api) systemd unit
+#
+# 默认配置面向主站生产机（jf，宝塔面板环境，运行用户 www:www）。
+# 若部署在备用/预发机（jf-backup，Debian 12 标准 Nginx/PHP-FPM 环境），
+# 运行用户与组应为：
+#   User=www-data
+#   Group=www-data
+# 可直接通过安装脚本自动改写并安装：
+#   sudo bash backend-go/deploy/install_go_service.sh \
+#     --user www-data --group www-data --root /path/to/feedback-v1
+# ============================================================
+
+[Unit]
+Description=Feedback V1 Go API Service (feedback-api)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 主站宝塔环境使用 www:www；Debian 12 (jf-backup) 请改用 User=www-data / Group=www-data
+User=www
+Group=www
+WorkingDirectory=/www/wwwroot/JF/feedback-git/feedback-v1
+ExecStart=/opt/feedback-go/feedback-api
+Environment=FEEDBACK_LISTEN_ADDR=127.0.0.1:8090
+Environment=FEEDBACK_ROOT=/www/wwwroot/JF/feedback-git/feedback-v1
+EnvironmentFile=-/etc/feedback-api/env
+Restart=always
+RestartSec=2
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=feedback-api
+
+[Install]
+WantedBy=multi-user.target
