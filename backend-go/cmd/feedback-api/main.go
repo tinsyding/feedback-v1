@@ -21,7 +21,10 @@ import (
 	"feedback-api/internal/httpx"
 	"feedback-api/internal/qbank"
 	"feedback-api/internal/ratelimit"
+	"feedback-api/internal/senderctrl"
+	"feedback-api/internal/senderlogs"
 	"feedback-api/internal/session"
+	"feedback-api/internal/syslogs"
 	"feedback-api/internal/vision"
 )
 
@@ -94,6 +97,9 @@ func main() {
 	auditLogger := auditlog.NewDualLogger(sqlDB, feedbackRoot)
 	authRepo := auth.NewMySQLRepository(sqlDB)
 	qbankRepo := qbank.NewMySQLRepository(sqlDB)
+	sysLogsRepo := syslogs.NewMySQLRepository(sqlDB, feedbackRoot)
+	senderCtrlStore := senderctrl.NewStore(feedbackRoot, loader)
+	senderLogsMgr := senderlogs.NewManager(feedbackRoot, senderCtrlStore)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handler.Health)
@@ -115,6 +121,15 @@ func main() {
 		ConfigLoader: loader,
 		Audit:        auditLogger,
 		FeedbackRoot: feedbackRoot,
+	}))
+	mux.HandleFunc("/api/logs.php", handler.Logs(handler.LogsDeps{
+		Repo:         sysLogsRepo,
+		Sessions:     sessStore,
+		ConfigLoader: loader,
+		Audit:        auditLogger,
+		SenderCtrl:   senderCtrlStore,
+		SenderLogs:   senderLogsMgr,
+		Limiter:      syslogs.NewIngestLimiter(),
 	}))
 
 	srv := &http.Server{
