@@ -19,6 +19,7 @@ backend-go/
 │   ├── normalize/                  # 学期/年级/学科归一化与 10 位错题本短码派生（对齐 lib_normalize.php）
 │   ├── qbank/                      # 题库专题与题目事务仓储、元数据清洗与孤儿 PDF 引用清理
 │   ├── ratelimit/                  # MySQL auth_rate_limits 共享防爆破限频存储
+│   ├── retest/                     # 家长端错题重练、批量入库归档、多周题库预加载与 SVG 验证码
 │   ├── retestkeys/                 # 错题本学生身份 Key 归一化纯函数（对齐 lib_retest_keys.php）
 │   ├── senderctrl/                 # 桌面发送器单机云控覆盖与远程指令队列（data/sender_control/）
 │   ├── senderlogs/                 # 桌面发送器日志分片、批次汇总与现场快照管理（data/sender_logs/）
@@ -26,7 +27,7 @@ backend-go/
 │   ├── syslogs/                    # system_logs 分页检索、UTF-8 BOM CSV 导出与滑动窗口上报限流
 │   ├── httpx/                      # CORS、同源/严格同主机 CSRF、真实 IP、Bearer 鉴权与统一 JSON 响应
 │   ├── vision/                     # PNG/JPEG 校验与 OpenAI 兼容多模态客户端
-│   └── handler/                    # /healthz 与 Phase 1/2/3（全部 10 个接口）业务端点实现
+│   └── handler/                    # /healthz 与 Phase 1~4（全部 11 个接口）业务端点实现
 ├── deploy/
 │   ├── feedback-api.service        # systemd 服务单元模板
 │   ├── install_go_service.sh       # systemd 幂等安装脚本（支持 --user/--group/--root/--bin）
@@ -35,7 +36,7 @@ backend-go/
     └── parity_test.py              # PHP vs Go 差分一致性测试脚本（Python 3 stdlib）
 ```
 
-## 当前已接管接口（Phase 1 + Phase 2 + Phase 3.1~3.4）
+## 当前已接管接口（Phase 1 + Phase 2 + Phase 3 + Phase 4，全部 11/11 个 API）
 
 - `GET /healthz`：服务健康探针（返回 `{"success":true,"data":{"service":"feedback-api","engine":"go","status":"ok"},"error":null}`）。
 - `GET /api/public_config.php`：公开脱敏系统配置（含字段裁剪与区间收敛）。
@@ -48,6 +49,7 @@ backend-go/
 - `GET|POST|DELETE /api/qbank.php`：题库专题列表与详情查询、事务双表保存（含变式题知识点级联与孤儿 PDF 引用清理）及删除（助教仅可读禁写）。
 - `GET|POST|DELETE /api/logs.php`：前端日志限频上报、管理后台检索/筛选/7 天统计/CSV 导出/删除，以及桌面发送器日志同步、现场快照、单机云控覆盖与远程指令下发（全部 15 个 action）。
 - `GET|POST /api/admin.php`：管理后台认证与密码维护、系统与 AI 配置（密钥脱敏与 `.ai_secrets.json` 隔离 + 连通性测试）、数据表元数据与通用 CRUD（含系统表黑名单与 `class_batches` 409 级联保护）、学情版本历史与回滚、错题本 Token 反查及原件下载（全部 21 个 action）。
+- `GET|POST /api/retest.php`：家长端错题重练（SVG 验证码、管理员 24h 免密直通、吊销黑名单、多周历史与单次预加载题库拼装）、教师端批次查重/单人回显/事务入库归档、临时 PDF 暂存与 2 小时限期下载（全部 10 个 action）。
 
 所有 Go 响应均携带响应头 `X-Backend-Engine: go`，便于联调与灰度假期核验。
 

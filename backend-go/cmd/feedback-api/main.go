@@ -22,6 +22,7 @@ import (
 	"feedback-api/internal/httpx"
 	"feedback-api/internal/qbank"
 	"feedback-api/internal/ratelimit"
+	"feedback-api/internal/retest"
 	"feedback-api/internal/senderctrl"
 	"feedback-api/internal/senderlogs"
 	"feedback-api/internal/session"
@@ -102,6 +103,7 @@ func main() {
 	senderCtrlStore := senderctrl.NewStore(feedbackRoot, loader)
 	senderLogsMgr := senderlogs.NewManager(feedbackRoot, senderCtrlStore)
 	adminRepo := admin.NewMySQLRepository(sqlDB)
+	retestRepo := retest.NewMySQLRepository(sqlDB)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handler.Health)
@@ -137,6 +139,13 @@ func main() {
 		Repo:         adminRepo,
 		Sessions:     sessStore,
 		RateLimit:    rlStore,
+		ConfigLoader: loader,
+		Audit:        auditLogger,
+		FeedbackRoot: feedbackRoot,
+	}))
+	mux.HandleFunc("/api/retest.php", handler.Retest(handler.RetestDeps{
+		Repo:         retestRepo,
+		Sessions:     sessStore,
 		ConfigLoader: loader,
 		Audit:        auditLogger,
 		FeedbackRoot: feedbackRoot,
