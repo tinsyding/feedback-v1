@@ -2946,7 +2946,14 @@ function renderQbankCompletenessNotice() {
     const missingTopicNums = [];
     errorNums.forEach(num => {
         const q = qMap[num];
-        if (!q || (!q.studentPdf && !q.teacherPdf && !q.student_pdf && !q.teacher_pdf)) {
+        const hasExercisePdf = Boolean(
+            q && (
+                (q.exercisePdf && String(q.exercisePdf.url || '').trim()) ||
+                (typeof q.exercisePdf === 'string' && q.exercisePdf.trim()) ||
+                (typeof q.exercise_pdf === 'string' && q.exercise_pdf.trim())
+            )
+        );
+        if (!hasExercisePdf) {
             missingPdfNums.push(num);
         }
         if (!q || !String(q.topic || '').trim()) {
