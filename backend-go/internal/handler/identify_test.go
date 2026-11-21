@@ -46,7 +46,7 @@ func TestIdentifyEndpointModesGatesAndArchiving(t *testing.T) {
 	}`)
 
 	loader := config.NewLoader(root, "")
-	h := httpx.Middleware(Identify(loader, vision.NewClient()))
+	h := httpx.Middleware(Identify(loader, &vision.Client{HTTPClient: mockVision.Client()}))
 	pngBytes := buildTestPNG(t, 400, 300)
 
 	// GET -> 405

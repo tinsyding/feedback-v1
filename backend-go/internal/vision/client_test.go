@@ -102,7 +102,7 @@ func TestClientComplete(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient()
+	c := &Client{HTTPClient: srv.Client()}
 	got, err := c.Complete(context.Background(), srv.URL, "sk-test", "qwen3.8-max", 5*time.Second, []ContentPart{{Type: "text", Text: "hi"}})
 	if err != nil || got != `{"ok":true}` {
 		t.Fatalf("got (%q, %v)", got, err)
@@ -111,5 +111,30 @@ func TestClientComplete(t *testing.T) {
 	_, err = c.Complete(context.Background(), srv.URL, "bad", "qwen3.8-max", 5*time.Second, []ContentPart{{Type: "text", Text: "hi"}})
 	if err == nil || !strings.Contains(err.Error(), "视觉模型返回为空：invalid api key") {
 		t.Fatalf("expected upstream error message, got %v", err)
+	}
+}
+
+func TestClientBlocksLoopbackAndRedirects(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://example.com/", http.StatusTemporaryRedirect)
+	}))
+	defer srv.Close()
+
+	// Default NewClient() must block loopback SSRF
+	defaultClient := NewClient()
+	_, err := defaultClient.Complete(context.Background(), srv.URL, "sk-test", "qwen3.8-max", 5*time.Second, []ContentPart{{Type: "text", Text: "hi"}})
+	if err == nil || !strings.Contains(err.Error(), "禁止访问内网或本地地址") {
+		t.Fatalf("expected SSRF block error for loopback, got %v", err)
+	}
+
+	// Redirect responses must be rejected without following
+	noRedirectClient := srv.Client()
+	noRedirectClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	c := &Client{HTTPClient: noRedirectClient}
+	_, err = c.Complete(context.Background(), srv.URL, "sk-test", "qwen3.8-max", 5*time.Second, []ContentPart{{Type: "text", Text: "hi"}})
+	if err == nil || !strings.Contains(err.Error(), "禁止重定向") {
+		t.Fatalf("expected redirect rejection, got %v", err)
 	}
 }

@@ -665,3 +665,55 @@ func TestAdminRemainingEndpointsAndLimits(t *testing.T) {
 		t.Fatalf("change_password failed: %d %s (hash=%q)", recCPOK.Code, recCPOK.Body.String(), repo.updatedHashes[1])
 	}
 }
+
+func TestAdminConfigClearKeyAndSSRFGuards(t *testing.T) {
+	h, _, sessions, _, root := setupAdminTestEnv(t)
+	ck := addAdminCookie(t, sessions, nil)
+	loader := config.NewLoader(root, "")
+
+	postCfg := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/admin.php?action=config", strings.NewReader(body))
+		req.Host = "feedback.wxjifang.cn"
+		req.Header.Set("Origin", "http://feedback.wxjifang.cn")
+		req.AddCookie(ck)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// 1. Seed a real API key and local verifyMode
+	if rec := postCfg(`{"dashscopeApiKey":"sk-real-secret-9999","senderControl":{"verifyMode":"local"}}`); rec.Code != http.StatusOK {
+		t.Fatalf("seed config failed: %d %s", rec.Code, rec.Body.String())
+	}
+	vBefore := loader.Load().SenderControl().PolicyVersion
+
+	// 2. disableQwenFlashTitle: null must NOT reset verifyMode or bump policyVersion
+	if rec := postCfg(`{"disableQwenFlashTitle":null}`); rec.Code != http.StatusOK {
+		t.Fatalf("null disableQwenFlashTitle failed: %d %s", rec.Code, rec.Body.String())
+	}
+	scAfter := loader.Load().SenderControl()
+	if scAfter.VerifyMode != "local" || scAfter.PolicyVersion != vBefore {
+		t.Fatalf("null disableQwenFlashTitle mutated senderControl: %+v (prev version=%d)", scAfter, vBefore)
+	}
+
+	// 3. SSRF hosts on identifyApiBase must be rejected with 400
+	for _, badURL := range []string{
+		"http://127.0.0.1:8090/v1",
+		"http://169.254.169.254/latest/meta-data",
+		"http://localhost:8080/v1",
+	} {
+		rec := postCfg(`{"identifyApiBase":"` + badURL + `","clearApiKey":true}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for SSRF identifyApiBase %s, got %d %s", badURL, rec.Code, rec.Body.String())
+		}
+	}
+
+	// 4. Changing identifyApiBase with clearApiKey: true (even omitting dashscopeApiKey) must actually clear stored key
+	recClear := postCfg(`{"identifyApiBase":"https://api.example.com/v1/chat/completions","clearApiKey":true}`)
+	if recClear.Code != http.StatusOK {
+		t.Fatalf("clearApiKey with host change failed: %d %s", recClear.Code, recClear.Body.String())
+	}
+	if gotKey := loader.Load().VisionAPIKey(); gotKey != "" {
+		t.Fatalf("expected stored API key to be cleared, still got %q", gotKey)
+	}
+}

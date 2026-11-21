@@ -138,8 +138,8 @@ jobs:
           $SSH "find /www/wwwroot/JF/feedback-git -name '.user.ini' -exec chattr -i {} + 2>/dev/null || true"
           # 2. 拉取最新代码并严格对齐当前目标提交（彻底避免多分支 fast-forward 失败与服务端临时改动冲突）
           $SSH "cd /www/wwwroot/JF/feedback-git && git fetch origin main && git reset --hard $TARGET_SHA && git rev-parse HEAD"
-          # 3. 统一属主与权限（pull/reset 以 root 执行，新文件交还 www 属主并规范读写位，保护本地密钥与脚本执行权限）
-          $SSH "chown -R www:www /www/wwwroot/JF/feedback-git && cd /www/wwwroot/JF/feedback-git && find feedback-v1 -type d -exec chmod 755 {} + && find feedback-v1 -type f -exec chmod 644 {} + && find feedback-v1/scripts -type f -name '*.sh' -exec chmod 755 {} + && for f in feedback-v1/data/.ai_secrets.json feedback-v1/api/db.local.php feedback-v1/api/secret_key.local.php feedback-v1/api/admin/helpers.local.php; do if [ -f \"\$f\" ]; then chmod 600 \"\$f\"; fi; done && chmod 700 .git && echo PERMS-OK"
+          # 3. 统一属主与权限（pull/reset 以 root 执行，新文件交还 www 属主并规范读写位，排除敏感密钥文件避免短时 0644 窗口）
+          $SSH "chown -R www:www /www/wwwroot/JF/feedback-git && cd /www/wwwroot/JF/feedback-git && find feedback-v1 -type d -exec chmod 755 {} + && find feedback-v1 -type f ! -path 'feedback-v1/data/.ai_secrets.json' ! -path 'feedback-v1/api/db.local.php' ! -path 'feedback-v1/api/secret_key.local.php' ! -path 'feedback-v1/api/admin/helpers.local.php' -exec chmod 644 {} + && find feedback-v1/scripts -type f -name '*.sh' -exec chmod 755 {} + && for f in feedback-v1/data/.ai_secrets.json feedback-v1/api/db.local.php feedback-v1/api/secret_key.local.php feedback-v1/api/admin/helpers.local.php; do if [ -f \"\$f\" ]; then chmod 600 \"\$f\"; fi; done && chmod 700 .git && echo PERMS-OK"
           # 4. 重新加锁 .user.ini 恢复宝塔目录安全防御
           $SSH "find /www/wwwroot/JF/feedback-git -name '.user.ini' -exec chattr +i {} + 2>/dev/null || true"
           # 5. 自动执行数据库增量迁移（幂等，优先使用 PHP 8.2 避免系统默认老版本语法不兼容）
@@ -169,13 +169,12 @@ jobs:
           fi
           chown www:www /opt/feedback-go/feedback-api.new
           chmod 755 /opt/feedback-go/feedback-api.new
+          if [ -f /opt/feedback-go/feedback-api ]; then
+            cp -p /opt/feedback-go/feedback-api /opt/feedback-go/feedback-api.prev
+          fi
           mv -f /opt/feedback-go/feedback-api.new /opt/feedback-go/feedback-api
           if systemctl is-enabled feedback-api >/dev/null 2>&1 || systemctl is-active --quiet feedback-api; then
-            systemctl restart feedback-api
-          else
-            echo "feedback-api.service not enabled or active yet; skipping restart"
-          fi
-          if systemctl is-active --quiet feedback-api; then
+            systemctl restart feedback-api || true
             ok=0
             for _ in 1 2 3 4 5 6 7 8 9 10; do
               code=$(curl -sS --noproxy "*" --connect-timeout 2 --max-time 5 -o /dev/null -w "%{http_code}" http://127.0.0.1:8090/healthz || true)
@@ -187,10 +186,16 @@ jobs:
               sleep 1
             done
             if [ "$ok" -ne 1 ]; then
-              echo "feedback-api healthz failed" >&2
+              echo "feedback-api healthz failed; rolling back to previous binary" >&2
               systemctl status feedback-api --no-pager >&2 || true
+              if [ -f /opt/feedback-go/feedback-api.prev ]; then
+                mv -f /opt/feedback-go/feedback-api.prev /opt/feedback-go/feedback-api
+                systemctl restart feedback-api || true
+              fi
               exit 1
             fi
+          else
+            echo "feedback-api.service not enabled or active yet; skipping restart"
           fi
           EOF
 

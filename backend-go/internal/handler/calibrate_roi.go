@@ -215,6 +215,11 @@ func parseBoxRel(raw any) ([4]float64, bool) {
 	v1 := config.AsPHPFloat(arr[1])
 	v2 := config.AsPHPFloat(arr[2])
 	v3 := config.AsPHPFloat(arr[3])
+	for _, v := range [4]float64{v0, v1, v2, v3} {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return [4]float64{}, false
+		}
+	}
 
 	if v0 > 1.0 || v1 > 1.0 || v2 > 1.0 || v3 > 1.0 {
 		v0 /= 1000.0

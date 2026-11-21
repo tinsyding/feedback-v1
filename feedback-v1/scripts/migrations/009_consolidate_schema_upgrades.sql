@@ -44,10 +44,10 @@ INSERT INTO `student_record_history` (
   `record_created_at`, `record_updated_at`, `archived_at`
 )
 SELECT
-  sr.`id`, k.`keep_id`, '', COALESCE(sr.`student_id`, ''), sr.`student_name`, COALESCE(sr.`student_key`, ''),
+  sr.`id`, k.`keep_id`, COALESCE(sr.`batch_code`, ''), COALESCE(sr.`student_id`, ''), sr.`student_name`, COALESCE(sr.`student_key`, ''),
   sr.`week_num`, sr.`preview_week_num`, sr.`homework_score`, sr.`preview_score`, sr.`total_score`, sr.`error_count`,
   sr.`error_questions`, sr.`preview_error_questions`, sr.`teacher_comment`, sr.`preview_comment`,
-  sr.`source_files`, sr.`retest_token`, '', 'migration_009', 'batch_overwrite',
+  sr.`source_files`, sr.`retest_token`, COALESCE(sr.`created_by`, ''), 'migration_009', 'batch_overwrite',
   sr.`created_at`, sr.`updated_at`, NOW()
 FROM `student_records` AS sr
 INNER JOIN `class_batches` AS dup

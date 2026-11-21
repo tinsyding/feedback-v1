@@ -139,7 +139,8 @@ func (r *MySQLRepository) CheckExistingBatch(ctx context.Context, in CheckBatchI
 			sID := strings.TrimSpace(st.ID)
 			sKey := retestkeys.BuildStudentKey(sID, sName, in.Grade, in.Subject)
 			legacyKey := retestkeys.LegacyStudentKey(sID, sName)
-			errs := append([]int(nil), st.Errors...)
+			errs := make([]int, len(st.Errors))
+			copy(errs, st.Errors)
 			sort.Ints(errs)
 			item := incData{name: sName, id: sID, key: sKey, score: st.Score, errors: errs}
 			incomingMap[sKey] = item

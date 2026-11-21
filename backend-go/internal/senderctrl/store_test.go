@@ -20,13 +20,16 @@ func TestOverridesCommandsAndAckLifecycle(t *testing.T) {
 	// Set override with PHP enum values "api" and "always" + CJK truncation
 	longNotice := strings.Repeat("重要通知", 150) // 600 runes
 	longNote := strings.Repeat("备注信息", 60)    // 240 runes
-	saved := st.SetOverrides("PC-01/win", map[string]any{
+	saved, err := st.SetOverrides("PC-01/win", map[string]any{
 		"verifyMode":     "api",
 		"snapshotPolicy": "always",
 		"studentGapMin":  3.0,
 		"studentGapMax":  1.0, // clamped to >= min
 		"noticeMessage":  longNotice,
 	}, longNote)
+	if err != nil {
+		t.Fatalf("SetOverrides failed: %v", err)
+	}
 	if saved.ClientSlug != "PC-01_win" {
 		t.Fatalf("unexpected slug: %q", saved.ClientSlug)
 	}
@@ -57,15 +60,15 @@ func TestOverridesCommandsAndAckLifecycle(t *testing.T) {
 	}
 
 	// Unsupported command returns nil
-	if cmd := st.EnqueueCommand("PC-01_win", "invalid_cmd", nil, "admin"); cmd != nil {
-		t.Fatalf("expected nil for invalid cmd, got %+v", cmd)
+	if cmd, err := st.EnqueueCommand("PC-01_win", "invalid_cmd", nil, "admin"); err != nil || cmd != nil {
+		t.Fatalf("expected (nil, nil) for invalid cmd, got (%+v, %v)", cmd, err)
 	}
 
 	// Enqueue & deduplicate same command type
-	cmd1 := st.EnqueueCommand("PC-01_win", "sync_logs", nil, "admin")
-	cmd2 := st.EnqueueCommand("PC-01_win", "sync_logs", map[string]any{"days": 3}, "admin")
-	if cmd1 == nil || cmd2 == nil || cmd1.CmdID == cmd2.CmdID {
-		t.Fatalf("expected second sync_logs to replace first")
+	cmd1, err1 := st.EnqueueCommand("PC-01_win", "sync_logs", nil, "admin")
+	cmd2, err2 := st.EnqueueCommand("PC-01_win", "sync_logs", map[string]any{"days": 3}, "admin")
+	if err1 != nil || err2 != nil || cmd1 == nil || cmd2 == nil || cmd1.CmdID == cmd2.CmdID {
+		t.Fatalf("expected second sync_logs to replace first (err1=%v err2=%v)", err1, err2)
 	}
 
 	eff := st.BuildEffectiveControl("PC-01_win", true)
@@ -78,14 +81,58 @@ func TestOverridesCommandsAndAckLifecycle(t *testing.T) {
 	}
 
 	// Ack command with long CJK message
-	acked := st.AcknowledgeCommands("PC-01_win", []any{
+	acked, err := st.AcknowledgeCommands("PC-01_win", []any{
 		map[string]any{"cmd_id": cmd2.CmdID, "status": "ok", "message": strings.Repeat("完成", 200)},
 	})
-	if acked != 1 {
-		t.Fatalf("acked = %d, want 1", acked)
+	if err != nil || acked != 1 {
+		t.Fatalf("acked = %d (err=%v), want 1", acked, err)
 	}
 	eff2 := st.BuildEffectiveControl("PC-01_win", true)
 	if len(eff2["pending_commands"].([]map[string]any)) != 0 {
 		t.Fatalf("expected 0 pending after ack")
+	}
+}
+
+func TestLoadPHPLegacyEmptyArrayJSON(t *testing.T) {
+	root := t.TempDir()
+	ctrlDir := filepath.Join(root, "data", "sender_control", "clients")
+	if err := os.MkdirAll(ctrlDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// PHP json_encode encodes empty overrides/params arrays as [] rather than {}
+	phpJSON := `{
+		"client_slug": "legacy_pc",
+		"overrides": [],
+		"note": "keep this note",
+		"updated_at": "2026-11-21 09:00:00",
+		"commands": [
+			{
+				"cmd_id": "cmd_php_1",
+				"type": "stop_batch",
+				"params": [],
+				"created_at": "2026-11-21 09:00:00",
+				"created_ts": 1763715600,
+				"created_by": "admin",
+				"delivered_at": "",
+				"acked_at": "",
+				"ack_status": "",
+				"ack_message": ""
+			}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(ctrlDir, "legacy_pc.json"), []byte(phpJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	st := NewStore(root, config.NewLoader(root, ""))
+	loaded := st.LoadClientState("legacy_pc")
+	if loaded.Note != "keep this note" {
+		t.Fatalf("expected note preserved from PHP JSON, got %q", loaded.Note)
+	}
+	if len(loaded.Commands) != 1 || loaded.Commands[0].CmdID != "cmd_php_1" {
+		t.Fatalf("expected pending PHP command preserved, got %+v", loaded.Commands)
+	}
+	if loaded.Commands[0].Params == nil {
+		t.Fatal("expected Params initialized to empty map, got nil")
 	}
 }

@@ -798,7 +798,7 @@ func (r *MySQLRepository) CreateRecord(ctx context.Context, table string, input 
 		if rawEQ, ok := data["error_questions"]; ok && rawEQ != nil {
 			eqJSON, eqCount := ParseErrorQuestions(rawEQ)
 			data["error_questions"] = eqJSON
-			if _, hasCnt := data["error_count"]; !hasCnt {
+			if cnt, hasCnt := data["error_count"]; !hasCnt || cnt == nil {
 				data["error_count"] = eqCount
 			}
 		}
@@ -976,7 +976,7 @@ func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, in
 		if rawEQ, ok := data["error_questions"]; ok && rawEQ != nil {
 			eqJSON, eqCount := ParseErrorQuestions(rawEQ)
 			data["error_questions"] = eqJSON
-			if _, hasCnt := data["error_count"]; !hasCnt {
+			if cnt, hasCnt := data["error_count"]; !hasCnt || cnt == nil {
 				data["error_count"] = eqCount
 			}
 		}

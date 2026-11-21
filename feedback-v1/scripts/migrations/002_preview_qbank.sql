@@ -12,27 +12,28 @@
 
 ALTER TABLE `qbank_weeks`
   ADD COLUMN `bank_type` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'homework'
-    COMMENT '题库类型：homework=课后巩固，preview=预习' AFTER `id`,
-  DROP INDEX `uk_week`,
-  DROP INDEX `idx_list`,
-  ADD UNIQUE KEY `uk_week` (`year`,`season`,`subject`,`grade`,`tier`,`week`,`bank_type`),
-  ADD KEY `idx_list` (`year`,`season`,`subject`,`grade`,`bank_type`);
+    COMMENT '题库类型：homework=课后巩固，preview=预习' AFTER `id`;
+ALTER TABLE `qbank_weeks` DROP INDEX `uk_week`;
+ALTER TABLE `qbank_weeks` DROP INDEX `idx_list`;
+ALTER TABLE `qbank_weeks` ADD UNIQUE KEY `uk_week` (`year`,`season`,`subject`,`grade`,`tier`,`week`,`bank_type`);
+ALTER TABLE `qbank_weeks` ADD KEY `idx_list` (`year`,`season`,`subject`,`grade`,`bank_type`);
 
 ALTER TABLE `qbank_questions`
   ADD COLUMN `bank_type` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'homework'
-    COMMENT '题库类型：homework=课后巩固，preview=预习' AFTER `qbank_id`,
-  DROP INDEX `idx_lookup`,
-  ADD KEY `idx_lookup` (`bank_type`,`year`,`season`,`subject`,`grade`,`tier`,`week`,`question_num`);
+    COMMENT '题库类型：homework=课后巩固，preview=预习' AFTER `qbank_id`;
+ALTER TABLE `qbank_questions` DROP INDEX `idx_lookup`;
+ALTER TABLE `qbank_questions` ADD KEY `idx_lookup` (`bank_type`,`year`,`season`,`subject`,`grade`,`tier`,`week`,`question_num`);
 
 ALTER TABLE `student_records`
   ADD COLUMN `preview_week_num` int(11) DEFAULT NULL
-    COMMENT '预习作业对应周次/讲次，可与课后巩固不同' AFTER `week_num`,
+    COMMENT '预习作业对应周次/讲次，可与课后巩固不同' AFTER `week_num`;
+ALTER TABLE `student_records`
   ADD COLUMN `preview_error_questions` json DEFAULT NULL
-    COMMENT '预习错题具体题号数组，如 [2, 4]' AFTER `error_questions`,
+    COMMENT '预习错题具体题号数组，如 [2, 4]' AFTER `error_questions`;
+ALTER TABLE `student_records`
   ADD COLUMN `preview_comment` text COLLATE utf8mb4_unicode_ci DEFAULT NULL
     COMMENT '预习针对性评语' AFTER `teacher_comment`;
 
-ALTER TABLE `student_record_history`
-  ADD COLUMN `preview_week_num` int(11) DEFAULT NULL AFTER `week_num`,
-  ADD COLUMN `preview_error_questions` json DEFAULT NULL AFTER `error_questions`,
-  ADD COLUMN `preview_comment` text COLLATE utf8mb4_unicode_ci DEFAULT NULL AFTER `teacher_comment`;
+ALTER TABLE `student_record_history` ADD COLUMN `preview_week_num` int(11) DEFAULT NULL AFTER `week_num`;
+ALTER TABLE `student_record_history` ADD COLUMN `preview_error_questions` json DEFAULT NULL AFTER `error_questions`;
+ALTER TABLE `student_record_history` ADD COLUMN `preview_comment` text COLLATE utf8mb4_unicode_ci DEFAULT NULL AFTER `teacher_comment`;

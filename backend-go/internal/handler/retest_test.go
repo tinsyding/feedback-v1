@@ -679,3 +679,32 @@ func TestRetestCreateTempDownloadMaxBytesAndStream(t *testing.T) {
 		t.Fatalf("streamed bytes mismatch: err=%v len=%d want=%d", err, len(bodyBytes), len(pdfPayload))
 	}
 }
+
+func TestRetestCreateTempDownloadParentVerifiedToken(t *testing.T) {
+	h, _, sessions, _, _ := setupRetestTestEnv(t, "test-retest-secret")
+	tok := "parent_tok_123"
+	parentSID := "parent11223344556677889900aabbcc"
+	sessions.Set(parentSID, map[string]any{
+		verifiedTokenSessionKey(tok): "1",
+	})
+
+	pdfPayload := []byte("%PDF-1.4\n%%EOF\n")
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	_ = mw.WriteField("token", tok)
+	fw, err := mw.CreateFormFile("file", "家长错题本.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = fw.Write(pdfPayload)
+	_ = mw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/retest.php?action=create_temp_download", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: parentSID})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"success":true`) {
+		t.Fatalf("parent verified_token create_temp_download failed: %d %s", rec.Code, rec.Body.String())
+	}
+}

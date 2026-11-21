@@ -18,7 +18,7 @@ func (r *MySQLRepository) FindTokenRecord(ctx context.Context, token string) (*T
 	}
 	var rec TokenRecord
 	var previewWeek sql.NullInt64
-	var peqRaw, studentID sql.NullString
+	var peqRaw, studentKey, studentID sql.NullString
 	var updatedAt, createdAt sql.NullTime
 	err := r.db.QueryRowContext(ctx, `
 		SELECT cb.subject, cb.grade, cb.tier, sr.week_num, sr.preview_week_num,
@@ -32,7 +32,7 @@ func (r *MySQLRepository) FindTokenRecord(ctx context.Context, token string) (*T
 		token,
 	).Scan(
 		&rec.Subject, &rec.Grade, &rec.Tier, &rec.WeekNum, &previewWeek,
-		&peqRaw, &rec.StudentName, &rec.StudentKey, &studentID,
+		&peqRaw, &rec.StudentName, &studentKey, &studentID,
 		&rec.Year, &rec.Season, &updatedAt, &createdAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -42,6 +42,7 @@ func (r *MySQLRepository) FindTokenRecord(ctx context.Context, token string) (*T
 		log.Printf("retest: FindTokenRecord error (token=%s): %v", token, err)
 		return nil, NewHTTPError(500, "数据库查询服务异常，请稍后重试")
 	}
+	rec.StudentKey = strings.TrimSpace(studentKey.String)
 	rec.StudentID = strings.TrimSpace(studentID.String)
 	if previewWeek.Valid && previewWeek.Int64 > 0 {
 		rec.PreviewWeekNum = int(previewWeek.Int64)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/jpeg"
@@ -14,6 +15,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"feedback-api/internal/httpx"
 )
 
 var (
@@ -53,10 +56,10 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
-// NewClient creates a Vision client with default HTTP transport.
+// NewClient creates a Vision client with an SSRF-blocking, no-redirect HTTP transport.
 func NewClient() *Client {
 	return &Client{
-		HTTPClient: &http.Client{},
+		HTTPClient: httpx.NewSafeHTTPClient(0),
 	}
 }
 
@@ -113,25 +116,35 @@ func (c *Client) Complete(ctx context.Context, apiBase, apiKey, model string, ti
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, apiBase, &body)
 	if err != nil {
-		return "", fmt.Errorf("视觉模型调用失败：%w", err)
+		return "", fmt.Errorf("视觉模型调用失败：请求地址无效")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	httpClient := c.HTTPClient
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = httpx.NewSafeHTTPClient(0)
 	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("视觉模型调用失败：%v", err)
+		if errors.Is(err, httpx.ErrSSRFBlocked) {
+			return "", fmt.Errorf("视觉模型调用失败：%s", httpx.ErrSSRFBlocked.Error())
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return "", fmt.Errorf("视觉模型调用超时")
+		}
+		return "", fmt.Errorf("视觉模型网络请求失败")
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		return "", fmt.Errorf("视觉模型调用失败：禁止重定向 (HTTP %d)", resp.StatusCode)
+	}
+
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
-		return "", fmt.Errorf("视觉模型调用失败：%v", err)
+		return "", fmt.Errorf("视觉模型响应读取失败")
 	}
 	if len(raw) == 0 {
 		return "", fmt.Errorf("视觉模型调用失败：empty response (HTTP %d)", resp.StatusCode)

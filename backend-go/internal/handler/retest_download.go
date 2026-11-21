@@ -43,7 +43,7 @@ func hasAnyVerifiedRetestToken(sess *session.Session) bool {
 		return false
 	}
 	for k, v := range sess.Data {
-		if strings.HasPrefix(k, "retest_verified_") && strings.TrimSpace(config.AsPHPString(v)) != "" {
+		if strings.HasPrefix(k, "verified_token_") && strings.TrimSpace(config.AsPHPString(v)) != "" {
 			return true
 		}
 	}

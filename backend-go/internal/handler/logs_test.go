@@ -362,4 +362,19 @@ func TestLogsSenderSyncSnapshotPullFiltersStatsAndSecurityHardening(t *testing.T
 			t.Fatalf("GET %s failed: code=%d body=%s", action, recGet.Code, recGet.Body.String())
 		}
 	}
+
+	// 6. sender_snapshot with meta_json=null & client_json=null must not panic
+	var nullBuf bytes.Buffer
+	mwNull := multipart.NewWriter(&nullBuf)
+	_ = mwNull.WriteField("token", "sender-tok-1")
+	_ = mwNull.WriteField("client_json", "null")
+	_ = mwNull.WriteField("meta_json", "null")
+	_ = mwNull.Close()
+	reqNullSnap := httptest.NewRequest(http.MethodPost, "/api/logs.php?action=sender_snapshot", &nullBuf)
+	reqNullSnap.Header.Set("Content-Type", mwNull.FormDataContentType())
+	recNullSnap := httptest.NewRecorder()
+	h.ServeHTTP(recNullSnap, reqNullSnap)
+	if recNullSnap.Code != http.StatusOK || !strings.Contains(recNullSnap.Body.String(), `"success":true`) {
+		t.Fatalf("null meta_json snapshot failed: code=%d body=%s", recNullSnap.Code, recNullSnap.Body.String())
+	}
 }

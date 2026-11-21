@@ -84,6 +84,9 @@ func handleAdminConfig(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
 		if input == nil {
 			input = map[string]any{}
 		}
+		deps.ConfigLoader.LockWrite()
+		defer deps.ConfigLoader.UnlockWrite()
+
 		cfgPath := deps.ConfigLoader.ConfigJSONPath()
 		rawBytes, err := os.ReadFile(cfgPath)
 		if err != nil {
@@ -150,7 +153,7 @@ func handleAdminConfig(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
 			for k, v := range scRaw {
 				mergedRaw[k] = v
 			}
-			if dqf, hasDQF := input["disableQwenFlashTitle"]; hasDQF {
+			if dqf, hasDQF := input["disableQwenFlashTitle"]; hasDQF && dqf != nil {
 				if _, hasVM := scRaw["verifyMode"]; !hasVM {
 					if config.AsPHPBool(dqf) {
 						mergedRaw["verifyMode"] = "local"
@@ -164,7 +167,7 @@ func handleAdminConfig(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
 			normSC.UpdatedAt = tz.In(deps.now()).Format("2006-01-02 15:04:05")
 			cfgMap["senderControl"] = normSC
 			cfgMap["disableQwenFlashTitle"] = normSC.VerifyMode == "local"
-		} else if dqf, hasDQF := input["disableQwenFlashTitle"]; hasDQF {
+		} else if dqf, hasDQF := input["disableQwenFlashTitle"]; hasDQF && dqf != nil {
 			prevSC := config.NormalizeGlobalSenderControl(asStringAnyMap(cfgMap["senderControl"]), cfgMap)
 			if config.AsPHPBool(dqf) {
 				prevSC.VerifyMode = "local"
@@ -179,12 +182,15 @@ func handleAdminConfig(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
 		rt := deps.ConfigLoader.Load()
 		prevBase := strings.TrimSpace(rt.IdentifyAPIBase())
 		hasNewKey := false
+		newSubmittedKey := ""
 		if rawKey, ok := input["dashscopeApiKey"]; ok {
 			submittedKey := strings.TrimSpace(config.AsPHPString(rawKey))
 			if submittedKey != "" && !config.IsMaskedAPIKey(submittedKey) {
 				hasNewKey = true
+				newSubmittedKey = submittedKey
 			}
 		}
+		clearKeyRequested := config.AsPHPBool(input["clearApiKey"])
 
 		if rawBase, ok := input["identifyApiBase"]; ok && rawBase != nil {
 			newBase := strings.TrimSpace(config.AsPHPString(rawBase))
@@ -194,9 +200,13 @@ func handleAdminConfig(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
 					httpx.SendResponse(w, false, nil, httpx.StrPtr("API 端点 Base URL 格式无效"), http.StatusBadRequest)
 					return
 				}
+				if httpx.IsBlockedSSRFHost(newU.Hostname()) {
+					httpx.SendResponse(w, false, nil, httpx.StrPtr("API 端点不允许指向内网或本地地址"), http.StatusBadRequest)
+					return
+				}
 				if prevU, prevErr := url.Parse(prevBase); prevErr == nil && prevBase != "" {
 					hostChanged := !strings.EqualFold(newU.Scheme, prevU.Scheme) || !strings.EqualFold(newU.Host, prevU.Host)
-					if hostChanged && rt.VisionAPIKey() != "" && !hasNewKey && !config.AsPHPBool(input["clearApiKey"]) {
+					if hostChanged && rt.VisionAPIKey() != "" && !hasNewKey && !clearKeyRequested {
 						httpx.SendResponse(w, false, nil, httpx.StrPtr("更换自定义 API 端点时必须重新填写或清空 API Key"), http.StatusBadRequest)
 						return
 					}
@@ -204,20 +214,17 @@ func handleAdminConfig(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
 			}
 		}
 
-		if rawKey, ok := input["dashscopeApiKey"]; ok {
-			submittedKey := strings.TrimSpace(config.AsPHPString(rawKey))
-			if submittedKey != "" && !config.IsMaskedAPIKey(submittedKey) {
-				aiSecrets["dashscopeApiKey"] = submittedKey
-				if err := deps.ConfigLoader.SaveAISecrets(aiSecrets); err != nil {
-					httpx.SendResponse(w, false, nil, httpx.StrPtr("保存 AI 密钥文件失败，请检查 data/ 目录权限"), http.StatusInternalServerError)
-					return
-				}
-			} else if submittedKey == "" && config.AsPHPBool(input["clearApiKey"]) {
-				delete(aiSecrets, "dashscopeApiKey")
-				if err := deps.ConfigLoader.SaveAISecrets(aiSecrets); err != nil {
-					httpx.SendResponse(w, false, nil, httpx.StrPtr("清理 AI 密钥文件失败，请检查 data/ 目录权限"), http.StatusInternalServerError)
-					return
-				}
+		if hasNewKey {
+			aiSecrets["dashscopeApiKey"] = newSubmittedKey
+			if err := deps.ConfigLoader.SaveAISecrets(aiSecrets); err != nil {
+				httpx.SendResponse(w, false, nil, httpx.StrPtr("保存 AI 密钥文件失败，请检查 data/ 目录权限"), http.StatusInternalServerError)
+				return
+			}
+		} else if clearKeyRequested {
+			delete(aiSecrets, "dashscopeApiKey")
+			if err := deps.ConfigLoader.SaveAISecrets(aiSecrets); err != nil {
+				httpx.SendResponse(w, false, nil, httpx.StrPtr("清理 AI 密钥文件失败，请检查 data/ 目录权限"), http.StatusInternalServerError)
+				return
 			}
 		}
 

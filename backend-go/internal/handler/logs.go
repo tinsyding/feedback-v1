@@ -335,7 +335,7 @@ func handleLogsSenderSync(w http.ResponseWriter, r *http.Request, deps LogsDeps)
 	}
 
 	if len(ackCommands) > 0 && deps.SenderCtrl != nil {
-		deps.SenderCtrl.AcknowledgeCommands(clientSlug, ackCommands)
+		_, _ = deps.SenderCtrl.AcknowledgeCommands(clientSlug, ackCommands)
 	}
 
 	// Opportunistic async 30-day retention cleanup
@@ -399,6 +399,9 @@ func handleLogsSenderSync(w http.ResponseWriter, r *http.Request, deps LogsDeps)
 		if len(filesForMeta) == 0 {
 			filesForMeta = activeFiles
 		}
+		if filesForMeta == nil {
+			filesForMeta = []any{}
+		}
 		var meta map[string]any
 		if deps.SenderLogs != nil {
 			cDir := deps.SenderLogs.ClientDir(dateStr, clientSlug)
@@ -406,6 +409,9 @@ func handleLogsSenderSync(w http.ResponseWriter, r *http.Request, deps LogsDeps)
 			deps.SenderLogs.AppendBatchSummary(cDir, summary)
 		}
 		counts, _ := summary["counts"].(map[string]any)
+		if counts == nil {
+			counts = map[string]any{}
+		}
 		failed := config.AsPHPInt(counts["failed"])
 		blocked := config.AsPHPInt(counts["blocked"])
 		unmatched := config.AsPHPInt(counts["unmatched"])
@@ -414,6 +420,9 @@ func handleLogsSenderSync(w http.ResponseWriter, r *http.Request, deps LogsDeps)
 			sysLevel = "warn"
 		}
 		students, _ := summary["students"].([]any)
+		if students == nil {
+			students = []any{}
+		}
 		if len(students) > 150 {
 			students = students[:150]
 		}
@@ -641,8 +650,14 @@ func handleLogsSenderSnapshot(w http.ResponseWriter, r *http.Request, deps LogsD
 	serverIP := httpx.GetClientIP(r)
 	clientInfo := map[string]any{}
 	_ = json.Unmarshal([]byte(r.PostFormValue("client_json")), &clientInfo)
+	if clientInfo == nil {
+		clientInfo = map[string]any{}
+	}
 	metaIn := map[string]any{}
 	_ = json.Unmarshal([]byte(r.PostFormValue("meta_json")), &metaIn)
+	if metaIn == nil {
+		metaIn = map[string]any{}
+	}
 
 	now := deps.now()
 	rawPrefix := r.PostFormValue("prefix")
@@ -754,7 +769,7 @@ func handleLogsSenderControlPullPost(w http.ResponseWriter, r *http.Request, dep
 	ackCommands, _ := input["ack_commands"].([]any)
 
 	if len(ackCommands) > 0 && deps.SenderCtrl != nil {
-		deps.SenderCtrl.AcknowledgeCommands(clientSlug, ackCommands)
+		_, _ = deps.SenderCtrl.AcknowledgeCommands(clientSlug, ackCommands)
 	}
 	if len(clientInfo) > 0 && deps.SenderLogs != nil {
 		dateStr := deps.now().Format("2006-01-02")
@@ -814,7 +829,11 @@ func handleLogsSenderClientOverride(w http.ResponseWriter, r *http.Request, deps
 		overrides, _ = input["overrides"].(map[string]any)
 		note = config.AsPHPString(input["note"])
 	}
-	st := deps.SenderCtrl.SetOverrides(clientSlug, overrides, note)
+	st, err := deps.SenderCtrl.SetOverrides(clientSlug, overrides, note)
+	if err != nil {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("保存单机云控覆盖策略失败，请检查目录权限"), http.StatusInternalServerError)
+		return
+	}
 	msg := fmt.Sprintf("已更新发送器 [%s] 的单机云控覆盖策略", st.ClientSlug)
 	if clearAll {
 		msg = fmt.Sprintf("已清空发送器 [%s] 的单机云控覆盖（恢复继承全局）", st.ClientSlug)
@@ -860,7 +879,11 @@ func handleLogsSenderClientCommand(w http.ResponseWriter, r *http.Request, deps 
 	if op == "" {
 		op = "admin"
 	}
-	cmd := deps.SenderCtrl.EnqueueCommand(clientSlug, cmdType, params, op)
+	cmd, err := deps.SenderCtrl.EnqueueCommand(clientSlug, cmdType, params, op)
+	if err != nil {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("保存远程指令失败，请检查目录权限"), http.StatusInternalServerError)
+		return
+	}
 	if cmd == nil {
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("不支持的远程指令类型: "+html.EscapeString(cmdType)), http.StatusBadRequest)
 		return
@@ -988,37 +1011,32 @@ func handleLogsSenderLogFile(w http.ResponseWriter, r *http.Request, deps LogsDe
 	}
 	isDownload := config.AsPHPBool(q.Get("download"))
 
-	filePath, dateStr, clientSlug, filename := deps.SenderLogs.LogFilePath(q.Get("date"), q.Get("client"), logType)
-	raw, err := os.ReadFile(filePath)
-	if err != nil {
-		if isDownload {
+	if isDownload {
+		var dlErr error
+		_, _, _, err := deps.SenderLogs.StreamLogFile(q.Get("date"), q.Get("client"), logType, func(f *os.File, size int64) error {
+			_, dateStr, clientSlug, _ := deps.SenderLogs.LogFilePath(q.Get("date"), q.Get("client"), logType)
+			dlName := clientSlug + "_" + logType + "_" + dateStr + ".log"
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, dlName))
+			w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+			w.WriteHeader(http.StatusOK)
+			_, dlErr = io.Copy(w, f)
+			return nil
+		})
+		if err != nil {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte("日志文件不存在"))
 			return
 		}
+		_ = dlErr
+		return
+	}
+
+	dateStr, clientSlug, filename, content, totalLines, sizeBytes, err := deps.SenderLogs.ReadLogFileTail(q.Get("date"), q.Get("client"), logType, maxLines)
+	if err != nil {
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("指定的日志文件不存在"), http.StatusNotFound)
 		return
-	}
-
-	if isDownload {
-		dlName := clientSlug + "_" + logType + "_" + dateStr + ".log"
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, dlName))
-		w.Header().Set("Content-Length", strconv.Itoa(len(raw)))
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(raw)
-		return
-	}
-
-	text := strings.ReplaceAll(string(raw), "\r\n", "\n")
-	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
-	if len(raw) == 0 {
-		lines = []string{}
-	}
-	totalLines := len(lines)
-	if totalLines > maxLines {
-		lines = lines[totalLines-maxLines:]
 	}
 	httpx.SendResponse(w, true, map[string]any{
 		"date":        dateStr,
@@ -1026,8 +1044,8 @@ func handleLogsSenderLogFile(w http.ResponseWriter, r *http.Request, deps LogsDe
 		"type":        logType,
 		"filename":    filename,
 		"total_lines": totalLines,
-		"size_kb":     math.Round(float64(len(raw))/1024*100) / 100,
-		"content":     strings.Join(lines, "\n"),
+		"size_kb":     math.Round(float64(sizeBytes)/1024*100) / 100,
+		"content":     content,
 	}, nil, http.StatusOK)
 }
 
@@ -1036,8 +1054,7 @@ func handleLogsSenderSnapshotImg(w http.ResponseWriter, r *http.Request, deps Lo
 		return
 	}
 	q := r.URL.Query()
-	imgPath := deps.SenderLogs.SnapshotImagePath(q.Get("date"), q.Get("client"), q.Get("prefix"), q.Get("img"))
-	data, err := os.ReadFile(imgPath)
+	data, err := deps.SenderLogs.ReadSnapshotImage(q.Get("date"), q.Get("client"), q.Get("prefix"), q.Get("img"))
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		return
@@ -1063,12 +1080,13 @@ func handleLogsExport(w http.ResponseWriter, r *http.Request, deps LogsDeps) {
 	}
 	q := r.URL.Query()
 	rows, err := deps.Repo.ExportRows(r.Context(), syslogs.ListFilter{
-		Level:  strings.TrimSpace(q.Get("level")),
-		Module: strings.TrimSpace(q.Get("module")),
-		Event:  strings.TrimSpace(q.Get("event")),
-		Date:   strings.TrimSpace(q.Get("date")),
-		Search: strings.TrimSpace(q.Get("search")),
-		IP:     strings.TrimSpace(q.Get("ip")),
+		Level:       strings.TrimSpace(q.Get("level")),
+		Module:      strings.TrimSpace(q.Get("module")),
+		Event:       strings.TrimSpace(q.Get("event")),
+		Date:        strings.TrimSpace(q.Get("date")),
+		Search:      strings.TrimSpace(q.Get("search")),
+		IP:          strings.TrimSpace(q.Get("ip")),
+		Fingerprint: strings.TrimSpace(q.Get("fingerprint")),
 	}, 5000)
 	if err != nil {
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("数据库连接失败"), http.StatusInternalServerError)

@@ -30,6 +30,23 @@ var (
 	}
 )
 
+// unmarshalPHPMap decodes a JSON object into map[string]any, treating JSON null or
+// PHP-encoded empty arrays ([]) as an empty map instead of failing.
+func unmarshalPHPMap(raw json.RawMessage) (map[string]any, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" || strings.HasPrefix(trimmed, "[") {
+		return map[string]any{}, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, err
+	}
+	if m == nil {
+		m = map[string]any{}
+	}
+	return m, nil
+}
+
 // RemoteCommand represents an admin-issued command queued for a sender client.
 type RemoteCommand struct {
 	CmdID       string         `json:"cmd_id"`
@@ -44,6 +61,26 @@ type RemoteCommand struct {
 	AckMessage  string         `json:"ack_message"`
 }
 
+// UnmarshalJSON tolerates PHP-encoded empty arrays ("params": []) in addition to objects.
+func (c *RemoteCommand) UnmarshalJSON(data []byte) error {
+	type alias RemoteCommand
+	aux := struct {
+		*alias
+		Params json.RawMessage `json:"params"`
+	}{
+		alias: (*alias)(c),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	params, err := unmarshalPHPMap(aux.Params)
+	if err != nil {
+		return err
+	}
+	c.Params = params
+	return nil
+}
+
 // ClientState represents data/sender_control/clients/<slug>.json.
 type ClientState struct {
 	ClientSlug string          `json:"client_slug"`
@@ -51,6 +88,26 @@ type ClientState struct {
 	Note       string          `json:"note"`
 	UpdatedAt  string          `json:"updated_at"`
 	Commands   []RemoteCommand `json:"commands"`
+}
+
+// UnmarshalJSON tolerates PHP-encoded empty arrays ("overrides": []) in addition to objects.
+func (s *ClientState) UnmarshalJSON(data []byte) error {
+	type alias ClientState
+	aux := struct {
+		*alias
+		Overrides json.RawMessage `json:"overrides"`
+	}{
+		alias: (*alias)(s),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	overrides, err := unmarshalPHPMap(aux.Overrides)
+	if err != nil {
+		return err
+	}
+	s.Overrides = overrides
+	return nil
 }
 
 // Store manages per-client sender control overrides and remote command queues on disk.
@@ -326,23 +383,25 @@ func (s *Store) LoadClientState(slug string) ClientState {
 }
 
 // SetOverrides updates per-client overrides and note.
-func (s *Store) SetOverrides(slug string, overrides map[string]any, note string) ClientState {
+func (s *Store) SetOverrides(slug string, overrides map[string]any, note string) (ClientState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.loadLocked(slug)
 	st.Overrides = NormalizeOverrides(overrides)
 	st.Note = textutil.TruncateRunes(strings.TrimSpace(note), 200)
 	st.UpdatedAt = s.now().Format("2006-01-02 15:04:05")
-	_ = s.saveLocked(st)
-	return st
+	if err := s.saveLocked(st); err != nil {
+		return ClientState{}, err
+	}
+	return st, nil
 }
 
 // EnqueueCommand queues a remote command for a sender client (deduplicating unacked commands of the same type).
-// Returns nil if cmdType is unsupported.
-func (s *Store) EnqueueCommand(slug, cmdType string, params map[string]any, operator string) *RemoteCommand {
+// Returns (nil, nil) if cmdType is unsupported.
+func (s *Store) EnqueueCommand(slug, cmdType string, params map[string]any, operator string) (*RemoteCommand, error) {
 	t := strings.ToLower(strings.TrimSpace(cmdType))
 	if _, ok := validCmdTypes[t]; !ok {
-		return nil
+		return nil, nil
 	}
 	if params == nil {
 		params = map[string]any{}
@@ -380,14 +439,16 @@ func (s *Store) EnqueueCommand(slug, cmdType string, params map[string]any, oper
 	}
 	st.Commands = filtered
 	st.UpdatedAt = now.Format("2006-01-02 15:04:05")
-	_ = s.saveLocked(st)
-	return &cmd
+	if err := s.saveLocked(st); err != nil {
+		return nil, err
+	}
+	return &cmd, nil
 }
 
 // AcknowledgeCommands marks commands acknowledged by the sender client.
-func (s *Store) AcknowledgeCommands(slug string, acks []any) int {
+func (s *Store) AcknowledgeCommands(slug string, acks []any) (int, error) {
 	if len(acks) == 0 {
-		return 0
+		return 0, nil
 	}
 	type ackInfo struct {
 		status  string
@@ -415,7 +476,7 @@ func (s *Store) AcknowledgeCommands(slug string, acks []any) int {
 		}
 	}
 	if len(ackMap) == 0 {
-		return 0
+		return 0, nil
 	}
 
 	s.mu.Lock()
@@ -436,9 +497,11 @@ func (s *Store) AcknowledgeCommands(slug string, acks []any) int {
 		}
 	}
 	if changed > 0 {
-		_ = s.saveLocked(st)
+		if err := s.saveLocked(st); err != nil {
+			return 0, err
+		}
 	}
-	return changed
+	return changed, nil
 }
 
 // GlobalPolicy returns the normalized global senderControl policy from config.json.

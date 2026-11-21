@@ -126,7 +126,7 @@ jobs:
             DB_NAME=$($PHP_BIN -r '$c = @include "/www/wwwroot/JF/feedback-git/feedback-v1/api/db.local.php"; echo is_array($c) ? ($c["dbname"] ?? "feedback") : "feedback";')
 
             if [ -n "$DB_PASS" ]; then
-              $MYSQLDUMP -u"$DB_USER" -p"$DB_PASS" --single-transaction --quick --default-character-set=utf8mb4 "$DB_NAME" | gzip -c
+              MYSQL_PWD="$DB_PASS" $MYSQLDUMP -u"$DB_USER" --single-transaction --quick --default-character-set=utf8mb4 "$DB_NAME" | gzip -c
             else
               $MYSQLDUMP -u"$DB_USER" --single-transaction --quick --default-character-set=utf8mb4 "$DB_NAME" | gzip -c
             fi
@@ -151,12 +151,14 @@ jobs:
           SSH="ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 $DEPLOY_USER@$DEPLOY_HOST"
 
           # 压缩打包 data 目录下的 pdfs, uploads 为整体归档文件（history/qbank 已完全走 MySQL 备份），避开解压数万个小文件导致 Google Drive API 超频卡死与严重超时
-          $SSH "cd /www/wwwroot/JF/feedback-git/feedback-v1 && tar -czf - data/pdfs data/uploads 2>/dev/null || true" > ./staging/materials/feedback_materials_${BACKUP_TIME}.tar.gz
+          $SSH "cd /www/wwwroot/JF/feedback-git/feedback-v1 && dirs=''; for d in data/pdfs data/uploads; do if [ -d \"\$d\" ]; then dirs=\"\$dirs \$d\"; fi; done; if [ -n \"\$dirs\" ]; then tar -czf - \$dirs; fi" > ./staging/materials/feedback_materials_${BACKUP_TIME}.tar.gz
 
           if [ -s ./staging/materials/feedback_materials_${BACKUP_TIME}.tar.gz ]; then
-            echo "✅ 材料归档完成，大小: $(ls -lh ./staging/materials/feedback_materials_${BACKUP_TIME}.tar.gz | awk '{print $5}')"
+            tar -tzf ./staging/materials/feedback_materials_${BACKUP_TIME}.tar.gz >/dev/null
+            echo "✅ 材料归档完成且校验通过，大小: $(ls -lh ./staging/materials/feedback_materials_${BACKUP_TIME}.tar.gz | awk '{print $5}')"
           else
             echo "⚠️ 警告：材料归档为空或不存在"
+            rm -f ./staging/materials/feedback_materials_${BACKUP_TIME}.tar.gz
           fi
 
       - name: Backup server configurations via SSH stream
@@ -171,7 +173,10 @@ jobs:
           $SSH "cd /www/wwwroot/JF/feedback-git/feedback-v1 && files=''; for p in config.json api/db.local.php api/secret_key.local.php api/admin/helpers.local.php data/.ai_secrets.json /etc/feedback-api/env; do if [ -f \"\$p\" ] && [ -r \"\$p\" ]; then files=\"\$files \$p\"; fi; done; if [ -n \"\$files\" ]; then tar -czf - \$files; fi" > ./staging/configs/feedback_configs_${BACKUP_TIME}.tar.gz
 
           if [ -s ./staging/configs/feedback_configs_${BACKUP_TIME}.tar.gz ]; then
-            echo "✅ 生产配置归档完成，大小: $(ls -lh ./staging/configs/feedback_configs_${BACKUP_TIME}.tar.gz | awk '{print $5}')"
+            tar -tzf ./staging/configs/feedback_configs_${BACKUP_TIME}.tar.gz >/dev/null
+            echo "✅ 生产配置归档完成且校验通过，大小: $(ls -lh ./staging/configs/feedback_configs_${BACKUP_TIME}.tar.gz | awk '{print $5}')"
+          else
+            rm -f ./staging/configs/feedback_configs_${BACKUP_TIME}.tar.gz
           fi
 
       - name: Upload to Google Drive via rclone

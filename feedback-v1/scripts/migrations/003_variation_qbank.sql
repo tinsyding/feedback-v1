@@ -8,7 +8,9 @@
 
 ALTER TABLE `qbank_questions`
   ADD COLUMN `parent_question_num` INT NULL DEFAULT NULL
-    COMMENT '举一反三关联的原课后题号 (1, 2, 3...)' AFTER `question_num`,
+    COMMENT '举一反三关联的原课后题号 (1, 2, 3...)' AFTER `question_num`;
+ALTER TABLE `qbank_questions`
   ADD COLUMN `sub_num` INT NOT NULL DEFAULT 1
-    COMMENT '变式题序号 (1, 2...)' AFTER `parent_question_num`,
+    COMMENT '变式题序号 (1, 2...)' AFTER `parent_question_num`;
+ALTER TABLE `qbank_questions`
   ADD KEY `idx_parent_lookup` (`bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week`, `parent_question_num`);

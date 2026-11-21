@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const (
@@ -50,6 +51,21 @@ type Secrets struct {
 type Loader struct {
 	FeedbackRoot string
 	SecretsFile  string
+	writeMu      sync.Mutex
+}
+
+// LockWrite serializes read-modify-write updates to config.json and data/.ai_secrets.json.
+func (l *Loader) LockWrite() {
+	if l != nil {
+		l.writeMu.Lock()
+	}
+}
+
+// UnlockWrite releases the config write lock acquired by LockWrite.
+func (l *Loader) UnlockWrite() {
+	if l != nil {
+		l.writeMu.Unlock()
+	}
 }
 
 // NewLoader builds a Loader, falling back to FEEDBACK_SECRETS_FILE from environment when secretsFile is empty.

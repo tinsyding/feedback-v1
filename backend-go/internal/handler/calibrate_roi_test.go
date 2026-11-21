@@ -87,7 +87,7 @@ func TestCalibrateROIEndpoint(t *testing.T) {
 	}
 
 	loader := config.NewLoader(root, "")
-	h := httpx.Middleware(CalibrateROI(loader, vision.NewClient()))
+	h := httpx.Middleware(CalibrateROI(loader, &vision.Client{HTTPClient: mockVision.Client()}))
 
 	// GET readiness
 	rec := httptest.NewRecorder()
@@ -185,6 +185,17 @@ func TestCalibrateROIEndpoint(t *testing.T) {
 	ok, _, errStr = decodeEnvelope(t, rec)
 	if rec.Code != 200 || ok || errStr == nil || *errStr != "检测到输入框位置异常（压住标题栏）" {
 		t.Fatalf("overlap unexpected: %d %v %v", rec.Code, ok, errStr)
+	}
+
+	// NaN/Inf string coordinates must return 200 error instead of 500 JSON encode error
+	mockContent = `{"success":true,"title_bar":["NaN",300,80,980],"input_box":[780,300,980,980],"reason":"nan"}`
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, makeMultipartReq(t, "/api/calibrate_roi.php",
+		map[string]string{"token": config.DefaultSenderToken},
+		map[string][]byte{"image": buildTestPNG(t, 400, 300)}))
+	ok, _, errStr = decodeEnvelope(t, rec)
+	if rec.Code != 200 || ok || errStr == nil || *errStr != "检测到的窗口区域坐标不完整或越界" {
+		t.Fatalf("NaN coord unexpected: %d %v %v", rec.Code, ok, errStr)
 	}
 
 	// Too small chatH < 0.04 -> 200 error

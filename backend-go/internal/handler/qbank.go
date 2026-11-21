@@ -135,7 +135,7 @@ func handleQBankGet(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 		tier := strings.TrimSpace(q.Get("tier"))
 		week := config.AsPHPInt(q.Get("week"))
 		year := defaultYear
-		if rawYear := strings.TrimSpace(q.Get("year")); rawYear != "" {
+		if rawYear := strings.TrimSpace(q.Get("year")); rawYear != "" && rawYear != "0" {
 			year = config.AsPHPInt(rawYear)
 		}
 		season := normalize.Season(q.Get("season"), defaultSeasonZh)

@@ -187,11 +187,13 @@ func cleanupUploadCaptures(uploadDir string, cutoff time.Time) {
 				continue
 			}
 			dirPath := filepath.Join(uploadDir, d.Name())
+			dirInfo, dirStatErr := d.Info()
 			entries, err := os.ReadDir(dirPath)
 			if err != nil {
 				continue
 			}
 			empty := true
+			removedAny := false
 			for _, e := range entries {
 				if e.IsDir() {
 					empty = false
@@ -203,12 +205,14 @@ func cleanupUploadCaptures(uploadDir string, cutoff time.Time) {
 					continue
 				}
 				if info.ModTime().Before(cutoff) {
-					_ = os.Remove(filepath.Join(dirPath, e.Name()))
+					if os.Remove(filepath.Join(dirPath, e.Name())) == nil {
+						removedAny = true
+					}
 				} else {
 					empty = false
 				}
 			}
-			if empty {
+			if empty && (removedAny || (dirStatErr == nil && dirInfo.ModTime().Before(cutoff))) {
 				_ = os.Remove(dirPath)
 			}
 		}

@@ -1,7 +1,10 @@
 package senderlogs
 
 import (
+	"bufio"
 	"encoding/json"
+	"errors"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -447,12 +450,98 @@ func (m *Manager) SnapshotImagePath(dateStr, clientSlug, rawPrefix, imgParam str
 	return filepath.Join(m.baseDir(), d, slug, "snapshots", prefix, imgName)
 }
 
-// CleanupOld removes date folders older than retentionDays.
+// ReadSnapshotImage reads a snapshot image under m.mu.RLock().
+func (m *Manager) ReadSnapshotImage(dateStr, clientSlug, rawPrefix, imgParam string) ([]byte, error) {
+	imgPath := m.SnapshotImagePath(dateStr, clientSlug, rawPrefix, imgParam)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return os.ReadFile(imgPath)
+}
+
+// StreamLogFile opens a log file under m.mu.RLock() and invokes fn with the open file and its size.
+func (m *Manager) StreamLogFile(dateStr, clientSlug, logType string, fn func(f *os.File, size int64) error) (string, string, string, error) {
+	filePath, d, slug, filename := m.LogFilePath(dateStr, clientSlug, logType)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	f, err := os.Open(filePath)
+	if err != nil {
+		return d, slug, filename, err
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return d, slug, filename, err
+	}
+	if err := fn(f, info.Size()); err != nil {
+		return d, slug, filename, err
+	}
+	return d, slug, filename, nil
+}
+
+// ReadLogFileTail streams a log file under m.mu.RLock() using an O(maxLines) ring buffer,
+// returning exact total line count, file size, and the trailing maxLines lines without full-file buffering.
+func (m *Manager) ReadLogFileTail(dateStr, clientSlug, logType string, maxLines int) (string, string, string, string, int, int64, error) {
+	if maxLines <= 0 {
+		maxLines = 2000
+	}
+	filePath, d, slug, filename := m.LogFilePath(dateStr, clientSlug, logType)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		return d, slug, filename, "", 0, 0, err
+	}
+	defer func() { _ = f.Close() }()
+
+	info, err := f.Stat()
+	if err != nil {
+		return d, slug, filename, "", 0, 0, err
+	}
+	sizeBytes := info.Size()
+	if sizeBytes == 0 {
+		return d, slug, filename, "", 0, 0, nil
+	}
+
+	ring := make([]string, maxLines)
+	totalLines := 0
+	br := bufio.NewReaderSize(f, 64*1024)
+	for {
+		line, readErr := br.ReadString('\n')
+		if len(line) > 0 {
+			line = strings.TrimSuffix(line, "\n")
+			line = strings.TrimSuffix(line, "\r")
+			ring[totalLines%maxLines] = line
+			totalLines++
+		}
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			return d, slug, filename, "", 0, sizeBytes, readErr
+		}
+	}
+
+	var out []string
+	if totalLines <= maxLines {
+		out = ring[:totalLines]
+	} else {
+		start := totalLines % maxLines
+		out = make([]string, 0, maxLines)
+		out = append(out, ring[start:]...)
+		out = append(out, ring[:start]...)
+	}
+	return d, slug, filename, strings.Join(out, "\n"), totalLines, sizeBytes, nil
+}
+
+// CleanupOld removes date folders older than retentionDays under m.mu.Lock().
 func (m *Manager) CleanupOld(retentionDays int) {
 	if retentionDays <= 0 {
 		retentionDays = 30
 	}
 	cutoff := m.now().AddDate(0, 0, -retentionDays).Format("2006-01-02")
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	entries, err := os.ReadDir(m.baseDir())
 	if err != nil {
 		return
