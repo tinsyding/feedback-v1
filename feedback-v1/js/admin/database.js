@@ -76,7 +76,7 @@
                         }
 
                         return `
-                            <button type="button" class="db-tab-pill ${tName === dbCurrentTable ? 'active' : ''}" onclick="switchDbTable('${escapeHtml(tName)}')">
+                            <button type="button" class="db-tab-pill ${tName === dbCurrentTable ? 'active' : ''}" onclick="switchDbTable('${escapeInlineJs(tName)}')">
                                 ${iconSvg}
                                 <span>${escapeHtml(t.friendly_name || tName)}</span>
                                 <span class="db-pill-count">${t.count ?? 0}</span>
@@ -684,7 +684,7 @@
                     const errBadges = formatRecordErrorBadges(r);
 
                     const tokenHtml = r.retest_token ? `
-                        <span class="token-pill" onclick="copyDbToken('${escapeHtml(r.retest_token)}')" title="点击复制Token">
+                        <span class="token-pill" onclick="copyDbToken('${escapeInlineJs(r.retest_token)}')" title="点击复制Token">
                             ${escapeHtml(r.retest_token)}
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path></svg>
                         </span>
@@ -712,7 +712,7 @@
                                 <input type="checkbox" class="db-row-cb" data-id="${r.id}" ${isSelected ? 'checked' : ''} onchange="toggleDbSelectRow(${r.id}, this)" style="accent-color: var(--primary); cursor: pointer;">
                             </td>
                             <td>
-                                <div class="student-profile-chip" onclick="copyStudentIdName('${escapeHtml(copyIdName)}')" title="点击复制：${escapeHtml(copyIdName)}">
+                                <div class="student-profile-chip" onclick="copyStudentIdName('${escapeInlineJs(copyIdName)}')" title="点击复制：${escapeHtml(copyIdName)}">
                                     <div>
                                         <div class="student-name-text">
                                             ${escapeHtml(r.student_name || '-')}
@@ -754,8 +754,8 @@
                             <td>${r.created_by ? renderCreatorCell(r, false) : '<span style="color:var(--text-muted); font-size:0.75rem;">-</span>'}</td>
                             <td class="cell-mono" style="font-size:0.8rem; color:var(--text-secondary);">${formatTimestamp(r.created_at)}</td>
                             <td style="text-align: right; white-space: nowrap;">
-                                ${r.retest_token ? `<button type="button" class="btn-action retest" onclick="openRetestStudent('${escapeHtml(r.retest_token)}')" title="打开学员/家长端错题本（需输入姓名验证）">错题本</button>` : ''}
-                                ${r.retest_token ? `<button type="button" class="btn-action admin-retest" onclick="openRetestDirect('${escapeHtml(r.retest_token)}')" title="管理员免密直达错题本">管理员错题本</button>` : ''}
+                                ${r.retest_token ? `<button type="button" class="btn-action retest" onclick="openRetestStudent('${escapeInlineJs(r.retest_token)}')" title="打开学员/家长端错题本（需输入姓名验证）">错题本</button>` : ''}
+                                ${r.retest_token ? `<button type="button" class="btn-action admin-retest" onclick="openRetestDirect('${escapeInlineJs(r.retest_token)}')" title="管理员免密直达错题本">管理员错题本</button>` : ''}
                                 <button type="button" class="btn-action edit" onclick="openDbRecordModal(${r.id})" title="编辑此记录">编辑</button>
                                 <button type="button" class="btn-action detail" onclick="openDbDetailModal(${idx})" title="查看完整详情">详情</button>
                                 <button type="button" class="btn-action delete" onclick="deleteDbRecord(${r.id})" title="删除此记录">删除</button>
@@ -796,7 +796,7 @@
                                 <input type="checkbox" class="db-row-cb" data-id="${r.id}" ${isSelected ? 'checked' : ''} onchange="toggleDbSelectRow(${r.id}, this)" style="accent-color: var(--primary); cursor: pointer;">
                             </td>
                             <td class="cell-mono">${r.id}</td>
-                            <td><span class="token-pill" onclick="copyDbToken('${escapeHtml(r.token)}')">${escapeHtml(r.token || '-')}</span></td>
+                            <td><span class="token-pill" onclick="copyDbToken('${escapeInlineJs(r.token)}')">${escapeHtml(r.token || '-')}</span></td>
                             <td style="font-weight:700; color: var(--text-primary);">${escapeHtml(r.student_name || '-')}</td>
                             <td><span class="action-tag action">${escapeHtml(r.action || '-')}</span></td>
                             <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.82rem; color: var(--text-secondary); cursor:pointer;" onclick="openDbDetailModal(${idx})" title="点击查看详情">
@@ -961,7 +961,7 @@
                     ` : `
                         <button type="button" class="btn-action detail" onclick="openDbDetailModal(${idx})" title="查看教师详情与名下助教">详情</button>
                         <button type="button" class="btn-action edit" onclick="openDbRecordModal(${r.id})" title="编辑教师信息">编辑</button>
-                        <button type="button" class="btn-action" style="color:var(--accent); border-color:rgba(10,132,255,0.3);" onclick="promptResetTeacherPwd(${r.id}, '${escapeHtml(r.username)}', '${escapeHtml(r.real_name || '')}')" title="重置教师密码">重置密码</button>
+                        <button type="button" class="btn-action" style="color:var(--accent); border-color:rgba(10,132,255,0.3);" onclick="promptResetTeacherPwd(${r.id}, '${escapeInlineJs(r.username)}', '${escapeInlineJs(r.real_name || '')}')" title="重置教师密码">重置密码</button>
                         <button type="button" class="btn-action delete" onclick="deleteDbRecord(${r.id})" title="删除此教师账号">删除</button>
                     `;
 
@@ -1077,7 +1077,7 @@
                     const errBadges = formatRecordErrorBadges(r);
 
                     const tokenHtml = r.retest_token ? `
-                        <span class="token-pill" onclick="copyDbToken('${escapeHtml(r.retest_token)}')" title="点击复制Token">
+                        <span class="token-pill" onclick="copyDbToken('${escapeInlineJs(r.retest_token)}')" title="点击复制Token">
                             ${escapeHtml(r.retest_token)}
                             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path></svg>
                         </span>
@@ -1099,7 +1099,7 @@
                             <div class="db-card-head">
                                 <div class="db-card-head-left">
                                     <input type="checkbox" class="db-row-cb" data-id="${r.id}" ${isSelected ? 'checked' : ''} onchange="toggleDbSelectRow(${r.id}, this)" style="accent-color: var(--primary); cursor: pointer; width: 17px; height: 17px;">
-                                    <div class="student-profile-chip" onclick="copyStudentIdName('${escapeHtml(copyIdName)}')" title="点击复制：${escapeHtml(copyIdName)}">
+                                    <div class="student-profile-chip" onclick="copyStudentIdName('${escapeInlineJs(copyIdName)}')" title="点击复制：${escapeHtml(copyIdName)}">
                                         <div>
                                             <div class="student-name-text">
                                                 ${escapeHtml(r.student_name || '-')}
@@ -1159,8 +1159,8 @@
                             <div class="db-card-footer">
                                 <span class="db-card-time">${formatTimestamp(r.created_at)}</span>
                                 <div class="db-card-btns">
-                                    ${r.retest_token ? `<button type="button" class="btn-action retest" onclick="openRetestStudent('${escapeHtml(r.retest_token)}')" title="打开学员/家长端错题本（需输入姓名验证）">错题本</button>` : ''}
-                                    ${r.retest_token ? `<button type="button" class="btn-action admin-retest" onclick="openRetestDirect('${escapeHtml(r.retest_token)}')" title="管理员免密直达错题本">管理员错题本</button>` : ''}
+                                    ${r.retest_token ? `<button type="button" class="btn-action retest" onclick="openRetestStudent('${escapeInlineJs(r.retest_token)}')" title="打开学员/家长端错题本（需输入姓名验证）">错题本</button>` : ''}
+                                    ${r.retest_token ? `<button type="button" class="btn-action admin-retest" onclick="openRetestDirect('${escapeInlineJs(r.retest_token)}')" title="管理员免密直达错题本">管理员错题本</button>` : ''}
                                     <button type="button" class="btn-action edit" onclick="openDbRecordModal(${r.id})" title="编辑此记录">编辑</button>
                                     <button type="button" class="btn-action detail" onclick="openDbDetailModal(${idx})" title="查看完整详情">详情</button>
                                     <button type="button" class="btn-action delete" onclick="deleteDbRecord(${r.id})" title="删除此记录">删除</button>
@@ -1226,7 +1226,7 @@
                             <div class="db-card-meta-grid">
                                 <div class="db-card-meta-cell">
                                     <span class="db-card-meta-label">Token</span>
-                                    <span class="token-pill" onclick="copyDbToken('${escapeHtml(r.token)}')">${escapeHtml(r.token || '-')}</span>
+                                    <span class="token-pill" onclick="copyDbToken('${escapeInlineJs(r.token)}')">${escapeHtml(r.token || '-')}</span>
                                 </div>
                                 <div class="db-card-meta-cell">
                                     <span class="db-card-meta-label">IP 地址</span>
@@ -1454,7 +1454,7 @@
                     ` : `
                         <button type="button" class="btn-action detail" onclick="openDbDetailModal(${idx})" title="查看教师档案与名下助教">详情</button>
                         <button type="button" class="btn-action edit" onclick="openDbRecordModal(${r.id})">编辑</button>
-                        <button type="button" class="btn-action" style="color:var(--accent); border-color:rgba(10,132,255,0.3);" onclick="promptResetTeacherPwd(${r.id}, '${escapeHtml(r.username)}', '${escapeHtml(r.real_name || '')}')">重置密码</button>
+                        <button type="button" class="btn-action" style="color:var(--accent); border-color:rgba(10,132,255,0.3);" onclick="promptResetTeacherPwd(${r.id}, '${escapeInlineJs(r.username)}', '${escapeInlineJs(r.real_name || '')}')">重置密码</button>
                         <button type="button" class="btn-action delete" onclick="deleteDbRecord(${r.id})">删除</button>
                     `;
 
@@ -2392,8 +2392,8 @@
                                             ${record.batch_code ? `
                                                 <span style="font-size: 0.74rem; background: var(--bg-subtle); border: 1px solid var(--border-color); color: var(--text-secondary); padding: 1px 7px; border-radius: 4px; display:inline-flex; align-items:center; gap:5px; font-family:var(--font-mono);" title="生成批次号: ${escapeHtml(record.batch_code)}">
                                                     <span>批次: ${escapeHtml(record.batch_code)}</span>
-                                                    <span style="color:var(--primary); cursor:pointer;" onclick="copyTextToClipboard('${escapeHtml(record.batch_code)}', '批次号已复制')">复制</span>
-                                                    <span style="color:var(--primary); cursor:pointer; font-weight:600;" onclick="closeDbDetailModal(); filterByBatchCode('${escapeHtml(record.batch_code)}')">筛选</span>
+                                                    <span style="color:var(--primary); cursor:pointer;" onclick="copyTextToClipboard('${escapeInlineJs(record.batch_code)}', '批次号已复制')">复制</span>
+                                                    <span style="color:var(--primary); cursor:pointer; font-weight:600;" onclick="closeDbDetailModal(); filterByBatchCode('${escapeInlineJs(record.batch_code)}')">筛选</span>
                                                 </span>
                                             ` : ''}
                                         </div>
@@ -2418,7 +2418,7 @@
                                 <!-- 右侧主力快捷操作 -->
                                 <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                                     ${record.retest_token ? `
-                                        <button type="button" class="btn secondary" style="padding: 6px 12px; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 5px;" onclick="openRetestStudent('${escapeHtml(record.retest_token)}')" title="打开学员/家长端错题本（需输入姓名验证）">
+                                        <button type="button" class="btn secondary" style="padding: 6px 12px; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 5px;" onclick="openRetestStudent('${escapeInlineJs(record.retest_token)}')" title="打开学员/家长端错题本（需输入姓名验证）">
                                             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
                                             <span>错题本</span>
                                         </button>
@@ -2623,7 +2623,7 @@
                                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
                                     <span>历史版本变更快照</span>
                                 </div>
-                                <button type="button" class="btn secondary" style="font-size: 0.74rem; padding: 2px 8px; display: inline-flex; align-items: center; gap: 4px;" onclick="loadRecordHistory(${record.id}, '${escapeHtml(record.student_name)}', ${record.batch_id || 0}, ${record.week_num || 0})">
+                                <button type="button" class="btn secondary" style="font-size: 0.74rem; padding: 2px 8px; display: inline-flex; align-items: center; gap: 4px;" onclick="loadRecordHistory(${record.id}, '${escapeInlineJs(record.student_name)}', ${record.batch_id || 0}, ${record.week_num || 0})">
                                     <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
                                     <span>刷新快照</span>
                                 </button>
@@ -2860,7 +2860,7 @@
                                                 <span style="display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: var(--bg-subtle); color: var(--text-muted); font-size: 0.78rem; font-weight: 700; font-family: var(--font-mono);">${aIdx + 1}</span>
                                                 <div style="display: flex; align-items: center; gap: 8px;">
                                                     <span style="font-weight: 700; font-size: 0.95rem; color: var(--text-primary);">${escapeHtml(ast.real_name || '助教')}</span>
-                                                    <span class="cell-mono" style="font-size: 0.82rem; color: var(--text-secondary); background: var(--bg-subtle); padding: 2px 7px; border-radius: 4px; border: 1px solid var(--border-subtle); cursor: pointer;" onclick="copyTextToClipboard('${escapeHtml(ast.username)}', '助教账号已复制')" title="点击复制账号">
+                                                    <span class="cell-mono" style="font-size: 0.82rem; color: var(--text-secondary); background: var(--bg-subtle); padding: 2px 7px; border-radius: 4px; border: 1px solid var(--border-subtle); cursor: pointer;" onclick="copyTextToClipboard('${escapeInlineJs(ast.username)}', '助教账号已复制')" title="点击复制账号">
                                                         @${escapeHtml(ast.username || '-')}
                                                         <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" style="margin-left: 2px; vertical-align: -1px;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path></svg>
                                                     </span>
@@ -2868,16 +2868,16 @@
                                                 ${astStatusBadge}
                                             </div>
                                             <div style="display: flex; align-items: center; gap: 8px;">
-                                                <button type="button" class="btn-action" onclick="copyAssistantShareInfo('${escapeHtml(ast.real_name || '')}', '${escapeHtml(ast.username)}', '${escapeHtml(ast.initial_password || '')}', '${escapeHtml(record.real_name || '')}', '${escapeHtml(record.username)}')" title="一键复制助教账号密码及登录说明">复制凭证</button>
-                                                <button type="button" class="btn-action" style="color:var(--accent); border-color:rgba(99,102,241,0.3);" onclick="promptResetTeacherPwd(${ast.id}, '${escapeHtml(ast.username)}', '${escapeHtml(ast.real_name || '')}')" title="重置助教登录密码">重置密码</button>
-                                                <button type="button" class="btn-action delete" onclick="deleteAssistantInModal(${ast.id}, '${escapeHtml(ast.username)}', ${record.id})" title="删除此助教">删除</button>
+                                                <button type="button" class="btn-action" onclick="copyAssistantShareInfo('${escapeInlineJs(ast.real_name || '')}', '${escapeInlineJs(ast.username)}', '${escapeInlineJs(ast.initial_password || '')}', '${escapeInlineJs(record.real_name || '')}', '${escapeInlineJs(record.username)}')" title="一键复制助教账号密码及登录说明">复制凭证</button>
+                                                <button type="button" class="btn-action" style="color:var(--accent); border-color:rgba(99,102,241,0.3);" onclick="promptResetTeacherPwd(${Number(ast.id)}, '${escapeInlineJs(ast.username)}', '${escapeInlineJs(ast.real_name || '')}')" title="重置助教登录密码">重置密码</button>
+                                                <button type="button" class="btn-action delete" onclick="deleteAssistantFromDetail(${Number(ast.id)}, '${escapeInlineJs(ast.username)}', ${Number(record.id)})" title="删除此助教">删除</button>
                                             </div>
                                         </div>
                                         <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding-top: 8px; border-top: 1px solid var(--border-subtle); font-size: 0.82rem; color: var(--text-secondary);">
                                             <div style="display: flex; align-items: center; gap: 6px;">
                                                 <span style="color: var(--text-muted);">初始密码:</span>
                                                 ${pwdDisp}
-                                                ${ast.initial_password ? `<button type="button" class="btn-action" style="font-size:0.72rem; padding:1px 6px; height:20px; line-height:18px;" onclick="copyTextToClipboard('${escapeHtml(ast.initial_password)}', '初始密码已复制')" title="复制初始密码">复制</button>` : ''}
+                                                ${ast.initial_password ? `<button type="button" class="btn-action" style="font-size:0.72rem; padding:1px 6px; height:20px; line-height:18px;" onclick="copyTextToClipboard('${escapeInlineJs(ast.initial_password)}', '初始密码已复制')" title="复制初始密码">复制</button>` : ''}
                                             </div>
                                             <div style="display: flex; align-items: center; gap: 16px;">
                                                 <span${ipTooltip}><span style="color: var(--text-muted);">最近登录:</span> <span class="cell-mono" style="color: var(--text-secondary);">${lastLogin}</span></span>
@@ -2898,7 +2898,7 @@
                                     <div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 3px;">教师账号 (工号)</div>
                                     <div style="font-size: 1.1rem; font-weight: 600; color: var(--text-primary); font-family: var(--font-mono); display: flex; align-items: center; justify-content: space-between;">
                                         <span>${escapeHtml(record.username || '-')}</span>
-                                        <button type="button" class="btn-action" style="font-size:0.72rem; padding:1px 6px;" onclick="copyTextToClipboard('${escapeHtml(record.username)}', '教师账号已复制')">复制</button>
+                                        <button type="button" class="btn-action" style="font-size:0.72rem; padding:1px 6px;" onclick="copyTextToClipboard('${escapeInlineJs(record.username)}', '教师账号已复制')">复制</button>
                                     </div>
                                 </div>
                                 <div style="background: var(--bg-subtle); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
@@ -2913,7 +2913,7 @@
                                     <div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 3px;">初始密码</div>
                                     <div style="font-size: 0.95rem; font-weight: 600; color: #f59e0b; font-family: var(--font-mono); display: flex; align-items: center; justify-content: space-between;">
                                         <span>${isTest ? '公共体验免密/0' : (record.initial_password ? escapeHtml(record.initial_password) : '<span style="color:var(--text-muted); font-size:0.82rem; font-weight:normal;">已自定义密码</span>')}</span>
-                                        ${record.initial_password ? `<button type="button" class="btn-action" style="font-size:0.72rem; padding:1px 6px;" onclick="copyTextToClipboard('${escapeHtml(record.initial_password)}', '初始密码已复制')">复制</button>` : ''}
+                                        ${record.initial_password ? `<button type="button" class="btn-action" style="font-size:0.72rem; padding:1px 6px;" onclick="copyTextToClipboard('${escapeInlineJs(record.initial_password)}', '初始密码已复制')">复制</button>` : ''}
                                     </div>
                                 </div>
                                 <div style="background: rgba(59,130,246,0.08); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid rgba(59,130,246,0.25);">
@@ -2944,7 +2944,7 @@
                             <!-- 底部快捷操作栏 -->
                             <div style="display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 10px; padding-top: 14px; border-top: 1px solid var(--border-color);">
                                 ${isTest ? '' : `
-                                    <button type="button" class="btn secondary" style="color:var(--accent); border-color:rgba(10,132,255,0.35); font-size:0.84rem; padding:6px 14px; display: inline-flex; align-items: center; gap: 4px;" onclick="promptResetTeacherPwd(${record.id}, '${escapeHtml(record.username)}', '${escapeHtml(record.real_name || '')}')">
+                                    <button type="button" class="btn secondary" style="color:var(--accent); border-color:rgba(10,132,255,0.35); font-size:0.84rem; padding:6px 14px; display: inline-flex; align-items: center; gap: 4px;" onclick="promptResetTeacherPwd(${record.id}, '${escapeInlineJs(record.username)}', '${escapeInlineJs(record.real_name || '')}')">
                                         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-1.5 1.5L14 9l-3-3 2-2 2.5 2.5z"></path><circle cx="7.5" cy="16.5" r="4.5"></circle><path d="m10.7 13.3 5.3-5.3"></path></svg>
                                         <span>重置教师密码</span>
                                     </button>
@@ -3492,7 +3492,7 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
                                     ${opBadge}
                                     <span style="font-size: 0.75rem; color: var(--text-muted);">${formatTimestamp(h.archived_at)}</span>
                                 </div>
-                                <button type="button" class="btn danger" style="padding: 3px 10px; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 4px;" onclick="rollbackRecordVersion(${h.id}, '${escapeHtml(studentName)}', ${h.week_num})">
+                                <button type="button" class="btn danger" style="padding: 3px 10px; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 4px;" onclick="rollbackRecordVersion(${h.id}, '${escapeInlineJs(studentName)}', ${h.week_num})">
                                     <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><polyline points="3 3 3 8 8 8"></polyline></svg>
                                     <span>回溯至此版本</span>
                                 </button>

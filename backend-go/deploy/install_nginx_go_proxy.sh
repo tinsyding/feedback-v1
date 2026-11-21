@@ -227,9 +227,15 @@ for item in "${TARGET_ENTRIES[@]}"; do
         mkdir -p "$BACKUP_ROOT/$label"
         backup="$BACKUP_ROOT/$label/zz-feedback-go-proxy.conf"
         cp -a "$target" "$backup"
-        rm -f "$target"
+        if [ -n "$TARGET_DIR" ]; then
+            printf '# feedback-api Go proxy rolled back to PHP-FPM\n' > "$target"
+            chmod 600 "$target"
+            echo "已回滚为注释空配置（兼容显式 include，已备份至 $backup）：$target"
+        else
+            rm -f "$target"
+            echo "已移除（已备份至 $backup）：$target"
+        fi
         CHANGED+=("$label|$target|$backup")
-        echo "已移除（已备份至 $backup）：$target"
     else
         if [ -f "$target" ] && cmp -s "$SNIPPET" "$target"; then
             echo "已是最新：$target"

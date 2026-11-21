@@ -11,6 +11,7 @@ import (
 
 	"feedback-api/internal/admin"
 	"feedback-api/internal/config"
+	"feedback-api/internal/httpx"
 	"feedback-api/internal/retest"
 	"feedback-api/internal/retestkeys"
 	"feedback-api/internal/session"
@@ -211,10 +212,23 @@ func handleRetestDecrypt(w http.ResponseWriter, r *http.Request, deps RetestDeps
 			return
 		}
 
-		// One-time SVG captcha check (atomic read-and-delete)
+		clientIP := httpx.GetClientIP(r)
+		rlKey := clientIP + "|" + rawToken
+		rlStatus := getRateStatus(r.Context(), deps.RateLimit, "retest_decrypt", rlKey, 600)
+		if rlStatus.Locked {
+			writeRawJSON(w, http.StatusTooManyRequests, map[string]any{
+				"success":    false,
+				"needVerify": true,
+				"error":      fmt.Sprintf("验证失败次数过多，请 %d 秒后再试", rlStatus.RemainingSeconds),
+			})
+			return
+		}
+
+		// One-time SVG captcha check (atomic read-and-delete; fail closed on DB error)
 		var savedCaptcha string
 		if deps.Sessions != nil {
-			_, _ = session.Update(r.Context(), deps.Sessions, sess.ID, func(data map[string]any) (bool, error) {
+			var capErr error
+			_, capErr = session.Update(r.Context(), deps.Sessions, sess.ID, func(data map[string]any) (bool, error) {
 				savedCaptcha = strings.ToLower(config.AsPHPString(data["retest_captcha"]))
 				if _, exists := data["retest_captcha"]; exists {
 					delete(data, "retest_captcha")
@@ -222,7 +236,9 @@ func handleRetestDecrypt(w http.ResponseWriter, r *http.Request, deps RetestDeps
 				}
 				return false, nil
 			})
-			if isNewSess && savedCaptcha != "" {
+			if capErr != nil {
+				savedCaptcha = ""
+			} else if isNewSess && savedCaptcha != "" {
 				session.SetCookie(w, r, sess.ID)
 			}
 		} else {
@@ -231,6 +247,7 @@ func handleRetestDecrypt(w http.ResponseWriter, r *http.Request, deps RetestDeps
 		}
 
 		if savedCaptcha == "" || strings.ToLower(inputCaptcha) != savedCaptcha {
+			recordRateFailure(r.Context(), deps.RateLimit, "retest_decrypt", rlKey, 15, 600, 600)
 			logRetestAccess(r, deps, rawToken, inputName, "verify_fail", "图形验证码错误")
 			writeRawJSON(w, http.StatusOK, map[string]any{
 				"success":      false,
@@ -246,6 +263,7 @@ func handleRetestDecrypt(w http.ResponseWriter, r *http.Request, deps RetestDeps
 		cleanKey := strings.ToLower(nameSpaceCleaner.Replace(studentKey))
 		nameMatched := cleanInput == cleanTarget || cleanInput == cleanKey || (studentID != "" && cleanInput == strings.ToLower(studentID)+cleanTarget)
 		if !nameMatched {
+			recordRateFailure(r.Context(), deps.RateLimit, "retest_decrypt", rlKey, 15, 600, 600)
 			logRetestAccess(r, deps, rawToken, inputName, "verify_fail", "姓名不匹配: "+inputName)
 			writeRawJSON(w, http.StatusOK, map[string]any{
 				"success":    false,
@@ -256,11 +274,18 @@ func handleRetestDecrypt(w http.ResponseWriter, r *http.Request, deps RetestDeps
 			return
 		}
 
+		clearRateFailure(r.Context(), deps.RateLimit, "retest_decrypt", rlKey)
 		if deps.Sessions != nil {
 			if _, err := session.Update(r.Context(), deps.Sessions, sess.ID, func(data map[string]any) (bool, error) {
 				data[sessKey] = keyCandidates[0]
 				return true, nil
-			}); err == nil && isNewSess {
+			}); err != nil {
+				writeRawJSON(w, http.StatusInternalServerError, map[string]any{
+					"success": false,
+					"error":   "验证状态保存失败，请稍后重试",
+				})
+				return
+			} else if isNewSess {
 				session.SetCookie(w, r, sess.ID)
 			}
 		} else {

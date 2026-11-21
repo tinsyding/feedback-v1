@@ -38,18 +38,44 @@ func sanitizeTempPDFName(raw string) string {
 	return clean
 }
 
+func hasAnyVerifiedRetestToken(sess *session.Session) bool {
+	if sess == nil || sess.Data == nil {
+		return false
+	}
+	for k, v := range sess.Data {
+		if strings.HasPrefix(k, "retest_verified_") && strings.TrimSpace(config.AsPHPString(v)) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func handleRetestCreateTempDownload(w http.ResponseWriter, r *http.Request, deps RetestDeps) {
 	if r.Method != http.MethodPost {
 		writeRawJSON(w, http.StatusMethodNotAllowed, map[string]any{"success": false, "error": "Method Not Allowed"})
 		return
 	}
 
+	sess, isNewSess := loadAuthSession(r, deps.Sessions)
+	isUserAuth := sess.IsLoggedIn()
+	if !isUserAuth && !hasAnyVerifiedRetestToken(sess) {
+		writeRawJSON(w, http.StatusUnauthorized, map[string]any{
+			"success": false,
+			"error":   "未授权的下载请求：请先通过学生身份验证",
+		})
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxTempPDFSize+(2<<20))
 
-	// Parse multipart form if multipart; otherwise read raw body later
+	q := r.URL.Query()
+	token := strings.TrimSpace(q.Get("token"))
+
+	// Parse multipart form with a 1 MiB memory cap (spills large files to disk);
+	// for non-multipart raw PDF streams, never call PostFormValue so r.Body is not drained.
 	isMultipart := strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data")
 	if isMultipart {
-		if err := r.ParseMultipartForm(maxTempPDFSize + (1 << 20)); err != nil {
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
 			var maxErr *http.MaxBytesError
 			if errors.As(err, &maxErr) {
 				writeRawJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"success": false, "error": "文件大小超出限制（最大 25MB）"})
@@ -59,17 +85,12 @@ func handleRetestCreateTempDownload(w http.ResponseWriter, r *http.Request, deps
 		if r.MultipartForm != nil {
 			defer func() { _ = r.MultipartForm.RemoveAll() }()
 		}
+		if postTok := strings.TrimSpace(r.PostFormValue("token")); postTok != "" {
+			token = postTok
+		}
 	}
 
-	q := r.URL.Query()
-	token := strings.TrimSpace(r.PostFormValue("token"))
-	if token == "" {
-		token = strings.TrimSpace(q.Get("token"))
-	}
-
-	sess, isNewSess := loadAuthSession(r, deps.Sessions)
 	isTokenVerified := token != "" && sess.StringVal(verifiedTokenSessionKey(token)) != ""
-	isUserAuth := sess.IsLoggedIn()
 	if !isTokenVerified && !isUserAuth {
 		writeRawJSON(w, http.StatusUnauthorized, map[string]any{
 			"success": false,
@@ -185,7 +206,10 @@ func handleRetestCreateTempDownload(w http.ResponseWriter, r *http.Request, deps
 	})
 	_ = writeFileAtomic(metaPath, metaBytes, 0o644)
 
-	studentName := strings.TrimSpace(r.PostFormValue("studentName"))
+	studentName := ""
+	if isMultipart {
+		studentName = strings.TrimSpace(r.PostFormValue("studentName"))
+	}
 	if studentName == "" {
 		studentName = strings.TrimSpace(q.Get("studentName"))
 	}
@@ -196,9 +220,10 @@ func handleRetestCreateTempDownload(w http.ResponseWriter, r *http.Request, deps
 
 	tokenQS := ""
 	if token != "" {
-		tokenQS = "&token=" + url.PathEscape(token)
+		tokenQS = "&token=" + url.QueryEscape(token)
 	}
-	relativeURL := "api/retest.php?action=download_file&key=" + fileKey + "&fn=" + url.PathEscape(cleanFileName) + tokenQS
+	encFN := url.QueryEscape(cleanFileName)
+	relativeURL := "api/retest.php?action=download_file&key=" + fileKey + "&fn=" + encFN + tokenQS
 
 	scheme := "http"
 	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
@@ -208,7 +233,7 @@ func handleRetestCreateTempDownload(w http.ResponseWriter, r *http.Request, deps
 	if host == "" {
 		host = "localhost"
 	}
-	fullURL := fmt.Sprintf("%s://%s/api/retest.php?action=download_file&key=%s&fn=%s%s", scheme, host, fileKey, url.PathEscape(cleanFileName), tokenQS)
+	fullURL := fmt.Sprintf("%s://%s/api/retest.php?action=download_file&key=%s&fn=%s%s", scheme, host, fileKey, encFN, tokenQS)
 
 	writeRawJSON(w, http.StatusOK, map[string]any{
 		"success":     true,
@@ -287,7 +312,7 @@ func handleRetestDownloadFile(w http.ResponseWriter, r *http.Request, deps Retes
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	encName := url.PathEscape(cleanFileName)
+	encName := strings.ReplaceAll(url.QueryEscape(cleanFileName), "+", "%20")
 	w.Header().Set("Content-Description", "File Transfer")
 	w.Header().Set("Content-Type", "application/pdf")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, encName, encName))

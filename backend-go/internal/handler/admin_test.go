@@ -407,17 +407,49 @@ func TestAdminConfigIsolationAndTestAI(t *testing.T) {
 		t.Fatalf("stored api key leaked to unverified custom base_url (%d hits)", aiMockHits)
 	}
 
+	// Changing identifyApiBase via POST ?action=config without a new api_key must be rejected (prevents stored key exfiltration).
+	swapBaseBody, _ := json.Marshal(map[string]any{
+		"identifyApiBase": "https://evil.example.com/v1",
+	})
+	reqSwap := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/admin.php?action=config", bytes.NewReader(swapBaseBody))
+	reqSwap.Host = "feedback.wxjifang.cn"
+	reqSwap.Header.Set("Origin", "http://feedback.wxjifang.cn")
+	reqSwap.AddCookie(ck)
+	recSwap := httptest.NewRecorder()
+	h.ServeHTTP(recSwap, reqSwap)
+	if recSwap.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when changing identifyApiBase without new api_key, got %d: %s", recSwap.Code, recSwap.Body.String())
+	}
+
+	// Default HTTPClient blocks loopback/private IPs (SSRF guard).
 	probeBody, _ := json.Marshal(map[string]any{
 		"base_url": aiMock.URL,
 		"api_key":  "sk-explicit-test-key",
 		"model":    "qwen3.8-max",
 	})
+	reqSSRF := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/admin.php?action=test_ai_config", bytes.NewReader(probeBody))
+	reqSSRF.Host = "feedback.wxjifang.cn"
+	reqSSRF.Header.Set("Origin", "http://feedback.wxjifang.cn")
+	reqSSRF.AddCookie(ck)
+	recSSRF := httptest.NewRecorder()
+	h.ServeHTTP(recSSRF, reqSSRF)
+	if !strings.Contains(recSSRF.Body.String(), "禁止访问内网或本地地址") || aiMockHits != 0 {
+		t.Fatalf("expected SSRF block on loopback address, got hits=%d body=%s", aiMockHits, recSSRF.Body.String())
+	}
+
+	// With an injected test HTTPClient, test_ai_config succeeds against mock server.
+	hWithMockClient := httpx.Middleware(Admin(AdminDeps{
+		Sessions:     sessions,
+		ConfigLoader: config.NewLoader(dir, ""),
+		FeedbackRoot: dir,
+		HTTPClient:   aiMock.Client(),
+	}))
 	req3 := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/admin.php?action=test_ai_config", bytes.NewReader(probeBody))
 	req3.Host = "feedback.wxjifang.cn"
 	req3.Header.Set("Origin", "http://feedback.wxjifang.cn")
 	req3.AddCookie(ck)
 	rec3 := httptest.NewRecorder()
-	h.ServeHTTP(rec3, req3)
+	hWithMockClient.ServeHTTP(rec3, req3)
 	if rec3.Code != http.StatusOK || !strings.Contains(rec3.Body.String(), `"reply":"OK"`) {
 		t.Fatalf("test_ai_config failed: %d %s", rec3.Code, rec3.Body.String())
 	}

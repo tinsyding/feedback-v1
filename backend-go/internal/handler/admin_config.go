@@ -176,6 +176,34 @@ func handleAdminConfig(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
 			cfgMap["senderControl"] = prevSC
 		}
 
+		rt := deps.ConfigLoader.Load()
+		prevBase := strings.TrimSpace(rt.IdentifyAPIBase())
+		hasNewKey := false
+		if rawKey, ok := input["dashscopeApiKey"]; ok {
+			submittedKey := strings.TrimSpace(config.AsPHPString(rawKey))
+			if submittedKey != "" && !config.IsMaskedAPIKey(submittedKey) {
+				hasNewKey = true
+			}
+		}
+
+		if rawBase, ok := input["identifyApiBase"]; ok && rawBase != nil {
+			newBase := strings.TrimSpace(config.AsPHPString(rawBase))
+			if newBase != "" {
+				newU, parseErr := url.Parse(newBase)
+				if parseErr != nil || (!strings.EqualFold(newU.Scheme, "http") && !strings.EqualFold(newU.Scheme, "https")) || strings.TrimSpace(newU.Host) == "" {
+					httpx.SendResponse(w, false, nil, httpx.StrPtr("API 端点 Base URL 格式无效"), http.StatusBadRequest)
+					return
+				}
+				if prevU, prevErr := url.Parse(prevBase); prevErr == nil && prevBase != "" {
+					hostChanged := !strings.EqualFold(newU.Scheme, prevU.Scheme) || !strings.EqualFold(newU.Host, prevU.Host)
+					if hostChanged && rt.VisionAPIKey() != "" && !hasNewKey && !config.AsPHPBool(input["clearApiKey"]) {
+						httpx.SendResponse(w, false, nil, httpx.StrPtr("更换自定义 API 端点时必须重新填写或清空 API Key"), http.StatusBadRequest)
+						return
+					}
+				}
+			}
+		}
+
 		if rawKey, ok := input["dashscopeApiKey"]; ok {
 			submittedKey := strings.TrimSpace(config.AsPHPString(rawKey))
 			if submittedKey != "" && !config.IsMaskedAPIKey(submittedKey) {

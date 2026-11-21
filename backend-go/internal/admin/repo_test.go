@@ -614,8 +614,8 @@ func TestMySQLRepositoryListGetCreateUpdateDeleteAndReset(t *testing.T) {
 	if n, err := repo.DeleteRecords(ctx, "qbank_weeks", []string{"9"}, "boss", false); err != nil || n != 1 {
 		t.Fatalf("DeleteRecords(qbank_weeks): n=%d err=%v", n, err)
 	}
-	if st.txCommitted != 1 {
-		t.Fatalf("expected txCommitted=1, got %d", st.txCommitted)
+	if st.txCommitted != 2 {
+		t.Fatalf("expected txCommitted=2, got %d", st.txCommitted)
 	}
 	st.failQBankWeeksDelete = true
 	prevRB := st.txRolledBack

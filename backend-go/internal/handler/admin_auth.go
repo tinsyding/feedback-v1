@@ -152,15 +152,21 @@ func handleAdminLogin(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
 }
 
 func handleAdminLogout(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
-	sess, isNew := loadAuthSession(r, deps.Sessions)
-	adminUser := "admin"
-	if sess != nil && sess.AdminUsername() != "" {
-		adminUser = sess.AdminUsername()
+	if r.Method != http.MethodPost {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("只支持 POST 请求"), http.StatusMethodNotAllowed)
+		return
 	}
-	adminAuditLog(r, deps, sess, "info", "admin_logout", map[string]any{
-		"username": adminUser,
-		"message":  "管理员安全退出登录",
-	})
+	sess, isNew := loadAuthSession(r, deps.Sessions)
+	if sess != nil && sess.IsAdminLoggedIn() {
+		adminUser := sess.AdminUsername()
+		if adminUser == "" {
+			adminUser = "admin"
+		}
+		adminAuditLog(r, deps, sess, "info", "admin_logout", map[string]any{
+			"username": adminUser,
+			"message":  "管理员安全退出登录",
+		})
+	}
 
 	if !isNew && sess != nil && sess.Data != nil {
 		delete(sess.Data, "admin_logged_in")

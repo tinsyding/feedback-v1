@@ -419,7 +419,7 @@
                 const lastSync = item.last_sync_at || item.last_seen || '-';
 
                 return `
-                    <div onclick="selectSenderClient('${escapeHtml(item.date)}', '${escapeHtml(item.client_slug)}')"
+                    <div onclick="selectSenderClient('${escapeInlineJs(item.date)}', '${escapeInlineJs(item.client_slug)}')"
                          style="padding:12px; border-radius:8px; margin-bottom:8px; cursor:pointer; transition:border-color 0.15s ease, background-color 0.15s ease; border:1px solid ${isSelected ? 'var(--primary)' : 'var(--border-color)'}; background:${isSelected ? 'rgba(99, 102, 241, 0.12)' : 'rgba(255,255,255,0.02)'};">
                         <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; margin-bottom:4px;">
                             <span style="font-weight:600; font-size:0.88rem; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(displayName)}">
@@ -521,19 +521,19 @@
                         }).join('')}
                     </div>
                     <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                        <button class="btn danger-subtle" onclick="sendSenderRemoteCommand('${escapeHtml(client.client_slug)}', 'stop_batch')" style="padding:5px 10px; font-size:0.79rem;" title="向该电脑下发远程急停指令（最多2~12秒内送达，安全停下并保留断点）">
+                        <button class="btn danger-subtle" onclick="sendSenderRemoteCommand('${escapeInlineJs(client.client_slug)}', 'stop_batch')" style="padding:5px 10px; font-size:0.79rem;" title="向该电脑下发远程急停指令（最多2~12秒内送达，安全停下并保留断点）">
                             ⏹ 远程急停
                         </button>
-                        <button class="btn secondary" onclick="openSenderClientOverrideModal('${escapeHtml(client.client_slug)}', '${escapeHtml(displayName)}')" style="padding:5px 10px; font-size:0.79rem;">
+                        <button class="btn secondary" onclick="openSenderClientOverrideModal('${escapeInlineJs(client.client_slug)}', '${escapeInlineJs(displayName)}')" style="padding:5px 10px; font-size:0.79rem;">
                             ⚙ 单机策略覆盖
                         </button>
-                        <button class="btn secondary" onclick="sendSenderRemoteCommand('${escapeHtml(client.client_slug)}', 'refresh_policy')" style="padding:5px 10px; font-size:0.79rem;" title="通知客户端立即刷新云控策略">
+                        <button class="btn secondary" onclick="sendSenderRemoteCommand('${escapeInlineJs(client.client_slug)}', 'refresh_policy')" style="padding:5px 10px; font-size:0.79rem;" title="通知客户端立即刷新云控策略">
                             ↻ 同步策略
                         </button>
-                        <button class="btn secondary" onclick="sendSenderRemoteCommand('${escapeHtml(client.client_slug)}', 'clear_roi')" style="padding:5px 10px; font-size:0.79rem;" title="重置该电脑保存的企微窗口 ROI 校准坐标">
+                        <button class="btn secondary" onclick="sendSenderRemoteCommand('${escapeInlineJs(client.client_slug)}', 'clear_roi')" style="padding:5px 10px; font-size:0.79rem;" title="重置该电脑保存的企微窗口 ROI 校准坐标">
                             清空视野ROI
                         </button>
-                        <button class="btn secondary" onclick="sendSenderRemoteCommand('${escapeHtml(client.client_slug)}', 'sync_logs')" style="padding:5px 10px; font-size:0.79rem;" title="要求客户端立即补传本地未同步的 .log 文件">
+                        <button class="btn secondary" onclick="sendSenderRemoteCommand('${escapeInlineJs(client.client_slug)}', 'sync_logs')" style="padding:5px 10px; font-size:0.79rem;" title="要求客户端立即补传本地未同步的 .log 文件">
                             补传日志
                         </button>
                     </div>
@@ -580,10 +580,10 @@
             body.innerHTML = `
                 <div style="padding:10px 18px; border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; background:rgba(0,0,0,0.15);">
                     <div style="display:flex; align-items:center; gap:8px;">
-                        <button class="btn ${activeSenderLogType === 'sender' ? 'primary' : 'secondary'}" onclick="activeSenderLogType='sender'; renderSenderRawTab(senderClientsCache.find(c=>c.date==='${escapeHtml(client.date)}' && c.client_slug==='${escapeHtml(client.client_slug)}'))" style="padding:4px 10px; font-size:0.8rem;">
+                        <button class="btn ${activeSenderLogType === 'sender' ? 'primary' : 'secondary'}" onclick="activeSenderLogType='sender'; renderSenderRawTab(senderClientsCache.find(c=>c.date==='${escapeInlineJs(client.date)}' && c.client_slug==='${escapeInlineJs(client.client_slug)}'))" style="padding:4px 10px; font-size:0.8rem;">
                             全量运行日志 (sender_${escapeHtml(client.date)}.log ${client.sender_log_size_kb ? `· ${client.sender_log_size_kb} KB` : ''})
                         </button>
-                        <button class="btn ${activeSenderLogType === 'error' ? 'primary' : 'secondary'}" onclick="activeSenderLogType='error'; renderSenderRawTab(senderClientsCache.find(c=>c.date==='${escapeHtml(client.date)}' && c.client_slug==='${escapeHtml(client.client_slug)}'))" style="padding:4px 10px; font-size:0.8rem;">
+                        <button class="btn ${activeSenderLogType === 'error' ? 'primary' : 'secondary'}" onclick="activeSenderLogType='error'; renderSenderRawTab(senderClientsCache.find(c=>c.date==='${escapeInlineJs(client.date)}' && c.client_slug==='${escapeInlineJs(client.client_slug)}'))" style="padding:4px 10px; font-size:0.8rem;">
                             错误与警告专档 (error_${escapeHtml(client.date)}.log ${client.error_log_size_kb ? `· ${client.error_log_size_kb} KB` : ''})
                         </button>
                     </div>
@@ -749,13 +749,13 @@
                                 ${titleUrl ? `
                                     <div>
                                         <div style="font-size:0.73rem; color:var(--text-secondary); margin-bottom:3px;">聊天标题栏截图 (点击放大):</div>
-                                        <img src="${titleUrl}" onclick="openSnapshotPreviewModal('${titleUrl}', '标题栏裁剪图 - ${escapeHtml(s.target_name || '')}')" style="width:100%; max-height:70px; object-fit:contain; background:#000; border-radius:4px; cursor:zoom-in; border:1px solid rgba(255,255,255,0.1);">
+                                        <img src="${titleUrl}" onclick="openSnapshotPreviewModal('${titleUrl}', '标题栏裁剪图 - ${escapeInlineJs(s.target_name || '')}')" style="width:100%; max-height:70px; object-fit:contain; background:#000; border-radius:4px; cursor:zoom-in; border:1px solid rgba(255,255,255,0.1);">
                                     </div>
                                 ` : ''}
                                 ${annotatedUrl ? `
                                     <div>
                                         <div style="font-size:0.73rem; color:var(--text-secondary); margin-bottom:3px;">企微窗口红框标注全图 (点击放大):</div>
-                                        <img src="${annotatedUrl}" onclick="openSnapshotPreviewModal('${annotatedUrl}', '企微窗口现场全图 - ${escapeHtml(s.target_name || '')}')" style="width:100%; max-height:150px; object-fit:contain; background:#000; border-radius:4px; cursor:zoom-in; border:1px solid rgba(255,255,255,0.1);">
+                                        <img src="${annotatedUrl}" onclick="openSnapshotPreviewModal('${annotatedUrl}', '企微窗口现场全图 - ${escapeInlineJs(s.target_name || '')}')" style="width:100%; max-height:150px; object-fit:contain; background:#000; border-radius:4px; cursor:zoom-in; border:1px solid rgba(255,255,255,0.1);">
                                     </div>
                                 ` : ''}
                             </div>
@@ -806,7 +806,7 @@
             };
             const desc = labels[cmdType] || cmdType;
             if (cmdType === 'stop_batch' || cmdType === 'clear_roi') {
-                const ok = await showConfirmModal(`确认下发指令：${desc}？`);
+                const ok = await showConfirm('确认下发远程指令', `确认下发指令：${desc}？`, cmdType === 'stop_batch');
                 if (!ok) return;
             }
             try {

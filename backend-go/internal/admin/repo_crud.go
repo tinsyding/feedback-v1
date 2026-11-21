@@ -239,7 +239,7 @@ func (r *MySQLRepository) ListRecords(ctx context.Context, q ListQuery) (ListRes
 		var searchConds []string
 		isNum := IsNumericString(search)
 		for _, c := range cols {
-			if c.Name == "password_hash" {
+			if c.Name == "password_hash" || c.Name == "initial_password" {
 				continue
 			}
 			t := strings.ToLower(c.Type)
@@ -643,12 +643,24 @@ func (r *MySQLRepository) enrichUsersAssistants(ctx context.Context, rows []map[
 	for _, row := range rows {
 		tid := config.AsPHPInt(row["id"])
 		uname := config.AsPHPString(row["username"])
-		list := byTID[tid]
-		if len(list) == 0 {
-			list = byUname[uname]
+		seen := make(map[int]struct{})
+		list := make([]map[string]any, 0, len(byTID[tid])+len(byUname[uname]))
+		for _, a := range byTID[tid] {
+			aid := config.AsPHPInt(a["id"])
+			if aid > 0 {
+				seen[aid] = struct{}{}
+			}
+			list = append(list, a)
 		}
-		if list == nil {
-			list = []map[string]any{}
+		for _, a := range byUname[uname] {
+			aid := config.AsPHPInt(a["id"])
+			if aid > 0 {
+				if _, dup := seen[aid]; dup {
+					continue
+				}
+				seen[aid] = struct{}{}
+			}
+			list = append(list, a)
 		}
 		row["assistants"] = list
 		row["assistant_count"] = len(list)
@@ -683,6 +695,7 @@ func (r *MySQLRepository) GetRecord(ctx context.Context, table, id string) (map[
 		row["password"] = ""
 	} else if validTbl == "users" {
 		row["password_hash"] = ""
+		row["initial_password"] = ""
 		if aRows, err := r.db.QueryContext(ctx,
 			"SELECT `id`, `username`, `real_name`, `role`, `status`, '' AS `initial_password`, `last_login_at`, `last_login_ip`, `created_at`, `teacher_id`, `created_by` FROM `users` WHERE `role` = 'assistant' AND (`teacher_id` = ? OR `created_by` = ?) ORDER BY `id` ASC",
 			row["id"], row["username"],
@@ -937,7 +950,8 @@ func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, in
 	if validTbl == "student_records" {
 		_, hasSID := data["student_id"]
 		_, hasSName := data["student_name"]
-		if hasSID || hasSName {
+		_, hasBatchID := data["batch_id"]
+		if hasSID || hasSName || hasBatchID {
 			var currSID, currSName sql.NullString
 			var currBatchID int
 			_ = r.db.QueryRowContext(ctx, "SELECT student_id, student_name, batch_id FROM student_records WHERE id = ? LIMIT 1", id).Scan(&currSID, &currSName, &currBatchID)
@@ -1014,18 +1028,32 @@ func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, in
 		return 0, nil, NewHTTPError(400, "未提供任何修改字段", nil)
 	}
 
-	// Archive student_records before admin_edit
-	if validTbl == "student_records" {
-		r.archiveStudentRecordForAdminEdit(ctx, id, adminOp)
-	}
-
 	values = append(values, id)
 	updateSQL := fmt.Sprintf("UPDATE `%s` SET %s WHERE `%s` = ?", validTbl, strings.Join(setParts, ", "), pk)
-	res, err := r.db.ExecContext(ctx, updateSQL, values...)
-	if err != nil {
-		return 0, nil, NewHTTPError(500, "更新失败: "+err.Error(), nil)
+
+	var affected int64
+	if validTbl == "student_records" {
+		tx, txErr := r.db.BeginTx(ctx, nil)
+		if txErr != nil {
+			return 0, nil, NewHTTPError(500, "更新失败: "+txErr.Error(), nil)
+		}
+		defer func() { _ = tx.Rollback() }()
+		archiveStudentRecordForAdminEditTx(ctx, tx, id, adminOp)
+		res, err := tx.ExecContext(ctx, updateSQL, values...)
+		if err != nil {
+			return 0, nil, NewHTTPError(500, "更新失败: "+err.Error(), nil)
+		}
+		affected, _ = res.RowsAffected()
+		if err := tx.Commit(); err != nil {
+			return 0, nil, NewHTTPError(500, "更新失败: "+err.Error(), nil)
+		}
+	} else {
+		res, err := r.db.ExecContext(ctx, updateSQL, values...)
+		if err != nil {
+			return 0, nil, NewHTTPError(500, "更新失败: "+err.Error(), nil)
+		}
+		affected, _ = res.RowsAffected()
 	}
-	affected, _ := res.RowsAffected()
 
 	if validTbl == "qbank_weeks" {
 		if qRows, err := r.db.QueryContext(ctx,
@@ -1055,8 +1083,8 @@ func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, in
 	return affected, fields, nil
 }
 
-func (r *MySQLRepository) archiveStudentRecordForAdminEdit(ctx context.Context, id, adminOp string) {
-	qRows, err := r.db.QueryContext(ctx, "SELECT * FROM `student_records` WHERE `id` = ? LIMIT 1", id)
+func archiveStudentRecordForAdminEditTx(ctx context.Context, tx *sql.Tx, id, adminOp string) {
+	qRows, err := tx.QueryContext(ctx, "SELECT * FROM `student_records` WHERE `id` = ? LIMIT 1", id)
 	if err != nil {
 		return
 	}
@@ -1067,14 +1095,14 @@ func (r *MySQLRepository) archiveStudentRecordForAdminEdit(ctx context.Context, 
 	}
 	oldRec := list[0]
 	var bCode, bCreatedBy sql.NullString
-	_ = r.db.QueryRowContext(ctx,
+	_ = tx.QueryRowContext(ctx,
 		"SELECT batch_code, created_by FROM `generation_batches` WHERE `class_id` = ? AND `week_num` = ? ORDER BY id DESC LIMIT 1",
 		oldRec["batch_id"], oldRec["week_num"],
 	).Scan(&bCode, &bCreatedBy)
 	if adminOp == "" {
 		adminOp = "admin"
 	}
-	_, _ = r.db.ExecContext(ctx, `
+	_, _ = tx.ExecContext(ctx, `
 		INSERT INTO student_record_history (
 			record_id, batch_id, batch_code, student_id, student_name, student_key,
 			week_num, preview_week_num, homework_score, preview_score, total_score, error_count,

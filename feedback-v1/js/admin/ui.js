@@ -211,6 +211,19 @@
             }[tag] || tag));
         }
 
+        function escapeInlineJs(str) {
+            return escapeHtml(
+                String(str ?? '')
+                    .replace(/\\/g, '\\\\')
+                    .replace(/'/g, "\\'")
+                    .replace(/"/g, '\\"')
+                    .replace(/\r/g, '\\r')
+                    .replace(/\n/g, '\\n')
+                    .replace(/\u2028/g, '\\u2028')
+                    .replace(/\u2029/g, '\\u2029')
+            );
+        }
+
         /* ========================================================
            责任教师单元格：助教创建时追加所属教师账号
            后端 db_list 已附带 creator_role / creator_owner_username / creator_owner_name

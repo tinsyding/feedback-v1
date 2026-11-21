@@ -1,13 +1,16 @@
 package handler
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -42,11 +45,58 @@ func (d AdminDeps) now() time.Time {
 	return tz.Now()
 }
 
+func isBlockedSSRFIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+		return true
+	}
+	// Block IPv4-mapped IPv6 and CGNAT 100.64.0.0/10
+	if ip4 := ip.To4(); ip4 != nil {
+		if ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127 {
+			return true
+		}
+		if ip4[0] == 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (d AdminDeps) httpClient() *http.Client {
 	if d.HTTPClient != nil {
 		return d.HTTPClient
 	}
-	return &http.Client{Timeout: 15 * time.Second}
+	dialer := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+			if err != nil {
+				return nil, err
+			}
+			if len(ips) == 0 {
+				return nil, fmt.Errorf("无法解析目标主机: %s", host)
+			}
+			for _, ipAddr := range ips {
+				if isBlockedSSRFIP(ipAddr.IP) {
+					return nil, fmt.Errorf("禁止访问内网或本地地址")
+				}
+			}
+			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+		},
+	}
+	return &http.Client{
+		Timeout:   15 * time.Second,
+		Transport: transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
 // Admin handles all 21 actions of /api/admin.php.

@@ -253,17 +253,22 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request, deps AuthDeps) {
 	requireCaptcha := sess.IntVal("front_login_fail_count") > 0 || ipRate.Count > 0 || userRate.Count > 0
 	if requireCaptcha {
 		captchaInput := strings.ToLower(strings.TrimSpace(config.AsPHPString(input["captcha"])))
-		sessionCaptcha := sess.StringVal("front_captcha_code")
 		if captchaInput == "" {
 			httpx.SendResponse(w, false, map[string]any{"require_captcha": true}, httpx.StrPtr("请输入图形验证码"), http.StatusBadRequest)
 			return
 		}
-		if sessionCaptcha == "" || captchaInput != sessionCaptcha {
+		sessionCaptcha, captchaExpired, consumeErr := consumeFrontCaptcha(ctx, deps, sess)
+		if consumeErr != nil || captchaExpired || sessionCaptcha == "" || captchaInput != sessionCaptcha {
 			delete(sess.Data, "front_captcha_code")
+			delete(sess.Data, "front_captcha_time")
 			sess.Data["front_login_fail_count"] = sess.IntVal("front_login_fail_count") + 1
 			persistAuthSession(w, r, deps.Sessions, sess, isNew)
 			recordRateFailure(ctx, deps.RateLimit, "front_login_ip", clientIP, 10, 600, 600)
-			httpx.SendResponse(w, false, map[string]any{"require_captcha": true}, httpx.StrPtr("验证码错误，请重新输入"), http.StatusBadRequest)
+			msg := "验证码错误，请重新输入"
+			if captchaExpired {
+				msg = "验证码已过期，请刷新重试"
+			}
+			httpx.SendResponse(w, false, map[string]any{"require_captcha": true}, httpx.StrPtr(msg), http.StatusBadRequest)
 			return
 		}
 	}
@@ -479,7 +484,49 @@ func clearAdminSessionKeys(data map[string]any) {
 	delete(data, "login_time")
 }
 
+const frontCaptchaTTLSeconds = 300
+
+func consumeFrontCaptcha(ctx context.Context, deps AuthDeps, sess *session.Session) (string, bool, error) {
+	nowUnix := deps.nowUnix()
+	var (
+		code    string
+		capTime int64
+	)
+	if deps.Sessions != nil && sess != nil && sess.ID != "" {
+		_, err := session.Update(ctx, deps.Sessions, sess.ID, func(data map[string]any) (bool, error) {
+			code = strings.ToLower(strings.TrimSpace(config.AsPHPString(data["front_captcha_code"])))
+			capTime = int64(config.AsPHPInt(data["front_captcha_time"]))
+			_, hasCode := data["front_captcha_code"]
+			_, hasTime := data["front_captcha_time"]
+			if hasCode || hasTime {
+				delete(data, "front_captcha_code")
+				delete(data, "front_captcha_time")
+				return true, nil
+			}
+			return false, nil
+		})
+		if err != nil {
+			return "", false, err
+		}
+		delete(sess.Data, "front_captcha_code")
+		delete(sess.Data, "front_captcha_time")
+	} else if sess != nil {
+		code = strings.ToLower(strings.TrimSpace(sess.StringVal("front_captcha_code")))
+		capTime = int64(sess.IntVal("front_captcha_time"))
+		delete(sess.Data, "front_captcha_code")
+		delete(sess.Data, "front_captcha_time")
+	}
+	if code != "" && capTime > 0 && nowUnix-capTime > frontCaptchaTTLSeconds {
+		return "", true, nil
+	}
+	return code, false, nil
+}
+
 func handleAuthLogout(w http.ResponseWriter, r *http.Request, deps AuthDeps) {
+	if r.Method != http.MethodPost {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("只支持 POST 请求"), http.StatusMethodNotAllowed)
+		return
+	}
 	ctx := r.Context()
 	sess, isNew := loadAuthSession(r, deps.Sessions)
 
@@ -547,16 +594,28 @@ func handleAuthResetPassword(w http.ResponseWriter, r *http.Request, deps AuthDe
 	requireCaptcha := sess.IntVal("reset_pwd_fail_count") > 0 || ipRate.Count > 0 || userRate.Count > 0
 	if requireCaptcha {
 		captchaInput := strings.ToLower(strings.TrimSpace(config.AsPHPString(input["captcha"])))
-		sessionCaptcha := sess.StringVal("front_captcha_code")
-		if captchaInput == "" || sessionCaptcha == "" || captchaInput != sessionCaptcha {
+		var (
+			sessionCaptcha string
+			captchaExpired bool
+			consumeErr     error
+		)
+		if captchaInput != "" {
+			sessionCaptcha, captchaExpired, consumeErr = consumeFrontCaptcha(ctx, deps, sess)
+		}
+		if captchaInput == "" || consumeErr != nil || captchaExpired || sessionCaptcha == "" || captchaInput != sessionCaptcha {
 			delete(sess.Data, "front_captcha_code")
+			delete(sess.Data, "front_captcha_time")
 			sess.Data["reset_pwd_fail_count"] = sess.IntVal("reset_pwd_fail_count") + 1
 			persistAuthSession(w, r, deps.Sessions, sess, isNew)
 			recordRateFailure(ctx, deps.RateLimit, "reset_pwd_ip", clientIP, 5, 600, 600)
 			if username != "" {
 				recordRateFailure(ctx, deps.RateLimit, "reset_pwd_user", username, 5, 600, 600)
 			}
-			httpx.SendResponse(w, false, map[string]any{"require_captcha": true}, httpx.StrPtr("验证码错误，请重新输入"), http.StatusBadRequest)
+			msg := "验证码错误，请重新输入"
+			if captchaExpired {
+				msg = "验证码已过期，请刷新重试"
+			}
+			httpx.SendResponse(w, false, map[string]any{"require_captcha": true}, httpx.StrPtr(msg), http.StatusBadRequest)
 			return
 		}
 	}

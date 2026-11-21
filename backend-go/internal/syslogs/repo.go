@@ -10,10 +10,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"feedback-api/internal/textutil"
 	"feedback-api/internal/tz"
 )
 
@@ -183,8 +185,17 @@ func (r *MySQLRepository) InsertBatch(ctx context.Context, entries []LogRecord) 
 					cliB, _ := json.Marshal(nonNilMap(e.Client))
 					_, _ = stmt.ExecContext(
 						ctx,
-						e.ID, e.Timestamp, e.Level, e.Module, e.Event, e.Operator,
-						string(detB), string(ctxB), e.ClientIP, string(cliB), e.CreatedAt,
+						textutil.TruncateRunes(e.ID, 64),
+						e.Timestamp,
+						textutil.TruncateRunes(e.Level, 20),
+						textutil.TruncateRunes(e.Module, 50),
+						textutil.TruncateRunes(e.Event, 80),
+						textutil.TruncateRunes(e.Operator, 50),
+						string(detB),
+						string(ctxB),
+						textutil.TruncateRunes(e.ClientIP, 45),
+						string(cliB),
+						e.CreatedAt,
 					)
 				}
 				_ = stmt.Close()
@@ -616,7 +627,15 @@ func (r *MySQLRepository) DeleteByID(ctx context.Context, id string) (int64, err
 	if r == nil || r.db == nil {
 		return 0, nil
 	}
-	res, err := r.db.ExecContext(ctx, "DELETE FROM `system_logs` WHERE `log_id` = ? OR `id` = ?", id, id)
+	var (
+		res sql.Result
+		err error
+	)
+	if numID, parseErr := strconv.ParseUint(id, 10, 64); parseErr == nil && numID > 0 {
+		res, err = r.db.ExecContext(ctx, "DELETE FROM `system_logs` WHERE `log_id` = ? OR `id` = ?", id, numID)
+	} else {
+		res, err = r.db.ExecContext(ctx, "DELETE FROM `system_logs` WHERE `log_id` = ?", id)
+	}
 	if err != nil {
 		return 0, err
 	}

@@ -30,7 +30,7 @@ import (
 
 const (
 	minValidUnixMillis = 946684800000  // 2000-01-01T00:00:00Z
-	maxValidUnixMillis = 4102444800000 // 2100-01-01T00:00:00Z
+	maxValidUnixMillis = 2147483000000 // 2038-01-19T03:03:20Z (within MySQL TIMESTAMP limit)
 )
 
 var senderLogsCleanupRunning atomic.Bool
@@ -223,11 +223,11 @@ func handleLogsPostIngest(w http.ResponseWriter, r *http.Request, deps LogsDeps)
 	records := make([]syslogs.LogRecord, 0, len(rawEntries))
 	for _, entry := range rawEntries {
 		ts := parseBoundedUnixMillis(entry["timestamp"], float64(now.UnixMilli()))
-		level := strings.TrimSpace(config.AsPHPString(entry["level"]))
+		level := textutil.TruncateRunes(strings.TrimSpace(config.AsPHPString(entry["level"])), 20)
 		if level == "" {
 			level = "action"
 		}
-		module := strings.TrimSpace(config.AsPHPString(entry["module"]))
+		module := textutil.TruncateRunes(strings.TrimSpace(config.AsPHPString(entry["module"])), 50)
 		if module == "" {
 			module = "global"
 		}
@@ -238,6 +238,7 @@ func handleLogsPostIngest(w http.ResponseWriter, r *http.Request, deps LogsDeps)
 		if event == "" {
 			event = "unknown"
 		}
+		event = textutil.TruncateRunes(event, 80)
 		details, _ := entry["details"].(map[string]any)
 		if details == nil {
 			details = map[string]any{}
@@ -253,7 +254,7 @@ func handleLogsPostIngest(w http.ResponseWriter, r *http.Request, deps LogsDeps)
 		}
 		operator := "guest"
 		if sessionUser != "" {
-			operator = sessionUser
+			operator = textutil.TruncateRunes(sessionUser, 50)
 		} else if reqOp != "" {
 			operator = "guest:" + textutil.TruncateRunes(reqOp, 30)
 		}
@@ -456,8 +457,8 @@ func handleLogsSenderSync(w http.ResponseWriter, r *http.Request, deps LogsDeps)
 
 		metaCache := make(map[string]map[string]any)
 		dirCache := make(map[string]string)
-		byDateRaw := make(map[string]strings.Builder)
-		byDateErr := make(map[string]strings.Builder)
+		byDateRaw := make(map[string]*strings.Builder)
+		byDateErr := make(map[string]*strings.Builder)
 		records := make([]syslogs.LogRecord, 0, len(rawEntries))
 
 		for _, item := range rawEntries {
@@ -484,12 +485,18 @@ func handleLogsSenderSync(w http.ResponseWriter, r *http.Request, deps LogsDeps)
 					rawLine += "\n"
 				}
 				b := byDateRaw[dateStr]
+				if b == nil {
+					b = &strings.Builder{}
+					byDateRaw[dateStr] = b
+				}
 				b.WriteString(rawLine)
-				byDateRaw[dateStr] = b
 				if config.AsPHPBool(entry["is_error"]) {
 					eb := byDateErr[dateStr]
+					if eb == nil {
+						eb = &strings.Builder{}
+						byDateErr[dateStr] = eb
+					}
 					eb.WriteString(rawLine)
-					byDateErr[dateStr] = eb
 				}
 			}
 

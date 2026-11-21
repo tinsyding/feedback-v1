@@ -627,11 +627,17 @@
                                     </div>
                                 </div>
                                 <div class="assistant-card-ops">
-                                    <button type="button" class="assistant-btn-copy" onclick='window.copyAssistantItemInfo(${JSON.stringify(item)}, event)' title="一键复制助教账号与密码信息">复制</button>
-                                    <button type="button" class="assistant-btn-edit" onclick='window.openEditAssistantModal(${JSON.stringify(item)})' title="修改助教姓名、密码或状态">编辑</button>
-                                    <button type="button" class="assistant-btn-del" onclick="window.handleAssistantDelete(${item.id}, '${escapeHtml(item.username)}')" title="删除此助教账号">删除</button>
+                                    <button type="button" class="assistant-btn-copy" title="一键复制助教账号与密码信息">复制</button>
+                                    <button type="button" class="assistant-btn-edit" title="修改助教姓名、密码或状态">编辑</button>
+                                    <button type="button" class="assistant-btn-del" title="删除此助教账号">删除</button>
                                 </div>
                             `;
+                            const copyBtn = card.querySelector('.assistant-btn-copy');
+                            if (copyBtn) copyBtn.addEventListener('click', (ev) => window.copyAssistantItemInfo(item, ev));
+                            const editBtn = card.querySelector('.assistant-btn-edit');
+                            if (editBtn) editBtn.addEventListener('click', () => window.openEditAssistantModal(item));
+                            const delBtn = card.querySelector('.assistant-btn-del');
+                            if (delBtn) delBtn.addEventListener('click', () => window.handleAssistantDelete(item.id, item.username));
                             gridEl.appendChild(card);
                         });
                     }

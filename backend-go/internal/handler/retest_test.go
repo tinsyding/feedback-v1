@@ -632,7 +632,7 @@ func TestRetestCreateTempDownloadMaxBytesAndStream(t *testing.T) {
 	pdfPayload := []byte("%PDF-1.4\n1 0 obj\n<< /Length 5 >>\nstream\nhello\nendstream\nendobj\n%%EOF\n")
 	var okBuf bytes.Buffer
 	mwOK := multipart.NewWriter(&okBuf)
-	fwOK, err := mwOK.CreateFormFile("file", "错题本_测.pdf")
+	fwOK, err := mwOK.CreateFormFile("file", "错题本_S+班.pdf")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -648,14 +648,18 @@ func TestRetestCreateTempDownloadMaxBytesAndStream(t *testing.T) {
 		t.Fatalf("multipart create_temp_download failed: %d %s", recOK.Code, recOK.Body.String())
 	}
 	var upResp struct {
-		Success bool   `json:"success"`
-		Key     string `json:"key"`
+		Success     bool   `json:"success"`
+		Key         string `json:"key"`
+		DownloadURL string `json:"downloadUrl"`
 	}
 	if err := json.Unmarshal(recOK.Body.Bytes(), &upResp); err != nil || !upResp.Success || len(upResp.Key) != 32 {
 		t.Fatalf("unexpected upload response: %s (%v)", recOK.Body.String(), err)
 	}
+	if !strings.Contains(upResp.DownloadURL, "S%2B") {
+		t.Fatalf("expected + to be query-escaped as %%2B in downloadUrl, got %q", upResp.DownloadURL)
+	}
 
-	reqDL := httptest.NewRequest(http.MethodGet, "http://feedback.wxjifang.cn/api/retest.php?action=download_file&key="+upResp.Key, nil)
+	reqDL := httptest.NewRequest(http.MethodGet, "http://feedback.wxjifang.cn/"+upResp.DownloadURL, nil)
 	recDL := httptest.NewRecorder()
 	h.ServeHTTP(recDL, reqDL)
 	if recDL.Code != http.StatusOK {
@@ -663,6 +667,9 @@ func TestRetestCreateTempDownloadMaxBytesAndStream(t *testing.T) {
 	}
 	if recDL.Header().Get("Content-Type") != "application/pdf" {
 		t.Fatalf("unexpected Content-Type: %q", recDL.Header().Get("Content-Type"))
+	}
+	if !strings.Contains(recDL.Header().Get("Content-Disposition"), "S%2B") {
+		t.Fatalf("expected Content-Disposition to preserve S+ as S%%2B, got %q", recDL.Header().Get("Content-Disposition"))
 	}
 	if recDL.Header().Get("Content-Length") != strconv.Itoa(len(pdfPayload)) {
 		t.Fatalf("unexpected Content-Length: %q want %d", recDL.Header().Get("Content-Length"), len(pdfPayload))

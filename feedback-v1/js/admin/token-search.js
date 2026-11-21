@@ -324,23 +324,23 @@
                                 <code style="background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 4px; color: var(--text-primary); font-family: monospace;">${escapeHtml(item.token)}</code>
                             </div>
                             <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                                <button type="button" class="btn secondary" style="padding: 5px 11px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 4px;" onclick="copyDbToken('${escapeHtml(item.token)}')">
+                                <button type="button" class="btn secondary" style="padding: 5px 11px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 4px;" onclick="copyDbToken('${escapeInlineJs(item.token)}')">
                                     <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path></svg>
                                     <span>复制Token</span>
                                 </button>
-                                <button type="button" class="btn secondary" style="padding: 5px 11px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 4px;" onclick="copyFullRetestLink('${escapeHtml(fullRetestLink)}')">
+                                <button type="button" class="btn secondary" style="padding: 5px 11px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 4px;" onclick="copyFullRetestLink('${escapeInlineJs(fullRetestLink)}')">
                                     <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
                                     <span>复制链接</span>
                                 </button>
-                                <button type="button" class="btn secondary" style="padding: 5px 11px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 4px;" onclick="locateStudentInRecords('${escapeHtml(sName)}')">
+                                <button type="button" class="btn secondary" style="padding: 5px 11px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 4px;" onclick="locateStudentInRecords('${escapeInlineJs(sName)}')">
                                     <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>
                                     <span>在列表中定位</span>
                                 </button>
-                                <button type="button" class="btn secondary" style="padding: 5px 11px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 4px;" onclick="openRetestStudent('${escapeHtml(item.token)}')" title="打开学员/家长端错题本（需输入姓名验证）">
+                                <button type="button" class="btn secondary" style="padding: 5px 11px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 4px;" onclick="openRetestStudent('${escapeInlineJs(item.token)}')" title="打开学员/家长端错题本（需输入姓名验证）">
                                     <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
                                     <span>错题本</span>
                                 </button>
-                                <button type="button" class="btn secondary" style="padding: 5px 11px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 4px;" onclick="openRetestDirect('${escapeHtml(item.token)}')" title="管理员免密直达错题本">
+                                <button type="button" class="btn secondary" style="padding: 5px 11px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 4px;" onclick="openRetestDirect('${escapeInlineJs(item.token)}')" title="管理员免密直达错题本">
                                     <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polygon points="12 8 8 12 12 16 12 8"></polygon></svg>
                                     <span>管理员错题本</span>
                                 </button>

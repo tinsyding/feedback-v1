@@ -164,7 +164,9 @@ function cmdMigrate(): void {
             // 因此逐条执行、失败即停且不记录版本，靠“迁移必须幂等”保证可重入。
             foreach ($stmts as $stmt) {
                 // 跳过纯注释残留与 USE（连接已指向 feedback 库）
-                $head = strtoupper(ltrim($stmt));
+                $stripped = preg_replace('/\/\*[\s\S]*?\*\//', '', $stmt);
+                $stripped = preg_replace('/^\s*--.*$/m', '', $stripped);
+                $head = strtoupper(trim($stripped));
                 if ($head === '' || str_starts_with($head, 'USE ')) {
                     continue;
                 }

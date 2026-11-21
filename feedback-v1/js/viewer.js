@@ -3438,7 +3438,7 @@ function openReminderModal(type) {
         if (countEl) countEl.textContent = `共 ${unsubmitted.length} 位同学未提交：`;
         if (collapseEl) collapseEl.style.display = 'block';
         if (listEl) {
-            listEl.innerHTML = unsubmitted.map(name => `<span class="reminder-name-pill">${name}</span>`).join('');
+            listEl.innerHTML = unsubmitted.map(name => `<span class="reminder-name-pill">${escapeHtml(name)}</span>`).join('');
         }
     } else {
         if (countEl) countEl.textContent = `暂无未提交学生（全部已提交）`;

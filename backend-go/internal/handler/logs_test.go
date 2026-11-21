@@ -279,7 +279,7 @@ func TestLogsSenderSyncSnapshotPullFiltersStatsAndSecurityHardening(t *testing.T
 		`{"token":"sender-tok-1","sync_mode":"heartbeat","client":{"client_slug":"pc-alpha","hostname":"Alpha","os_user":"t1"}}`,
 		`{"token":"sender-tok-1","sync_mode":"chunk","date_str":"2026-11-22","offset":0,"content":"hello\n","client":{"client_slug":"pc-alpha"}}`,
 		`{"token":"sender-tok-1","sync_mode":"batch_summary","batch_summary":{"date_str":"2026-11-22","counts":{"total":2,"sent":2}},"client":{"client_slug":"pc-alpha"}}`,
-		`{"token":"sender-tok-1","sync_mode":"realtime","client":{"client_slug":"pc-alpha"},"entries":[{"event":"sent","timestamp":"NaN","raw_line":"row1"}]}`,
+		`{"token":"sender-tok-1","sync_mode":"realtime","client":{"client_slug":"pc-alpha"},"entries":[{"date_str":"2026-11-22","event":"sent","timestamp":"NaN","raw_line":"row1","is_error":true},{"date_str":"2026-11-22","event":"sent2","timestamp":"1795200000000","raw_line":"row2","is_error":true}]}`,
 	} {
 		req := httptest.NewRequest(http.MethodPost, "/api/logs.php?action=sender_sync", strings.NewReader(body))
 		rec := httptest.NewRecorder()

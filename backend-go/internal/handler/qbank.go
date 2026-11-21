@@ -234,6 +234,9 @@ func handleQBankPost(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 	bankType := qbank.NormalizeBankType(config.AsPHPString(input["bankType"]))
 
 	currentTeacher := strings.TrimSpace(sess.Username())
+	if currentTeacher == "" && sess.IsAdminLoggedIn() {
+		currentTeacher = strings.TrimSpace(sess.AdminUsername())
+	}
 	if currentTeacher == "" {
 		currentTeacher = strings.TrimSpace(config.AsPHPString(input["teacher_username"]))
 	}
@@ -458,6 +461,9 @@ func handleQBankDelete(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 	}
 	bankType := qbank.NormalizeBankType(q.Get("bankType"))
 	delTeacher := strings.TrimSpace(sess.Username())
+	if delTeacher == "" && sess.IsAdminLoggedIn() {
+		delTeacher = strings.TrimSpace(sess.AdminUsername())
+	}
 	if delTeacher == "" {
 		delTeacher = strings.TrimSpace(q.Get("teacher_username"))
 	}
@@ -471,18 +477,31 @@ func handleQBankDelete(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 	}
 
 	ctx := r.Context()
-	if deps.Repo != nil {
-		if deletedPDFs, err := deps.Repo.DeleteWeek(ctx, qbank.WeekKey{
-			Year:     yearPtr,
-			Season:   season,
-			Subject:  subject,
-			Grade:    grade,
-			Tier:     tier,
-			Week:     week,
-			BankType: bankType,
-		}); err == nil && len(deletedPDFs) > 0 {
-			qbank.CleanupUnreferencedPDFs(ctx, deps.Repo, deps.FeedbackRoot, deletedPDFs)
-		}
+	if deps.Repo == nil {
+		httpx.SendJSON(w, http.StatusInternalServerError, map[string]any{
+			"success": false,
+			"error":   "数据库不可用，删除失败",
+		})
+		return
+	}
+	deletedPDFs, err := deps.Repo.DeleteWeek(ctx, qbank.WeekKey{
+		Year:     yearPtr,
+		Season:   season,
+		Subject:  subject,
+		Grade:    grade,
+		Tier:     tier,
+		Week:     week,
+		BankType: bankType,
+	})
+	if err != nil {
+		httpx.SendJSON(w, http.StatusInternalServerError, map[string]any{
+			"success": false,
+			"error":   "删除失败，请稍后重试",
+		})
+		return
+	}
+	if len(deletedPDFs) > 0 {
+		qbank.CleanupUnreferencedPDFs(ctx, deps.Repo, deps.FeedbackRoot, deletedPDFs)
 	}
 
 	auditlog.RecordFromRequest(ctx, deps.Audit, r, "warn", "qbank", "delete_questions", delTeacher, map[string]any{

@@ -173,6 +173,11 @@ func (r *MySQLRepository) RollbackRecord(ctx context.Context, historyID int, adm
 			return RollbackResult{}, NewHTTPError(500, "学情记录回溯失败，数据库操作已回滚", nil)
 		}
 
+		eqVal := h["error_questions"]
+		if eqVal == nil || strings.TrimSpace(config.AsPHPString(eqVal)) == "" {
+			eqVal = "[]"
+		}
+
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE student_records SET
 				student_id = ?, student_name = ?, student_key = ?, preview_week_num = ?,
@@ -188,7 +193,7 @@ func (r *MySQLRepository) RollbackRecord(ctx context.Context, historyID int, adm
 			h["preview_score"],
 			h["total_score"],
 			h["error_count"],
-			h["error_questions"],
+			eqVal,
 			h["preview_error_questions"],
 			h["teacher_comment"],
 			h["preview_comment"],
@@ -203,6 +208,10 @@ func (r *MySQLRepository) RollbackRecord(ctx context.Context, historyID int, adm
 		recCreatedAt := config.AsPHPString(h["record_created_at"])
 		if recCreatedAt == "" {
 			recCreatedAt = tz.Now().Format("2006-01-02 15:04:05")
+		}
+		eqVal := h["error_questions"]
+		if eqVal == nil || strings.TrimSpace(config.AsPHPString(eqVal)) == "" {
+			eqVal = "[]"
 		}
 		res, err := tx.ExecContext(ctx, `
 			INSERT INTO student_records (
@@ -226,7 +235,7 @@ func (r *MySQLRepository) RollbackRecord(ctx context.Context, historyID int, adm
 			h["preview_score"],
 			h["total_score"],
 			h["error_count"],
-			h["error_questions"],
+			eqVal,
 			h["preview_error_questions"],
 			h["teacher_comment"],
 			h["preview_comment"],

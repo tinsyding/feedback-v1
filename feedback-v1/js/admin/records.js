@@ -145,7 +145,7 @@
                 const hasRec = activeTeacherSet.has(t.username);
                 const label = t.real_name ? `${t.real_name} (${t.username})` : t.username;
                 return `
-                    <button type="button" class="filter-pill ${isActive ? 'active' : ''}" onclick="setRecFilter('teacher', '${escapeHtml(t.username)}')" title="${hasRec ? '该教师有已录入的学情错题' : '暂无学情记录'}">
+                    <button type="button" class="filter-pill ${isActive ? 'active' : ''}" onclick="setRecFilter('teacher', '${escapeInlineJs(t.username)}')" title="${hasRec ? '该教师有已录入的学情错题' : '暂无学情记录'}">
                         ${escapeHtml(label)}${hasRec ? '<span style="width:6px;height:6px;background:#10b981;border-radius:50%;display:inline-block;margin-left:4px;"></span>' : ''}
                     </button>
                 `;
@@ -176,7 +176,7 @@
                 return a.localeCompare(b, 'zh');
             });
             const gradePills = gradeList.map(g => `
-                <button type="button" class="filter-pill ${recFilters.grade === g ? 'active' : ''}" onclick="setRecFilter('grade', '${escapeHtml(g)}')">
+                <button type="button" class="filter-pill ${recFilters.grade === g ? 'active' : ''}" onclick="setRecFilter('grade', '${escapeInlineJs(g)}')">
                     ${escapeHtml(g)}
                 </button>
             `).join('');
@@ -185,7 +185,7 @@
             const rawSubjects = dbFilterOptions.subjects?.length ? dbFilterOptions.subjects : ['物理', '数学', '英语', '化学', '生物'];
             const subjectList = [...new Set(rawSubjects)].sort((a, b) => a.localeCompare(b, 'zh'));
             const subjectPills = subjectList.map(s => `
-                <button type="button" class="filter-pill ${recFilters.subject === s ? 'active' : ''}" onclick="setRecFilter('subject', '${escapeHtml(s)}')">
+                <button type="button" class="filter-pill ${recFilters.subject === s ? 'active' : ''}" onclick="setRecFilter('subject', '${escapeInlineJs(s)}')">
                     ${escapeHtml(s)}
                 </button>
             `).join('');
@@ -200,7 +200,7 @@
                 return a.localeCompare(b, 'zh');
             });
             const tierPills = tierList.map(t => `
-                <button type="button" class="filter-pill ${recFilters.tier === t ? 'active' : ''}" onclick="setRecFilter('tier', '${escapeHtml(t)}')">
+                <button type="button" class="filter-pill ${recFilters.tier === t ? 'active' : ''}" onclick="setRecFilter('tier', '${escapeInlineJs(t)}')">
                     ${escapeHtml(t)}层
                 </button>
             `).join('');
@@ -585,7 +585,7 @@
                             <input type="checkbox" class="rec-row-cb" data-id="${r.id}" ${isSelected ? 'checked' : ''} onchange="toggleRecordsSelectRow(${r.id}, this)" style="accent-color: var(--primary); cursor: pointer;">
                         </td>
                         <td>
-                            <div class="student-profile-chip" onclick="copyStudentIdName('${escapeHtml(copyIdName)}')" title="点击复制：${escapeHtml(copyIdName)}">
+                            <div class="student-profile-chip" onclick="copyStudentIdName('${escapeInlineJs(copyIdName)}')" title="点击复制：${escapeHtml(copyIdName)}">
                                 <div>
                                     <div class="student-name-text">
                                         ${escapeHtml(r.student_name || '-')}
@@ -675,7 +675,7 @@
                         <div class="db-card-head">
                             <div class="db-card-head-left">
                                 <input type="checkbox" class="rec-row-cb" data-id="${r.id}" ${isSelected ? 'checked' : ''} onchange="toggleRecordsSelectRow(${r.id}, this)" style="accent-color: var(--primary); cursor: pointer; width: 17px; height: 17px;">
-                                <div class="student-profile-chip" onclick="copyStudentIdName('${escapeHtml(copyIdName)}')" title="点击复制：${escapeHtml(copyIdName)}">
+                                <div class="student-profile-chip" onclick="copyStudentIdName('${escapeInlineJs(copyIdName)}')" title="点击复制：${escapeHtml(copyIdName)}">
                                     <div>
                                         <div class="student-name-text">
                                             ${escapeHtml(r.student_name || '-')}

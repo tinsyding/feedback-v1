@@ -54,6 +54,19 @@ function escapeHtml(str) {
 }
 window.escapeHtml = escapeHtml;
 
+function escapeInlineJs(str) {
+    return escapeHtml(
+        String(str ?? '')
+            .replace(/\\/g, '\\\\')
+            .replace(/'/g, "\\'")
+            .replace(/"/g, '\\"')
+            .replace(/\r/g, '\\r')
+            .replace(/\n/g, '\\n')
+            .replace(/\u2028/g, '\\u2028')
+            .replace(/\u2029/g, '\\u2029')
+    );
+}
+
 let currentQuestions = [];
 let isDirty = false;
 let browserFingerprint = '';
@@ -3582,9 +3595,9 @@ function openTierSyncModal(sourceData = null, isAutoPrompt = false) {
             ? `<span class="tier-sync-badge exist">已有 ${meta.questionCount || 0} 题 (覆盖)</span>`
             : `<span class="tier-sync-badge empty">未录入</span>`;
         return `
-            <div class="tier-sync-item" onclick="window.toggleTierSyncItem(this, '${escapeHtml(t)}')">
+            <div class="tier-sync-item" onclick="window.toggleTierSyncItem(this, '${escapeInlineJs(t)}')">
                 <div class="tier-sync-item-top">
-                    <input type="checkbox" class="tier-sync-checkbox" onclick="event.stopPropagation(); window.toggleTierSyncItem(this.closest('.tier-sync-item'), '${escapeHtml(t)}');">
+                    <input type="checkbox" class="tier-sync-checkbox" onclick="event.stopPropagation(); window.toggleTierSyncItem(this.closest('.tier-sync-item'), '${escapeInlineJs(t)}');">
                     <span class="tier-sync-item-name">${escapeHtml(t)} 班</span>
                 </div>
                 ${badgeHtml}
@@ -4720,7 +4733,7 @@ function renderQuestionList() {
                     </div>
                     ${isAssistant ? '' : `
                     <div class="big-question-header-actions">
-                        <button type="button" class="big-question-action-btn" onclick="toggleBigGroupSubTopics('${escapeHtml(groupKey)}')" title="展开或收起各小问独立知识点设置">
+                        <button type="button" class="big-question-action-btn" onclick="toggleBigGroupSubTopics('${escapeInlineJs(groupKey)}')" title="展开或收起各小问独立知识点设置">
                             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
                                 <line x1="8" y1="6" x2="21" y2="6"></line>
                                 <line x1="8" y1="12" x2="21" y2="12"></line>
@@ -5121,7 +5134,7 @@ function renderSavedSubjectTabs() {
         const count = counts[sub] || 0;
         const isActive = savedSubjectFilter === sub;
         html += `
-            <button type="button" class="ui-pill ${isActive ? 'active' : ''}" onclick="setSavedSubjectFilter('${escapeHtml(sub)}')">
+            <button type="button" class="ui-pill ${isActive ? 'active' : ''}" onclick="setSavedSubjectFilter('${escapeInlineJs(sub)}')">
                 ${escapeHtml(sub)} <span class="pill-count">${count}</span>
             </button>
         `;
@@ -5165,7 +5178,7 @@ function renderSavedTierTabs() {
         const count = counts[tier] || 0;
         const isActive = savedTierFilter === tier;
         html += `
-            <button type="button" class="ui-pill ${isActive ? 'active' : ''}" onclick="setSavedTierFilter('${escapeHtml(tier)}')">
+            <button type="button" class="ui-pill ${isActive ? 'active' : ''}" onclick="setSavedTierFilter('${escapeInlineJs(tier)}')">
                 ${escapeHtml(tier)}层 <span class="pill-count">${count}</span>
             </button>
         `;
@@ -5209,7 +5222,7 @@ function renderSavedGradeTabs() {
         const count = counts[grade] || 0;
         const isActive = savedGradeFilter === grade;
         html += `
-            <button type="button" class="ui-pill ${isActive ? 'active' : ''}" onclick="setSavedGradeFilter('${escapeHtml(grade)}')">
+            <button type="button" class="ui-pill ${isActive ? 'active' : ''}" onclick="setSavedGradeFilter('${escapeInlineJs(grade)}')">
                 ${escapeHtml(grade)} <span class="pill-count">${count}</span>
             </button>
         `;
@@ -5418,7 +5431,7 @@ function applySavedDataFilter() {
                 </div>
             </div>
             <div class="saved-card-actions">
-                <button type="button" class="saved-btn edit-btn" onclick="event.stopPropagation(); editSavedItem('${escapeHtml(item.subject)}', '${escapeHtml(itemGrade)}', '${escapeHtml(item.tier)}', ${item.week}, ${itemYear}, '${escapeHtml(itemSeason)}', '${itemBankType}')">
+                <button type="button" class="saved-btn edit-btn" onclick="event.stopPropagation(); editSavedItem('${escapeInlineJs(item.subject)}', '${escapeInlineJs(itemGrade)}', '${escapeInlineJs(item.tier)}', ${item.week}, ${itemYear}, '${escapeInlineJs(itemSeason)}', '${itemBankType}')">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
@@ -5426,7 +5439,7 @@ function applySavedDataFilter() {
                     ${isAssistant ? '查看题目' : '查看 / 更改题目'}
                 </button>
                 ${isAssistant ? '' : `
-                <button type="button" class="saved-btn delete-btn" onclick="event.stopPropagation(); deleteStoredData('${escapeHtml(item.subject)}', '${escapeHtml(itemGrade)}', '${escapeHtml(item.tier)}', ${item.week}, ${itemYear}, '${escapeHtml(itemSeason)}', '${itemBankType}')" title="删除此专题数据">
+                <button type="button" class="saved-btn delete-btn" onclick="event.stopPropagation(); deleteStoredData('${escapeInlineJs(item.subject)}', '${escapeInlineJs(itemGrade)}', '${escapeInlineJs(item.tier)}', ${item.week}, ${itemYear}, '${escapeInlineJs(itemSeason)}', '${itemBankType}')" title="删除此专题数据">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"></line>
                         <line x1="6" y1="6" x2="18" y2="18"></line>

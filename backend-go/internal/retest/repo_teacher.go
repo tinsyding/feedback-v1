@@ -456,11 +456,12 @@ func (r *MySQLRepository) GetStudentWeekRecord(ctx context.Context, q StudentWee
 		studentID := q.StudentID
 		if studentID == "" {
 			idRows, err := r.db.QueryContext(ctx, `
-				SELECT DISTINCT sr.student_id
+				SELECT sr.student_id
 				FROM student_records sr
 				INNER JOIN class_batches cb ON sr.batch_id = cb.id
 				WHERE cb.subject = ? AND cb.grade = ? AND sr.student_name = ? AND sr.student_id != ''
-				ORDER BY (cb.tier = ?) DESC, sr.updated_at DESC
+				GROUP BY sr.student_id
+				ORDER BY MAX(cb.tier = ?) DESC, MAX(sr.updated_at) DESC
 				LIMIT 2`,
 				q.Subject, q.Grade, q.StudentName, q.Tier,
 			)
@@ -675,7 +676,7 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 	).Scan(&batchID, &batchCreator)
 	if errors.Is(err, sql.ErrNoRows) {
 		res, insErr := r.db.ExecContext(ctx,
-			"INSERT INTO class_batches (`year`, `season`, `grade`, `tier`, `subject`, `class_name`, `created_by`) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			"INSERT INTO class_batches (`year`, `season`, `grade`, `tier`, `subject`, `class_name`, `created_by`) VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE `id` = LAST_INSERT_ID(`id`)",
 			in.Year, normSeason, in.Grade, in.Tier, in.Subject, className, in.CurrentTeacher,
 		)
 		if insErr != nil {
@@ -782,10 +783,16 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 			for exRows.Next() {
 				var e exRec
 				if err := exRows.Scan(&e.id, &e.batchID, &e.studentID, &e.studentName, &e.studentKey, &e.weekNum, &e.previewWeekNum, &e.hwScore, &e.pvScore, &e.totScore, &e.errCount, &e.errQ, &e.pvErrQ, &e.comment, &e.pvComment, &e.srcFiles, &e.token, &e.createdAt, &e.updatedAt); err != nil {
+					_ = exRows.Close()
 					log.Printf("retest: EncryptBatch archive scan error: %v", err)
-					continue
+					return EncryptBatchResult{}, NewHTTPError(500, "历史学情归档失败，为防止数据丢失已终止覆盖操作")
 				}
 				existing = append(existing, e)
+			}
+			if rowsErr := exRows.Err(); rowsErr != nil {
+				_ = exRows.Close()
+				log.Printf("retest: EncryptBatch archive rows error: %v", rowsErr)
+				return EncryptBatchResult{}, NewHTTPError(500, "历史学情归档失败，为防止数据丢失已终止覆盖操作")
 			}
 			_ = exRows.Close()
 
@@ -1055,8 +1062,8 @@ func (r *MySQLRepository) LogAccess(ctx context.Context, token, studentName, act
 		textutil.TruncateRunes(token, 32),
 		textutil.TruncateRunes(studentName, 50),
 		textutil.TruncateRunes(action, 50),
-		details,
-		textutil.TruncateRunes(ip, 50),
+		textutil.TruncateRunes(details, 255),
+		textutil.TruncateRunes(ip, 45),
 		textutil.TruncateRunes(userAgent, 500),
 	)
 }

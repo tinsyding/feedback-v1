@@ -61,13 +61,16 @@ func asOptionalFloat(v any) (float64, bool) {
 	}
 	switch x := v.(type) {
 	case float64:
+		if math.IsNaN(x) || math.IsInf(x, 0) {
+			return 0, false
+		}
 		return x, true
 	case int:
 		return float64(x), true
 	case int64:
 		return float64(x), true
 	case json.Number:
-		if f, err := x.Float64(); err == nil {
+		if f, err := x.Float64(); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
 			return f, true
 		}
 		return 0, false
@@ -77,6 +80,9 @@ func asOptionalFloat(v any) (float64, bool) {
 			return 0, true
 		}
 		if f, err := strconv.ParseFloat(s, 64); err == nil {
+			if math.IsNaN(f) || math.IsInf(f, 0) {
+				return 0, false
+			}
 			return f, true
 		}
 		return 0, true

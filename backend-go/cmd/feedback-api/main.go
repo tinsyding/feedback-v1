@@ -167,6 +167,7 @@ func main() {
 	mux.HandleFunc("/api/retest.php", handler.Retest(handler.RetestDeps{
 		Repo:         retestRepo,
 		Sessions:     sessStore,
+		RateLimit:    rlStore,
 		ConfigLoader: loader,
 		Audit:        auditLogger,
 		FeedbackRoot: feedbackRoot,

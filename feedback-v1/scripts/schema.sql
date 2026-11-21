@@ -62,8 +62,7 @@ CREATE TABLE IF NOT EXISTS `class_batches` (
   `created_by` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT '生成教师账号',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_batch_identity` (`year`,`season`,`grade`,`tier`,`subject`,`class_name`),
-  KEY `idx_query` (`year`,`season`,`grade`,`tier`,`subject`)
+  UNIQUE KEY `uk_batch_identity` (`year`,`season`,`grade`,`tier`,`subject`,`class_name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='班级教学期次表';
 
 -- ---------- 学生学情错题（当前版本） ----------

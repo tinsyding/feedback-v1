@@ -16,6 +16,7 @@ import (
 	"feedback-api/internal/auditlog"
 	"feedback-api/internal/config"
 	"feedback-api/internal/httpx"
+	"feedback-api/internal/ratelimit"
 	"feedback-api/internal/retest"
 	"feedback-api/internal/session"
 )
@@ -24,6 +25,7 @@ import (
 type RetestDeps struct {
 	Repo         retest.Repository
 	Sessions     session.Store
+	RateLimit    ratelimit.Store
 	ConfigLoader *config.Loader
 	Audit        auditlog.Logger
 	FeedbackRoot string

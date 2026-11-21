@@ -142,7 +142,7 @@ func (m *Manager) UpdateClientMeta(clientDir string, clientInfo map[string]any, 
 	if teacherNote != "" {
 		operator = teacherNote + "@" + hostname
 	}
-	operator = textutil.TruncateRunes(operator, 60)
+	operator = textutil.TruncateRunes(operator, 50)
 
 	mergedFiles := make([]string, 0)
 	seenFiles := make(map[string]struct{})
