@@ -23,7 +23,7 @@ switch ($action) {
             $tables = [];
             foreach ($statusRows as $r) {
                 $tblName = $r['Name'] ?? ($r['name'] ?? '');
-                if (empty($tblName)) continue;
+                if (empty($tblName) || isAdminHiddenTable($tblName)) continue;
                 // 实时查询精确 COUNT(*)（前台教师账号排除助教）
                 $exactCount = $tblName === 'users' 
                     ? (int)DB::fetchValue("SELECT COUNT(*) FROM `users` WHERE (`role` != 'assistant' OR `role` IS NULL)") 

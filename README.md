@@ -4,8 +4,10 @@
 
 ```text
 feedback/
-├── docs/          # 架构、API、多环境与 GitHub 工具链文档
-└── feedback-v1/   # 线上运行系统 (PHP 8.2 + 原生 HTML/CSS/JS + MySQL)
+├── backend-go/    # 渐进式 Go 后端服务 (feedback-api，Phase 0~2 已就绪)
+├── docs/          # 架构、API、Go 迁移、多环境与 GitHub 工具链文档
+├── feedback-v1/   # 线上运行系统 (PHP 8.2 + 原生 HTML/CSS/JS + MySQL + sender_py)
+└── scripts/       # 仓库级辅助与验收脚本
 ```
 
 ## 文档导航
@@ -13,10 +15,15 @@ feedback/
 - [生产环境与运维说明](./docs/environments.md)
 - [GitHub 配置与 CI/CD 工具链说明](./docs/github.md)
 - [后端 API 接口文档](./docs/api.md)
+- [Go 后端渐进迁移指南](./docs/go-migration.md)
 - [更新日志 (CHANGELOG)](./CHANGELOG.md)
 - [桌面端企业微信反馈发送器说明](./feedback-v1/tools/sender_py/README.md)
 
 ## 目录说明
+
+### `backend-go/`
+- 技术栈：Go + `go-sql-driver/mysql`（极简依赖），通过 Nginx 精确 `location =` 反代逐接口灰度接管 PHP 端点，并与 PHP 共用 MySQL `app_sessions` 会话表。
+- 详细说明见 [`backend-go/README.md`](./backend-go/README.md) 与 [`docs/go-migration.md`](./docs/go-migration.md)。
 
 ### `feedback-v1/`
 - 技术栈：PHP 8.2 + 原生 JavaScript / CSS + MySQL

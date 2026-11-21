@@ -22,14 +22,33 @@ $configFile = dirname(__DIR__, 2) . '/config.json';
 
 
 
+// 禁止通过通用后台 CRUD / 元数据接口访问或修改的系统表黑名单
+if (!defined('ADMIN_HIDDEN_TABLES')) {
+    define('ADMIN_HIDDEN_TABLES', [
+        'app_sessions',
+        'schema_migrations'
+    ]);
+}
+
 /**
- * 获取数据库所有有效表
+ * 判断指定表是否属于禁止通用后台访问的系统表
+ */
+function isAdminHiddenTable(string $table): bool {
+    return in_array(strtolower(trim($table)), ADMIN_HIDDEN_TABLES, true);
+}
+
+/**
+ * 获取数据库所有有效表（自动排除系统敏感/基础设施表）
  */
 function getValidTables(): array {
     $rows = DB::fetchAll("SHOW TABLES");
     $tables = [];
     foreach ($rows as $r) {
-        $tables[] = reset($r);
+        $tbl = (string)reset($r);
+        if ($tbl === '' || isAdminHiddenTable($tbl)) {
+            continue;
+        }
+        $tables[] = $tbl;
     }
     return $tables;
 }
@@ -40,6 +59,9 @@ function getValidTables(): array {
 function validateTable(?string $table): string {
     if (empty($table) || !preg_match('/^[a-zA-Z0-9_]+$/', $table)) {
         sendResponse(false, null, '无效的数据表名称', 400);
+    }
+    if (isAdminHiddenTable($table)) {
+        sendResponse(false, null, "系统表 '{$table}' 禁止通过通用后台接口访问", 403);
     }
     $tables = getValidTables();
     if (!in_array($table, $tables, true)) {

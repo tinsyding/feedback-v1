@@ -1028,6 +1028,26 @@ switch ($action) {
                 }
             }
 
+            if ($table === 'class_batches') {
+                $forceCascade = filter_var(
+                    $_GET['force_cascade'] ?? ($rawInput['force_cascade'] ?? false),
+                    FILTER_VALIDATE_BOOLEAN
+                );
+                $placeholders = implode(',', array_fill(0, count($ids), '?'));
+                $relatedCount = (int)DB::fetchValue(
+                    "SELECT COUNT(*) FROM `student_records` WHERE `batch_id` IN ({$placeholders})",
+                    array_values($ids)
+                );
+                if ($relatedCount > 0 && !$forceCascade) {
+                    sendResponse(
+                        false,
+                        ['related_student_records' => $relatedCount],
+                        "所选班级期次关联了 {$relatedCount} 条学生学情记录，直接删除将触发外键级联清空。请先清理关联学情，或显式传入 force_cascade=true 确认级联删除",
+                        409
+                    );
+                }
+            }
+
             $affectedQbankIds = [];
             if ($table === 'qbank_weeks') {
                 try {
