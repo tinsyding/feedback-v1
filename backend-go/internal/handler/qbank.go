@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -12,7 +14,10 @@ import (
 	"feedback-api/internal/normalize"
 	"feedback-api/internal/qbank"
 	"feedback-api/internal/session"
+	"feedback-api/internal/tz"
 )
+
+const maxQBankJSONBodyBytes = 10 << 20 // 10MB matching Nginx client_max_body_size 10m
 
 // QBankDeps bundles dependencies for /api/qbank.php.
 type QBankDeps struct {
@@ -28,7 +33,7 @@ func (d QBankDeps) nowMillis() int64 {
 	if d.NowFunc != nil {
 		return d.NowFunc().UnixMilli()
 	}
-	return time.Now().UnixMilli()
+	return tz.Now().UnixMilli()
 }
 
 func (d QBankDeps) semesterDefaults() (int, string) {
@@ -80,11 +85,11 @@ func handleQBankGet(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 	switch action {
 	case "list":
 		var filter qbank.ListFilter
-		if rawYear := strings.TrimSpace(q.Get("year")); rawYear != "" && rawYear != "all" {
+		if rawYear := strings.TrimSpace(q.Get("year")); rawYear != "" && rawYear != "all" && rawYear != "0" {
 			y := config.AsPHPInt(rawYear)
 			filter.Year = &y
 		}
-		if rawSeason := strings.TrimSpace(q.Get("season")); rawSeason != "" && rawSeason != "all" {
+		if rawSeason := strings.TrimSpace(q.Get("season")); rawSeason != "" && rawSeason != "all" && rawSeason != "0" {
 			filter.Season = normalize.Season(rawSeason, "秋")
 		}
 		if rawSubject := strings.TrimSpace(q.Get("subject")); rawSubject != "" && rawSubject != "all" {
@@ -193,7 +198,21 @@ func handleQBankPost(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 		return
 	}
 
-	input := readJSONBodyMap(r)
+	input, err := decodeQBankJSONBody(w, r)
+	if err != nil {
+		if isMaxBytesError(err) {
+			httpx.SendJSON(w, http.StatusRequestEntityTooLarge, map[string]any{
+				"success": false,
+				"error":   "请求体大小不能超过 10MB",
+			})
+			return
+		}
+		httpx.SendJSON(w, http.StatusBadRequest, map[string]any{
+			"success": false,
+			"error":   "无效的 JSON 数据",
+		})
+		return
+	}
 	if len(input) == 0 {
 		httpx.SendJSON(w, http.StatusBadRequest, map[string]any{
 			"success": false,
@@ -429,12 +448,12 @@ func handleQBankDelete(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 	tier := strings.TrimSpace(q.Get("tier"))
 	week := config.AsPHPInt(q.Get("week"))
 	var yearPtr *int
-	if rawYear := strings.TrimSpace(q.Get("year")); rawYear != "" {
+	if rawYear := strings.TrimSpace(q.Get("year")); rawYear != "" && rawYear != "0" {
 		y := config.AsPHPInt(rawYear)
 		yearPtr = &y
 	}
 	season := ""
-	if rawSeason := strings.TrimSpace(q.Get("season")); rawSeason != "" {
+	if rawSeason := strings.TrimSpace(q.Get("season")); rawSeason != "" && rawSeason != "0" {
 		season = normalize.Season(rawSeason, "秋")
 	}
 	bankType := qbank.NormalizeBankType(q.Get("bankType"))
@@ -480,4 +499,28 @@ func handleQBankDelete(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 		"success": true,
 		"message": "删除成功",
 	})
+}
+
+func decodeQBankJSONBody(w http.ResponseWriter, r *http.Request) (map[string]any, error) {
+	if r == nil || r.Body == nil {
+		return nil, io.EOF
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxQBankJSONBodyBytes)
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, err
+	}
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		return nil, io.EOF
+	}
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.UseNumber()
+	var m map[string]any
+	if err := dec.Decode(&m); err != nil {
+		return nil, err
+	}
+	if m == nil {
+		return nil, io.EOF
+	}
+	return m, nil
 }

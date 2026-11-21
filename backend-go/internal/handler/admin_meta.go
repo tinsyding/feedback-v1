@@ -139,10 +139,18 @@ func handleAdminSearchByToken(w http.ResponseWriter, r *http.Request, deps Admin
 	rawInput := strings.TrimSpace(r.URL.Query().Get("token"))
 	if rawInput == "" {
 		httpx.ParseRequestForm(r)
+		if r.MultipartForm != nil {
+			defer func() { _ = r.MultipartForm.RemoveAll() }()
+		}
 		rawInput = strings.TrimSpace(r.PostFormValue("token"))
 	}
 	if rawInput == "" {
-		if body, err := decodeAdminJSONBody(r); err == nil {
+		body, err := decodeAdminJSONBodyWithLimit(w, r, maxAdminJSONBodyBytes)
+		if isMaxBytesError(err) {
+			httpx.SendResponse(w, false, nil, httpx.StrPtr("请求体大小超过限制"), http.StatusRequestEntityTooLarge)
+			return
+		}
+		if err == nil {
 			rawInput = strings.TrimSpace(config.AsPHPString(body["token"]))
 		}
 	}
@@ -221,7 +229,11 @@ func handleAdminRecordRollback(w http.ResponseWriter, r *http.Request, deps Admi
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("数据库连接失败"), http.StatusInternalServerError)
 		return
 	}
-	rawInput, _ := decodeAdminJSONBody(r)
+	rawInput, err := decodeAdminJSONBodyWithLimit(w, r, maxAdminJSONBodyBytes)
+	if isMaxBytesError(err) {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("请求体大小超过限制"), http.StatusRequestEntityTooLarge)
+		return
+	}
 	historyID := config.AsPHPInt(rawInput["history_id"])
 	if historyID <= 0 {
 		historyID, _ = strconv.Atoi(r.URL.Query().Get("history_id"))

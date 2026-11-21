@@ -31,6 +31,9 @@ func TestMiddlewareCORSAndOptions(t *testing.T) {
 	if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "true" {
 		t.Fatalf("ACAC = %q", got)
 	}
+	if got := rec.Header().Values("Vary"); len(got) == 0 || got[0] != "Origin" {
+		t.Fatalf("Vary = %v, want [Origin]", got)
+	}
 	if got := rec.Header().Get("X-Backend-Engine"); got != "go" {
 		t.Fatalf("X-Backend-Engine = %q", got)
 	}

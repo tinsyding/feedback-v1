@@ -1,23 +1,10 @@
 [
     {
-        "id": "update_2026_11_21_bug",
-        "version": "维护公告",
-        "date": "2026-11-21",
-        "title": "系统维护提示",
-        "active": true,
-        "items": [
-            {
-                "title": "目前出了bug，正在修复，请勿使用",
-                "desc": ""
-            }
-        ]
-    },
-    {
         "id": "update_2026_11_19",
         "version": "v1.3.0",
         "date": "2026-11-19",
         "title": "系统更新提示",
-        "active": false,
+        "active": true,
         "items": [
             {
                 "title": "错题本新增「不分页方案」",

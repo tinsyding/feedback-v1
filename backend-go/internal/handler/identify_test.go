@@ -248,4 +248,17 @@ func TestIdentifyEndpointModesGatesAndArchiving(t *testing.T) {
 	if _, err := os.Stat(archiveDir); err != nil {
 		t.Fatalf("expected recent archive dir preserved: %v", err)
 	}
+
+	// >25MB body -> MaxBytesError returns 400 size error, NOT 200 鉴权失败
+	huge := make([]byte, (25<<20)+4096)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, makeMultipartReq(t, "/api/identify.php", map[string]string{
+		"token":       config.DefaultSenderToken,
+		"mode":        "title",
+		"target_name": "张三",
+	}, map[string][]byte{"image_title": huge}))
+	ok, _, errStr = decodeEnvelope(t, rec)
+	if rec.Code != http.StatusBadRequest || ok || errStr == nil || *errStr != "上传图超过 5MB" {
+		t.Fatalf("huge body (>25MB) unexpected: %d %v %v", rec.Code, ok, errStr)
+	}
 }

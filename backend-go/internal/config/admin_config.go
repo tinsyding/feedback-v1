@@ -8,7 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
+
+	"feedback-api/internal/tz"
 )
 
 // AdminFallbackCreds holds emergency fallback admin credentials when DB admin_users is empty or unavailable.
@@ -57,7 +58,7 @@ func (l *Loader) SaveAISecrets(secrets map[string]any) error {
 	for k, v := range secrets {
 		out[k] = v
 	}
-	out["updatedAt"] = time.Now().Format("2006-01-02 15:04:05")
+	out["updatedAt"] = tz.Now().Format("2006-01-02 15:04:05")
 	return atomicWriteJSON(l.AISecretsPath(), out, 0o600)
 }
 
@@ -137,6 +138,27 @@ func (l *Loader) LoadAdminFallback() AdminFallbackCreds {
 	return out
 }
 
+func matchPHPArrayOpen(tokens []phpToken, idx int) (closeVal string, bodyStart int, ok bool) {
+	if idx >= len(tokens) {
+		return "", 0, false
+	}
+	if tokens[idx].kind == "other" && tokens[idx].val == "[" {
+		return "]", idx + 1, true
+	}
+	const kw = "array"
+	if idx+len(kw) < len(tokens) {
+		for k := 0; k < len(kw); k++ {
+			if tokens[idx+k].kind != "other" || !strings.EqualFold(tokens[idx+k].val, kw[k:k+1]) {
+				return "", 0, false
+			}
+		}
+		if tokens[idx+len(kw)].kind == "other" && tokens[idx+len(kw)].val == "(" {
+			return ")", idx + len(kw) + 1, true
+		}
+	}
+	return "", 0, false
+}
+
 func extractPHPStringArrayField(src, key string) []string {
 	tokens := scanPHPTokens(src)
 	var out []string
@@ -147,9 +169,9 @@ func extractPHPStringArrayField(src, key string) []string {
 		if tokens[i+1].kind != "arrow" {
 			continue
 		}
-		if tokens[i+2].kind == "other" && tokens[i+2].val == "[" {
-			for j := i + 3; j < len(tokens); j++ {
-				if tokens[j].kind == "other" && tokens[j].val == "]" {
+		if closeVal, start, ok := matchPHPArrayOpen(tokens, i+2); ok {
+			for j := start; j < len(tokens); j++ {
+				if tokens[j].kind == "other" && tokens[j].val == closeVal {
 					break
 				}
 				if tokens[j].kind == "str" && strings.TrimSpace(tokens[j].val) != "" {

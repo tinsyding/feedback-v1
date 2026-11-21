@@ -19,6 +19,7 @@ import (
 	"feedback-api/internal/admin"
 	"feedback-api/internal/auditlog"
 	"feedback-api/internal/config"
+	"feedback-api/internal/httpx"
 	"feedback-api/internal/ratelimit"
 	"feedback-api/internal/session"
 )
@@ -38,6 +39,14 @@ type fakeAdminRepo struct {
 	createdID       int64
 	updatedAffected int64
 	deletedCount    int64
+	lastListQuery   admin.ListQuery
+	lastCreateTable string
+	lastCreateInput map[string]any
+	lastUpdateTable string
+	lastUpdateID    string
+	lastUpdateInput map[string]any
+	lastResetUserID int
+	lastResetPwd    string
 }
 
 func newFakeAdminRepo() *fakeAdminRepo {
@@ -149,16 +158,22 @@ func (f *fakeAdminRepo) GetFilterOptions(_ context.Context) (admin.FilterOptions
 func (f *fakeAdminRepo) GetStudentRecordsStats(_ context.Context) (admin.StudentRecordsStats, error) {
 	return admin.StudentRecordsStats{Total: 10, HasErr: 8, NoErr: 2, Batches: 2, Students: 9}, nil
 }
-func (f *fakeAdminRepo) ListRecords(_ context.Context, _ admin.ListQuery) (admin.ListResult, error) {
+func (f *fakeAdminRepo) ListRecords(_ context.Context, q admin.ListQuery) (admin.ListResult, error) {
+	f.lastListQuery = q
 	return f.listRes, nil
 }
 func (f *fakeAdminRepo) GetRecord(_ context.Context, _, _ string) (map[string]any, error) {
 	return f.getRow, nil
 }
-func (f *fakeAdminRepo) CreateRecord(_ context.Context, _ string, _ map[string]any, _ string) (int64, error) {
+func (f *fakeAdminRepo) CreateRecord(_ context.Context, table string, input map[string]any, _ string) (int64, error) {
+	f.lastCreateTable = table
+	f.lastCreateInput = input
 	return f.createdID, nil
 }
-func (f *fakeAdminRepo) UpdateRecord(_ context.Context, _, _ string, input map[string]any, _ string) (int64, []string, error) {
+func (f *fakeAdminRepo) UpdateRecord(_ context.Context, table, id string, input map[string]any, _ string) (int64, []string, error) {
+	f.lastUpdateTable = table
+	f.lastUpdateID = id
+	f.lastUpdateInput = input
 	var fields []string
 	for k := range input {
 		fields = append(fields, k)
@@ -174,7 +189,9 @@ func (f *fakeAdminRepo) DeleteRecords(_ context.Context, table string, _ []strin
 	}
 	return f.deletedCount, nil
 }
-func (f *fakeAdminRepo) ResetTeacherPassword(_ context.Context, _ int, _, _ string) (admin.ResetTeacherResult, error) {
+func (f *fakeAdminRepo) ResetTeacherPassword(_ context.Context, uid int, _, pwd string) (admin.ResetTeacherResult, error) {
+	f.lastResetUserID = uid
+	f.lastResetPwd = pwd
 	return f.resetRes, nil
 }
 func (f *fakeAdminRepo) ListRecordHistory(_ context.Context, _ int, _ string, _ int, _ *int) ([]map[string]any, error) {
@@ -209,7 +226,7 @@ func setupAdminTestEnv(t *testing.T) (http.Handler, *fakeAdminRepo, *session.Mem
 		FeedbackRoot: dir,
 		NowFunc:      func() time.Time { return time.Unix(1795143600, 0) },
 	}
-	return Admin(deps), repo, sessions, audit, dir
+	return httpx.Middleware(Admin(deps)), repo, sessions, audit, dir
 }
 
 func addAdminCookie(t *testing.T, sessions *session.MemoryStore, extra map[string]any) *http.Cookie {
@@ -361,14 +378,38 @@ func TestAdminConfigIsolationAndTestAI(t *testing.T) {
 	}
 
 	// test_ai_config against mock server
+	aiMockHits := 0
 	aiMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		aiMockHits++
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"OK"}}]}`))
 	}))
 	defer aiMock.Close()
 
+	// Custom base_url without explicit api_key must reject with 400 and never send stored secret.
+	for _, badProbe := range []map[string]any{
+		{"base_url": aiMock.URL, "model": "qwen3.8-max"},
+		{"base_url": aiMock.URL, "api_key": "sk-****1234", "model": "qwen3.8-max"},
+		{"base_url": "file:///etc/passwd", "api_key": "sk-explicit", "model": "qwen3.8-max"},
+	} {
+		badBytes, _ := json.Marshal(badProbe)
+		reqBad := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/admin.php?action=test_ai_config", bytes.NewReader(badBytes))
+		reqBad.Host = "feedback.wxjifang.cn"
+		reqBad.Header.Set("Origin", "http://feedback.wxjifang.cn")
+		reqBad.AddCookie(ck)
+		recBad := httptest.NewRecorder()
+		h.ServeHTTP(recBad, reqBad)
+		if recBad.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for invalid/custom base_url probe %+v, got %d: %s", badProbe, recBad.Code, recBad.Body.String())
+		}
+	}
+	if aiMockHits != 0 {
+		t.Fatalf("stored api key leaked to unverified custom base_url (%d hits)", aiMockHits)
+	}
+
 	probeBody, _ := json.Marshal(map[string]any{
 		"base_url": aiMock.URL,
+		"api_key":  "sk-explicit-test-key",
 		"model":    "qwen3.8-max",
 	})
 	req3 := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/admin.php?action=test_ai_config", bytes.NewReader(probeBody))
@@ -466,5 +507,129 @@ func TestAdminTablesCRUDTokenHistoryAndSourceFile(t *testing.T) {
 	h.ServeHTTP(recDLBin, reqDLBin)
 	if recDLBin.Code != http.StatusOK || recDLBin.Header().Get("Content-Type") != "application/octet-stream" {
 		t.Fatalf("download_source_file binary failed: %d %v", recDLBin.Code, recDLBin.Header())
+	}
+}
+
+func TestAdminRemainingEndpointsAndLimits(t *testing.T) {
+	h, repo, sessions, _, _ := setupAdminTestEnv(t)
+	ck := addAdminCookie(t, sessions, nil)
+
+	// GET metadata actions
+	for _, action := range []string{"db_tables", "db_batches_options", "dimensions", "student_records_stats", "record_history"} {
+		target := "http://feedback.wxjifang.cn/api/admin.php?action=" + action
+		if action == "record_history" {
+			target += "&record_id=12"
+		}
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		req.AddCookie(ck)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"success":true`) {
+			t.Fatalf("%s failed: %d %s", action, rec.Code, rec.Body.String())
+		}
+	}
+
+	// db_list captures query params
+	reqList := httptest.NewRequest(http.MethodGet, "http://feedback.wxjifang.cn/api/admin.php?action=db_list&table=student_records&page=2&per_page=15&sort_field=student_name&sort_order=asc&search=张三", nil)
+	reqList.AddCookie(ck)
+	recList := httptest.NewRecorder()
+	h.ServeHTTP(recList, reqList)
+	if recList.Code != http.StatusOK || repo.lastListQuery.Page != 2 || repo.lastListQuery.PageSize != 15 || repo.lastListQuery.Sort != "student_name" {
+		t.Fatalf("db_list unexpected: code=%d q=%+v body=%s", recList.Code, repo.lastListQuery, recList.Body.String())
+	}
+
+	// db_get missing id -> 400; valid id -> 200
+	reqGetMissing := httptest.NewRequest(http.MethodGet, "http://feedback.wxjifang.cn/api/admin.php?action=db_get&table=student_records", nil)
+	reqGetMissing.AddCookie(ck)
+	recGetMissing := httptest.NewRecorder()
+	h.ServeHTTP(recGetMissing, reqGetMissing)
+	if recGetMissing.Code != http.StatusBadRequest {
+		t.Fatalf("db_get missing id: %d", recGetMissing.Code)
+	}
+	reqGet := httptest.NewRequest(http.MethodGet, "http://feedback.wxjifang.cn/api/admin.php?action=db_get&table=student_records&id=12", nil)
+	reqGet.AddCookie(ck)
+	recGet := httptest.NewRecorder()
+	h.ServeHTTP(recGet, reqGet)
+	if recGet.Code != http.StatusOK || !strings.Contains(recGet.Body.String(), `"record":`) {
+		t.Fatalf("db_get failed: %d %s", recGet.Code, recGet.Body.String())
+	}
+
+	// db_create preserves json.Number on large integers
+	reqCreate := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/admin.php?action=db_create&table=student_records", strings.NewReader(`{"data":{"student_id":20260001,"student_name":"张三"}}`))
+	reqCreate.Host = "feedback.wxjifang.cn"
+	reqCreate.Header.Set("Origin", "http://feedback.wxjifang.cn")
+	reqCreate.AddCookie(ck)
+	recCreate := httptest.NewRecorder()
+	h.ServeHTTP(recCreate, reqCreate)
+	if recCreate.Code != http.StatusOK {
+		t.Fatalf("db_create failed: %d %s", recCreate.Code, recCreate.Body.String())
+	}
+	if num, ok := repo.lastCreateInput["student_id"].(json.Number); !ok || num.String() != "20260001" {
+		t.Fatalf("expected student_id json.Number(\"20260001\"), got %#v", repo.lastCreateInput["student_id"])
+	}
+
+	// Oversized >5MB JSON body on db_create returns 413
+	oversized := `{"pad":"` + strings.Repeat("x", (5<<20)+128) + `"}`
+	reqBig := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/admin.php?action=db_create&table=student_records", strings.NewReader(oversized))
+	reqBig.Host = "feedback.wxjifang.cn"
+	reqBig.Header.Set("Origin", "http://feedback.wxjifang.cn")
+	reqBig.AddCookie(ck)
+	recBig := httptest.NewRecorder()
+	h.ServeHTTP(recBig, reqBig)
+	if recBig.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 for >5MB db_create body, got %d: %s", recBig.Code, recBig.Body.String())
+	}
+
+	// db_update & db_reset_teacher_password
+	reqUpd := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/admin.php?action=db_update&table=student_records&id=12", strings.NewReader(`{"data":{"teacher_comment":"有进步"}}`))
+	reqUpd.Host = "feedback.wxjifang.cn"
+	reqUpd.Header.Set("Origin", "http://feedback.wxjifang.cn")
+	reqUpd.AddCookie(ck)
+	recUpd := httptest.NewRecorder()
+	h.ServeHTTP(recUpd, reqUpd)
+	if recUpd.Code != http.StatusOK || repo.lastUpdateID != "12" {
+		t.Fatalf("db_update failed: %d %s", recUpd.Code, recUpd.Body.String())
+	}
+
+	reqResetBad := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/admin.php?action=db_reset_teacher_password", strings.NewReader(`{"id":7,"password":"123"}`))
+	reqResetBad.Host = "feedback.wxjifang.cn"
+	reqResetBad.Header.Set("Origin", "http://feedback.wxjifang.cn")
+	reqResetBad.AddCookie(ck)
+	recResetBad := httptest.NewRecorder()
+	h.ServeHTTP(recResetBad, reqResetBad)
+	if recResetBad.Code != http.StatusBadRequest {
+		t.Fatalf("db_reset_teacher_password short password: got %d, want 400", recResetBad.Code)
+	}
+
+	reqReset := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/admin.php?action=db_reset_teacher_password", strings.NewReader(`{"id":7,"password":"NewTeacherPass123"}`))
+	reqReset.Host = "feedback.wxjifang.cn"
+	reqReset.Header.Set("Origin", "http://feedback.wxjifang.cn")
+	reqReset.AddCookie(ck)
+	recReset := httptest.NewRecorder()
+	h.ServeHTTP(recReset, reqReset)
+	if recReset.Code != http.StatusOK || repo.lastResetUserID != 7 || repo.lastResetPwd != "NewTeacherPass123" {
+		t.Fatalf("db_reset_teacher_password failed: %d %s", recReset.Code, recReset.Body.String())
+	}
+
+	// change_password >72 bytes -> 400, valid -> 200
+	longPwd := strings.Repeat("A", 73)
+	reqCPBad := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/admin.php?action=change_password", strings.NewReader(`{"old_password":"AdminPass123","new_password":"`+longPwd+`"}`))
+	reqCPBad.Host = "feedback.wxjifang.cn"
+	reqCPBad.Header.Set("Origin", "http://feedback.wxjifang.cn")
+	reqCPBad.AddCookie(ck)
+	recCPBad := httptest.NewRecorder()
+	h.ServeHTTP(recCPBad, reqCPBad)
+	if recCPBad.Code != http.StatusBadRequest {
+		t.Fatalf("change_password >72 bytes: got %d, want 400 (%s)", recCPBad.Code, recCPBad.Body.String())
+	}
+
+	reqCPOK := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/admin.php?action=change_password", strings.NewReader(`{"old_password":"AdminPass123","new_password":"AdminPass456"}`))
+	reqCPOK.Host = "feedback.wxjifang.cn"
+	reqCPOK.Header.Set("Origin", "http://feedback.wxjifang.cn")
+	reqCPOK.AddCookie(ck)
+	recCPOK := httptest.NewRecorder()
+	h.ServeHTTP(recCPOK, reqCPOK)
+	if recCPOK.Code != http.StatusOK || !strings.HasPrefix(repo.updatedHashes[1], "$2") {
+		t.Fatalf("change_password failed: %d %s (hash=%q)", recCPOK.Code, recCPOK.Body.String(), repo.updatedHashes[1])
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"feedback-api/internal/normalize"
@@ -17,7 +18,8 @@ func (r *MySQLRepository) FindTokenRecord(ctx context.Context, token string) (*T
 	}
 	var rec TokenRecord
 	var previewWeek sql.NullInt64
-	var peqRaw, studentID, updatedAt, createdAt sql.NullString
+	var peqRaw, studentID sql.NullString
+	var updatedAt, createdAt sql.NullTime
 	err := r.db.QueryRowContext(ctx, `
 		SELECT cb.subject, cb.grade, cb.tier, sr.week_num, sr.preview_week_num,
 		       sr.preview_error_questions, sr.student_name, sr.student_key, sr.student_id,
@@ -37,6 +39,7 @@ func (r *MySQLRepository) FindTokenRecord(ctx context.Context, token string) (*T
 		return nil, nil
 	}
 	if err != nil {
+		log.Printf("retest: FindTokenRecord error (token=%s): %v", token, err)
 		return nil, NewHTTPError(500, "数据库查询服务异常，请稍后重试")
 	}
 	rec.StudentID = strings.TrimSpace(studentID.String)
@@ -51,12 +54,10 @@ func (r *MySQLRepository) FindTokenRecord(ctx context.Context, token string) (*T
 	} else {
 		rec.PreviewErrors = []int{}
 	}
-	tsStr := updatedAt.String
-	if tsStr == "" {
-		tsStr = createdAt.String
-	}
-	if t, ok := parseDBTime(tsStr); ok {
-		rec.UpdatedUnix = t.Unix()
+	if updatedAt.Valid {
+		rec.UpdatedUnix = updatedAt.Time.Unix()
+	} else if createdAt.Valid {
+		rec.UpdatedUnix = createdAt.Time.Unix()
 	}
 	return &rec, nil
 }
@@ -89,60 +90,69 @@ func (r *MySQLRepository) LoadStudentHistoryAndAverages(ctx context.Context, sub
 		params...,
 	)
 	if err != nil {
+		log.Printf("retest: LoadStudentHistoryAndAverages query error: %v", err)
 		return bundle, err
 	}
 
 	batchIDSet := map[int]struct{}{}
-	for rows.Next() {
-		var row StudentRecordRow
-		var pvWeek sql.NullInt64
-		var hwScore, pvScore, totScore sql.NullFloat64
-		var errQ, pvErrQ, comment, pvComment, subSt, pvSubSt, batchTier sql.NullString
-		var errCnt sql.NullInt64
-		if err := rows.Scan(
-			&row.BatchID, &batchTier, &row.WeekNum, &pvWeek,
-			&hwScore, &pvScore, &totScore, &errCnt,
-			&errQ, &pvErrQ, &comment, &pvComment, &subSt, &pvSubSt,
-		); err != nil {
-			continue
-		}
-		row.BatchTier = strings.TrimSpace(batchTier.String)
-		if pvWeek.Valid {
-			v := int(pvWeek.Int64)
-			row.PreviewWeekNum = &v
-		}
-		if hwScore.Valid {
-			v := hwScore.Float64
-			row.HomeworkScore = &v
-		}
-		if pvScore.Valid {
-			v := pvScore.Float64
-			row.PreviewScore = &v
-		}
-		if totScore.Valid {
-			v := totScore.Float64
-			row.TotalScore = &v
-		}
-		row.ErrorCount = int(errCnt.Int64)
-		if errQ.Valid {
-			s := errQ.String
-			row.ErrorQuestionsRaw = &s
-		}
-		if pvErrQ.Valid {
-			s := pvErrQ.String
-			row.PreviewErrorsRaw = &s
-		}
-		row.TeacherComment = comment.String
-		row.PreviewComment = pvComment.String
-		row.SubmissionStatus = strings.TrimSpace(subSt.String)
-		row.PreviewSubmissionStatus = strings.TrimSpace(pvSubSt.String)
+	var rowsErr error
+	func() {
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var row StudentRecordRow
+			var pvWeek sql.NullInt64
+			var hwScore, pvScore, totScore sql.NullFloat64
+			var errQ, pvErrQ, comment, pvComment, subSt, pvSubSt, batchTier sql.NullString
+			var errCnt sql.NullInt64
+			if err := rows.Scan(
+				&row.BatchID, &batchTier, &row.WeekNum, &pvWeek,
+				&hwScore, &pvScore, &totScore, &errCnt,
+				&errQ, &pvErrQ, &comment, &pvComment, &subSt, &pvSubSt,
+			); err != nil {
+				continue
+			}
+			row.BatchTier = strings.TrimSpace(batchTier.String)
+			if pvWeek.Valid {
+				v := int(pvWeek.Int64)
+				row.PreviewWeekNum = &v
+			}
+			if hwScore.Valid {
+				v := hwScore.Float64
+				row.HomeworkScore = &v
+			}
+			if pvScore.Valid {
+				v := pvScore.Float64
+				row.PreviewScore = &v
+			}
+			if totScore.Valid {
+				v := totScore.Float64
+				row.TotalScore = &v
+			}
+			row.ErrorCount = int(errCnt.Int64)
+			if errQ.Valid {
+				s := errQ.String
+				row.ErrorQuestionsRaw = &s
+			}
+			if pvErrQ.Valid {
+				s := pvErrQ.String
+				row.PreviewErrorsRaw = &s
+			}
+			row.TeacherComment = comment.String
+			row.PreviewComment = pvComment.String
+			row.SubmissionStatus = strings.TrimSpace(subSt.String)
+			row.PreviewSubmissionStatus = strings.TrimSpace(pvSubSt.String)
 
-		bundle.Records = append(bundle.Records, row)
-		if row.BatchID > 0 {
-			batchIDSet[row.BatchID] = struct{}{}
+			bundle.Records = append(bundle.Records, row)
+			if row.BatchID > 0 {
+				batchIDSet[row.BatchID] = struct{}{}
+			}
 		}
+		rowsErr = rows.Err()
+	}()
+	if rowsErr != nil {
+		log.Printf("retest: LoadStudentHistoryAndAverages rows error: %v", rowsErr)
+		return bundle, rowsErr
 	}
-	_ = rows.Close()
 
 	// Compute class weekly averages (excluding 0s, rounding each score before AVG)
 	if len(batchIDSet) > 0 {
@@ -154,15 +164,20 @@ func (r *MySQLRepository) LoadStudentHistoryAndAverages(ctx context.Context, sub
 			fmt.Sprintf("SELECT batch_id, week_num, ROUND(AVG(ROUND(homework_score)), 1) AS avg_score FROM student_records WHERE batch_id IN (%s) AND homework_score IS NOT NULL AND homework_score > 0 GROUP BY batch_id, week_num", phs(len(bParams))),
 			bParams...,
 		); err == nil {
-			for avgRows.Next() {
-				var bid, wn int
-				var avg float64
-				if err := avgRows.Scan(&bid, &wn, &avg); err == nil {
-					bundle.WeekAvgByBatchWeek[fmt.Sprintf("%d:%d", bid, wn)] = avg
-					bundle.WeekAverages[fmt.Sprintf("%d", wn)] = avg
+			func() {
+				defer func() { _ = avgRows.Close() }()
+				for avgRows.Next() {
+					var bid, wn int
+					var avg float64
+					if err := avgRows.Scan(&bid, &wn, &avg); err == nil {
+						bundle.WeekAvgByBatchWeek[fmt.Sprintf("%d:%d", bid, wn)] = avg
+						bundle.WeekAverages[fmt.Sprintf("%d", wn)] = avg
+					}
 				}
-			}
-			_ = avgRows.Close()
+				if err := avgRows.Err(); err != nil {
+					log.Printf("retest: LoadStudentHistoryAndAverages batch avg rows error: %v", err)
+				}
+			}()
 		}
 	}
 
@@ -175,14 +190,19 @@ func (r *MySQLRepository) LoadStudentHistoryAndAverages(ctx context.Context, sub
 			GROUP BY sr.week_num`,
 			subject, grade, tier,
 		); err == nil {
-			for avgRows.Next() {
-				var wn int
-				var avg float64
-				if err := avgRows.Scan(&wn, &avg); err == nil {
-					bundle.WeekAverages[fmt.Sprintf("%d", wn)] = avg
+			func() {
+				defer func() { _ = avgRows.Close() }()
+				for avgRows.Next() {
+					var wn int
+					var avg float64
+					if err := avgRows.Scan(&wn, &avg); err == nil {
+						bundle.WeekAverages[fmt.Sprintf("%d", wn)] = avg
+					}
 				}
-			}
-			_ = avgRows.Close()
+				if err := avgRows.Err(); err != nil {
+					log.Printf("retest: LoadStudentHistoryAndAverages tier avg rows error: %v", err)
+				}
+			}()
 		}
 	}
 
@@ -206,16 +226,13 @@ func (r *MySQLRepository) PreloadMultiWeekQbankRows(ctx context.Context, subject
 	}
 	if strings.TrimSpace(season) != "" {
 		variants := normalize.SeasonVariants(season)
-		s1 := season
-		s2 := season
-		if len(variants) > 0 {
-			s1 = variants[0]
+		if len(variants) == 0 {
+			variants = []string{strings.TrimSpace(season)}
 		}
-		if len(variants) > 1 {
-			s2 = variants[1]
+		where = append(where, fmt.Sprintf("`season` IN (%s)", phs(len(variants))))
+		for _, v := range variants {
+			params = append(params, v)
 		}
-		where = append(where, "(`season` = ? OR `season` = ?)")
-		params = append(params, s1, s2)
 	}
 
 	sqlStr := "SELECT `id`, `bank_type`, `tier`, `week`, `question_num`, `parent_question_num`, `parent_question_nums`, `sub_num`, `topic`, `video_url`, `question_meta`, `exercise_pdf`, `answer_pdf` " +
@@ -224,6 +241,7 @@ func (r *MySQLRepository) PreloadMultiWeekQbankRows(ctx context.Context, subject
 
 	rows, err := r.db.QueryContext(ctx, sqlStr, params...)
 	if err != nil {
+		log.Printf("retest: PreloadMultiWeekQbankRows query error: %v", err)
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()

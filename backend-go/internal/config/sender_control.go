@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"feedback-api/internal/textutil"
 )
 
 // SenderControlPolicy mirrors the global Tier 1 policy returned by normalizeGlobalSenderControl in sender_control_helper.php.
@@ -127,7 +129,7 @@ func NormalizeGlobalSenderControl(raw map[string]any, rootConfig map[string]any)
 	}
 
 	out.UpdateURL = sanitizeControlURL(AsPHPString(raw["updateUrl"]))
-	out.NoticeMessage = clipBytes(strings.TrimSpace(AsPHPString(raw["noticeMessage"])), 500)
+	out.NoticeMessage = textutil.TruncateUTF8Bytes(strings.TrimSpace(AsPHPString(raw["noticeMessage"])), 500)
 
 	out.SearchWait = clampFloat(raw["searchWait"], 0.4, 8.0, defaults.SearchWait)
 	out.EnterWait = clampFloat(raw["enterWait"], 0.4, 8.0, defaults.EnterWait)
@@ -240,7 +242,7 @@ func sanitizeControlVersion(ver string) string {
 	if ver == "" || !reControlVersion.MatchString(ver) {
 		return ""
 	}
-	return clipBytes(ver, 32)
+	return textutil.TruncateUTF8Bytes(ver, 32)
 }
 
 func sanitizeControlURL(urlStr string) string {
@@ -248,12 +250,5 @@ func sanitizeControlURL(urlStr string) string {
 	if urlStr == "" || !reHTTPURL.MatchString(urlStr) {
 		return ""
 	}
-	return clipBytes(urlStr, 500)
-}
-
-func clipBytes(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max]
+	return textutil.TruncateUTF8Bytes(urlStr, 500)
 }

@@ -63,3 +63,13 @@ func TestGenerateSVGCaptcha(t *testing.T) {
 		t.Fatalf("invalid svg markup: %s", svg)
 	}
 }
+
+func TestParseRetestQuestionMetaNullCoords(t *testing.T) {
+	parsed := ParseRetestQuestionMeta(`{"box":{"x":null,"y":0.1,"w":0.2,"h":0.3},"answerBox":{"x":0.1,"y":0.2,"w":0.3,"h":0.4}}`, 5)
+	if parsed.Box != nil {
+		t.Fatalf("expected nil Box when x is null, got %+v", parsed.Box)
+	}
+	if parsed.AnswerBox == nil || parsed.AnswerBox.Num != 5 || parsed.AnswerBox.X != 0.1 {
+		t.Fatalf("expected valid AnswerBox, got %+v", parsed.AnswerBox)
+	}
+}

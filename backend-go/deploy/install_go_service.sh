@@ -203,11 +203,25 @@ chmod 755 "$BIN_PATH"
 install -d -m 750 -o root -g "$SERVICE_GROUP" "$ENV_DIR"
 echo "已就绪配置目录：$ENV_DIR (0750 root:$SERVICE_GROUP)"
 
-# 确保 identify 存档目录存在且对服务用户可写
-if [ -d "$FEEDBACK_ROOT/data" ] && [ ! -d "$FEEDBACK_ROOT/data/identify_archive" ]; then
-    install -d -m 755 -o "$SERVICE_USER" -g "$SERVICE_GROUP" "$FEEDBACK_ROOT/data/identify_archive"
-    echo "已创建存档目录：$FEEDBACK_ROOT/data/identify_archive"
-fi
+# 确保运行时写入目录存在且对服务用户可写
+for rel_dir in \
+    data \
+    data/identify_archive \
+    data/pdfs \
+    data/uploads \
+    data/temp \
+    data/logs \
+    data/sender_logs \
+    data/sender_control \
+    data/sender_control/clients; do
+    target_dir="$FEEDBACK_ROOT/$rel_dir"
+    if [ ! -d "$target_dir" ]; then
+        install -d -m 755 -o "$SERVICE_USER" -g "$SERVICE_GROUP" "$target_dir"
+        echo "已创建运行目录：$target_dir"
+    else
+        chown "$SERVICE_USER:$SERVICE_GROUP" "$target_dir"
+    fi
+done
 
 tmp_unit=""
 tmp_resp=""

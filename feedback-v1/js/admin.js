@@ -1,7 +1,7 @@
 /**
  * ============================================================================
  * 极方管理后台 (Admin Console) 前端运行脚本 - 生产环境合并包
- * 自动生成时间: 2026-11-21 03:04:25
+ * 自动生成时间: 2026-11-21 20:38:22
  * 源码模块目录: js/admin/
  * 请勿直接手动修改此文件，开发时请修改 js/admin/ 中的子模块并执行本打包脚本。
  * ============================================================================
@@ -2405,7 +2405,7 @@
             if (!confirmed) return;
             const ids = Array.from(teacherSelectedIds);
             try {
-                const res = await fetch(`${API_BASE}?action=db_batch_delete&table=users`, {
+                const res = await fetch(`${API_BASE}?action=db_delete&table=users`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ ids })

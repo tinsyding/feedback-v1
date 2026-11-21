@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"math"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -301,12 +302,15 @@ func InferSourceFileType(baseOrig string) string {
 	}
 }
 
-// IsNumericString reports whether s parses as a float (mirrors PHP is_numeric for search).
+// IsNumericString reports whether s parses as a finite standard float without underscores (mirrors PHP is_numeric for search).
 func IsNumericString(s string) bool {
 	s = strings.TrimSpace(s)
-	if s == "" {
+	if s == "" || strings.ContainsRune(s, '_') {
 		return false
 	}
-	_, err := strconv.ParseFloat(s, 64)
-	return err == nil
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+		return false
+	}
+	return true
 }

@@ -69,4 +69,14 @@ func TestLoadAdminFallback(t *testing.T) {
 	if len(creds.PasswordHashes) != 3 {
 		t.Fatalf("expected 3 password hashes, got %v", creds.PasswordHashes)
 	}
+
+	// Verify legacy PHP array(...) syntax is also supported
+	phpLegacy := "<?php return array('admin_username' => 'legacy', 'admin_password_hashes' => array('h1', 'h2'));"
+	if err := os.WriteFile(filepath.Join(localDir, "helpers.local.php"), []byte(phpLegacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	creds2 := loader.LoadAdminFallback()
+	if creds2.Username != "legacy" || len(creds2.PasswordHashes) != 2 || creds2.PasswordHashes[0] != "h1" || creds2.PasswordHashes[1] != "h2" {
+		t.Fatalf("unexpected array() creds: %+v", creds2)
+	}
 }

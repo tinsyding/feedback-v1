@@ -14,12 +14,14 @@ import (
 	"time"
 
 	"feedback-api/internal/config"
+	"feedback-api/internal/textutil"
+	"feedback-api/internal/tz"
 )
 
 var (
 	reNonSlugChar = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
-	validVerify   = map[string]struct{}{"auto": {}, "local": {}, "cloud": {}}
-	validSnapshot = map[string]struct{}{"errors_only": {}, "all": {}, "off": {}}
+	validVerify   = map[string]struct{}{"auto": {}, "local": {}, "api": {}}
+	validSnapshot = map[string]struct{}{"errors_only": {}, "always": {}, "off": {}}
 	validCmdTypes = map[string]struct{}{
 		"stop_batch":     {},
 		"refresh_policy": {},
@@ -42,7 +44,7 @@ type RemoteCommand struct {
 	AckMessage  string         `json:"ack_message"`
 }
 
-// ClientState represents data/sender_control/<slug>.json.
+// ClientState represents data/sender_control/clients/<slug>.json.
 type ClientState struct {
 	ClientSlug string          `json:"client_slug"`
 	Overrides  map[string]any  `json:"overrides"`
@@ -64,15 +66,15 @@ func NewStore(feedbackRoot string, cfgLoader *config.Loader) *Store {
 	return &Store{
 		feedbackRoot: strings.TrimSpace(feedbackRoot),
 		cfgLoader:    cfgLoader,
-		nowFunc:      time.Now,
+		nowFunc:      tz.Now,
 	}
 }
 
 func (s *Store) now() time.Time {
 	if s != nil && s.nowFunc != nil {
-		return s.nowFunc()
+		return tz.In(s.nowFunc())
 	}
-	return time.Now()
+	return tz.Now()
 }
 
 // SanitizeSlug mirrors PHP sanitizeControlSlug().
@@ -89,7 +91,7 @@ func SanitizeSlug(slug string) string {
 }
 
 func (s *Store) storageDir() string {
-	return filepath.Join(s.feedbackRoot, "data", "sender_control")
+	return filepath.Join(s.feedbackRoot, "data", "sender_control", "clients")
 }
 
 func (s *Store) clientFilePath(slug string) string {
@@ -238,10 +240,7 @@ func NormalizeOverrides(raw map[string]any) map[string]any {
 		}
 	}
 	if v, exists := raw["noticeMessage"]; exists && v != nil {
-		nm := strings.TrimSpace(config.AsPHPString(v))
-		if len(nm) > 500 {
-			nm = nm[:500]
-		}
+		nm := textutil.TruncateRunes(strings.TrimSpace(config.AsPHPString(v)), 500)
 		if nm != "" {
 			out["noticeMessage"] = nm
 		}
@@ -266,10 +265,7 @@ func (s *Store) loadLocked(slug string) ClientState {
 	}
 	st.ClientSlug = cleanSlug
 	st.Overrides = NormalizeOverrides(st.Overrides)
-	st.Note = strings.TrimSpace(st.Note)
-	if len(st.Note) > 200 {
-		st.Note = st.Note[:200]
-	}
+	st.Note = textutil.TruncateRunes(strings.TrimSpace(st.Note), 200)
 	if st.Commands == nil {
 		st.Commands = []RemoteCommand{}
 	}
@@ -288,9 +284,7 @@ func (s *Store) saveLocked(st ClientState) error {
 	}
 	st.ClientSlug = SanitizeSlug(st.ClientSlug)
 	st.Overrides = NormalizeOverrides(st.Overrides)
-	if len(st.Note) > 200 {
-		st.Note = st.Note[:200]
-	}
+	st.Note = textutil.TruncateRunes(st.Note, 200)
 	if len(st.Commands) > 30 {
 		st.Commands = st.Commands[len(st.Commands)-30:]
 	}
@@ -337,11 +331,7 @@ func (s *Store) SetOverrides(slug string, overrides map[string]any, note string)
 	defer s.mu.Unlock()
 	st := s.loadLocked(slug)
 	st.Overrides = NormalizeOverrides(overrides)
-	note = strings.TrimSpace(note)
-	if len(note) > 200 {
-		note = note[:200]
-	}
-	st.Note = note
+	st.Note = textutil.TruncateRunes(strings.TrimSpace(note), 200)
 	st.UpdatedAt = s.now().Format("2006-01-02 15:04:05")
 	_ = s.saveLocked(st)
 	return st
@@ -361,9 +351,7 @@ func (s *Store) EnqueueCommand(slug, cmdType string, params map[string]any, oper
 	if op == "" {
 		op = "admin"
 	}
-	if len(op) > 60 {
-		op = op[:60]
-	}
+	op = textutil.TruncateRunes(op, 60)
 	var rb [4]byte
 	_, _ = rand.Read(rb[:])
 	now := s.now()
@@ -420,13 +408,8 @@ func (s *Store) AcknowledgeCommands(slug string, acks []any) int {
 				if st == "" {
 					st = "ok"
 				}
-				if len(st) > 30 {
-					st = st[:30]
-				}
-				msg := strings.TrimSpace(config.AsPHPString(x["message"]))
-				if len(msg) > 300 {
-					msg = msg[:300]
-				}
+				st = textutil.TruncateRunes(st, 30)
+				msg := textutil.TruncateRunes(strings.TrimSpace(config.AsPHPString(x["message"])), 300)
 				ackMap[cid] = ackInfo{status: st, message: msg}
 			}
 		}

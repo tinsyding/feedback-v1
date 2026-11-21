@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -140,7 +141,17 @@ type mockSessionConn struct {
 
 func (c *mockSessionConn) Prepare(string) (driver.Stmt, error) { return nil, driver.ErrSkip }
 func (c *mockSessionConn) Close() error                        { return nil }
-func (c *mockSessionConn) Begin() (driver.Tx, error)           { return nil, driver.ErrSkip }
+func (c *mockSessionConn) Begin() (driver.Tx, error)           { return &mockSessionTx{state: c.state}, nil }
+func (c *mockSessionConn) BeginTx(_ context.Context, _ driver.TxOptions) (driver.Tx, error) {
+	return &mockSessionTx{state: c.state}, nil
+}
+
+type mockSessionTx struct {
+	state *mockSessionDBState
+}
+
+func (tx *mockSessionTx) Commit() error   { return nil }
+func (tx *mockSessionTx) Rollback() error { return nil }
 
 func (c *mockSessionConn) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	c.state.mu.Lock()
@@ -309,4 +320,187 @@ func TestMySQLStoreSlidingTTLAndCleanupExpired(t *testing.T) {
 			t.Fatalf("unexpected cleanup args: %#v", state.execs[0].args)
 		}
 	})
+}
+
+func TestMySQLStoreSaveDestroyUpdateAndCleanupLoop(t *testing.T) {
+	fixedNow := time.Unix(1_700_000_000, 0)
+	sid := "sess_mysql_ops_123456789012"
+
+	t.Run("Save inserts payload_json and deletes when empty", func(t *testing.T) {
+		state := &mockSessionDBState{}
+		store := NewMySQLStore(openMockSessionDB(t, state))
+		store.nowFunc = func() time.Time { return fixedNow }
+
+		err := store.Save(context.Background(), &Session{
+			ID:   sid,
+			Data: map[string]any{"user_logged_in": true, "username": "t101"},
+		})
+		if err != nil {
+			t.Fatalf("Save non-empty err = %v", err)
+		}
+		err = store.Save(context.Background(), &Session{ID: sid, Data: map[string]any{}})
+		if err != nil {
+			t.Fatalf("Save empty err = %v", err)
+		}
+
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		if len(state.execs) != 2 {
+			t.Fatalf("expected 2 execs, got %d", len(state.execs))
+		}
+		if !strings.Contains(state.execs[0].query, "INSERT INTO `app_sessions`") {
+			t.Fatalf("expected INSERT, got %s", state.execs[0].query)
+		}
+		wantExp := fixedNow.Unix() + int64(DefaultSessionTTL.Seconds())
+		if state.execs[0].args[2] != wantExp {
+			t.Fatalf("expires_at = %v, want %d", state.execs[0].args[2], wantExp)
+		}
+		if !strings.Contains(state.execs[1].query, "DELETE FROM `app_sessions`") {
+			t.Fatalf("expected DELETE for empty Save, got %s", state.execs[1].query)
+		}
+	})
+
+	t.Run("Destroy deletes session row", func(t *testing.T) {
+		state := &mockSessionDBState{deleteAffected: 1}
+		store := NewMySQLStore(openMockSessionDB(t, state))
+		if err := store.Destroy(context.Background(), sid); err != nil {
+			t.Fatalf("Destroy err = %v", err)
+		}
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		if len(state.execs) != 1 || !strings.Contains(state.execs[0].query, "DELETE FROM `app_sessions`") {
+			t.Fatalf("unexpected Destroy execs: %+v", state.execs)
+		}
+	})
+
+	t.Run("MySQLStore.Update handles changed=true, changed=false, empty-delete, and callback error", func(t *testing.T) {
+		// changed=true updates JSON
+		state := &mockSessionDBState{
+			rowFound:    true,
+			payloadJSON: `{"count":1}`,
+			expiresAt:   fixedNow.Unix() + 500,
+		}
+		store := NewMySQLStore(openMockSessionDB(t, state))
+		store.nowFunc = func() time.Time { return fixedNow }
+
+		sess, err := Update(context.Background(), store, sid, func(data map[string]any) (bool, error) {
+			data["added"] = "ok"
+			return true, nil
+		})
+		if err != nil || sess.Data["added"] != "ok" {
+			t.Fatalf("Update changed=true failed: sess=%+v err=%v", sess, err)
+		}
+		state.mu.Lock()
+		if len(state.execs) != 1 || !strings.Contains(state.execs[0].query, "INSERT INTO `app_sessions`") {
+			state.mu.Unlock()
+			t.Fatalf("expected 1 INSERT exec, got %+v", state.execs)
+		}
+		state.mu.Unlock()
+
+		// changed=false skips write
+		state.mu.Lock()
+		state.execs = nil
+		state.mu.Unlock()
+		if _, err := Update(context.Background(), store, sid, func(data map[string]any) (bool, error) {
+			return false, nil
+		}); err != nil {
+			t.Fatalf("Update changed=false err = %v", err)
+		}
+		state.mu.Lock()
+		if len(state.execs) != 0 {
+			state.mu.Unlock()
+			t.Fatalf("expected 0 execs when changed=false, got %+v", state.execs)
+		}
+		state.mu.Unlock()
+
+		// emptying map deletes row
+		if _, err := Update(context.Background(), store, sid, func(data map[string]any) (bool, error) {
+			delete(data, "count")
+			return true, nil
+		}); err != nil {
+			t.Fatalf("Update empty err = %v", err)
+		}
+		state.mu.Lock()
+		if len(state.execs) != 1 || !strings.Contains(state.execs[0].query, "DELETE FROM `app_sessions`") {
+			state.mu.Unlock()
+			t.Fatalf("expected DELETE when emptied, got %+v", state.execs)
+		}
+		state.mu.Unlock()
+
+		// callback error skips write
+		state.mu.Lock()
+		state.execs = nil
+		state.mu.Unlock()
+		wantErr := errors.New("boom")
+		if _, err := Update(context.Background(), store, sid, func(data map[string]any) (bool, error) {
+			data["bad"] = true
+			return true, wantErr
+		}); !errors.Is(err, wantErr) {
+			t.Fatalf("expected %v, got %v", wantErr, err)
+		}
+		state.mu.Lock()
+		if len(state.execs) != 0 {
+			state.mu.Unlock()
+			t.Fatalf("expected 0 execs on callback error, got %+v", state.execs)
+		}
+		state.mu.Unlock()
+	})
+
+	t.Run("StartCleanupLoop runs initial cleanup and stops on cancel", func(t *testing.T) {
+		state := &mockSessionDBState{deleteAffected: 2}
+		store := NewMySQLStore(openMockSessionDB(t, state))
+		store.nowFunc = func() time.Time { return fixedNow }
+
+		ctx, cancel := context.WithCancel(context.Background())
+		store.StartCleanupLoop(ctx, 50*time.Millisecond)
+		deadline := time.Now().Add(time.Second)
+		for time.Now().Before(deadline) {
+			state.mu.Lock()
+			n := len(state.execs)
+			state.mu.Unlock()
+			if n >= 1 {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		cancel()
+		state.mu.Lock()
+		if len(state.execs) < 1 {
+			state.mu.Unlock()
+			t.Fatal("expected StartCleanupLoop to execute at least 1 cleanup")
+		}
+		state.mu.Unlock()
+	})
+}
+
+func TestMemoryStoreConcurrentUpdate(t *testing.T) {
+	store := NewMemoryStore()
+	sid := "sess_concurrent_update_1234"
+	store.Set(sid, map[string]any{"counter": 0})
+
+	const workers = 32
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			_, err := Update(context.Background(), store, sid, func(data map[string]any) (bool, error) {
+				cur, _ := data["counter"].(int)
+				data["counter"] = cur + 1
+				return true, nil
+			})
+			if err != nil {
+				t.Errorf("concurrent Update failed: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	finalSess, err := store.Load(context.Background(), sid)
+	if err != nil || finalSess == nil {
+		t.Fatalf("Load failed: sess=%+v err=%v", finalSess, err)
+	}
+	if finalSess.Data["counter"] != workers {
+		t.Fatalf("counter = %v, want %d (lost update!)", finalSess.Data["counter"], workers)
+	}
 }

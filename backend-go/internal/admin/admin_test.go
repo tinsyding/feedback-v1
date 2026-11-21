@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"feedback-api/internal/textutil"
 )
 
 func TestHiddenTablesAndIdentifiers(t *testing.T) {
@@ -21,6 +23,14 @@ func TestHiddenTablesAndIdentifiers(t *testing.T) {
 	}
 	if IsValidIdentifier("users; DROP TABLE users") || IsValidIdentifier("") {
 		t.Fatal("expected invalid identifier")
+	}
+	if !IsNumericString("12345") || !IsNumericString("-42.5") {
+		t.Fatalf("expected standard numbers to pass IsNumericString")
+	}
+	for _, bad := range []string{"", "NaN", "nan", "Inf", "+Inf", "-inf", "1_000", "12abc"} {
+		if IsNumericString(bad) {
+			t.Fatalf("IsNumericString(%q) = true, want false", bad)
+		}
 	}
 }
 
@@ -99,5 +109,36 @@ func TestFindSourceFile(t *testing.T) {
 	}
 	if match.ArchivedName != "20261121_110000_homework_1.csv" {
 		t.Fatalf("unexpected match: %+v", match)
+	}
+
+	// Verify GBK-encoded CSV student matching and traversal rejection ("..").
+	if _, ok := FindSourceFile([]string{dir}, "..", "张三", nil); ok {
+		t.Fatal("expected FindSourceFile(\"..\") to be rejected")
+	}
+	gbkDir := t.TempDir()
+	gbkSub := filepath.Join(gbkDir, "20261121")
+	if err := os.MkdirAll(gbkSub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gbkName, gbkOK := textutil.EncodeGBK("王五")
+	if !gbkOK {
+		t.Fatal("expected EncodeGBK(王五) to succeed")
+	}
+	otherGBK, _ := textutil.EncodeGBK("赵六")
+	gf1 := filepath.Join(gbkSub, "20261121_110500_homework_2.csv")
+	gf2 := filepath.Join(gbkSub, "20261121_100500_homework_2.csv")
+	// gf1 is newer (higher fallback score) without matching student; gf2 contains GBK-encoded 王五.
+	_ = os.WriteFile(gf1, append([]byte("name,score\n"), otherGBK...), 0o644)
+	_ = os.WriteFile(gf2, append([]byte("name,score\n"), gbkName...), 0o644)
+	gbkIdx := `{"orig":"作业2.csv","rel":"20261121/20261121_110500_homework_2.csv","ts":1795143900,"type":"homework"}` + "\n" +
+		`{"orig":"作业2.csv","rel":"20261121/20261121_100500_homework_2.csv","ts":1795140300,"type":"homework"}` + "\n"
+	_ = os.WriteFile(filepath.Join(gbkDir, "index.jsonl"), []byte(gbkIdx), 0o644)
+
+	gbkMatch, ok := FindSourceFile([]string{gbkDir}, "作业2.csv", "王五", []int64{1795144000})
+	if !ok {
+		t.Fatal("expected GBK match")
+	}
+	if gbkMatch.ArchivedName != "20261121_100500_homework_2.csv" {
+		t.Fatalf("expected GBK content bonus to pick gf2, got %+v", gbkMatch)
 	}
 }

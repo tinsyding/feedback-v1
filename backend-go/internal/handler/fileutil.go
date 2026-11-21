@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"sync"
@@ -56,4 +57,19 @@ func runAsyncCleanup(running *atomic.Bool, fn func()) {
 		defer running.Store(false)
 		fn()
 	}()
+}
+
+// WaitBackgroundCleanups waits for active async cleanup goroutines until completion or ctx cancellation.
+func WaitBackgroundCleanups(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		bgCleanupWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

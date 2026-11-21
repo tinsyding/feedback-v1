@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,7 +15,9 @@ import (
 	"strconv"
 	"strings"
 
+	"feedback-api/internal/config"
 	"feedback-api/internal/httpx"
+	"feedback-api/internal/session"
 )
 
 const maxTempPDFSize = 25 * 1024 * 1024
@@ -41,10 +44,18 @@ func handleRetestCreateTempDownload(w http.ResponseWriter, r *http.Request, deps
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxTempPDFSize+(2<<20))
+
 	// Parse multipart form if multipart; otherwise read raw body later
 	isMultipart := strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data")
 	if isMultipart {
-		_ = r.ParseMultipartForm(maxTempPDFSize + (1 << 20))
+		if err := r.ParseMultipartForm(maxTempPDFSize + (1 << 20)); err != nil {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				writeRawJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"success": false, "error": "文件大小超出限制（最大 25MB）"})
+				return
+			}
+		}
 		if r.MultipartForm != nil {
 			defer func() { _ = r.MultipartForm.RemoveAll() }()
 		}
@@ -67,24 +78,48 @@ func handleRetestCreateTempDownload(w http.ResponseWriter, r *http.Request, deps
 		return
 	}
 
-	// Per-session rate limit: max 30 temp files per hour
+	// Per-session rate limit: max 30 temp files per hour (atomic read-modify-write)
 	nowUnix := deps.now().Unix()
-	dlCount := sess.IntVal("temp_download_count")
-	dlTime := int64(sess.IntVal("temp_download_time"))
-	if dlTime <= 0 || nowUnix-dlTime > 3600 {
-		dlCount = 0
-		dlTime = nowUnix
+	rateLimited := false
+	if deps.Sessions != nil {
+		if _, err := session.Update(r.Context(), deps.Sessions, sess.ID, func(data map[string]any) (bool, error) {
+			dlCount := config.AsPHPInt(data["temp_download_count"])
+			dlTime := int64(config.AsPHPInt(data["temp_download_time"]))
+			if dlTime <= 0 || nowUnix-dlTime > 3600 {
+				dlCount = 0
+				dlTime = nowUnix
+			}
+			if dlCount >= 30 {
+				rateLimited = true
+				return false, nil
+			}
+			data["temp_download_count"] = dlCount + 1
+			data["temp_download_time"] = dlTime
+			return true, nil
+		}); err == nil && isNewSess {
+			session.SetCookie(w, r, sess.ID)
+		}
+	} else {
+		dlCount := sess.IntVal("temp_download_count")
+		dlTime := int64(sess.IntVal("temp_download_time"))
+		if dlTime <= 0 || nowUnix-dlTime > 3600 {
+			dlCount = 0
+			dlTime = nowUnix
+		}
+		if dlCount >= 30 {
+			rateLimited = true
+		} else {
+			sess.Data["temp_download_count"] = dlCount + 1
+			sess.Data["temp_download_time"] = dlTime
+		}
 	}
-	if dlCount >= 30 {
+	if rateLimited {
 		writeRawJSON(w, http.StatusTooManyRequests, map[string]any{
 			"success": false,
 			"error":   "生成下载文件过于频繁，请稍后再试",
 		})
 		return
 	}
-	sess.Data["temp_download_count"] = dlCount + 1
-	sess.Data["temp_download_time"] = dlTime
-	persistAuthSession(w, r, deps.Sessions, sess, isNewSess)
 
 	var pdfBytes []byte
 	fileName := "错题本.pdf"
@@ -138,7 +173,7 @@ func handleRetestCreateTempDownload(w http.ResponseWriter, r *http.Request, deps
 	targetPath := filepath.Join(tempDir, fileKey+".pdf")
 	metaPath := filepath.Join(tempDir, fileKey+".json")
 
-	if err := os.WriteFile(targetPath, pdfBytes, 0o644); err != nil {
+	if err := writeFileAtomic(targetPath, pdfBytes, 0o644); err != nil {
 		writeRawJSON(w, http.StatusInternalServerError, map[string]any{"success": false, "error": "临时文件写入失败"})
 		return
 	}
@@ -148,7 +183,7 @@ func handleRetestCreateTempDownload(w http.ResponseWriter, r *http.Request, deps
 		"filename":   cleanFileName,
 		"created_at": nowUnix,
 	})
-	_ = os.WriteFile(metaPath, metaBytes, 0o644)
+	_ = writeFileAtomic(metaPath, metaBytes, 0o644)
 
 	studentName := strings.TrimSpace(r.PostFormValue("studentName"))
 	if studentName == "" {
@@ -241,8 +276,14 @@ func handleRetestDownloadFile(w http.ResponseWriter, r *http.Request, deps Retes
 	}
 	logRetestAccess(r, deps, token, studentName, "download_file", cleanFileName)
 
-	data, err := os.ReadFile(filePath)
+	f, err := os.Open(filePath)
 	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil || fi.IsDir() {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -254,9 +295,9 @@ func handleRetestDownloadFile(w http.ResponseWriter, r *http.Request, deps Retes
 	w.Header().Set("Expires", "0")
 	w.Header().Set("Cache-Control", "must-revalidate, post-check=0, pre-check=0")
 	w.Header().Set("Pragma", "public")
-	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.Header().Set("Content-Length", strconv.FormatInt(fi.Size(), 10))
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
+	_, _ = io.Copy(w, f)
 }
 
 func handleRetestLogDownload(w http.ResponseWriter, r *http.Request, deps RetestDeps) {

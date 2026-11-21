@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -742,6 +743,9 @@ func (r *MySQLRepository) CreateRecord(ctx context.Context, table string, input 
 		}
 		hash, err := bcrypt.GenerateFromPassword([]byte(rawPwd), bcrypt.DefaultCost)
 		if err != nil {
+			if errors.Is(err, bcrypt.ErrPasswordTooLong) {
+				return 0, NewHTTPError(400, "登录密码长度不能超过 72 字节", nil)
+			}
 			return 0, err
 		}
 		data["password_hash"] = string(hash)
@@ -778,7 +782,7 @@ func (r *MySQLRepository) CreateRecord(ctx context.Context, table string, input 
 				sSubject.String,
 			)
 		}
-		if rawEQ, ok := data["error_questions"]; ok {
+		if rawEQ, ok := data["error_questions"]; ok && rawEQ != nil {
 			eqJSON, eqCount := ParseErrorQuestions(rawEQ)
 			data["error_questions"] = eqJSON
 			if _, hasCnt := data["error_count"]; !hasCnt {
@@ -795,6 +799,9 @@ func (r *MySQLRepository) CreateRecord(ctx context.Context, table string, input 
 		}
 		rt := strings.TrimSpace(config.AsPHPString(data["retest_token"]))
 		if rt == "" || rt == "auto" {
+			if strings.TrimSpace(retestSecret) == "" {
+				return 0, NewHTTPError(500, "服务端密钥未配置，无法生成错题本凭证", nil)
+			}
 			sKeyForToken := config.AsPHPString(data["student_key"])
 			if sKeyForToken == "" {
 				sKeyForToken = retestkeys.BuildStudentKey(
@@ -811,7 +818,7 @@ func (r *MySQLRepository) CreateRecord(ctx context.Context, table string, input 
 	if validTbl == "qbank_questions" && config.AsPHPInt(data["qbank_id"]) > 0 {
 		if qRows, err := r.db.QueryContext(ctx,
 			"SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ? LIMIT 1",
-			data["qbank_id"],
+			config.AsPHPInt(data["qbank_id"]),
 		); err == nil {
 			if list, err := scanDynamicRows(qRows); err == nil && len(list) > 0 {
 				pw := list[0]
@@ -835,7 +842,7 @@ func (r *MySQLRepository) CreateRecord(ctx context.Context, table string, input 
 			if v, ok := data[col.Name]; ok && v != nil {
 				fields = append(fields, fmt.Sprintf("`%s`", col.Name))
 				phs = append(phs, "?")
-				values = append(values, v)
+				values = append(values, marshalIfComposite(v))
 			}
 			continue
 		}
@@ -908,6 +915,9 @@ func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, in
 			}
 			hash, err := bcrypt.GenerateFromPassword([]byte(rawPwd), bcrypt.DefaultCost)
 			if err != nil {
+				if errors.Is(err, bcrypt.ErrPasswordTooLong) {
+					return 0, nil, NewHTTPError(400, "登录密码长度不能超过 72 字节", nil)
+				}
 				return 0, nil, err
 			}
 			data["password_hash"] = string(hash)
@@ -949,7 +959,7 @@ func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, in
 			}
 			data["student_key"] = retestkeys.BuildStudentKey(sID, sName, sGrade.String, sSubject.String)
 		}
-		if rawEQ, ok := data["error_questions"]; ok {
+		if rawEQ, ok := data["error_questions"]; ok && rawEQ != nil {
 			eqJSON, eqCount := ParseErrorQuestions(rawEQ)
 			data["error_questions"] = eqJSON
 			if _, hasCnt := data["error_count"]; !hasCnt {
@@ -970,7 +980,7 @@ func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, in
 		if qid, ok := data["qbank_id"]; ok && qid != nil {
 			if qRows, err := r.db.QueryContext(ctx,
 				"SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ? LIMIT 1",
-				qid,
+				marshalIfComposite(qid),
 			); err == nil {
 				if list, err := scanDynamicRows(qRows); err == nil && len(list) > 0 {
 					pw := list[0]
@@ -990,7 +1000,7 @@ func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, in
 			continue
 		}
 		if col.Name == "updated_at" {
-			if _, exists := data["updated_at"]; !exists {
+			if v, exists := data["updated_at"]; !exists || v == nil {
 				setParts = append(setParts, "`updated_at` = NOW()")
 				continue
 			}
@@ -1160,10 +1170,28 @@ func (r *MySQLRepository) DeleteRecords(ctx context.Context, table string, ids [
 		}
 	}
 
-	var affectedQbankIDs []int
 	if validTbl == "qbank_weeks" {
-		_, _ = r.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM `qbank_questions` WHERE `qbank_id` IN (%s)", inPH), args...)
-	} else if validTbl == "qbank_questions" {
+		tx, err := r.db.BeginTx(ctx, nil)
+		if err != nil {
+			return 0, NewHTTPError(500, "删除失败", nil)
+		}
+		defer func() { _ = tx.Rollback() }()
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM `qbank_questions` WHERE `qbank_id` IN (%s)", inPH), args...); err != nil {
+			return 0, NewHTTPError(500, "删除失败", nil)
+		}
+		res, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM `%s` WHERE `%s` IN (%s)", validTbl, pk, inPH), args...)
+		if err != nil {
+			return 0, NewHTTPError(500, "删除失败", nil)
+		}
+		deleted, _ := res.RowsAffected()
+		if err := tx.Commit(); err != nil {
+			return 0, NewHTTPError(500, "删除失败", nil)
+		}
+		return deleted, nil
+	}
+
+	var affectedQbankIDs []int
+	if validTbl == "qbank_questions" {
 		if qRows, err := r.db.QueryContext(ctx, fmt.Sprintf("SELECT DISTINCT `qbank_id` FROM `qbank_questions` WHERE `id` IN (%s)", inPH), args...); err == nil {
 			for qRows.Next() {
 				var qid sql.NullInt64
@@ -1216,6 +1244,9 @@ func (r *MySQLRepository) ResetTeacherPassword(ctx context.Context, userID int, 
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
+		if errors.Is(err, bcrypt.ErrPasswordTooLong) {
+			return ResetTeacherResult{}, NewHTTPError(400, "新密码长度不能超过 72 字节", nil)
+		}
 		return ResetTeacherResult{}, err
 	}
 	if _, err := r.db.ExecContext(ctx, "UPDATE `users` SET `password_hash` = ?, `initial_password` = '', `updated_at` = NOW() WHERE `id` = ?", string(hash), id); err != nil {
@@ -1228,9 +1259,17 @@ func (r *MySQLRepository) ResetTeacherPassword(ctx context.Context, userID int, 
 }
 
 func marshalIfComposite(v any) any {
-	switch v.(type) {
+	switch x := v.(type) {
+	case json.Number:
+		if i, err := x.Int64(); err == nil {
+			return i
+		}
+		if f, err := x.Float64(); err == nil {
+			return f
+		}
+		return x.String()
 	case map[string]any, []any, []string, []int:
-		if b, err := json.Marshal(v); err == nil {
+		if b, err := json.Marshal(x); err == nil {
 			return string(b)
 		}
 	}

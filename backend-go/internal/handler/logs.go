@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -22,7 +23,14 @@ import (
 	"feedback-api/internal/senderlogs"
 	"feedback-api/internal/session"
 	"feedback-api/internal/syslogs"
+	"feedback-api/internal/textutil"
+	"feedback-api/internal/tz"
 	"feedback-api/internal/vision"
+)
+
+const (
+	minValidUnixMillis = 946684800000  // 2000-01-01T00:00:00Z
+	maxValidUnixMillis = 4102444800000 // 2100-01-01T00:00:00Z
 )
 
 var senderLogsCleanupRunning atomic.Bool
@@ -41,9 +49,23 @@ type LogsDeps struct {
 
 func (d LogsDeps) now() time.Time {
 	if d.NowFunc != nil {
-		return d.NowFunc()
+		return tz.In(d.NowFunc())
 	}
-	return time.Now()
+	return tz.Now()
+}
+
+func parseBoundedUnixMillis(raw any, fallback float64) float64 {
+	if raw == nil {
+		return fallback
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(config.AsPHPString(raw)), 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+		return fallback
+	}
+	if f < minValidUnixMillis || f > maxValidUnixMillis {
+		return fallback
+	}
+	return f
 }
 
 // Logs implements GET|POST|DELETE /api/logs.php matching feedback-v1/api/logs.php.
@@ -108,16 +130,21 @@ func newPrefixedLogID(prefix string) string {
 	return prefix + "_" + hex.EncodeToString(b[:])
 }
 
+func extractSenderHeaderToken(r *http.Request) string {
+	if tok := strings.TrimSpace(r.Header.Get("X-Sender-Token")); tok != "" {
+		return tok
+	}
+	auth := r.Header.Get("Authorization")
+	if len(auth) >= 7 && strings.EqualFold(auth[:7], "bearer ") {
+		return strings.TrimSpace(auth[7:])
+	}
+	return ""
+}
+
 func verifySenderTokenFromRequest(r *http.Request, loader *config.Loader, explicitToken string) bool {
 	tok := strings.TrimSpace(explicitToken)
 	if tok == "" {
-		tok = strings.TrimSpace(r.Header.Get("X-Sender-Token"))
-	}
-	if tok == "" {
-		auth := r.Header.Get("Authorization")
-		if len(auth) >= 7 && strings.EqualFold(auth[:7], "bearer ") {
-			tok = strings.TrimSpace(auth[7:])
-		}
+		tok = extractSenderHeaderToken(r)
 	}
 	if loader == nil {
 		return false
@@ -163,8 +190,8 @@ func handleLogsPostIngest(w http.ResponseWriter, r *http.Request, deps LogsDeps)
 	}
 	if sessionUser == "" {
 		guestKey := "guest_ip:" + serverIP
-		if c, err := r.Cookie("PHPSESSID"); err == nil && strings.TrimSpace(c.Value) != "" {
-			guestKey = "guest_sid:" + strings.TrimSpace(c.Value)
+		if sess != nil && sess.ID != "" {
+			guestKey = "guest_sid:" + sess.ID
 		}
 		if !deps.Limiter.Allow(guestKey, 30) {
 			httpx.SendResponse(w, false, nil, httpx.StrPtr("日志上报频次超限，请稍后再试"), http.StatusTooManyRequests)
@@ -195,12 +222,7 @@ func handleLogsPostIngest(w http.ResponseWriter, r *http.Request, deps LogsDeps)
 
 	records := make([]syslogs.LogRecord, 0, len(rawEntries))
 	for _, entry := range rawEntries {
-		ts := float64(now.UnixMilli())
-		if rawTS, ok := entry["timestamp"]; ok && rawTS != nil {
-			if f, err := strconv.ParseFloat(config.AsPHPString(rawTS), 64); err == nil && f > 0 {
-				ts = f
-			}
-		}
+		ts := parseBoundedUnixMillis(entry["timestamp"], float64(now.UnixMilli()))
 		level := strings.TrimSpace(config.AsPHPString(entry["level"]))
 		if level == "" {
 			level = "action"
@@ -233,10 +255,7 @@ func handleLogsPostIngest(w http.ResponseWriter, r *http.Request, deps LogsDeps)
 		if sessionUser != "" {
 			operator = sessionUser
 		} else if reqOp != "" {
-			if len(reqOp) > 30 {
-				reqOp = reqOp[:30]
-			}
-			operator = "guest:" + reqOp
+			operator = "guest:" + textutil.TruncateRunes(reqOp, 30)
 		}
 
 		clientMap := map[string]any{}
@@ -250,7 +269,7 @@ func handleLogsPostIngest(w http.ResponseWriter, r *http.Request, deps LogsDeps)
 			clientMap["userAgent"] = serverUA
 		}
 
-		createdAt := time.Unix(int64(math.Ceil(ts/1000.0)), 0).Format("2006-01-02 15:04:05")
+		createdAt := tz.Unix(int64(math.Ceil(ts/1000.0)), 0).Format("2006-01-02 15:04:05")
 		records = append(records, syslogs.LogRecord{
 			ID:        newPrefixedLogID("log"),
 			Timestamp: ts,
@@ -474,12 +493,7 @@ func handleLogsSenderSync(w http.ResponseWriter, r *http.Request, deps LogsDeps)
 				}
 			}
 
-			ts := float64(now.UnixMilli())
-			if rawTS, ok := entry["timestamp"]; ok && rawTS != nil {
-				if f, err := strconv.ParseFloat(config.AsPHPString(rawTS), 64); err == nil && f > 0 {
-					ts = f
-				}
-			}
+			ts := parseBoundedUnixMillis(entry["timestamp"], float64(now.UnixMilli()))
 			sysLevel := config.AsPHPString(entry["sys_level"])
 			switch sysLevel {
 			case "error", "warn", "action", "info":
@@ -490,9 +504,7 @@ func handleLogsSenderSync(w http.ResponseWriter, r *http.Request, deps LogsDeps)
 			if event == "" {
 				event = "sender_log"
 			}
-			if len(event) > 60 {
-				event = event[:60]
-			}
+			event = textutil.TruncateRunes(event, 60)
 			rawLvl := config.AsPHPString(entry["level"])
 			if rawLvl == "" {
 				rawLvl = "INFO"
@@ -522,7 +534,7 @@ func handleLogsSenderSync(w http.ResponseWriter, r *http.Request, deps LogsDeps)
 			for k, v := range curMeta {
 				cliRec[k] = v
 			}
-			createdAt := time.Unix(int64(math.Ceil(ts/1000.0)), 0).Format("2006-01-02 15:04:05")
+			createdAt := tz.Unix(int64(math.Ceil(ts/1000.0)), 0).Format("2006-01-02 15:04:05")
 
 			records = append(records, syslogs.LogRecord{
 				ID:        newPrefixedLogID("snd"),
@@ -580,10 +592,40 @@ func readValidSnapshotImage(r *http.Request, field string) []byte {
 }
 
 func handleLogsSenderSnapshot(w http.ResponseWriter, r *http.Request, deps LogsDeps) {
-	httpx.ParseRequestForm(r)
-	if r.MultipartForm != nil {
-		defer func() { _ = r.MultipartForm.RemoveAll() }()
+	if hdrTok := extractSenderHeaderToken(r); hdrTok != "" {
+		if deps.ConfigLoader == nil || !deps.ConfigLoader.Load().VerifySenderToken(hdrTok) {
+			httpx.SendResponse(w, false, nil, httpx.StrPtr("发送器鉴权失败"), http.StatusOK)
+			return
+		}
 	}
+
+	if r.ContentLength > 12<<20 {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("请求载荷超出限制"), http.StatusRequestEntityTooLarge)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 12<<20)
+	ct := strings.ToLower(r.Header.Get("Content-Type"))
+	if strings.HasPrefix(ct, "multipart/form-data") {
+		if err := r.ParseMultipartForm(4 << 20); err != nil {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				httpx.SendResponse(w, false, nil, httpx.StrPtr("请求载荷超出限制"), http.StatusRequestEntityTooLarge)
+				return
+			}
+			httpx.SendResponse(w, false, nil, httpx.StrPtr("无效的请求数据"), http.StatusBadRequest)
+			return
+		}
+		if r.MultipartForm != nil {
+			defer func() { _ = r.MultipartForm.RemoveAll() }()
+		}
+	} else if err := r.ParseForm(); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			httpx.SendResponse(w, false, nil, httpx.StrPtr("请求载荷超出限制"), http.StatusRequestEntityTooLarge)
+			return
+		}
+	}
+
 	if !verifySenderTokenFromRequest(r, deps.ConfigLoader, r.PostFormValue("token")) {
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("发送器鉴权失败"), http.StatusOK)
 		return
@@ -663,10 +705,28 @@ func handleLogsSenderSnapshot(w http.ResponseWriter, r *http.Request, deps LogsD
 }
 
 func handleLogsSenderControlPullPost(w http.ResponseWriter, r *http.Request, deps LogsDeps) {
-	input := readJSONBodyMap(r)
-	tok := config.AsPHPString(input["token"])
-	if tok == "" {
+	ct := strings.ToLower(r.Header.Get("Content-Type"))
+	var input map[string]any
+	var tok string
+	if strings.HasPrefix(ct, "application/x-www-form-urlencoded") || strings.HasPrefix(ct, "multipart/form-data") {
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		httpx.ParseRequestForm(r)
+		if r.MultipartForm != nil {
+			defer func() { _ = r.MultipartForm.RemoveAll() }()
+		}
 		tok = r.PostFormValue("token")
+		input = map[string]any{
+			"client_slug": r.PostFormValue("client_slug"),
+		}
+		if rawClient := strings.TrimSpace(r.PostFormValue("client")); rawClient != "" {
+			var cm map[string]any
+			if json.Unmarshal([]byte(rawClient), &cm) == nil && cm != nil {
+				input["client"] = cm
+			}
+		}
+	} else {
+		input = readJSONBodyMap(r)
+		tok = config.AsPHPString(input["token"])
 	}
 	if !verifySenderTokenFromRequest(r, deps.ConfigLoader, tok) {
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("发送器鉴权失败"), http.StatusOK)

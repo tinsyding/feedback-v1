@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 
 const list1 = [
     { errorNum: 2, parentNum: 2, topic: '等腰三角形判定', exercisePdf: 'q2.pdf', sourceType: 'homework' },
@@ -10,164 +11,21 @@ const list1 = [
     { errorNum: 3, parentNum: 3, subNum: 1, topic: '角平分线辅助线', exercisePdf: 'q3_v1.pdf', sourceType: 'variation', isVariation: true }
 ];
 
+// 直接从生产文件 feedback-v1/js/retest.js 抽取 appendList 真实分组实现（含 isSameClusterItem）
+const retestCode = fs.readFileSync(path.join(__dirname, '../feedback-v1/js/retest.js'), 'utf8');
+const appendListMatch = retestCode.match(/^([ \t]*)const appendList = \(list, sourceType, headerWeek\) => \{[\s\S]*?^\1\};/m);
+if (!appendListMatch) {
+    throw new Error('Could not extract live appendList from feedback-v1/js/retest.js');
+}
+
 function runGrouping(list, sourceType, headerWeek) {
-    const parseQNum = val => {
-        if (typeof val === 'number') return val;
-        const m = String(val || '').match(/\d+/);
-        return m ? parseInt(m[0], 10) : 0;
-    };
-    const cleanTopic = t => String(t || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
-
-    const validItems = [];
-    list.forEach(p => {
-        const url = p.exercisePdf;
-        if (url) {
-            const actualSourceType = (sourceType === 'preview') ? 'preview' : (p.sourceType || sourceType);
-            const isVar = actualSourceType === 'variation' || Boolean(p.isVariation);
-
-            let pNums = [];
-            if (Array.isArray(p.matchedParentNums) && p.matchedParentNums.length > 0) {
-                pNums = p.matchedParentNums.map(parseQNum).filter(n => n > 0);
-            } else if (Array.isArray(p.parentNums) && p.parentNums.length > 0) {
-                pNums = p.parentNums.map(parseQNum).filter(n => n > 0);
-            } else if (typeof p.parent_question_nums === 'string' && p.parent_question_nums) {
-                pNums = p.parent_question_nums.split(',').map(parseQNum).filter(n => n > 0);
-            }
-            const pNum = parseQNum(p.parentNum || p.parent_question_num || p.errorNum);
-            if (pNums.length === 0 && pNum > 0) {
-                pNums = [pNum];
-            }
-
-            validItems.push({
-                url: url,
-                errorNum: parseQNum(p.errorNum),
-                parentNum: pNum,
-                parentNums: pNums,
-                matchedParentNums: pNums,
-                subNum: p.subNum || 1,
-                videoUrl: p.videoUrl || p.video_url || '',
-                topic: p.topic || '',
-                week: headerWeek,
-                sourceType: actualSourceType,
-                isVariation: isVar
-            });
-        }
-    });
-
-    validItems.sort((a, b) => {
-        const diff = parseQNum(a.errorNum) - parseQNum(b.errorNum);
-        if (diff !== 0) return diff;
-        const rankA = a.isVariation ? (10 + (a.subNum || 1)) : 0;
-        const rankB = b.isVariation ? (10 + (b.subNum || 1)) : 0;
-        return rankA - rankB;
-    });
-
-    const parentTopicMap = new Map();
-    validItems.forEach(item => {
-        if (!item.isVariation && cleanTopic(item.topic)) {
-            parentTopicMap.set(item.parentNum, cleanTopic(item.topic));
-        }
-    });
-
-    const groups = [];
-    const groupByTopicKey = new Map();
-
-    validItems.forEach(item => {
-        const parentNum = item.parentNum;
-        const itemTopic = cleanTopic(item.topic) || parentTopicMap.get(parentNum) || '';
-        const topicKey = itemTopic ? ('topic:' + itemTopic) : ('orphan_parent:' + parentNum);
-
-        let group = groupByTopicKey.get(topicKey);
-        if (!group) {
-            group = {
-                topicKey: topicKey,
-                topic: itemTopic,
-                sourceType: item.sourceType,
-                firstOrder: parentNum,
-                parentNumsSet: new Set(),
-                originalItems: [],
-                variationItems: []
-            };
-            groups.push(group);
-            groupByTopicKey.set(topicKey, group);
-        }
-
-        group.parentNumsSet.add(parentNum);
-        if (parentNum < group.firstOrder) {
-            group.firstOrder = parentNum;
-        }
-
-        if (!item.isVariation) {
-            group.originalItems.push(item);
-        } else {
-            // 同一考点组内变式按 url 去重并合并关联原题
-            const existingVar = group.variationItems.find(v => v.url === item.url);
-            if (existingVar) {
-                const mergedPNums = Array.from(new Set(
-                    (existingVar.parentNums || []).concat(item.parentNums || [])
-                )).sort((a, b) => a - b);
-                existingVar.parentNums = mergedPNums;
-                existingVar.matchedParentNums = mergedPNums;
-            } else {
-                group.variationItems.push(item);
-            }
-        }
-    });
-
-    groups.sort((a, b) => a.firstOrder - b.firstOrder);
-
+    const type = 'exercise';
     const pdfsToMerge = [];
-    groups.forEach(group => {
-        const parentNums = Array.from(group.parentNumsSet).sort((a, b) => a - b);
-        const isGroupMerged = group.topic !== '' && group.originalItems.length >= 2;
-
-        group.originalItems.sort((a, b) => a.parentNum - b.parentNum);
-
-        // 计算组内各变式命中的原题
-        group.variationItems.forEach(v => {
-            const allP = Array.isArray(v.parentNums) && v.parentNums.length > 0 ? v.parentNums : [v.parentNum];
-            const matched = allP.filter(p => parentNums.includes(p));
-            v.matchedParentNums = matched.length > 0 ? matched : (allP.length > 0 ? allP : [v.parentNum]);
-        });
-
-        group.variationItems.sort((a, b) => {
-            const pA = Array.isArray(a.matchedParentNums) && a.matchedParentNums.length > 0 ? a.matchedParentNums[0] : a.parentNum;
-            const pB = Array.isArray(b.matchedParentNums) && b.matchedParentNums.length > 0 ? b.matchedParentNums[0] : b.parentNum;
-            const pDiff = pA - pB;
-            if (pDiff !== 0) return pDiff;
-            return (a.subNum || 1) - (b.subNum || 1);
-        });
-
-        const totalVariationsInGroup = group.variationItems.length;
-
-        const groupItems = group.originalItems.concat(group.variationItems);
-        if (groupItems.length === 0) return;
-
-        groupItems.forEach((item, idx) => {
-            const pNum = item.parentNum;
-            const varTotal = totalVariationsInGroup;
-            const varCount = totalVariationsInGroup;
-
-            pdfsToMerge.push({
-                ...item,
-                parentNum: pNum,
-                parentNums: item.parentNums || [pNum],
-                matchedParentNums: item.matchedParentNums || [pNum],
-                clusterTopic: group.topic,
-                variationTotal: varTotal,
-                variationCount: varCount,
-                isGroupMerged: isGroupMerged,
-                groupTopic: group.topic,
-                groupParentNums: parentNums,
-                groupVariationCount: totalVariationsInGroup,
-                isGroupStart: idx === 0,
-                isGroupEnd: idx === groupItems.length - 1,
-                isClusterStart: idx === 0 || groupItems[idx - 1].url !== item.url || groupItems[idx - 1].isVariation !== item.isVariation,
-                isClusterEnd: idx === groupItems.length - 1 || groupItems[idx + 1].url !== item.url || groupItems[idx + 1].isVariation !== item.isVariation
-            });
-        });
-    });
-
+    const invoke = new Function('type', 'pdfsToMerge', 'list', 'sourceType', 'headerWeek', `
+        ${appendListMatch[0]}
+        appendList(list, sourceType, headerWeek);
+    `);
+    invoke(type, pdfsToMerge, list, sourceType, headerWeek);
     return pdfsToMerge;
 }
 
@@ -230,3 +88,44 @@ console.log('Deduplicated items length:', resDup.length);
 if (resDup.length !== 3) throw new Error('Expected 3 items after deduplicating same PDF URL in group');
 if (resDup[2].matchedParentNums.join(',') !== '2,5') throw new Error('Merged variation should match both parents [2, 5]');
 console.log('DEDUPLICATION TEST PASSED!');
+
+// 运行测试 4：region_crop 模式同文件不同框选区域（验证 live retest.js isSameClusterItem / 去重逻辑）
+const regionList = [
+    {
+        errorNum: 1,
+        parentNum: 1,
+        mode: 'region_crop',
+        regions: [{ pageOffset: 0, x: 0.1, y: 0.1, w: 0.8, h: 0.2 }],
+        topic: '一次函数图像',
+        exercisePdf: 'shared_page.pdf',
+        sourceType: 'homework'
+    },
+    {
+        errorNum: 1,
+        parentNum: 1,
+        subNum: 1,
+        mode: 'region_crop',
+        regions: [{ pageOffset: 0, x: 0.1, y: 0.4, w: 0.8, h: 0.2 }],
+        topic: '一次函数图像',
+        exercisePdf: 'shared_page.pdf',
+        sourceType: 'variation',
+        isVariation: true
+    },
+    {
+        errorNum: 2,
+        parentNum: 2,
+        subNum: 2,
+        mode: 'region_crop',
+        regions: [{ pageOffset: 0, x: 0.1, y: 0.7, w: 0.8, h: 0.2 }],
+        topic: '一次函数图像',
+        exercisePdf: 'shared_page.pdf',
+        sourceType: 'variation',
+        isVariation: true
+    }
+];
+const resRegion = runGrouping(regionList, 'homework', '1');
+console.log('\n--- Region Crop Cluster Boundary Test ---');
+if (resRegion.length !== 3) throw new Error('Expected 3 items when region_crop variations use distinct regions on same PDF');
+if (!resRegion[1].isClusterStart || !resRegion[1].isClusterEnd) throw new Error('Expected variation 1 to form its own cluster boundary');
+if (!resRegion[2].isClusterStart || !resRegion[2].isClusterEnd) throw new Error('Expected variation 2 to form its own cluster boundary');
+console.log('REGION CROP CLUSTER TEST PASSED!');

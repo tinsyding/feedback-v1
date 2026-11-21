@@ -25,10 +25,11 @@ WorkingDirectory=/www/wwwroot/JF/feedback-git/feedback-v1
 ExecStart=/opt/feedback-go/feedback-api
 Environment=FEEDBACK_LISTEN_ADDR=127.0.0.1:8090
 Environment=FEEDBACK_ROOT=/www/wwwroot/JF/feedback-git/feedback-v1
+Environment=TZ=Asia/Shanghai
 EnvironmentFile=-/etc/feedback-api/env
 Restart=always
 RestartSec=2
-TimeoutStopSec=15
+TimeoutStopSec=60
 NoNewPrivileges=true
 PrivateTmp=true
 StandardOutput=journal

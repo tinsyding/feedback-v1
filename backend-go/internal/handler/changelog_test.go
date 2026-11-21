@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"feedback-api/internal/httpx"
 	"feedback-api/internal/session"
 )
 
@@ -20,7 +21,7 @@ func TestChangelog(t *testing.T) {
 	store.Set(teacherSID, map[string]any{"user_logged_in": true, "user_role": "teacher"})
 	store.Set(adminSID, map[string]any{"admin_logged_in": true, "admin_username": "admin"})
 
-	h := Changelog(root, store)
+	h := httpx.Middleware(Changelog(root, store))
 
 	// 1. Unknown action -> 400
 	rec := httptest.NewRecorder()

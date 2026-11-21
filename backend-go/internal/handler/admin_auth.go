@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -21,7 +22,11 @@ func handleAdminLogin(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("只支持 POST 请求"), http.StatusMethodNotAllowed)
 		return
 	}
-	input, _ := decodeAdminJSONBody(r)
+	input, err := decodeAdminJSONBodyWithLimit(w, r, maxAdminJSONBodyBytes)
+	if isMaxBytesError(err) {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("请求体大小超过限制"), http.StatusRequestEntityTooLarge)
+		return
+	}
 	username := strings.TrimSpace(config.AsPHPString(input["username"]))
 	password := config.AsPHPString(input["password"])
 	if username == "" || password == "" {
@@ -208,7 +213,11 @@ func handleAdminChangePassword(w http.ResponseWriter, r *http.Request, deps Admi
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("只支持 POST 请求"), http.StatusMethodNotAllowed)
 		return
 	}
-	input, _ := decodeAdminJSONBody(r)
+	input, err := decodeAdminJSONBodyWithLimit(w, r, maxAdminJSONBodyBytes)
+	if isMaxBytesError(err) {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("请求体大小超过限制"), http.StatusRequestEntityTooLarge)
+		return
+	}
 	oldPwd := config.AsPHPString(input["old_password"])
 	newPwd := config.AsPHPString(input["new_password"])
 	if oldPwd == "" || newPwd == "" {
@@ -240,6 +249,10 @@ func handleAdminChangePassword(w http.ResponseWriter, r *http.Request, deps Admi
 	}
 	newHash, err := bcrypt.GenerateFromPassword([]byte(newPwd), bcrypt.DefaultCost)
 	if err != nil {
+		if errors.Is(err, bcrypt.ErrPasswordTooLong) {
+			httpx.SendResponse(w, false, nil, httpx.StrPtr("新密码长度不能超过 72 字节"), http.StatusBadRequest)
+			return
+		}
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("服务器内部错误，请稍后重试"), http.StatusInternalServerError)
 		return
 	}

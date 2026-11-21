@@ -34,6 +34,10 @@ func TestSeasonNormalization(t *testing.T) {
 	if !reflect.DeepEqual(variants, wantVariants) {
 		t.Fatalf("SeasonVariants(秋季) = %#v, want %#v", variants, wantVariants)
 	}
+	emptyVariants := SeasonVariants("")
+	if emptyVariants == nil || len(emptyVariants) != 0 {
+		t.Fatalf("SeasonVariants(\"\") = %#v, want non-nil empty slice []string{}", emptyVariants)
+	}
 }
 
 func TestGradeAndDeriveRetestToken(t *testing.T) {

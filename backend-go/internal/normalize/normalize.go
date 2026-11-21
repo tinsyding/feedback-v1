@@ -81,7 +81,7 @@ func Season(season, fallbackOrTarget string) string {
 func SeasonVariants(season string) []string {
 	raw := strings.TrimSpace(season)
 	if raw == "" {
-		return nil
+		return []string{}
 	}
 	zh := Season(raw, "zh")
 	en := Season(raw, "en")

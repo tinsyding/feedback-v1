@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"feedback-api/internal/tz"
 )
 
 // User represents a row in the `users` table.
@@ -232,7 +234,7 @@ func (r *MySQLRepository) ListAssistants(ctx context.Context, ownerID int64, own
 	for rows.Next() {
 		var rec AssistantRecord
 		var realName, role, createdBy sql.NullString
-		var lastLoginAt, createdAt, updatedAt sql.NullString
+		var lastLoginAt, createdAt, updatedAt sql.NullTime
 		if err := rows.Scan(
 			&rec.ID, &rec.Username, &realName, &role, &rec.TeacherID, &createdBy, &rec.Status,
 			&lastLoginAt, &createdAt, &updatedAt,
@@ -243,15 +245,15 @@ func (r *MySQLRepository) ListAssistants(ctx context.Context, ownerID int64, own
 		rec.Role = role.String
 		rec.CreatedBy = createdBy.String
 		if lastLoginAt.Valid {
-			v := lastLoginAt.String
+			v := tz.In(lastLoginAt.Time).Format("2006-01-02 15:04:05")
 			rec.LastLoginAt = &v
 		}
 		if createdAt.Valid {
-			v := createdAt.String
+			v := tz.In(createdAt.Time).Format("2006-01-02 15:04:05")
 			rec.CreatedAt = &v
 		}
 		if updatedAt.Valid {
-			v := updatedAt.String
+			v := tz.In(updatedAt.Time).Format("2006-01-02 15:04:05")
 			rec.UpdatedAt = &v
 		}
 		out = append(out, rec)

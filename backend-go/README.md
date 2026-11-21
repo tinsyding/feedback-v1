@@ -77,7 +77,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dis
 
 ### 3. 本地启动服务
 
-服务默认监听 `127.0.0.1:8090`，需要通过 `FEEDBACK_ROOT` 指向 `feedback-v1/` 目录（动态按请求读取 `config.json`，并可只读回退解析 `api/secret_key.local.php`）：
+服务默认监听 `127.0.0.1:8090`，需要通过 `FEEDBACK_ROOT` 指向 `feedback-v1/` 目录（动态按请求读取 `config.json` 与 `data/.ai_secrets.json`，并可只读回退解析 `api/secret_key.local.php`）：
 
 ```bash
 cd backend-go
@@ -111,12 +111,12 @@ python3 backend-go/scripts/parity_test.py --go-bin backend-go/bin/feedback-api
 ## 环境变量与配置优先级
 
 1. `FEEDBACK_LISTEN_ADDR`：监听地址，默认 `127.0.0.1:8090`。
-2. `FEEDBACK_ROOT`：`feedback-v1` 站点根目录（用于读取 `config.json`、`api/secret_key.local.php` 及写入 `data/identify_archive/`）。
+2. `FEEDBACK_ROOT`：`feedback-v1` 站点根目录（用于读取 `config.json`、`data/.ai_secrets.json`、`api/secret_key.local.php` 及写入 `data/` 各运行子目录）。
 3. `FEEDBACK_ENV_FILE`：可选 `.env` 文件路径（仅填充尚未设置的进程环境变量，不覆盖系统已有环境变量）。
 4. `FEEDBACK_SECRETS_FILE`：可选 JSON 密钥文件路径。
 5. 密钥与模型优先级（严格对齐 PHP 实现）：
-   - `SenderAPIToken`：`SENDER_API_TOKEN` 环境变量 → 密钥文件 `senderApiToken` → 未配置时仅接受内置默认 Token。
-   - `VisionAPIKey`：`config.json["dashscopeApiKey"]` → `DASHSCOPE_API_KEY` 环境变量 → `FEEDBACK_SECRETS_FILE` / `secret_key.local.php`。
+   - `SenderAPIToken`：`SENDER_API_TOKENS` / `SENDER_API_TOKEN` 环境变量 → 密钥文件 `senderApiTokens` / `senderApiToken` → 未配置时仅在未关闭 `ALLOW_DEFAULT_SENDER_TOKEN=false` 时回退内置默认 Token。
+   - `VisionAPIKey`：`data/.ai_secrets.json["dashscopeApiKey"]` → 兼容旧 `config.json["dashscopeApiKey"]` → `DASHSCOPE_API_KEY` 环境变量 → `FEEDBACK_SECRETS_FILE` / `secret_key.local.php`。
    - `IdentifyAPIBase` / `IdentifyModel` / `IdentifyFastModel`：同理优先读取 `config.json`，缺失再依次回退环境变量与密钥文件。
 
 ## 部署与运维文档

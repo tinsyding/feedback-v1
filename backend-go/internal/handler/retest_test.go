@@ -5,31 +5,45 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"feedback-api/internal/admin"
 	"feedback-api/internal/auditlog"
 	"feedback-api/internal/config"
+	"feedback-api/internal/httpx"
 	"feedback-api/internal/retest"
 	"feedback-api/internal/session"
 )
 
 type fakeRetestRepo struct {
-	revoked      map[string]bool
-	tokenRecord  *retest.TokenRecord
-	history      retest.StudentHistoryBundle
-	qbankRows    []retest.QbankQuestionRow
-	accessLogs   []string
-	encryptRes   retest.EncryptBatchResult
-	checkRes     retest.CheckBatchResult
-	weekRecRes   retest.StudentWeekResult
-	tokenExists  bool
+	mu               sync.Mutex
+	revoked          map[string]bool
+	lastRevokeReason string
+	tokenRecord      *retest.TokenRecord
+	history          retest.StudentHistoryBundle
+	qbankRows        []retest.QbankQuestionRow
+	accessLogs       []string
+	encryptRes       retest.EncryptBatchResult
+	lastEncryptIn    retest.EncryptBatchInput
+	checkRes         retest.CheckBatchResult
+	lastCheckIn      retest.CheckBatchInput
+	weekRecRes       retest.StudentWeekResult
+	lastWeekQ        retest.StudentWeekQuery
+	tokenExists      bool
 }
 
 func newFakeRetestRepo() *fakeRetestRepo {
@@ -92,13 +106,22 @@ func newFakeRetestRepo() *fakeRetestRepo {
 	}
 }
 
-func (f *fakeRetestRepo) CheckExistingBatch(_ context.Context, _ retest.CheckBatchInput) (retest.CheckBatchResult, error) {
+func (f *fakeRetestRepo) CheckExistingBatch(_ context.Context, in retest.CheckBatchInput) (retest.CheckBatchResult, error) {
+	f.mu.Lock()
+	f.lastCheckIn = in
+	f.mu.Unlock()
 	return f.checkRes, nil
 }
-func (f *fakeRetestRepo) GetStudentWeekRecord(_ context.Context, _ retest.StudentWeekQuery) (retest.StudentWeekResult, error) {
+func (f *fakeRetestRepo) GetStudentWeekRecord(_ context.Context, q retest.StudentWeekQuery) (retest.StudentWeekResult, error) {
+	f.mu.Lock()
+	f.lastWeekQ = q
+	f.mu.Unlock()
 	return f.weekRecRes, nil
 }
-func (f *fakeRetestRepo) EncryptBatch(_ context.Context, _ retest.EncryptBatchInput) (retest.EncryptBatchResult, error) {
+func (f *fakeRetestRepo) EncryptBatch(_ context.Context, in retest.EncryptBatchInput) (retest.EncryptBatchResult, error) {
+	f.mu.Lock()
+	f.lastEncryptIn = in
+	f.mu.Unlock()
 	return f.encryptRes, nil
 }
 func (f *fakeRetestRepo) FindTokenRecord(_ context.Context, token string) (*retest.TokenRecord, error) {
@@ -115,21 +138,30 @@ func (f *fakeRetestRepo) PreloadMultiWeekQbankRows(_ context.Context, _, _ strin
 	return f.qbankRows, nil
 }
 func (f *fakeRetestRepo) IsTokenRevoked(_ context.Context, token string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.revoked[token], nil
 }
 func (f *fakeRetestRepo) TokenExists(_ context.Context, _ string, _ bool) (bool, error) {
 	return f.tokenExists, nil
 }
-func (f *fakeRetestRepo) RevokeToken(_ context.Context, token, _, _ string) error {
+func (f *fakeRetestRepo) RevokeToken(_ context.Context, token, _, reason string) error {
+	f.mu.Lock()
 	f.revoked[token] = true
+	f.lastRevokeReason = reason
+	f.mu.Unlock()
 	return nil
 }
 func (f *fakeRetestRepo) UnrevokeToken(_ context.Context, token string) error {
+	f.mu.Lock()
 	delete(f.revoked, token)
+	f.mu.Unlock()
 	return nil
 }
 func (f *fakeRetestRepo) LogAccess(_ context.Context, _, _, action, _, _, _ string) {
+	f.mu.Lock()
 	f.accessLogs = append(f.accessLogs, action)
+	f.mu.Unlock()
 }
 
 func setupRetestTestEnv(t *testing.T, secret string) (http.Handler, *fakeRetestRepo, *session.MemoryStore, string, *int64) {
@@ -142,14 +174,14 @@ func setupRetestTestEnv(t *testing.T, secret string) (http.Handler, *fakeRetestR
 	nowUnix := int64(1795143600)
 	repo := newFakeRetestRepo()
 	sessions := session.NewMemoryStore()
-	h := Retest(RetestDeps{
+	h := httpx.Middleware(Retest(RetestDeps{
 		Repo:         repo,
 		Sessions:     sessions,
 		ConfigLoader: config.NewLoader(dir, ""),
 		Audit:        auditlog.NewDualLogger(nil, dir),
 		FeedbackRoot: dir,
 		NowFunc:      func() time.Time { return time.Unix(nowUnix, 0) },
-	})
+	}))
 	return h, repo, sessions, dir, &nowUnix
 }
 
@@ -337,5 +369,306 @@ func TestRetestTeacherBatchActions(t *testing.T) {
 	h.ServeHTTP(recEnc, reqEnc)
 	if recEnc.Code != http.StatusOK || !strings.Contains(recEnc.Body.String(), `"batch_code":"B20261121_100000_abcd"`) {
 		t.Fatalf("encrypt_batch failed: %d %s", recEnc.Code, recEnc.Body.String())
+	}
+}
+
+func TestRetestDecryptDeterministicPreviewOrder(t *testing.T) {
+	h, repo, _, _, nowUnix := setupRetestTestEnv(t, "prod_retest_secret_2026")
+
+	p2 := 2
+	p4 := 4
+	s90 := 90.0
+	e1 := "[1]"
+	e2 := "[2]"
+	eEmpty := "[]"
+	repo.tokenRecord.WeekNum = 3
+	repo.tokenRecord.PreviewWeekNum = 0
+	repo.tokenRecord.PreviewErrors = nil
+	repo.history.Records = []retest.StudentRecordRow{
+		{
+			BatchID:           1,
+			BatchTier:         "U",
+			WeekNum:           1,
+			HomeworkScore:     &s90,
+			ErrorQuestionsRaw: &e1,
+			PreviewWeekNum:    &p2,
+			PreviewErrorsRaw:  &e1,
+		},
+		{
+			BatchID:          2,
+			BatchTier:        "U",
+			WeekNum:          3,
+			PreviewWeekNum:   &p2,
+			PreviewErrorsRaw: &e2,
+		},
+		{
+			BatchID:          3,
+			BatchTier:        "U",
+			WeekNum:          4,
+			PreviewWeekNum:   &p4,
+			PreviewErrorsRaw: &eEmpty,
+		},
+	}
+	repo.qbankRows = []retest.QbankQuestionRow{
+		{ID: 1, BankType: "homework", Tier: "U", Week: 1, QuestionNum: 1, Topic: "方程", ExercisePDF: "data/pdfs/hw1_1.pdf"},
+		{ID: 2, BankType: "preview", Tier: "U", Week: 2, QuestionNum: 1, Topic: "预习1", ExercisePDF: "data/pdfs/pv2_1.pdf"},
+		{ID: 3, BankType: "preview", Tier: "U", Week: 2, QuestionNum: 2, Topic: "预习2", ExercisePDF: "data/pdfs/pv2_2.pdf"},
+	}
+
+	sig := admin.SignRetestAdminSig("tok1234567", *nowUnix, "prod_retest_secret_2026")
+	target := fmt.Sprintf("http://feedback.wxjifang.cn/api/retest.php?action=decrypt&token=tok1234567&admin_sig=%s&admin_ts=%d", sig, *nowUnix)
+
+	type decryptResp struct {
+		Success       bool             `json:"success"`
+		CurrentWeek   int              `json:"currentWeek"`
+		PreviewErrors []int            `json:"previewErrors"`
+		PreviewPDFs   []map[string]any `json:"previewPdfs"`
+	}
+	var baseline decryptResp
+	for i := 0; i < 20; i++ {
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("run %d: unexpected status %d: %s", i, rec.Code, rec.Body.String())
+		}
+		var got decryptResp
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("run %d: invalid json: %v", i, err)
+		}
+		if !got.Success || got.CurrentWeek != 2 || !reflect.DeepEqual(got.PreviewErrors, []int{2}) {
+			t.Fatalf("run %d: unexpected decrypt output: %+v (body=%s)", i, got, rec.Body.String())
+		}
+		pvRaw, _ := json.Marshal(got.PreviewPDFs)
+		if !strings.Contains(string(pvRaw), "data/pdfs/pv2_2.pdf") || strings.Contains(string(pvRaw), "data/pdfs/pv2_1.pdf") {
+			t.Fatalf("run %d: unexpected previewPdfs: %s", i, string(pvRaw))
+		}
+		if i == 0 {
+			baseline = got
+		} else if !reflect.DeepEqual(got, baseline) {
+			t.Fatalf("run %d diverged from baseline: got=%+v want=%+v", i, got, baseline)
+		}
+	}
+}
+
+func TestRetestConcurrentCaptchaReplayPrevented(t *testing.T) {
+	h, _, sessions, _, _ := setupRetestTestEnv(t, "prod_retest_secret_2026")
+
+	reqCap := httptest.NewRequest(http.MethodGet, "http://feedback.wxjifang.cn/api/retest.php?action=captcha", nil)
+	recCap := httptest.NewRecorder()
+	h.ServeHTTP(recCap, reqCap)
+	if recCap.Code != http.StatusOK {
+		t.Fatalf("captcha status: %d", recCap.Code)
+	}
+	cookies := recCap.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("expected PHPSESSID cookie")
+	}
+	ck := cookies[0]
+	sess, _ := sessions.Load(context.Background(), ck.Value)
+	savedCode := sess.StringVal("retest_captcha")
+	if len(savedCode) != 4 {
+		t.Fatalf("expected 4-char captcha, got %q", savedCode)
+	}
+
+	const workers = 12
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var okCount atomic.Int32
+	var captchaErrCount atomic.Int32
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			<-start
+			payload := fmt.Sprintf(`{"token":"tok%07d","studentName":"张三","captcha":%q}`, idx, savedCode)
+			req := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/retest.php?action=decrypt", strings.NewReader(payload))
+			req.Header.Set("Content-Type", "application/json")
+			req.AddCookie(ck)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+
+			var out struct {
+				Success      bool `json:"success"`
+				CaptchaError bool `json:"captchaError"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+				t.Errorf("worker %d bad json (%d): %v %s", idx, rec.Code, err, rec.Body.String())
+				return
+			}
+			if out.Success {
+				okCount.Add(1)
+			} else if out.CaptchaError {
+				captchaErrCount.Add(1)
+			} else {
+				t.Errorf("worker %d unexpected response: %s", idx, rec.Body.String())
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	if okCount.Load() != 1 || captchaErrCount.Load() != workers-1 {
+		t.Fatalf("expected exactly 1 success and %d captchaError, got ok=%d captchaErr=%d", workers-1, okCount.Load(), captchaErrCount.Load())
+	}
+}
+
+func TestRetestFormEncodedTeacherActionsAndJSONNumber(t *testing.T) {
+	h, repo, sessions, _, _ := setupRetestTestEnv(t, "prod_retest_secret_2026")
+	tSess := &session.Session{ID: "fm_sess_1234567890abcdefg", Data: map[string]any{"user_logged_in": true, "username": "t1", "user_role": "teacher"}}
+	_ = sessions.Save(context.Background(), tSess)
+	ck := &http.Cookie{Name: "PHPSESSID", Value: tSess.ID}
+
+	// 1. Form-encoded check_existing_batch
+	formCheck := url.Values{
+		"subject":  {"数学"},
+		"grade":    {"七年级"},
+		"tier":     {"U"},
+		"week":     {"3"},
+		"year":     {"2026"},
+		"season":   {"秋"},
+		"students": {"[]"},
+	}
+	reqCheck := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/retest.php?action=check_existing_batch", strings.NewReader(formCheck.Encode()))
+	reqCheck.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqCheck.AddCookie(ck)
+	recCheck := httptest.NewRecorder()
+	h.ServeHTTP(recCheck, reqCheck)
+	if recCheck.Code != http.StatusOK {
+		t.Fatalf("form check_existing_batch failed: %d %s", recCheck.Code, recCheck.Body.String())
+	}
+	if repo.lastCheckIn.Subject != "数学" || repo.lastCheckIn.Grade != "七年级" || repo.lastCheckIn.Tier != "U" || repo.lastCheckIn.Week != 3 {
+		t.Fatalf("unexpected lastCheckIn: %+v", repo.lastCheckIn)
+	}
+
+	// 2. Form-encoded get_student_week_record with with_roster=1
+	formWeek := url.Values{
+		"subject":      {"数学"},
+		"grade":        {"七年级"},
+		"week":         {"2"},
+		"student_name": {"张三"},
+		"with_roster":  {"1"},
+	}
+	reqWeek := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/retest.php?action=get_student_week_record", strings.NewReader(formWeek.Encode()))
+	reqWeek.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqWeek.AddCookie(ck)
+	recWeek := httptest.NewRecorder()
+	h.ServeHTTP(recWeek, reqWeek)
+	if recWeek.Code != http.StatusOK {
+		t.Fatalf("form get_student_week_record failed: %d %s", recWeek.Code, recWeek.Body.String())
+	}
+	if !repo.lastWeekQ.WithRoster || repo.lastWeekQ.Week != 2 || repo.lastWeekQ.StudentName != "张三" {
+		t.Fatalf("unexpected lastWeekQ: %+v", repo.lastWeekQ)
+	}
+
+	// 3. Form-encoded revoke_token with 210-rune CJK reason -> rune-safe truncation to 200
+	longReason := strings.Repeat("错", 210)
+	formRev := url.Values{
+		"token":  {"tok1234567"},
+		"reason": {longReason},
+	}
+	reqRev := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/retest.php?action=revoke_token", strings.NewReader(formRev.Encode()))
+	reqRev.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqRev.AddCookie(ck)
+	recRev := httptest.NewRecorder()
+	h.ServeHTTP(recRev, reqRev)
+	if recRev.Code != http.StatusOK {
+		t.Fatalf("form revoke_token failed: %d %s", recRev.Code, recRev.Body.String())
+	}
+	if !utf8.ValidString(repo.lastRevokeReason) || utf8.RuneCountInString(repo.lastRevokeReason) != 200 {
+		t.Fatalf("expected 200 valid UTF-8 runes, got len=%d valid=%v", utf8.RuneCountInString(repo.lastRevokeReason), utf8.ValidString(repo.lastRevokeReason))
+	}
+
+	// 4. encrypt_batch with JSON numeric id & homeworkScore preserves exact decimal string via json.Number
+	encPayload := `{"subject":"数学","grade":"七年级","tier":"U","week":1,"students":[{"name":"张三","id":20260001,"homeworkScore":95.5,"errors":[1,2]}]}`
+	reqEnc := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/retest.php?action=encrypt_batch", strings.NewReader(encPayload))
+	reqEnc.Header.Set("Content-Type", "application/json")
+	reqEnc.AddCookie(ck)
+	recEnc := httptest.NewRecorder()
+	h.ServeHTTP(recEnc, reqEnc)
+	if recEnc.Code != http.StatusOK {
+		t.Fatalf("encrypt_batch failed: %d %s", recEnc.Code, recEnc.Body.String())
+	}
+	if len(repo.lastEncryptIn.Students) != 1 {
+		t.Fatalf("expected 1 student, got %d", len(repo.lastEncryptIn.Students))
+	}
+	st := repo.lastEncryptIn.Students[0]
+	if st.ID != "20260001" {
+		t.Fatalf("expected exact numeric string ID 20260001, got %q", st.ID)
+	}
+	if st.HomeworkScore == nil || *st.HomeworkScore != 95.5 {
+		t.Fatalf("expected HomeworkScore 95.5, got %v", st.HomeworkScore)
+	}
+}
+
+func TestRetestCreateTempDownloadMaxBytesAndStream(t *testing.T) {
+	h, _, sessions, _, _ := setupRetestTestEnv(t, "prod_retest_secret_2026")
+	tSess := &session.Session{ID: "mp_sess_1234567890abcdefg", Data: map[string]any{"user_logged_in": true, "username": "t1"}}
+	_ = sessions.Save(context.Background(), tSess)
+	ck := &http.Cookie{Name: "PHPSESSID", Value: tSess.ID}
+
+	// 1. Multipart > 27 MiB => 413
+	var bigBuf bytes.Buffer
+	mwBig := multipart.NewWriter(&bigBuf)
+	fwBig, err := mwBig.CreateFormFile("file", "oversize.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = fwBig.Write([]byte("%PDF-1.4\n"))
+	_, _ = fwBig.Write(bytes.Repeat([]byte("A"), (27<<20)+4096))
+	_ = mwBig.Close()
+
+	reqBig := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/retest.php?action=create_temp_download", &bigBuf)
+	reqBig.Header.Set("Content-Type", mwBig.FormDataContentType())
+	reqBig.AddCookie(ck)
+	recBig := httptest.NewRecorder()
+	h.ServeHTTP(recBig, reqBig)
+	if recBig.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 for >27MiB multipart PDF, got %d (%s)", recBig.Code, recBig.Body.String())
+	}
+
+	// 2. Valid multipart PDF upload + download_file streams exact bytes & Content-Length
+	pdfPayload := []byte("%PDF-1.4\n1 0 obj\n<< /Length 5 >>\nstream\nhello\nendstream\nendobj\n%%EOF\n")
+	var okBuf bytes.Buffer
+	mwOK := multipart.NewWriter(&okBuf)
+	fwOK, err := mwOK.CreateFormFile("file", "错题本_测.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = fwOK.Write(pdfPayload)
+	_ = mwOK.Close()
+
+	reqOK := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/retest.php?action=create_temp_download", &okBuf)
+	reqOK.Header.Set("Content-Type", mwOK.FormDataContentType())
+	reqOK.AddCookie(ck)
+	recOK := httptest.NewRecorder()
+	h.ServeHTTP(recOK, reqOK)
+	if recOK.Code != http.StatusOK {
+		t.Fatalf("multipart create_temp_download failed: %d %s", recOK.Code, recOK.Body.String())
+	}
+	var upResp struct {
+		Success bool   `json:"success"`
+		Key     string `json:"key"`
+	}
+	if err := json.Unmarshal(recOK.Body.Bytes(), &upResp); err != nil || !upResp.Success || len(upResp.Key) != 32 {
+		t.Fatalf("unexpected upload response: %s (%v)", recOK.Body.String(), err)
+	}
+
+	reqDL := httptest.NewRequest(http.MethodGet, "http://feedback.wxjifang.cn/api/retest.php?action=download_file&key="+upResp.Key, nil)
+	recDL := httptest.NewRecorder()
+	h.ServeHTTP(recDL, reqDL)
+	if recDL.Code != http.StatusOK {
+		t.Fatalf("download_file status=%d body=%s", recDL.Code, recDL.Body.String())
+	}
+	if recDL.Header().Get("Content-Type") != "application/pdf" {
+		t.Fatalf("unexpected Content-Type: %q", recDL.Header().Get("Content-Type"))
+	}
+	if recDL.Header().Get("Content-Length") != strconv.Itoa(len(pdfPayload)) {
+		t.Fatalf("unexpected Content-Length: %q want %d", recDL.Header().Get("Content-Length"), len(pdfPayload))
+	}
+	bodyBytes, err := io.ReadAll(recDL.Result().Body)
+	if err != nil || !bytes.Equal(bodyBytes, pdfPayload) {
+		t.Fatalf("streamed bytes mismatch: err=%v len=%d want=%d", err, len(bodyBytes), len(pdfPayload))
 	}
 }

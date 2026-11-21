@@ -1,6 +1,10 @@
 package handler
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,7 +14,49 @@ import (
 	"feedback-api/internal/httpx"
 	"feedback-api/internal/retest"
 	"feedback-api/internal/session"
+	"feedback-api/internal/textutil"
 )
+
+func decodeRetestJSONBody(w http.ResponseWriter, r *http.Request, maxBytes int64) (map[string]any, error) {
+	if r == nil || r.Body == nil {
+		return nil, io.EOF
+	}
+	if maxBytes > 0 {
+		r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+	}
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, err
+	}
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		return nil, io.EOF
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var out map[string]any
+	if err := dec.Decode(&out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func decodeRetestInputOrForm(w http.ResponseWriter, r *http.Request, maxBytes int64) (map[string]any, func()) {
+	ct := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type")))
+	if strings.HasPrefix(ct, "application/x-www-form-urlencoded") || strings.HasPrefix(ct, "multipart/form-data") {
+		if maxBytes > 0 {
+			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+		}
+		httpx.ParseRequestForm(r)
+		cleanup := func() {
+			if r.MultipartForm != nil {
+				_ = r.MultipartForm.RemoveAll()
+			}
+		}
+		return nil, cleanup
+	}
+	input, _ := decodeRetestJSONBody(w, r, maxBytes)
+	return input, func() {}
+}
 
 func firstParam(input map[string]any, r *http.Request, keys ...string) string {
 	for _, k := range keys {
@@ -35,8 +81,8 @@ func handleRetestCheckExistingBatch(w http.ResponseWriter, r *http.Request, deps
 	if _, ok := session.RequireAuth(w, r, deps.Sessions); !ok {
 		return
 	}
-	input, _ := decodeAdminJSONBody(r)
-	httpx.ParseRequestForm(r)
+	input, cleanup := decodeRetestInputOrForm(w, r, 4<<20)
+	defer cleanup()
 
 	subject := firstParam(input, r, "subject")
 	grade := firstParam(input, r, "grade")
@@ -91,8 +137,8 @@ func handleRetestGetStudentWeekRecord(w http.ResponseWriter, r *http.Request, de
 	if _, ok := session.RequireAuth(w, r, deps.Sessions); !ok {
 		return
 	}
-	input, _ := decodeAdminJSONBody(r)
-	httpx.ParseRequestForm(r)
+	input, cleanup := decodeRetestInputOrForm(w, r, 4<<20)
+	defer cleanup()
 
 	year := config.AsPHPInt(firstParam(input, r, "year"))
 	if year <= 0 {
@@ -102,7 +148,9 @@ func handleRetestGetStudentWeekRecord(w http.ResponseWriter, r *http.Request, de
 	if season == "" {
 		season = "秋"
 	}
-	withRoster := config.AsPHPBool(input["with_roster"]) || (r.URL.Query().Get("with_roster") != "" && r.URL.Query().Get("with_roster") != "0")
+	withRoster := config.AsPHPBool(input["with_roster"]) ||
+		(r.URL.Query().Get("with_roster") != "" && r.URL.Query().Get("with_roster") != "0") ||
+		(r.PostFormValue("with_roster") != "" && r.PostFormValue("with_roster") != "0")
 
 	q := retest.StudentWeekQuery{
 		Subject:     firstParam(input, r, "subject"),
@@ -139,8 +187,13 @@ func handleRetestEncryptBatch(w http.ResponseWriter, r *http.Request, deps Retes
 	if !ok {
 		return
 	}
-	input, err := decodeAdminJSONBody(r)
+	input, err := decodeRetestJSONBody(w, r, 16<<20)
 	if err != nil || input == nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeRawJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"success": false, "error": "Payload too large"})
+			return
+		}
 		writeRawJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "Invalid payload"})
 		return
 	}
@@ -212,6 +265,12 @@ func handleRetestEncryptBatch(w http.ResponseWriter, r *http.Request, deps Retes
 		switch x := v.(type) {
 		case float64:
 			return &x
+		case json.Number:
+			f, err := x.Float64()
+			if err != nil {
+				return nil
+			}
+			return &f
 		case int:
 			f := float64(x)
 			return &f
@@ -350,8 +409,8 @@ func handleRetestRevokeToggle(w http.ResponseWriter, r *http.Request, deps Retes
 		return
 	}
 
-	body, _ := decodeAdminJSONBody(r)
-	httpx.ParseRequestForm(r)
+	body, cleanup := decodeRetestInputOrForm(w, r, 1<<20)
+	defer cleanup()
 	token := strings.TrimSpace(config.AsPHPString(body["token"]))
 	if token == "" {
 		token = strings.TrimSpace(r.PostFormValue("token"))
@@ -387,9 +446,7 @@ func handleRetestRevokeToggle(w http.ResponseWriter, r *http.Request, deps Retes
 		if reason == "" {
 			reason = strings.TrimSpace(r.PostFormValue("reason"))
 		}
-		if len(reason) > 200 {
-			reason = reason[:200]
-		}
+		reason = textutil.TruncateRunes(reason, 200)
 		err = deps.Repo.RevokeToken(r.Context(), token, operator, reason)
 		event = "revoke_token"
 		msg = "已作废该错题本链接（重生成同一 Token 仍不可用，直至恢复）"

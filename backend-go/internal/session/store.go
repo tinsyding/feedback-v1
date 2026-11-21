@@ -108,6 +108,49 @@ type Store interface {
 	Destroy(ctx context.Context, sessionID string) error
 }
 
+// AtomicUpdater is an optional interface for Stores that support transactional read-modify-write updates.
+type AtomicUpdater interface {
+	Update(ctx context.Context, sessionID string, fn func(data map[string]any) (changed bool, err error)) (*Session, error)
+}
+
+// Update atomically reads, mutates via fn, and persists a session when supported by Store,
+// falling back to Load + fn + Save for simpler Store implementations.
+func Update(ctx context.Context, store Store, sessionID string, fn func(data map[string]any) (changed bool, err error)) (*Session, error) {
+	if store == nil {
+		return nil, errors.New("session store is not configured")
+	}
+	if fn == nil {
+		return nil, errors.New("nil session update callback")
+	}
+	if updater, ok := store.(AtomicUpdater); ok {
+		return updater.Update(ctx, sessionID, fn)
+	}
+	sid := strings.TrimSpace(sessionID)
+	if !reValidSessionID.MatchString(sid) {
+		return nil, errors.New("invalid session id")
+	}
+	sess, err := store.Load(ctx, sid)
+	if err != nil {
+		return nil, err
+	}
+	if sess == nil {
+		sess = &Session{ID: sid, Data: make(map[string]any)}
+	}
+	if sess.Data == nil {
+		sess.Data = make(map[string]any)
+	}
+	changed, err := fn(sess.Data)
+	if err != nil {
+		return nil, err
+	}
+	if changed {
+		if err := store.Save(ctx, sess); err != nil {
+			return nil, err
+		}
+	}
+	return sess, nil
+}
+
 // MySQLStore reads and writes shared PHP/Go sessions in the `app_sessions` MySQL table.
 type MySQLStore struct {
 	db      *sql.DB
@@ -232,6 +275,87 @@ func (s *MySQLStore) Save(ctx context.Context, sess *Session) error {
 		expiresAt,
 	)
 	return err
+}
+
+// Update executes a transactional read-modify-write against `app_sessions` using SELECT ... FOR UPDATE.
+func (s *MySQLStore) Update(ctx context.Context, sessionID string, fn func(data map[string]any) (changed bool, err error)) (*Session, error) {
+	sid := strings.TrimSpace(sessionID)
+	if !reValidSessionID.MatchString(sid) {
+		return nil, errors.New("invalid session id")
+	}
+	if s == nil || s.db == nil {
+		return nil, errors.New("session store database is not configured")
+	}
+	if fn == nil {
+		return nil, errors.New("nil session update callback")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	now := s.now().Unix()
+	var rawJSON sql.NullString
+	var expiresAt int64
+	err = tx.QueryRowContext(
+		ctx,
+		"SELECT `payload_json`, `expires_at` FROM `app_sessions` WHERE `session_id` = ? AND `expires_at` >= ? FOR UPDATE",
+		sid,
+		now,
+	).Scan(&rawJSON, &expiresAt)
+
+	data := make(map[string]any)
+	if err == nil {
+		if rawJSON.Valid && strings.TrimSpace(rawJSON.String) != "" {
+			dec := json.NewDecoder(strings.NewReader(rawJSON.String))
+			dec.UseNumber()
+			if decErr := dec.Decode(&data); decErr != nil {
+				data = make(map[string]any)
+			}
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+
+	changed, err := fn(data)
+	if err != nil {
+		return nil, err
+	}
+	if changed {
+		if len(data) == 0 {
+			if _, err := tx.ExecContext(ctx, "DELETE FROM `app_sessions` WHERE `session_id` = ?", sid); err != nil {
+				return nil, err
+			}
+		} else {
+			rawBytes, mErr := json.Marshal(data)
+			if mErr != nil {
+				return nil, mErr
+			}
+			newExpires := now + int64(s.effectiveTTL().Seconds())
+			if _, err := tx.ExecContext(
+				ctx,
+				`INSERT INTO `+"`app_sessions`"+` (`+"`session_id`, `payload_php`, `payload_json`, `expires_at`"+`)
+				 VALUES (?, '', ?, ?)
+				 ON DUPLICATE KEY UPDATE
+				   `+"`payload_php`"+` = '',
+				   `+"`payload_json`"+` = VALUES(`+"`payload_json`"+`),
+				   `+"`expires_at`"+` = VALUES(`+"`expires_at`"+`),
+				   `+"`updated_at`"+` = CURRENT_TIMESTAMP`,
+				sid,
+				string(rawBytes),
+				newExpires,
+			); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &Session{ID: sid, Data: data}, nil
 }
 
 // Destroy deletes a session row from `app_sessions`.
@@ -365,6 +489,41 @@ func (m *MemoryStore) Destroy(_ context.Context, sessionID string) error {
 	defer m.mu.Unlock()
 	delete(m.sessions, strings.TrimSpace(sessionID))
 	return nil
+}
+
+func copySessionMap(src map[string]any) map[string]any {
+	out := make(map[string]any, len(src))
+	for k, v := range src {
+		out[k] = v
+	}
+	return out
+}
+
+// Update executes an atomic read-modify-write on MemoryStore under m.mu.Lock().
+func (m *MemoryStore) Update(_ context.Context, sessionID string, fn func(data map[string]any) (changed bool, err error)) (*Session, error) {
+	sid := strings.TrimSpace(sessionID)
+	if !reValidSessionID.MatchString(sid) {
+		return nil, errors.New("invalid session id")
+	}
+	if fn == nil {
+		return nil, errors.New("nil session update callback")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	data := copySessionMap(m.sessions[sid])
+	changed, err := fn(data)
+	if err != nil {
+		return nil, err
+	}
+	if changed {
+		if len(data) == 0 {
+			delete(m.sessions, sid)
+		} else {
+			m.sessions[sid] = copySessionMap(data)
+		}
+	}
+	return &Session{ID: sid, Data: copySessionMap(data)}, nil
 }
 
 // NewSessionID generates a cryptographically random 32-char hex PHPSESSID.

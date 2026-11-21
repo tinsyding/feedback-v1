@@ -9,12 +9,12 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"feedback-api/internal/admin"
 	"feedback-api/internal/config"
 	"feedback-api/internal/httpx"
 	"feedback-api/internal/session"
+	"feedback-api/internal/tz"
 )
 
 var reASCIIFallback = regexp.MustCompile(`[^a-zA-Z0-9.\-_]`)
@@ -115,7 +115,11 @@ func handleAdminDBCreate(w http.ResponseWriter, r *http.Request, deps AdminDeps)
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("数据库连接失败"), http.StatusInternalServerError)
 		return
 	}
-	rawInput, err := decodeAdminJSONBody(r)
+	rawInput, err := decodeAdminJSONBodyWithLimit(w, r, maxAdminJSONBodyBytes)
+	if isMaxBytesError(err) {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("请求体大小超过限制"), http.StatusRequestEntityTooLarge)
+		return
+	}
 	if err != nil || rawInput == nil {
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("提交数据格式错误"), http.StatusBadRequest)
 		return
@@ -157,7 +161,11 @@ func handleAdminDBUpdate(w http.ResponseWriter, r *http.Request, deps AdminDeps)
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("数据库连接失败"), http.StatusInternalServerError)
 		return
 	}
-	rawInput, err := decodeAdminJSONBody(r)
+	rawInput, err := decodeAdminJSONBodyWithLimit(w, r, maxAdminJSONBodyBytes)
+	if isMaxBytesError(err) {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("请求体大小超过限制"), http.StatusRequestEntityTooLarge)
+		return
+	}
 	if err != nil || rawInput == nil {
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("提交数据格式错误"), http.StatusBadRequest)
 		return
@@ -214,7 +222,11 @@ func handleAdminDBDelete(w http.ResponseWriter, r *http.Request, deps AdminDeps)
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("数据库连接失败"), http.StatusInternalServerError)
 		return
 	}
-	rawInput, _ := decodeAdminJSONBody(r)
+	rawInput, err := decodeAdminJSONBodyWithLimit(w, r, maxAdminJSONBodyBytes)
+	if isMaxBytesError(err) {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("请求体大小超过限制"), http.StatusRequestEntityTooLarge)
+		return
+	}
 	if rawInput == nil {
 		rawInput = map[string]any{}
 	}
@@ -305,7 +317,11 @@ func handleAdminResetTeacherPassword(w http.ResponseWriter, r *http.Request, dep
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("数据库连接失败"), http.StatusInternalServerError)
 		return
 	}
-	rawInput, _ := decodeAdminJSONBody(r)
+	rawInput, err := decodeAdminJSONBodyWithLimit(w, r, maxAdminJSONBodyBytes)
+	if isMaxBytesError(err) {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("请求体大小超过限制"), http.StatusRequestEntityTooLarge)
+		return
+	}
 	if rawInput == nil {
 		rawInput = map[string]any{}
 	}
@@ -391,7 +407,7 @@ func handleAdminDownloadSourceFile(w http.ResponseWriter, r *http.Request, deps 
 			"file_name":     match.BaseOrig,
 			"archived_name": match.ArchivedName,
 			"size":          match.Size,
-			"uploaded_at":   time.Unix(match.Timestamp, 0).In(time.Local).Format("2006-01-02 15:04:05"),
+			"uploaded_at":   tz.Unix(match.Timestamp, 0).Format("2006-01-02 15:04:05"),
 		}, nil, http.StatusOK)
 		return
 	}

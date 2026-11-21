@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-	"time"
 
 	"feedback-api/internal/config"
 	"feedback-api/internal/retestkeys"
+	"feedback-api/internal/tz"
 )
 
 // ListRecordHistory mirrors PHP actions_history.php action=record_history.
@@ -202,7 +202,7 @@ func (r *MySQLRepository) RollbackRecord(ctx context.Context, historyID int, adm
 	} else {
 		recCreatedAt := config.AsPHPString(h["record_created_at"])
 		if recCreatedAt == "" {
-			recCreatedAt = time.Now().Format("2006-01-02 15:04:05")
+			recCreatedAt = tz.Now().Format("2006-01-02 15:04:05")
 		}
 		res, err := tx.ExecContext(ctx, `
 			INSERT INTO student_records (
@@ -289,7 +289,7 @@ func (r *MySQLRepository) SearchByToken(ctx context.Context, token, retestSecret
 		rawRows, scanErr := scanDynamicRows(rows)
 		_ = rows.Close()
 		if scanErr == nil {
-			nowTs := time.Now().Unix()
+			nowTs := tz.Now().Unix()
 			for _, row := range rawRows {
 				errList := DecodeJSONAnyList(row["error_questions"])
 				previewErrList := DecodeJSONAnyList(row["preview_error_questions"])

@@ -11,6 +11,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"feedback-api/internal/textutil"
+	"feedback-api/internal/tz"
 )
 
 var (
@@ -43,7 +46,7 @@ func ParseBatchCodeTimestamp(batchCode string) (int64, bool) {
 		return 0, false
 	}
 	t, err := time.ParseInLocation("2006-01-02 15:04:05",
-		m[1]+"-"+m[2]+"-"+m[3]+" "+m[4]+":"+m[5]+":"+m[6], time.Local)
+		m[1]+"-"+m[2]+"-"+m[3]+" "+m[4]+":"+m[5]+":"+m[6], tz.Shanghai())
 	if err != nil {
 		return 0, false
 	}
@@ -54,7 +57,7 @@ func ParseBatchCodeTimestamp(batchCode string) (int64, bool) {
 // Mirrors PHP actions_crud.php download_source_file lines 1196-1345.
 func FindSourceFile(uploadDirs []string, origFileName, studentName string, refTimestamps []int64) (*SourceFileMatch, bool) {
 	baseOrig := filepath.Base(strings.ReplaceAll(strings.TrimSpace(origFileName), "\\", "/"))
-	if baseOrig == "" || baseOrig == "." || baseOrig == "/" {
+	if baseOrig == "" || baseOrig == "." || baseOrig == ".." || baseOrig == "/" {
 		return nil, false
 	}
 	expectedSanitized := strings.ToLower(reNonSafeOrig.ReplaceAllString(baseOrig, ""))
@@ -153,7 +156,7 @@ func FindSourceFile(uploadDirs []string, origFileName, studentName string, refTi
 				continue
 			}
 			fTs := info.ModTime().Unix()
-			if parsed, err := time.ParseInLocation("20060102150405", dStr+tStr, time.Local); err == nil {
+			if parsed, err := time.ParseInLocation("20060102150405", dStr+tStr, tz.Shanghai()); err == nil {
 				fTs = parsed.Unix()
 			}
 			if _, exists := candidates[fPath]; !exists {
@@ -171,8 +174,15 @@ func FindSourceFile(uploadDirs []string, origFileName, studentName string, refTi
 	}
 
 	// 3. Score candidates
-	needContentCheck := len(candidates) > 1 && strings.TrimSpace(studentName) != ""
-	nameBytes := []byte(strings.TrimSpace(studentName))
+	trimmedStudentName := strings.TrimSpace(studentName)
+	needContentCheck := len(candidates) > 1 && trimmedStudentName != ""
+	nameBytes := []byte(trimmedStudentName)
+	var gbkNameBytes []byte
+	if needContentCheck {
+		if gbk, ok := textutil.EncodeGBK(trimmedStudentName); ok && len(gbk) > 0 && !bytes.Equal(gbk, nameBytes) {
+			gbkNameBytes = gbk
+		}
+	}
 
 	scored := make([]*sourceCandidate, 0, len(candidates))
 	for _, cand := range candidates {
@@ -216,7 +226,7 @@ func FindSourceFile(uploadDirs []string, origFileName, studentName string, refTi
 			if f, err := os.Open(cand.path); err == nil {
 				head, _ := io.ReadAll(io.LimitReader(f, 524288))
 				_ = f.Close()
-				if bytes.Contains(head, nameBytes) {
+				if bytes.Contains(head, nameBytes) || (len(gbkNameBytes) > 0 && bytes.Contains(head, gbkNameBytes)) {
 					score += 300000
 				}
 			}

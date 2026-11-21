@@ -283,7 +283,7 @@
             if (!confirmed) return;
             const ids = Array.from(teacherSelectedIds);
             try {
-                const res = await fetch(`${API_BASE}?action=db_batch_delete&table=users`, {
+                const res = await fetch(`${API_BASE}?action=db_delete&table=users`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ ids })

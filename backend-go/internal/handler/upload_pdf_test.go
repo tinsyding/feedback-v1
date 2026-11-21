@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"feedback-api/internal/httpx"
 	"feedback-api/internal/session"
 )
 
@@ -46,7 +47,7 @@ func TestUploadPDF(t *testing.T) {
 	store.Set(teacherSID, map[string]any{"user_logged_in": true, "user_role": "teacher"})
 	store.Set(assistSID, map[string]any{"user_logged_in": true, "user_role": "assistant"})
 
-	h := UploadPDF(root, store)
+	h := httpx.Middleware(UploadPDF(root, store))
 
 	// 1. Unauthenticated -> 401
 	rec := httptest.NewRecorder()

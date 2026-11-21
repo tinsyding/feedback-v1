@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"feedback-api/internal/httpx"
+	"feedback-api/internal/textutil"
+	"feedback-api/internal/tz"
 )
 
 // Entry represents a single backend audit log event matching PHP recordServerLog().
@@ -47,7 +49,10 @@ func RecordFromRequest(ctx context.Context, l Logger, r *http.Request, level, mo
 			ua = gotUA
 		}
 	}
-	l.Record(ctx, Entry{
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	l.Record(context.WithoutCancel(ctx), Entry{
 		Level:     level,
 		Module:    module,
 		Event:     event,
@@ -72,15 +77,15 @@ func NewDualLogger(db *sql.DB, feedbackRoot string) *DualLogger {
 	return &DualLogger{
 		db:           db,
 		feedbackRoot: strings.TrimSpace(feedbackRoot),
-		nowFunc:      time.Now,
+		nowFunc:      tz.Now,
 	}
 }
 
 func (l *DualLogger) now() time.Time {
 	if l != nil && l.nowFunc != nil {
-		return l.nowFunc()
+		return tz.In(l.nowFunc())
 	}
-	return time.Now()
+	return tz.Now()
 }
 
 func newLogID() string {
@@ -100,12 +105,9 @@ func (l *DualLogger) Record(ctx context.Context, entry Entry) {
 	logID := newLogID()
 	createdAt := now.Format("2006-01-02 15:04:05")
 
-	ip := strings.TrimSpace(entry.ClientIP)
+	ip := textutil.TruncateRunes(strings.TrimSpace(entry.ClientIP), 45)
 	if ip == "" {
 		ip = "127.0.0.1"
-	}
-	if len(ip) > 45 {
-		ip = ip[:45]
 	}
 	ua := strings.TrimSpace(entry.UserAgent)
 	if ua == "" {
@@ -127,9 +129,7 @@ func (l *DualLogger) Record(ctx context.Context, entry Entry) {
 			operator = strings.TrimSpace(v)
 		}
 	}
-	if len(operator) > 50 {
-		operator = operator[:50]
-	}
+	operator = textutil.TruncateRunes(operator, 50)
 
 	clientInfo := map[string]any{
 		"ip":        ip,
@@ -143,9 +143,13 @@ func (l *DualLogger) Record(ctx context.Context, entry Entry) {
 	ctxJSON, _ := json.Marshal(ctxMap)
 	clientInfoJSON, _ := json.Marshal(clientInfo)
 
-	// 1. Best-effort write to MySQL system_logs
+	// 1. Best-effort write to MySQL system_logs (detached from HTTP request cancellation)
 	if l.db != nil {
-		dbCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		baseCtx := ctx
+		if baseCtx == nil {
+			baseCtx = context.Background()
+		}
+		dbCtx, cancel := context.WithTimeout(context.WithoutCancel(baseCtx), 3*time.Second)
 		_, _ = l.db.ExecContext(
 			dbCtx,
 			`INSERT INTO `+"`system_logs`"+`

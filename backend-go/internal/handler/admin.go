@@ -20,6 +20,7 @@ import (
 	"feedback-api/internal/httpx"
 	"feedback-api/internal/ratelimit"
 	"feedback-api/internal/session"
+	"feedback-api/internal/tz"
 )
 
 // AdminDeps bundles all dependencies for /api/admin.php.
@@ -38,7 +39,7 @@ func (d AdminDeps) now() time.Time {
 	if d.NowFunc != nil {
 		return d.NowFunc()
 	}
-	return time.Now()
+	return tz.Now()
 }
 
 func (d AdminDeps) httpClient() *http.Client {
@@ -120,19 +121,52 @@ func Admin(deps AdminDeps) http.HandlerFunc {
 	}
 }
 
+const maxAdminJSONBodyBytes = 5 << 20
+
 func decodeAdminJSONBody(r *http.Request) (map[string]any, error) {
-	raw, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
+	if r == nil || r.Body == nil {
+		return nil, io.EOF
+	}
+	raw, err := io.ReadAll(io.LimitReader(r.Body, maxAdminJSONBodyBytes))
 	if err != nil {
 		return nil, err
 	}
 	if len(strings.TrimSpace(string(raw))) == 0 {
 		return nil, io.EOF
 	}
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.UseNumber()
 	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil {
+	if err := dec.Decode(&out); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+func decodeAdminJSONBodyWithLimit(w http.ResponseWriter, r *http.Request, maxBytes int64) (map[string]any, error) {
+	if r == nil || r.Body == nil {
+		return nil, io.EOF
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, err
+	}
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		return nil, io.EOF
+	}
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.UseNumber()
+	var out map[string]any
+	if err := dec.Decode(&out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func isMaxBytesError(err error) bool {
+	var maxErr *http.MaxBytesError
+	return errors.As(err, &maxErr)
 }
 
 func writeAdminRepoError(w http.ResponseWriter, err error) {

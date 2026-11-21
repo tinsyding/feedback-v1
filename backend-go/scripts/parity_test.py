@@ -69,8 +69,19 @@ def make_png(width: int, height: int, rgb: tuple[int, int, int] = (32, 96, 160))
     return PNG_MAGIC + chunk(b"IHDR", ihdr) + chunk(b"IDAT", idat) + chunk(b"IEND", b"")
 
 
+def make_jpeg(width: int, height: int) -> bytes:
+    """Generate a minimal valid baseline JPEG (SOI + APP0/JFIF + SOF0 + EOI) for getimagesize & image.DecodeConfig."""
+    if width <= 0 or height <= 0:
+        raise ValueError("JPEG dimensions must be positive")
+    app0 = b"\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+    sof0_payload = struct.pack(">BHHB", 8, height, width, 3) + b"\x01\x22\x00\x02\x11\x01\x03\x11\x01"
+    sof0 = b"\xff\xc0" + struct.pack(">H", len(sof0_payload) + 2) + sof0_payload
+    return b"\xff\xd8" + app0 + sof0 + b"\xff\xd9"
+
+
 PNG_10X10 = make_png(10, 10, (120, 40, 40))
 PNG_400X300 = make_png(400, 300, (40, 120, 180))
+JPEG_400X300 = make_jpeg(400, 300)
 INVALID_TEXT_BYTES = b"this is definitely not a PNG or JPEG image\n"
 
 
@@ -261,6 +272,8 @@ def clean_subprocess_env() -> dict[str, str]:
     env = os.environ.copy()
     for key in (
         "SENDER_API_TOKEN",
+        "SENDER_API_TOKENS",
+        "ALLOW_DEFAULT_SENDER_TOKEN",
         "DASHSCOPE_API_KEY",
         "IDENTIFY_API_BASE",
         "IDENTIFY_MODEL",
@@ -270,8 +283,14 @@ def clean_subprocess_env() -> dict[str, str]:
         "FEEDBACK_SECRETS_FILE",
         "FEEDBACK_ROOT",
         "FEEDBACK_LISTEN_ADDR",
+        "DB_HOST",
+        "DB_PORT",
+        "DB_DATABASE",
+        "DB_USERNAME",
+        "DB_PASSWORD",
     ):
         env.pop(key, None)
+    env["ALLOW_DEFAULT_SENDER_TOKEN"] = "false"
     return env
 
 
@@ -377,12 +396,20 @@ def assert_json_values_match(
     path: str = "$",
     float_array_paths: set[str] | None = None,
 ) -> None:
-    """Strict structural + type-safe JSON equality (ignoring exact duration_ms int)."""
+    """Strict structural + type-safe JSON equality (ignoring exact duration_ms int and live server_time second)."""
     if path == "$.data.duration_ms":
         for label, val in (("left", a), ("right", b)):
             assert_true(
                 type(val) is int and val >= 0,
                 f"{ctx} {path} ({label}) must be non-negative int, got {val!r} ({type(val).__name__})",
+            )
+        return
+
+    if path == "$.data.cloud_control.server_time":
+        for label, val in (("left", a), ("right", b)):
+            assert_true(
+                isinstance(val, str) and bool(re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", val)),
+                f"{ctx} {path} ({label}) must be YYYY-MM-DD HH:MM:SS string, got {val!r}",
             )
         return
 
@@ -431,6 +458,7 @@ def assert_response_parity(
     origin: str | None = None,
     check_cache_control: bool = False,
     float_array_paths: set[str] | None = None,
+    expect_json: bool = True,
 ) -> None:
     assert_eq(go_resp.status, php_resp.status, f"[{test_name}] PHP vs Go HTTP status")
     assert_cors_headers("php-parity", origin, php_resp)
@@ -446,6 +474,9 @@ def assert_response_parity(
     if php_resp.status == 204:
         assert_eq(go_resp.body, b"", f"[{test_name}] Go 204 body empty")
         assert_eq(php_resp.body, b"", f"[{test_name}] PHP 204 body empty")
+        return
+
+    if not expect_json:
         return
 
     php_ct = php_resp.headers.get("content-type", "").lower()
@@ -538,6 +569,7 @@ class ParityHarness:
         origin: str | None = None,
         check_cache_control: bool = False,
         float_array_paths: set[str] | None = None,
+        expect_json: bool = True,
     ) -> dict[str, HttpResponse]:
         responses: dict[str, HttpResponse] = {}
         mock_calls_by_engine: dict[str, list[RecordedVisionRequest]] = {}
@@ -562,6 +594,7 @@ class ParityHarness:
                 origin=origin,
                 check_cache_control=check_cache_control,
                 float_array_paths=float_array_paths,
+                expect_json=expect_json,
             )
             php_calls = mock_calls_by_engine["php"]
             go_calls = mock_calls_by_engine["go"]
@@ -1711,6 +1744,550 @@ def register_and_run_all_tests(harness: ParityHarness) -> None:
             ),
         )
 
+    # 29. data/.ai_secrets.json key isolation (no leak in public_config; used by calibrate_roi & identify)
+    def test_ai_secrets_json_isolation() -> None:
+        ai_secrets_path = harness.feedback_root / "data" / ".ai_secrets.json"
+        isolated_key = "sk-isolated-ai-secrets-json-key-2026"
+        try:
+            ai_secrets_path.write_text(
+                json.dumps({"dashscopeApiKey": isolated_key, "updatedAt": "2026-11-21 20:00:00"}),
+                encoding="utf-8",
+            )
+            harness.write_config(harness.baseline_config(dashscopeApiKey=""))
+
+            # public_config.php must never leak isolated key
+            harness.execute_across_engines(
+                "ai_secrets_not_leaked_in_public_config",
+                lambda u: http_request(u, "GET", "/api/public_config.php"),
+                lambda e, r, _, __: (
+                    assert_eq(r.status, 200, f"[{e}] status"),
+                    assert_true(isolated_key not in r.text, f"[{e}] leaked isolated key in public_config"),
+                    assert_true("dashscopeApiKey" not in r.text, f"[{e}] leaked dashscopeApiKey field"),
+                ),
+                check_cache_control=True,
+            )
+
+            # identify.php reads dashscopeApiKey from data/.ai_secrets.json (overrides secret_key.local.php)
+            raw_content = '{"matched":true,"is_group":false,"title_in_header":true,"detected_title":"10099_赵六","reason":"ok"}'
+            harness.mock.state.set_chat_content(raw_content)
+            body, ct = encode_multipart(
+                fields={"token": TEST_SENDER_TOKEN, "mode": "title", "target_id": "10099", "target_name": "赵六"},
+                files=[("image_title", "title.png", "image/png", PNG_400X300)],
+            )
+            harness.execute_across_engines(
+                "ai_secrets_used_by_identify",
+                lambda u: http_request(u, "POST", "/api/identify.php", headers={"Content-Type": ct}, body=body),
+                lambda e, r, m, _: (
+                    assert_eq(r.status, 200, f"[{e}] status"),
+                    assert_eq(len(m), 1, f"[{e}] mock calls"),
+                    assert_eq(m[0].authorization, f"Bearer {isolated_key}", f"[{e}] isolated key auth header"),
+                ),
+            )
+        finally:
+            if ai_secrets_path.exists():
+                ai_secrets_path.unlink()
+
+    # 30. Array-typed senderApiTokens in api/secret_key.local.php with ALLOW_DEFAULT_SENDER_TOKEN=false
+    def test_multi_sender_tokens_and_strict_no_default() -> None:
+        reset_baseline()
+        secret_local = harness.feedback_root / "api" / "secret_key.local.php"
+        orig_secret_text = secret_local.read_text(encoding="utf-8")
+        try:
+            secret_local.write_text(
+                "<?php\n"
+                "return [\n"
+                f"    'retestSecret' => '{TEST_RETEST_SECRET}',\n"
+                "    'senderApiTokens' => ['tok_rot_1', 'tok_rot_2'],\n"
+                f"    'dashscopeApiKey' => '{TEST_VISION_KEY}',\n"
+                f"    'identifyApiBase' => 'http://127.0.0.1:{mock_port}/v1',\n"
+                "];\n",
+                encoding="utf-8",
+            )
+
+            # Both rotated tokens must be accepted (passes auth -> 400 missing image)
+            for rot_tok in ("tok_rot_1", "tok_rot_2"):
+                b_ok, ct_ok = encode_multipart(fields={"token": rot_tok})
+                harness.execute_across_engines(
+                    f"multi_token_accepted_{rot_tok}",
+                    lambda u, b=b_ok, c=ct_ok: http_request(
+                        u, "POST", "/api/calibrate_roi.php", headers={"Content-Type": c}, body=b
+                    ),
+                    lambda e, r, _, __, t=rot_tok: (
+                        assert_eq(r.status, 400, f"[{e}:{t}] expected 400 past auth"),
+                        assert_json_values_match(
+                            {"success": False, "data": None, "error": "缺少上传整窗截图：image"},
+                            r.json(),
+                            f"[{e}:{t}] accepted rotated token",
+                        ),
+                    ),
+                )
+
+            # Default token and invalid token must be rejected (200 鉴权失败)
+            for bad_label, bad_tok in (("default_tok", DEFAULT_SENDER_TOKEN), ("invalid_tok", "not_in_rotation")):
+                b_bad, ct_bad = encode_multipart(fields={"token": bad_tok})
+                harness.execute_across_engines(
+                    f"multi_token_rejected_{bad_label}",
+                    lambda u, b=b_bad, c=ct_bad: http_request(
+                        u, "POST", "/api/calibrate_roi.php", headers={"Content-Type": c}, body=b
+                    ),
+                    lambda e, r, _, __, lbl=bad_label: (
+                        assert_eq(r.status, 200, f"[{e}:{lbl}] status"),
+                        assert_json_values_match(
+                            {"success": False, "data": None, "error": "鉴权失败"},
+                            r.json(),
+                            f"[{e}:{lbl}] rejected token",
+                        ),
+                    ),
+                )
+
+            # When no custom token is configured and ALLOW_DEFAULT_SENDER_TOKEN=false, default token is rejected
+            secret_local.write_text(
+                "<?php\n"
+                "return [\n"
+                f"    'retestSecret' => '{TEST_RETEST_SECRET}',\n"
+                f"    'dashscopeApiKey' => '{TEST_VISION_KEY}',\n"
+                "];\n",
+                encoding="utf-8",
+            )
+            b_def, ct_def = encode_multipart(fields={"token": DEFAULT_SENDER_TOKEN})
+            harness.execute_across_engines(
+                "strict_no_default_token_when_unconfigured",
+                lambda u: http_request(
+                    u, "POST", "/api/calibrate_roi.php", headers={"Content-Type": ct_def}, body=b_def
+                ),
+                lambda e, r, _, __: (
+                    assert_eq(r.status, 200, f"[{e}] status"),
+                    assert_json_values_match(
+                        {"success": False, "data": None, "error": "鉴权失败"},
+                        r.json(),
+                        f"[{e}] strict default token disabled",
+                    ),
+                ),
+            )
+        finally:
+            secret_local.write_text(orig_secret_text, encoding="utf-8")
+
+    # 31. JPEG upload in calibrate_roi.php & identify.php + X-Forwarded-For / X-Real-IP extraction
+    def test_jpeg_upload_and_forwarded_ip_headers() -> None:
+        reset_baseline()
+        expected_jpeg_url = "data:image/jpeg;base64," + base64.b64encode(JPEG_400X300).decode("ascii")
+
+        # calibrate_roi.php with JPEG
+        cal_content = '{"success":true,"title_bar":[40,260,90,980],"input_box":[780,260,990,980],"reason":"jpeg window"}'
+        harness.mock.state.set_chat_content(cal_content)
+        cal_body, cal_ct = encode_multipart(
+            fields={"token": TEST_SENDER_TOKEN},
+            files=[("image", "window.jpg", "image/jpeg", JPEG_400X300)],
+        )
+        float_paths = {"$.data.title", "$.data.input", "$.data.chat"}
+        harness.execute_across_engines(
+            "calibrate_jpeg_upload",
+            lambda u: http_request(
+                u, "POST", "/api/calibrate_roi.php", headers={"Content-Type": cal_ct}, body=cal_body
+            ),
+            lambda e, r, m, _: (
+                assert_eq(r.status, 200, f"[{e}] status"),
+                assert_eq(len(m), 1, f"[{e}] mock calls"),
+                assert_eq(
+                    m[0].body_json["messages"][0]["content"][1]["image_url"]["url"],
+                    expected_jpeg_url,
+                    f"[{e}] JPEG data URL",
+                ),
+            ),
+            float_array_paths=float_paths,
+        )
+
+        # identify.php with JPEG + X-Forwarded-For (rightmost public IP selected) & X-Real-IP
+        id_content = '{"matched":true,"is_group":false,"title_in_header":true,"detected_title":"10088_孙七","reason":"jpeg ok"}'
+        harness.mock.state.set_chat_content(id_content)
+        id_body, id_ct = encode_multipart(
+            fields={"token": TEST_SENDER_TOKEN, "mode": "title", "target_id": "10088", "target_name": "孙七"},
+            files=[("image_title", "title.jpg", "image/jpeg", JPEG_400X300)],
+        )
+        for hdr_label, ip_hdrs, expected_ip in [
+            ("xff_public", {"X-Forwarded-For": "10.0.0.1, 8.8.8.8, 192.168.1.5"}, "8.8.8.8"),
+            ("x_real_ip", {"X-Real-IP": "1.1.1.1", "X-Forwarded-For": "8.8.8.8"}, "1.1.1.1"),
+        ]:
+            def check_id_jpeg(
+                engine: str,
+                resp: HttpResponse,
+                mock_calls: list[RecordedVisionRequest],
+                new_archives: set[str],
+                exp_ip: str = expected_ip,
+            ) -> None:
+                assert_eq(resp.status, 200, f"[{engine}] status")
+                assert_eq(len(mock_calls), 1, f"[{engine}] mock calls")
+                assert_eq(
+                    mock_calls[0].body_json["messages"][0]["content"][1]["image_url"]["url"],
+                    expected_jpeg_url,
+                    f"[{engine}] identify JPEG data URL",
+                )
+                assert_eq(len(new_archives), 1, f"[{engine}] archive count")
+                dirname = next(iter(new_archives))
+                req_doc = json.loads((harness.archive_day_dir() / dirname / "request.json").read_text(encoding="utf-8"))
+                assert_eq(req_doc["ip"], exp_ip, f"[{engine}] archived client IP")
+
+            harness.execute_across_engines(
+                f"identify_jpeg_and_{hdr_label}",
+                lambda u, h=ip_hdrs: http_request(
+                    u, "POST", "/api/identify.php", headers={"Content-Type": id_ct, **h}, body=id_body
+                ),
+                check_id_jpeg,
+            )
+
+    # 32. auth.php check, captcha PNG, logout, and unauthenticated assistant_list/create (401)
+    def test_auth_endpoints_parity() -> None:
+        # GET ?action=check
+        harness.execute_across_engines(
+            "auth_check_logged_out",
+            lambda u: http_request(u, "GET", "/api/auth.php?action=check"),
+            lambda e, r, _, __: (
+                assert_eq(r.status, 200, f"[{e}] auth check status"),
+                assert_json_values_match(
+                    {"success": True, "data": {"loggedIn": False, "require_captcha": False}, "error": None},
+                    r.json(),
+                    f"[{e}] auth check JSON",
+                ),
+            ),
+        )
+
+        # GET ?action=captcha -> 200 image/png with 130x42 dimensions
+        def check_auth_captcha(engine: str, resp: HttpResponse, _: list[RecordedVisionRequest], __: set[str]) -> None:
+            assert_eq(resp.status, 200, f"[{engine}] auth captcha status")
+            assert_true("image/png" in resp.headers.get("content-type", "").lower(), f"[{engine}] Content-Type")
+            assert_true(resp.body.startswith(PNG_MAGIC), f"[{engine}] PNG magic bytes")
+            w, h = struct.unpack(">II", resp.body[16:24])
+            assert_eq((w, h), (130, 42), f"[{engine}] captcha PNG dimensions")
+
+        harness.execute_across_engines(
+            "auth_captcha_png",
+            lambda u: http_request(u, "GET", "/api/auth.php?action=captcha"),
+            check_auth_captcha,
+            expect_json=False,
+            check_cache_control=True,
+        )
+
+        # POST ?action=logout
+        harness.execute_across_engines(
+            "auth_logout_200",
+            lambda u: http_request(u, "POST", "/api/auth.php?action=logout"),
+            lambda e, r, _, __: (
+                assert_eq(r.status, 200, f"[{e}] auth logout status"),
+                assert_json_values_match(
+                    {"success": True, "data": {"message": "已成功退出登录"}, "error": None},
+                    r.json(),
+                    f"[{e}] auth logout JSON",
+                ),
+            ),
+        )
+
+        # Unauthenticated assistant_list & assistant_create -> 401
+        harness.execute_across_engines(
+            "auth_unauth_assistant_list_401",
+            lambda u: http_request(u, "GET", "/api/auth.php?action=assistant_list"),
+            lambda e, r, _, __: (
+                assert_eq(r.status, 401, f"[{e}] assistant_list unauth status"),
+                assert_json_values_match(
+                    {"success": False, "data": None, "error": "需要教师或管理员登录后才可管理助教账号"},
+                    r.json(),
+                    f"[{e}] assistant_list unauth",
+                ),
+            ),
+        )
+        harness.execute_across_engines(
+            "auth_unauth_assistant_create_401",
+            lambda u: http_request(
+                u,
+                "POST",
+                "/api/auth.php?action=assistant_create",
+                headers={"Content-Type": "application/json"},
+                body=b"{}",
+            ),
+            lambda e, r, _, __: (
+                assert_eq(r.status, 401, f"[{e}] assistant_create unauth status"),
+                assert_json_values_match(
+                    {"success": False, "data": None, "error": "需要教师或管理员登录后才可创建助教账号"},
+                    r.json(),
+                    f"[{e}] assistant_create unauth",
+                ),
+            ),
+        )
+
+    # 33. qbank.php unauthenticated GET ?action=list, POST, DELETE -> 401
+    def test_qbank_unauth_401() -> None:
+        expected = {"success": False, "data": None, "error": "未登录或登录会话已过期，请重新登录"}
+        for method, path, body in [
+            ("GET", "/api/qbank.php?action=list", None),
+            ("POST", "/api/qbank.php", b"{}"),
+            ("DELETE", "/api/qbank.php?subject=%E6%95%B0%E5%AD%A6&grade=%E4%B8%83%E5%B9%B4%E7%BA%A7&tier=U&week=1", None),
+        ]:
+            harness.execute_across_engines(
+                f"qbank_unauth_{method}_401",
+                lambda u, m=method, p=path, b=body: http_request(u, m, p, body=b),
+                lambda e, r, _, __, m=method: (
+                    assert_eq(r.status, 401, f"[{e}] qbank {m} unauth status"),
+                    assert_json_values_match(expected, r.json(), f"[{e}] qbank {m} unauth"),
+                ),
+            )
+
+    # 34. logs.php sender_control_pull (GET/POST with clients/<slug>.json api/always), sender_sync, unauth 401
+    def test_logs_sender_control_sync_and_unauth() -> None:
+        reset_baseline()
+        clients_dir = harness.feedback_root / "data" / "sender_control" / "clients"
+        clients_dir.mkdir(parents=True, exist_ok=True)
+        slug = "lab_pc_parity"
+        client_file = clients_dir / f"{slug}.json"
+        client_file.write_text(
+            json.dumps(
+                {
+                    "client_slug": slug,
+                    "overrides": {
+                        "verifyMode": "api",
+                        "snapshotPolicy": "always",
+                        "searchWait": 2.5,
+                    },
+                    "note": "单机云控互操作测试",
+                    "updated_at": "2026-11-21 19:00:00",
+                    "commands": [],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        def check_pull(engine: str, resp: HttpResponse, _: list[RecordedVisionRequest], __: set[str]) -> None:
+            assert_eq(resp.status, 200, f"[{engine}] sender_control_pull status")
+            body = resp.json()
+            assert_eq(body.get("success"), True, f"[{engine}] success")
+            cc = body["data"]["cloud_control"]
+            assert_eq(cc["client_slug"], slug, f"[{engine}] client_slug")
+            assert_eq(cc["has_client_override"], True, f"[{engine}] has_client_override")
+            assert_eq(cc["client_overrides"]["verifyMode"], "api", f"[{engine}] override verifyMode=api")
+            assert_eq(cc["client_overrides"]["snapshotPolicy"], "always", f"[{engine}] override snapshotPolicy=always")
+            assert_eq(cc["effective_policy"]["verifyMode"], "api", f"[{engine}] effective verifyMode=api")
+            assert_eq(cc["effective_policy"]["snapshotPolicy"], "always", f"[{engine}] effective snapshotPolicy=always")
+            assert_eq(float(cc["effective_policy"]["searchWait"]), 2.5, f"[{engine}] effective searchWait=2.5")
+
+        # GET sender_control_pull
+        harness.execute_across_engines(
+            "logs_sender_control_pull_get",
+            lambda u: http_request(
+                u,
+                "GET",
+                f"/api/logs.php?action=sender_control_pull&client_slug={slug}&token={TEST_SENDER_TOKEN}",
+            ),
+            check_pull,
+        )
+
+        # POST sender_control_pull
+        pull_post_body = json.dumps(
+            {"token": TEST_SENDER_TOKEN, "client": {"client_slug": slug, "hostname": "LabPC", "os_user": "teacher"}}
+        ).encode("utf-8")
+        harness.execute_across_engines(
+            "logs_sender_control_pull_post",
+            lambda u: http_request(
+                u,
+                "POST",
+                "/api/logs.php?action=sender_control_pull",
+                headers={"Content-Type": "application/json"},
+                body=pull_post_body,
+            ),
+            check_pull,
+        )
+
+        # POST sender_sync chunk mode (use offset=0 and identical content so PHP and Go both see size=14)
+        chunk_body = json.dumps(
+            {
+                "token": TEST_SENDER_TOKEN,
+                "sync_mode": "chunk",
+                "date_str": "2026-11-21",
+                "log_type": "sender",
+                "offset": 0,
+                "content": "parity line 1\n",
+                "client": {"client_slug": slug, "hostname": "LabPC", "os_user": "teacher"},
+            }
+        ).encode("utf-8")
+        harness.execute_across_engines(
+            "logs_sender_sync_chunk",
+            lambda u: http_request(
+                u,
+                "POST",
+                "/api/logs.php?action=sender_sync",
+                headers={"Content-Type": "application/json"},
+                body=chunk_body,
+            ),
+            lambda e, r, _, __: (
+                assert_eq(r.status, 200, f"[{e}] sender_sync chunk status"),
+                assert_eq(r.json()["data"]["mode"], "chunk", f"[{e}] chunk mode"),
+                assert_eq(r.json()["data"]["size"], 14, f"[{e}] chunk size"),
+                assert_eq(r.json()["data"]["cloud_control"]["effective_policy"]["verifyMode"], "api", f"[{e}] cloud_control"),
+            ),
+        )
+
+        # POST sender_sync batch_summary mode
+        summary_body = json.dumps(
+            {
+                "token": TEST_SENDER_TOKEN,
+                "sync_mode": "batch_summary",
+                "client": {"client_slug": slug, "hostname": "LabPC", "os_user": "teacher"},
+                "batch_summary": {
+                    "date_str": "2026-11-21",
+                    "counts": {"total": 2, "sent": 2, "failed": 0, "blocked": 0, "unmatched": 0, "skipped": 0},
+                    "files": ["batch1.json"],
+                    "stopped": False,
+                    "students": [{"name": "张三", "status": "sent"}],
+                },
+            }
+        ).encode("utf-8")
+        harness.execute_across_engines(
+            "logs_sender_sync_batch_summary",
+            lambda u: http_request(
+                u,
+                "POST",
+                "/api/logs.php?action=sender_sync",
+                headers={"Content-Type": "application/json"},
+                body=summary_body,
+            ),
+            lambda e, r, _, __: (
+                assert_eq(r.status, 200, f"[{e}] sender_sync batch_summary status"),
+                assert_eq(r.json()["data"]["mode"], "batch_summary", f"[{e}] batch_summary mode"),
+            ),
+        )
+
+        # Unauthenticated GET list / stats / filters -> 401
+        expected_unauth = {"success": False, "data": None, "error": "未登录或会话已过期，需管理员权限"}
+        for act in ("list", "stats", "filters"):
+            harness.execute_across_engines(
+                f"logs_unauth_{act}_401",
+                lambda u, a=act: http_request(u, "GET", f"/api/logs.php?action={a}"),
+                lambda e, r, _, __, a=act: (
+                    assert_eq(r.status, 401, f"[{e}] logs {a} unauth status"),
+                    assert_json_values_match(expected_unauth, r.json(), f"[{e}] logs {a} unauth"),
+                ),
+            )
+
+    # 35. admin.php check (loggedIn:false), unauth actions (401), and strict cross-origin POST CSRF (403)
+    def test_admin_check_unauth_and_csrf() -> None:
+        harness.execute_across_engines(
+            "admin_check_logged_out",
+            lambda u: http_request(u, "GET", "/api/admin.php?action=check"),
+            lambda e, r, _, __: (
+                assert_eq(r.status, 200, f"[{e}] admin check status"),
+                assert_json_values_match(
+                    {"success": True, "data": {"loggedIn": False}, "error": None},
+                    r.json(),
+                    f"[{e}] admin check JSON",
+                ),
+            ),
+        )
+
+        expected_unauth = {"success": False, "data": None, "error": "未登录或会话已过期，需管理员权限"}
+        for method, act, body in [
+            ("GET", "db_tables", None),
+            ("GET", "config", None),
+            ("GET", "db_list&table=student_records", None),
+            ("POST", "change_password", b"{}"),
+        ]:
+            harness.execute_across_engines(
+                f"admin_unauth_{act.split('&')[0]}_401",
+                lambda u, m=method, a=act, b=body: http_request(u, m, f"/api/admin.php?action={a}", body=b),
+                lambda e, r, _, __, a=act: (
+                    assert_eq(r.status, 401, f"[{e}] admin {a} unauth status"),
+                    assert_json_values_match(expected_unauth, r.json(), f"[{e}] admin {a} unauth"),
+                ),
+            )
+
+        # Cross-origin POST CSRF rejected with 403 (both evil origin and cross-subdomain origin)
+        for origin in ("https://evil.example", "https://vip.wxjifang.cn"):
+            harness.execute_across_engines(
+                f"admin_csrf_post_403_{origin.split('//')[1]}",
+                lambda u, o=origin: http_request(
+                    u,
+                    "POST",
+                    "/api/admin.php?action=logout",
+                    headers={"Origin": o},
+                ),
+                lambda e, r, _, __, o=origin: (
+                    assert_eq(r.status, 403, f"[{e}:{o}] admin CSRF status"),
+                    assert_cors_headers(e, o, r),
+                ),
+                origin=origin,
+            )
+
+    # 36. retest.php SVG captcha, download_file 400/404, and unauth teacher/download actions (401)
+    def test_retest_captcha_download_and_unauth() -> None:
+        reset_baseline()
+
+        # GET ?action=captcha -> 200 image/svg+xml
+        def check_svg(engine: str, resp: HttpResponse, _: list[RecordedVisionRequest], __: set[str]) -> None:
+            assert_eq(resp.status, 200, f"[{engine}] retest captcha status")
+            assert_true("image/svg+xml" in resp.headers.get("content-type", "").lower(), f"[{engine}] SVG Content-Type")
+            assert_true("<svg" in resp.text and "</svg>" in resp.text, f"[{engine}] SVG body")
+
+        harness.execute_across_engines(
+            "retest_captcha_svg",
+            lambda u: http_request(u, "GET", "/api/retest.php?action=captcha"),
+            check_svg,
+            expect_json=False,
+            check_cache_control=True,
+        )
+
+        # GET ?action=download_file&key=invalid -> 400
+        harness.execute_across_engines(
+            "retest_download_file_invalid_key_400",
+            lambda u: http_request(u, "GET", "/api/retest.php?action=download_file&key=invalid"),
+            lambda e, r, _, __: (
+                assert_eq(r.status, 400, f"[{e}] invalid key status"),
+                assert_eq(r.text, "无效的文件凭证（Invalid Key）", f"[{e}] invalid key message"),
+            ),
+            expect_json=False,
+        )
+
+        # GET ?action=download_file&key=0123456789abcdef0123456789abcdef -> 404
+        harness.execute_across_engines(
+            "retest_download_file_missing_key_404",
+            lambda u: http_request(
+                u, "GET", "/api/retest.php?action=download_file&key=0123456789abcdef0123456789abcdef"
+            ),
+            lambda e, r, _, __: (
+                assert_eq(r.status, 404, f"[{e}] missing key status"),
+                assert_eq(r.text, "文件不存在或已过期，请返回页面重新生成", f"[{e}] missing key message"),
+            ),
+            expect_json=False,
+        )
+
+        # Unauthenticated check_existing_batch & encrypt_batch -> 401
+        expected_auth_401 = {"success": False, "data": None, "error": "未登录或登录会话已过期，请重新登录"}
+        for act in ("check_existing_batch", "encrypt_batch"):
+            harness.execute_across_engines(
+                f"retest_unauth_{act}_401",
+                lambda u, a=act: http_request(
+                    u,
+                    "POST",
+                    f"/api/retest.php?action={a}",
+                    headers={"Content-Type": "application/json"},
+                    body=b"{}",
+                ),
+                lambda e, r, _, __, a=act: (
+                    assert_eq(r.status, 401, f"[{e}] retest {a} unauth status"),
+                    assert_json_values_match(expected_auth_401, r.json(), f"[{e}] retest {a} unauth"),
+                ),
+            )
+
+        # Unauthenticated create_temp_download -> 401
+        harness.execute_across_engines(
+            "retest_unauth_create_temp_download_401",
+            lambda u: http_request(u, "POST", "/api/retest.php?action=create_temp_download", body=b"%PDF-1.4\n"),
+            lambda e, r, _, __: (
+                assert_eq(r.status, 401, f"[{e}] create_temp_download unauth status"),
+                assert_json_values_match(
+                    {"success": False, "error": "未授权的下载请求：请先通过学生身份验证"},
+                    r.json(),
+                    f"[{e}] create_temp_download unauth",
+                ),
+            ),
+        )
+
     tests: list[tuple[str, Callable[[], None]]] = [
         ("public_config_defaults", test_public_config_defaults),
         ("public_config_clamped_and_no_secrets", test_public_config_clamped_and_no_secrets),
@@ -1740,6 +2317,14 @@ def register_and_run_all_tests(harness: ParityHarness) -> None:
         ("changelog_public_and_unauth", test_changelog_public_and_unauth),
         ("upload_pdf_unauth_401", test_upload_pdf_unauth_401),
         ("upload_capture_unauth_401", test_upload_capture_unauth_401),
+        ("ai_secrets_json_isolation", test_ai_secrets_json_isolation),
+        ("multi_sender_tokens_and_strict_no_default", test_multi_sender_tokens_and_strict_no_default),
+        ("jpeg_upload_and_forwarded_ip_headers", test_jpeg_upload_and_forwarded_ip_headers),
+        ("auth_endpoints_parity", test_auth_endpoints_parity),
+        ("qbank_unauth_401", test_qbank_unauth_401),
+        ("logs_sender_control_sync_and_unauth", test_logs_sender_control_sync_and_unauth),
+        ("admin_check_unauth_and_csrf", test_admin_check_unauth_and_csrf),
+        ("retest_captcha_download_and_unauth", test_retest_captcha_download_and_unauth),
     ]
 
     for name, fn in tests:
@@ -1767,6 +2352,20 @@ def prepare_isolated_feedback_root(temp_dir: Path, source_feedback_v1: Path, moc
         f"    'identifyApiBase' => 'http://127.0.0.1:{mock_port}/v1',\n"
         "    'identifyModel' => 'mock-vision-max',\n"
         "    'identifyFastModel' => 'mock-vision-flash',\n"
+        "];\n",
+        encoding="utf-8",
+    )
+
+    # Isolate DB config to an unreachable port so no-DB parity tests never hit a live MySQL instance
+    db_local = root / "api" / "db.local.php"
+    db_local.write_text(
+        "<?php\n"
+        "return [\n"
+        "    'host' => '127.0.0.1',\n"
+        "    'port' => 1,\n"
+        "    'dbname' => 'feedback_parity_offline',\n"
+        "    'username' => 'nobody',\n"
+        "    'password' => '',\n"
         "];\n",
         encoding="utf-8",
     )

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"feedback-api/internal/config"
+	"feedback-api/internal/textutil"
 )
 
 // SanitizeCSVCell defends against Excel/WPS formula injection (=, +, -, @, \t, \r).
@@ -51,8 +52,9 @@ func FormatDetailsForExport(details map[string]any) string {
 		return "-"
 	}
 	s := string(b)
-	if len(s) > 300 {
-		return s[:300] + "..."
+	trunc := textutil.TruncateRunes(s, 300)
+	if len(trunc) < len(s) {
+		return trunc + "..."
 	}
 	return s
 }

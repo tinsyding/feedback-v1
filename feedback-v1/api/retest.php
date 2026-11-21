@@ -761,19 +761,29 @@ if ($action === 'check_existing_batch') {
                 $params = array_merge($params, $nameOnlyNames);
             }
             $recRows = $db->fetchAll(
-                "SELECT student_name, student_id, student_key, homework_score, error_count, error_questions, updated_at, created_by
+                "SELECT student_name, student_id, student_key, homework_score, error_count, error_questions, teacher_comment, updated_at, created_by
                  FROM `student_records`
                  WHERE `batch_id` = ? AND `week_num` = ? AND (" . implode(' OR ', $whereOr) . ")
                  ORDER BY updated_at ASC, id ASC",
                 $params
             );
 
-            $matchedCount = count($recRows);
+            $matchedCount = 0;
             $modifiedStudents = [];
             $lastUpdated = '';
             $latestRowOperator = '';
 
             foreach ($recRows as $r) {
+                $oldErrs = json_decode($r['error_questions'], true);
+                if (!is_array($oldErrs)) $oldErrs = [];
+                $oldErrs = array_values(array_unique(array_map('intval', $oldErrs)));
+                sort($oldErrs, SORT_NUMERIC);
+
+                $hasOldScore = ($r['homework_score'] !== null && $r['homework_score'] !== '');
+                $oldComment = trim((string)($r['teacher_comment'] ?? ''));
+                $hasHomeworkData = $hasOldScore || ((int)($r['error_count'] ?? 0) > 0) || !empty($oldErrs) || $oldComment !== '';
+                if (!$hasHomeworkData) continue;
+
                 $rKey = trim($r['student_key'] ?? '');
                 $rName = trim($r['student_name']);
                 $matchedData = ($rKey !== '' && isset($incomingMap[$rKey])) ? $incomingMap[$rKey] : null;
@@ -788,6 +798,7 @@ if ($action === 'check_existing_batch') {
                 }
                 if (!$matchedData) continue;
 
+                $matchedCount++;
                 if (!empty($r['updated_at']) && $r['updated_at'] > $lastUpdated) {
                     $lastUpdated = $r['updated_at'];
                 }
@@ -796,23 +807,22 @@ if ($action === 'check_existing_batch') {
 
                 $incoming = $matchedData;
 
-                $oldScoreNum = isset($r['homework_score']) ? floatval($r['homework_score']) : 0.0;
+                $scoreChanged = false;
+                $oldScoreDisplay = null;
                 $newScoreNum = $incoming['score'];
-                $scoreChanged = (abs($oldScoreNum - $newScoreNum) > 0.01);
+                $newScoreDisplay = (abs($newScoreNum - round($newScoreNum)) < 0.001) ? (int)round($newScoreNum) : round($newScoreNum, 1);
 
-                $oldErrs = json_decode($r['error_questions'], true);
-                if (!is_array($oldErrs)) $oldErrs = [];
-                $oldErrs = array_values(array_unique(array_map('intval', $oldErrs)));
-                sort($oldErrs, SORT_NUMERIC);
+                if ($hasOldScore) {
+                    $oldScoreNum = floatval($r['homework_score']);
+                    $scoreChanged = (abs($oldScoreNum - $newScoreNum) > 0.01);
+                    $oldScoreDisplay = (abs($oldScoreNum - round($oldScoreNum)) < 0.001) ? (int)round($oldScoreNum) : round($oldScoreNum, 1);
+                }
 
                 $newErrs = $incoming['errors'];
                 $errorsChanged = ($oldErrs !== $newErrs);
 
                 // 只有已存档且得分或错题发生变动的学生，才判定为需要预警的覆盖修改
                 if ($scoreChanged || $errorsChanged) {
-                    $oldScoreDisplay = (abs($oldScoreNum - round($oldScoreNum)) < 0.001) ? (int)round($oldScoreNum) : round($oldScoreNum, 1);
-                    $newScoreDisplay = (abs($newScoreNum - round($newScoreNum)) < 0.001) ? (int)round($newScoreNum) : round($newScoreNum, 1);
-
                     $displayName = $rName;
                     if (!empty($r['student_id'])) {
                         $displayName = $r['student_id'] . ' ' . $rName;
@@ -863,8 +873,9 @@ if ($action === 'check_existing_batch') {
         }
 
         // 未传入学生名单时的回退逻辑：检查该班级该周是否有任何记录并返回学生列表
+        $hwNonEmptyCond = "(`homework_score` IS NOT NULL OR `error_count` > 0 OR COALESCE(`teacher_comment`, '') != '')";
         $recordCount = (int)$db->fetchValue(
-            "SELECT COUNT(*) FROM `student_records` WHERE `batch_id` = ? AND `week_num` = ?",
+            "SELECT COUNT(*) FROM `student_records` WHERE `batch_id` = ? AND `week_num` = ? AND {$hwNonEmptyCond}",
             [$batchId, $week]
         );
 
@@ -877,7 +888,7 @@ if ($action === 'check_existing_batch') {
         $recRows = $db->fetchAll(
             "SELECT student_name, student_id, student_key, homework_score, error_count, error_questions
              FROM `student_records`
-             WHERE `batch_id` = ? AND `week_num` = ?
+             WHERE `batch_id` = ? AND `week_num` = ? AND {$hwNonEmptyCond}
              ORDER BY id ASC",
             [$batchId, $week]
         );

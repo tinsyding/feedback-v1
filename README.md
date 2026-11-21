@@ -4,7 +4,7 @@
 
 ```text
 feedback/
-├── backend-go/    # 渐进式 Go 后端服务 (feedback-api，Phase 0~2 已就绪)
+├── backend-go/    # 渐进式 Go 后端服务 (feedback-api，Phase 0~4 全部 11 个 API 已就绪)
 ├── docs/          # 架构、API、Go 迁移、多环境与 GitHub 工具链文档
 ├── feedback-v1/   # 线上运行系统 (PHP 8.2 + 原生 HTML/CSS/JS + MySQL + sender_py)
 └── scripts/       # 仓库级辅助与验收脚本
@@ -56,7 +56,7 @@ feedback/
 
 ## GitHub 与自动化流水线
 
-- 生产部署：[`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml)，监听 `main` push，SSH 到服务器执行代码拉取对齐、权限校验、`scripts/migrate.php` 数据库增量迁移、PHP-FPM 重载与 10 项冒烟检查。
+- 生产部署：[`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml)，监听 `main` push，SSH 到服务器执行代码拉取对齐、权限收敛（保护本地密钥 `600` 与脚本可执行位）、`scripts/migrate.php` 数据库增量迁移、Go 服务重启与 healthz 探活、PHP-FPM 重载及 16 项全量冒烟检查。
 - 客户端打包：[`.github/workflows/build-sender.yml`](./.github/workflows/build-sender.yml)，监听 `sender-*` tag，编译 Windows Web 版客户端并发布 GitHub Release（含 Nuitka 原生机器码单文件版与普通绿色压缩包版）。
 - 安全硬化：[`.github/workflows/apply-nginx-hardening.yml`](./.github/workflows/apply-nginx-hardening.yml)，手动触发，一键更新并验证生产 Nginx 安全规则片段。
 - 异地灾备：[`.github/workflows/backup-production-to-gdrive.yml`](./.github/workflows/backup-production-to-gdrive.yml)，每日定时将生产数据归档同步至 Google Drive。

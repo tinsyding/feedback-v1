@@ -13,6 +13,8 @@ import (
 
 	"feedback-api/internal/config"
 	"feedback-api/internal/senderctrl"
+	"feedback-api/internal/textutil"
+	"feedback-api/internal/tz"
 )
 
 var (
@@ -26,7 +28,7 @@ var (
 type Manager struct {
 	feedbackRoot string
 	ctrl         *senderctrl.Store
-	mu           sync.Mutex
+	mu           sync.RWMutex
 	nowFunc      func() time.Time
 }
 
@@ -35,15 +37,15 @@ func NewManager(feedbackRoot string, ctrl *senderctrl.Store) *Manager {
 	return &Manager{
 		feedbackRoot: strings.TrimSpace(feedbackRoot),
 		ctrl:         ctrl,
-		nowFunc:      time.Now,
+		nowFunc:      tz.Now,
 	}
 }
 
 func (m *Manager) now() time.Time {
 	if m != nil && m.nowFunc != nil {
-		return m.nowFunc()
+		return tz.In(m.nowFunc())
 	}
-	return time.Now()
+	return tz.Now()
 }
 
 func (m *Manager) baseDir() string {
@@ -72,7 +74,7 @@ func SanitizeDate(raw string, now time.Time) string {
 	if sub := reCompactDay.FindStringSubmatch(d); len(sub) == 4 {
 		return sub[1] + "-" + sub[2] + "-" + sub[3]
 	}
-	return now.Format("2006-01-02")
+	return tz.In(now).Format("2006-01-02")
 }
 
 // SanitizePrefix safely cleans snapshot directory prefixes (prevents path traversal).
@@ -81,12 +83,9 @@ func SanitizePrefix(raw string, now time.Time) string {
 	clean := reSafePrefix.ReplaceAllString(base, "_")
 	clean = strings.Trim(clean, "_")
 	if clean == "" || clean == "." || clean == ".." {
-		return now.Format("20060102_150405")
+		return tz.In(now).Format("20060102_150405")
 	}
-	if len(clean) > 120 {
-		clean = clean[:120]
-	}
-	return clean
+	return textutil.TruncateRunes(clean, 120)
 }
 
 // ClientDir returns <FeedbackRoot>/data/sender_logs/<date>/<slug>.
@@ -139,46 +138,91 @@ func (m *Manager) UpdateClientMeta(clientDir string, clientInfo map[string]any, 
 	if teacherNote != "" {
 		displayName = teacherNote + " (" + hostname + "/" + osUser + ")"
 	}
-	operator := hostname
+	operator := hostname + "(" + osUser + ")"
 	if teacherNote != "" {
-		operator = teacherNote + "(" + hostname + ")"
+		operator = teacherNote + "@" + hostname
 	}
-	if len(operator) > 50 {
-		operator = operator[:50]
-	}
+	operator = textutil.TruncateRunes(operator, 60)
 
-	filesOut := existing["active_files"]
+	mergedFiles := make([]string, 0)
+	seenFiles := make(map[string]struct{})
+	appendFile := func(raw any) {
+		if raw == nil {
+			return
+		}
+		s := config.AsPHPString(raw)
+		if _, exists := seenFiles[s]; exists {
+			return
+		}
+		seenFiles[s] = struct{}{}
+		mergedFiles = append(mergedFiles, s)
+	}
+	if prevFiles, ok := existing["active_files"].([]any); ok {
+		for _, f := range prevFiles {
+			appendFile(f)
+		}
+	}
 	if len(activeFiles) > 0 {
-		filesOut = activeFiles
+		for _, f := range activeFiles {
+			appendFile(f)
+		}
 	}
-	if filesOut == nil {
-		filesOut = []any{}
-	}
-
-	rtOut := existing["runtime_state"]
-	if runtimeState != nil {
-		rtOut = runtimeState
-	}
-	if rtOut == nil {
-		rtOut = map[string]any{}
+	if len(mergedFiles) > 20 {
+		mergedFiles = mergedFiles[len(mergedFiles)-20:]
 	}
 
 	now := m.now()
-	meta := map[string]any{
-		"hostname":      hostname,
-		"os_user":       osUser,
-		"teacher_note":  teacherNote,
-		"display_name":  displayName,
-		"operator":      operator,
-		"ip":            ip,
-		"app_version":   pickStr("app_version", ""),
-		"active_files":  filesOut,
-		"runtime_state": rtOut,
-		"last_sync_at":  now.Format("2006-01-02 15:04:05"),
-		"last_sync_ts":  now.Unix(),
+	rtOut := map[string]any{}
+	if prevRT, ok := existing["runtime_state"].(map[string]any); ok && prevRT != nil {
+		for k, v := range prevRT {
+			rtOut[k] = v
+		}
 	}
+	if runtimeState != nil {
+		processed := config.AsPHPInt(runtimeState["processed"])
+		if processed < 0 {
+			processed = 0
+		}
+		total := config.AsPHPInt(runtimeState["total"])
+		if total < 0 {
+			total = 0
+		}
+		polVer := config.AsPHPInt(runtimeState["policy_version"])
+		if polVer < 0 {
+			polVer = 0
+		}
+		rtOut = map[string]any{
+			"running":        config.AsPHPBool(runtimeState["running"]),
+			"processed":      processed,
+			"total":          total,
+			"current_name":   textutil.TruncateRunes(strings.TrimSpace(config.AsPHPString(runtimeState["current_name"])), 60),
+			"verify_mode":    textutil.TruncateRunes(strings.TrimSpace(config.AsPHPString(runtimeState["verify_mode"])), 20),
+			"policy_version": polVer,
+			"updated_at":     now.Format("2006-01-02 15:04:05"),
+		}
+	}
+
+	meta := make(map[string]any, len(existing)+14)
+	for k, v := range existing {
+		meta[k] = v
+	}
+	meta["client_id"] = pickStr("client_id", "")
+	meta["client_slug"] = filepath.Base(clientDir)
+	meta["hostname"] = hostname
+	meta["os_user"] = osUser
+	meta["teacher_note"] = teacherNote
+	meta["display_name"] = displayName
+	meta["operator"] = operator
+	meta["platform"] = pickStr("platform", "")
+	meta["app_version"] = pickStr("app_version", "")
+	meta["ip"] = ip
+	meta["active_files"] = mergedFiles
+	meta["runtime_state"] = rtOut
+	meta["last_sync_at"] = now.Format("2006-01-02 15:04:05")
+	meta["last_sync_ts"] = now.Unix()
+
 	if b, err := json.MarshalIndent(meta, "", "    "); err == nil {
-		_ = os.WriteFile(metaPath, b, 0644)
+		_ = writeFileAtomic(metaPath, b, 0o644)
 	}
 	return meta
 }
@@ -267,6 +311,9 @@ func (m *Manager) SaveSnapshot(clientDir, safePrefix string, titleImg, annotated
 
 // ListClients aggregates client cards across recent dates matching GET ?action=sender_clients.
 func (m *Manager) ListClients(reqDate string) ([]string, []map[string]any) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	base := m.baseDir()
 	entries, err := os.ReadDir(base)
 	availableDates := make([]string, 0)
@@ -422,6 +469,34 @@ func appendBytes(path string, data []byte) {
 		_, _ = f.Write(data)
 		_ = f.Close()
 	}
+}
+
+func writeFileAtomic(targetPath string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(targetPath)
+	f, err := os.CreateTemp(dir, ".meta-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := f.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	_ = os.Chmod(tmpPath, perm)
+	if err := os.Rename(tmpPath, targetPath); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
 }
 
 func readReversedJSONL(path string) []map[string]any {

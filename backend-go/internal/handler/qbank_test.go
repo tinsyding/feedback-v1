@@ -18,19 +18,24 @@ import (
 )
 
 type mockQBankRepo struct {
-	listItems   []qbank.WeekListItem
-	weekDetail  *qbank.WeekDetail
-	savedReq    *qbank.SaveWeekRequest
-	removedPDFs []string
-	deletedPDFs []string
-	pdfRefCount map[string]int
+	listItems     []qbank.WeekListItem
+	weekDetail    *qbank.WeekDetail
+	savedReq      *qbank.SaveWeekRequest
+	removedPDFs   []string
+	deletedPDFs   []string
+	pdfRefCount   map[string]int
+	lastFilter    qbank.ListFilter
+	lastGetKey    qbank.WeekKey
+	lastDeleteKey qbank.WeekKey
 }
 
-func (m *mockQBankRepo) ListWeeks(_ context.Context, _ qbank.ListFilter) ([]qbank.WeekListItem, error) {
+func (m *mockQBankRepo) ListWeeks(_ context.Context, f qbank.ListFilter) ([]qbank.WeekListItem, error) {
+	m.lastFilter = f
 	return m.listItems, nil
 }
 
-func (m *mockQBankRepo) GetWeek(_ context.Context, _ qbank.WeekKey) (*qbank.WeekDetail, error) {
+func (m *mockQBankRepo) GetWeek(_ context.Context, k qbank.WeekKey) (*qbank.WeekDetail, error) {
+	m.lastGetKey = k
 	return m.weekDetail, nil
 }
 
@@ -40,7 +45,8 @@ func (m *mockQBankRepo) SaveWeek(_ context.Context, req qbank.SaveWeekRequest) (
 	return m.removedPDFs, nil
 }
 
-func (m *mockQBankRepo) DeleteWeek(_ context.Context, _ qbank.WeekKey) ([]string, error) {
+func (m *mockQBankRepo) DeleteWeek(_ context.Context, k qbank.WeekKey) ([]string, error) {
+	m.lastDeleteKey = k
 	return m.deletedPDFs, nil
 }
 
@@ -184,5 +190,92 @@ func TestQBankSaveValidationOrphanCleanupAndDelete(t *testing.T) {
 	}
 	if _, err := os.Stat(keptFile); !os.IsNotExist(err) {
 		t.Fatal("expected deleted week PDF with 0 refs to be removed")
+	}
+}
+
+func TestQBankListGetZeroParamsAndBodyLimit(t *testing.T) {
+	root := t.TempDir()
+	sessStore := session.NewMemoryStore()
+	teacherSID := "2222bbbb3333cccc4444dddd5555eeee"
+	sessStore.Set(teacherSID, map[string]any{
+		"user_logged_in": true,
+		"username":       "t101",
+		"user_role":      "teacher",
+	})
+	repo := &mockQBankRepo{
+		listItems: []qbank.WeekListItem{},
+	}
+	h := httpx.Middleware(QBank(QBankDeps{
+		Repo:         repo,
+		Sessions:     sessStore,
+		ConfigLoader: config.NewLoader(root, ""),
+		Audit:        auditlog.NoopLogger{},
+		FeedbackRoot: root,
+	}))
+
+	// 1. GET list with year=0&season=0 leaves Year nil and Season empty
+	reqList := httptest.NewRequest(http.MethodGet, "/api/qbank.php?action=list&year=0&season=0", nil)
+	reqList.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+	recList := httptest.NewRecorder()
+	h.ServeHTTP(recList, reqList)
+	if recList.Code != http.StatusOK || repo.lastFilter.Year != nil || repo.lastFilter.Season != "" {
+		t.Fatalf("unexpected GET list year=0&season=0: code=%d filter=%+v", recList.Code, repo.lastFilter)
+	}
+
+	// 2. GET get returns data:null when not found, and weekDetail when found
+	reqGetNil := httptest.NewRequest(http.MethodGet, "/api/qbank.php?action=get&subject=数学&grade=七年级&tier=S%2B&week=3", nil)
+	reqGetNil.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+	recGetNil := httptest.NewRecorder()
+	h.ServeHTTP(recGetNil, reqGetNil)
+	if recGetNil.Code != http.StatusOK || !strings.Contains(recGetNil.Body.String(), `"data":null`) {
+		t.Fatalf("GET get not-found: code=%d body=%s", recGetNil.Code, recGetNil.Body.String())
+	}
+
+	repo.weekDetail = &qbank.WeekDetail{
+		BankType:           "homework",
+		Year:               2026,
+		Season:             "秋",
+		Subject:            "数学",
+		Grade:              "七年级",
+		Tier:               "S+",
+		Week:               3,
+		UpdatedAtFormatted: "2026-11-22 00:15",
+		Questions:          []qbank.QuestionItem{},
+	}
+	reqGetOK := httptest.NewRequest(http.MethodGet, "/api/qbank.php?action=get&subject=数学&grade=七年级&tier=S%2B&week=3", nil)
+	reqGetOK.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+	recGetOK := httptest.NewRecorder()
+	h.ServeHTTP(recGetOK, reqGetOK)
+	if recGetOK.Code != http.StatusOK || !strings.Contains(recGetOK.Body.String(), `"2026-11-22 00:15"`) {
+		t.Fatalf("GET get found: code=%d body=%s", recGetOK.Code, recGetOK.Body.String())
+	}
+
+	// 3. POST missing exercisePdf -> 400
+	noPDFBody := `{"subject":"数学","grade":"七年级","tier":"S+","week":3,"questions":[{"id":1,"topic":"函数"}]}`
+	reqNoPDF := httptest.NewRequest(http.MethodPost, "/api/qbank.php", strings.NewReader(noPDFBody))
+	reqNoPDF.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+	recNoPDF := httptest.NewRecorder()
+	h.ServeHTTP(recNoPDF, reqNoPDF)
+	if recNoPDF.Code != http.StatusBadRequest {
+		t.Fatalf("missing exercisePdf status = %d, want 400 (%s)", recNoPDF.Code, recNoPDF.Body.String())
+	}
+
+	// 4. POST >10MB -> 413
+	hugeBody := `{"pad":"` + strings.Repeat("a", (10<<20)+128) + `"}`
+	reqBig := httptest.NewRequest(http.MethodPost, "/api/qbank.php", strings.NewReader(hugeBody))
+	reqBig.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+	recBig := httptest.NewRecorder()
+	h.ServeHTTP(recBig, reqBig)
+	if recBig.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("POST >10MB status = %d, want 413 (%s)", recBig.Code, recBig.Body.String())
+	}
+
+	// 5. DELETE with year=0&season=0 leaves Year nil and Season empty
+	reqDelZero := httptest.NewRequest(http.MethodDelete, "/api/qbank.php?subject=数学&grade=七年级&tier=S%2B&week=3&year=0&season=0", nil)
+	reqDelZero.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+	recDelZero := httptest.NewRecorder()
+	h.ServeHTTP(recDelZero, reqDelZero)
+	if recDelZero.Code != http.StatusOK || repo.lastDeleteKey.Year != nil || repo.lastDeleteKey.Season != "" {
+		t.Fatalf("unexpected DELETE year=0&season=0: code=%d key=%+v", recDelZero.Code, repo.lastDeleteKey)
 	}
 }

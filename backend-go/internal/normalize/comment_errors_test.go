@@ -20,6 +20,7 @@ func TestParseErrorQuestionsFromComment(t *testing.T) {
 		{"pure_numbers_first_line", "第1题、第3题、第8题。", []int{1, 3, 8}},
 		{"ignore_score_in_prose", "本次考了98分，班级第1名，表现优秀！", []int{}},
 		{"filter_out_of_range", "错题：0, 1, 101, 5, 5", []int{1, 5}},
+		{"nbsp_and_fullwidth_spaces", "错题\u00a0：\u30002、4\u00a06", []int{2, 4, 6}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

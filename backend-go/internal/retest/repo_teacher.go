@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"sort"
 	"strconv"
@@ -16,6 +17,8 @@ import (
 
 	"feedback-api/internal/normalize"
 	"feedback-api/internal/retestkeys"
+	"feedback-api/internal/textutil"
+	"feedback-api/internal/tz"
 )
 
 // MySQLRepository implements Repository backed by MySQL *sql.DB.
@@ -47,19 +50,6 @@ func formatDisplayScore(v float64) any {
 		return int(math.Round(v))
 	}
 	return math.Round(v*10) / 10
-}
-
-func parseDBTime(s string) (time.Time, bool) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return time.Time{}, false
-	}
-	for _, layout := range []string{"2006-01-02 15:04:05", time.RFC3339, "2006-01-02"} {
-		if t, err := time.ParseInLocation(layout, s, time.Local); err == nil {
-			return t, true
-		}
-	}
-	return time.Time{}, false
 }
 
 func normalizeSeasonZh(s string) string {
@@ -108,10 +98,12 @@ func (r *MySQLRepository) CheckExistingBatch(ctx context.Context, in CheckBatchI
 		return empty, nil
 	}
 	if err != nil {
+		log.Printf("retest: CheckExistingBatch class_batches query error: %v", err)
 		return CheckBatchResult{}, NewHTTPError(500, "检查班级历史批次失败，数据库服务异常")
 	}
 
-	var genCreator, genCreatedAt sql.NullString
+	var genCreator sql.NullString
+	var genCreatedAt sql.NullTime
 	_ = r.db.QueryRowContext(ctx,
 		"SELECT created_by, created_at FROM `generation_batches` WHERE `class_id` = ? AND `week_num` = ? ORDER BY `id` DESC LIMIT 1",
 		batchID, in.Week,
@@ -123,8 +115,8 @@ func (r *MySQLRepository) CheckExistingBatch(ctx context.Context, in CheckBatchI
 	}
 	operatorName := r.lookupRealName(ctx, operator)
 	createdAtFmt := ""
-	if t, ok := parseDBTime(genCreatedAt.String); ok {
-		createdAtFmt = t.Format("2006-01-02 15:04")
+	if genCreatedAt.Valid {
+		createdAtFmt = tz.In(genCreatedAt.Time).Format("2006-01-02 15:04")
 	}
 
 	if in.HasIncomingList {
@@ -185,27 +177,42 @@ func (r *MySQLRepository) CheckExistingBatch(ctx context.Context, in CheckBatchI
 		}
 
 		rows, err := r.db.QueryContext(ctx,
-			"SELECT student_name, student_id, student_key, homework_score, error_count, error_questions, updated_at, created_by FROM `student_records` WHERE `batch_id` = ? AND `week_num` = ? AND ("+strings.Join(whereOr, " OR ")+") ORDER BY updated_at ASC, id ASC",
+			"SELECT student_name, student_id, student_key, homework_score, error_count, error_questions, teacher_comment, updated_at, created_by FROM `student_records` WHERE `batch_id` = ? AND `week_num` = ? AND ("+strings.Join(whereOr, " OR ")+") ORDER BY updated_at ASC, id ASC",
 			params...,
 		)
 		if err != nil {
+			log.Printf("retest: CheckExistingBatch student_records query error: %v", err)
 			return CheckBatchResult{}, NewHTTPError(500, "检查班级历史批次失败，数据库服务异常")
 		}
 		defer func() { _ = rows.Close() }()
 
 		matchedCount := 0
 		modifiedStudents := []map[string]any{}
-		lastUpdated := ""
+		var lastUpdated time.Time
 		latestRowOperator := ""
 
 		for rows.Next() {
-			var rName, rID, rKey, rErrRaw, rUpdAt, rCreatedBy sql.NullString
+			var rName, rID, rKey, rErrRaw, rComment, rCreatedBy sql.NullString
+			var rUpdAt sql.NullTime
 			var rScore sql.NullFloat64
 			var rErrCnt sql.NullInt64
-			if err := rows.Scan(&rName, &rID, &rKey, &rScore, &rErrCnt, &rErrRaw, &rUpdAt, &rCreatedBy); err != nil {
+			if err := rows.Scan(&rName, &rID, &rKey, &rScore, &rErrCnt, &rErrRaw, &rComment, &rUpdAt, &rCreatedBy); err != nil {
+				log.Printf("retest: CheckExistingBatch scan error: %v", err)
 				continue
 			}
-			matchedCount++
+			var rawPtr *string
+			if rErrRaw.Valid {
+				s := rErrRaw.String
+				rawPtr = &s
+			}
+			oldErrs := ParseJSONErrorInts(rawPtr)
+			sort.Ints(oldErrs)
+
+			hasHomeworkData := rScore.Valid || rErrCnt.Int64 > 0 || len(oldErrs) > 0 || strings.TrimSpace(rComment.String) != ""
+			if !hasHomeworkData {
+				continue
+			}
+
 			rk := strings.TrimSpace(rKey.String)
 			rn := strings.TrimSpace(rName.String)
 			matched, ok := incomingMap[rk]
@@ -221,24 +228,19 @@ func (r *MySQLRepository) CheckExistingBatch(ctx context.Context, in CheckBatchI
 			if !ok {
 				continue
 			}
-			if rUpdAt.String != "" && rUpdAt.String > lastUpdated {
-				lastUpdated = rUpdAt.String
+			matchedCount++
+			if rUpdAt.Valid && (lastUpdated.IsZero() || rUpdAt.Time.After(lastUpdated)) {
+				lastUpdated = rUpdAt.Time
 			}
 			latestRowOperator = strings.TrimSpace(rCreatedBy.String)
 
-			oldScore := 0.0
+			scoreChanged := false
+			var oldScoreDisplay any
 			if rScore.Valid {
-				oldScore = rScore.Float64
+				oldScore := rScore.Float64
+				scoreChanged = math.Abs(oldScore-matched.score) > 0.01
+				oldScoreDisplay = formatDisplayScore(oldScore)
 			}
-			scoreChanged := math.Abs(oldScore-matched.score) > 0.01
-
-			var rawPtr *string
-			if rErrRaw.Valid {
-				s := rErrRaw.String
-				rawPtr = &s
-			}
-			oldErrs := ParseJSONErrorInts(rawPtr)
-			sort.Ints(oldErrs)
 			errorsChanged := !intSlicesEqual(oldErrs, matched.errors)
 
 			if scoreChanged || errorsChanged {
@@ -253,7 +255,7 @@ func (r *MySQLRepository) CheckExistingBatch(ctx context.Context, in CheckBatchI
 					"operator":      strings.TrimSpace(rCreatedBy.String),
 					"scoreChanged":  scoreChanged,
 					"errorsChanged": errorsChanged,
-					"oldScore":      formatDisplayScore(oldScore),
+					"oldScore":      oldScoreDisplay,
 					"newScore":      formatDisplayScore(matched.score),
 					"oldErrors":     oldErrs,
 					"newErrors":     matched.errors,
@@ -261,8 +263,8 @@ func (r *MySQLRepository) CheckExistingBatch(ctx context.Context, in CheckBatchI
 			}
 		}
 
-		if t, ok := parseDBTime(lastUpdated); ok {
-			createdAtFmt = t.Format("2006-01-02 15:04")
+		if !lastUpdated.IsZero() {
+			createdAtFmt = tz.In(lastUpdated).Format("2006-01-02 15:04")
 		}
 		if latestRowOperator != "" {
 			operator = latestRowOperator
@@ -285,17 +287,19 @@ func (r *MySQLRepository) CheckExistingBatch(ctx context.Context, in CheckBatchI
 	}
 
 	// Fallback when incomingStudents not provided
+	const hwNonEmptyCond = "(`homework_score` IS NOT NULL OR `error_count` > 0 OR COALESCE(`teacher_comment`, '') != '')"
 	var recordCount int
-	_ = r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM `student_records` WHERE `batch_id` = ? AND `week_num` = ?", batchID, in.Week).Scan(&recordCount)
+	_ = r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM `student_records` WHERE `batch_id` = ? AND `week_num` = ? AND "+hwNonEmptyCond, batchID, in.Week).Scan(&recordCount)
 	if recordCount == 0 {
 		return empty, nil
 	}
 
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT student_name, student_id, student_key, homework_score, error_count, error_questions FROM `student_records` WHERE `batch_id` = ? AND `week_num` = ? ORDER BY id ASC",
+		"SELECT student_name, student_id, student_key, homework_score, error_count, error_questions FROM `student_records` WHERE `batch_id` = ? AND `week_num` = ? AND "+hwNonEmptyCond+" ORDER BY id ASC",
 		batchID, in.Week,
 	)
 	if err != nil {
+		log.Printf("retest: CheckExistingBatch fallback query error: %v", err)
 		return CheckBatchResult{}, NewHTTPError(500, "检查班级历史批次失败，数据库服务异常")
 	}
 	defer func() { _ = rows.Close() }()
@@ -375,6 +379,7 @@ func (r *MySQLRepository) GetStudentWeekRecord(ctx context.Context, q StudentWee
 			q.Year, normSeason, q.Season, q.Tier, q.Subject, q.Grade,
 		)
 		if err != nil {
+			log.Printf("retest: GetStudentWeekRecord roster query error: %v", err)
 			return StudentWeekResult{}, NewHTTPError(500, "查询学员错题记录失败")
 		}
 		type rosterEntry struct {
@@ -387,7 +392,8 @@ func (r *MySQLRepository) GetStudentWeekRecord(ctx context.Context, q StudentWee
 		order := []string{}
 		seen := map[string]*rosterEntry{}
 		for rows.Next() {
-			var sID, sName, sKey, rTier, lastSeen sql.NullString
+			var sID, sName, sKey, rTier sql.NullString
+			var lastSeen sql.NullTime
 			var isCurTerm, isCurTier int
 			if err := rows.Scan(&sID, &sName, &sKey, &rTier, &lastSeen, &isCurTerm, &isCurTier); err != nil {
 				continue
@@ -499,12 +505,16 @@ func (r *MySQLRepository) GetStudentWeekRecord(ctx context.Context, q StudentWee
 			if rows, err := r.db.QueryContext(ctx,
 				"SELECT sr.retest_token, sr.error_questions, sr.error_count, sr.homework_score, sr.teacher_comment, sr.submission_status, sr.updated_at FROM `student_records` sr INNER JOIN `class_batches` cb ON sr.batch_id = cb.id WHERE cb.subject = ? AND cb.grade = ? AND sr.week_num = ? AND "+whereStudent+" ORDER BY (cb.tier = ?) DESC, sr.updated_at DESC, sr.id DESC",
 				hwParams...,
-			); err == nil {
+			); err != nil {
+				log.Printf("retest: GetStudentWeekRecord hw query error: %v", err)
+			} else {
 				for rows.Next() {
-					var tok, eqRaw, comment, subSt, updAt sql.NullString
+					var tok, eqRaw, comment, subSt sql.NullString
+					var updAt sql.NullTime
 					var errCnt sql.NullInt64
 					var score sql.NullFloat64
 					if err := rows.Scan(&tok, &eqRaw, &errCnt, &score, &comment, &subSt, &updAt); err != nil {
+						log.Printf("retest: GetStudentWeekRecord hw scan error: %v", err)
 						continue
 					}
 					if retestToken == "" && strings.TrimSpace(tok.String) != "" {
@@ -530,8 +540,8 @@ func (r *MySQLRepository) GetStudentWeekRecord(ctx context.Context, q StudentWee
 						hasHwRecord = hasHw
 						hwScore = scPtr
 						hwComment = cComment
-						if t, ok := parseDBTime(updAt.String); ok {
-							hwUpdatedAt = t.Format("01-02 15:04")
+						if updAt.Valid {
+							hwUpdatedAt = tz.In(updAt.Time).Format("01-02 15:04")
 						}
 						resolved := ResolveSubmissionStatus(expSt, errs, scPtr, cComment)
 						isHwUnsubmitted = resolved == "unsubmitted"
@@ -563,11 +573,15 @@ func (r *MySQLRepository) GetStudentWeekRecord(ctx context.Context, q StudentWee
 			if rows, err := r.db.QueryContext(ctx,
 				"SELECT sr.retest_token, sr.preview_error_questions, sr.preview_score, sr.preview_comment, sr.preview_submission_status, sr.updated_at FROM `student_records` sr INNER JOIN `class_batches` cb ON sr.batch_id = cb.id WHERE cb.subject = ? AND cb.grade = ? AND (sr.preview_week_num = ? OR (sr.preview_week_num IS NULL AND sr.week_num = ?)) AND "+whereStudent+" ORDER BY (sr.preview_error_questions IS NOT NULL) DESC, (cb.tier = ?) DESC, sr.updated_at DESC, sr.id DESC",
 				pvParams...,
-			); err == nil {
+			); err != nil {
+				log.Printf("retest: GetStudentWeekRecord pv query error: %v", err)
+			} else {
 				for rows.Next() {
-					var tok, peqRaw, pComment, pSubSt, updAt sql.NullString
+					var tok, peqRaw, pComment, pSubSt sql.NullString
+					var updAt sql.NullTime
 					var pScore sql.NullFloat64
 					if err := rows.Scan(&tok, &peqRaw, &pScore, &pComment, &pSubSt, &updAt); err != nil {
+						log.Printf("retest: GetStudentWeekRecord pv scan error: %v", err)
 						continue
 					}
 					if retestToken == "" && strings.TrimSpace(tok.String) != "" {
@@ -591,8 +605,8 @@ func (r *MySQLRepository) GetStudentWeekRecord(ctx context.Context, q StudentWee
 						hasPvRecord = true
 						pvScore = scPtr
 						pvComment = cComment
-						if t, ok := parseDBTime(updAt.String); ok {
-							pvUpdatedAt = t.Format("01-02 15:04")
+						if updAt.Valid {
+							pvUpdatedAt = tz.In(updAt.Time).Format("01-02 15:04")
 						}
 						resolved := ResolveSubmissionStatus(expSt, pvErrors, scPtr, cComment)
 						isPvUnsubmitted = resolved == "unsubmitted"
@@ -665,11 +679,13 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 			in.Year, normSeason, in.Grade, in.Tier, in.Subject, className, in.CurrentTeacher,
 		)
 		if insErr != nil {
+			log.Printf("retest: EncryptBatch class_batches insert error: %v", insErr)
 			return EncryptBatchResult{}, NewHTTPError(500, "无法创建或获取班级批次信息，数据库操作异常")
 		}
 		lastID, _ := res.LastInsertId()
 		batchID = int(lastID)
 	} else if err != nil {
+		log.Printf("retest: EncryptBatch class_batches query error: %v", err)
 		return EncryptBatchResult{}, NewHTTPError(500, "无法创建或获取班级批次信息，数据库操作异常")
 	} else if in.CurrentTeacher != "" && strings.TrimSpace(batchCreator.String) == "" {
 		_, _ = r.db.ExecContext(ctx, "UPDATE class_batches SET `created_by` = ? WHERE `id` = ?", in.CurrentTeacher, batchID)
@@ -677,15 +693,16 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 
 	// 60-second debounce check
 	isDebounced := false
-	var prevBatchCode, prevCreator, prevCreatedAt sql.NullString
+	var prevBatchCode, prevCreator sql.NullString
+	var prevCreatedAt sql.NullTime
 	var prevStudentCount int
 	var prevGenID int
 	if err := r.db.QueryRowContext(ctx,
 		"SELECT id, batch_code, created_by, student_count, created_at FROM `generation_batches` WHERE `class_id` = ? AND `week_num` = ? ORDER BY id DESC LIMIT 1",
 		batchID, in.Week,
 	).Scan(&prevGenID, &prevBatchCode, &prevCreator, &prevStudentCount, &prevCreatedAt); err == nil {
-		if t, ok := parseDBTime(prevCreatedAt.String); ok {
-			diff := time.Since(t).Seconds()
+		if prevCreatedAt.Valid {
+			diff := time.Since(prevCreatedAt.Time).Seconds()
 			sameTeacher := in.CurrentTeacher == "" || strings.TrimSpace(prevCreator.String) == "" || strings.TrimSpace(prevCreator.String) == in.CurrentTeacher
 			if diff >= 0 && diff <= 60 && sameTeacher && prevStudentCount == len(in.Students) {
 				isDebounced = true
@@ -697,7 +714,7 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 	if !isDebounced {
 		var rnd [2]byte
 		_, _ = rand.Read(rnd[:])
-		batchCode = "B" + time.Now().Format("20060102_150405") + "_" + hex.EncodeToString(rnd[:])
+		batchCode = "B" + tz.Now().Format("20060102_150405") + "_" + hex.EncodeToString(rnd[:])
 	}
 
 	var sourceFilesJSON any
@@ -708,6 +725,7 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
+		log.Printf("retest: EncryptBatch begin tx error: %v", err)
 		return EncryptBatchResult{}, NewHTTPError(500, "数据库事务启动失败")
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -749,21 +767,25 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 				qParams...,
 			)
 			if err != nil {
+				log.Printf("retest: EncryptBatch archive select error: %v", err)
 				return EncryptBatchResult{}, NewHTTPError(500, "历史学情归档失败，为防止数据丢失已终止覆盖操作")
 			}
 			type exRec struct {
-				id, batchID, weekNum, errCount int
-				studentID, studentName, studentKey, errQ, comment, createdAt, updatedAt sql.NullString
-				previewWeekNum sql.NullInt64
-				hwScore, pvScore, totScore sql.NullFloat64
-				pvErrQ, pvComment, srcFiles, token sql.NullString
+				id, batchID, weekNum, errCount                 int
+				studentID, studentName, studentKey, errQ, comment sql.NullString
+				createdAt, updatedAt                           sql.NullTime
+				previewWeekNum                                 sql.NullInt64
+				hwScore, pvScore, totScore                     sql.NullFloat64
+				pvErrQ, pvComment, srcFiles, token             sql.NullString
 			}
 			var existing []exRec
 			for exRows.Next() {
 				var e exRec
-				if err := exRows.Scan(&e.id, &e.batchID, &e.studentID, &e.studentName, &e.studentKey, &e.weekNum, &e.previewWeekNum, &e.hwScore, &e.pvScore, &e.totScore, &e.errCount, &e.errQ, &e.pvErrQ, &e.comment, &e.pvComment, &e.srcFiles, &e.token, &e.createdAt, &e.updatedAt); err == nil {
-					existing = append(existing, e)
+				if err := exRows.Scan(&e.id, &e.batchID, &e.studentID, &e.studentName, &e.studentKey, &e.weekNum, &e.previewWeekNum, &e.hwScore, &e.pvScore, &e.totScore, &e.errCount, &e.errQ, &e.pvErrQ, &e.comment, &e.pvComment, &e.srcFiles, &e.token, &e.createdAt, &e.updatedAt); err != nil {
+					log.Printf("retest: EncryptBatch archive scan error: %v", err)
+					continue
 				}
+				existing = append(existing, e)
 			}
 			_ = exRows.Close()
 
@@ -784,6 +806,7 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 					ex.pvErrQ, ex.comment, ex.pvComment,
 					ex.srcFiles, ex.token, prevCreator.String, in.CurrentTeacher, opType, ex.createdAt, ex.updatedAt,
 				); err != nil {
+					log.Printf("retest: EncryptBatch archive insert error (record_id=%d): %v", ex.id, err)
 					return EncryptBatchResult{}, NewHTTPError(500, "历史学情归档失败，为防止数据丢失已终止覆盖操作")
 				}
 			}
@@ -905,6 +928,7 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 			st.HomeworkScore, st.PreviewScore, st.TotalScore, len(errs), errJSON, pvErrJSON,
 			st.Comment, pvCommentForDB, hwStatus, pvStatus, shortToken, in.CurrentTeacher,
 		); err != nil {
+			log.Printf("retest: EncryptBatch upsert student_records error (student_key=%s): %v", studentKey, err)
 			return EncryptBatchResult{}, NewHTTPError(500, "学生学情记录写入失败，操作已回滚")
 		}
 
@@ -939,11 +963,13 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 			"INSERT INTO generation_batches (`batch_code`, `class_id`, `week_num`, `student_count`, `error_student_count`, `source_files`, `created_by`, `created_at`) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
 			batchCode, batchID, in.Week, validStudentCount, errorStudentCount, sourceFilesJSON, in.CurrentTeacher,
 		); err != nil {
+			log.Printf("retest: EncryptBatch generation_batches insert error: %v", err)
 			return EncryptBatchResult{}, NewHTTPError(500, "生成批次记录失败，操作已回滚")
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
+		log.Printf("retest: EncryptBatch tx commit error: %v", err)
 		return EncryptBatchResult{}, NewHTTPError(500, "数据库事务提交失败")
 	}
 
@@ -994,9 +1020,9 @@ func (r *MySQLRepository) RevokeToken(ctx context.Context, token, operator, reas
 	if err := r.requireDB(); err != nil {
 		return err
 	}
-	token = truncateBytes(strings.TrimSpace(token), 64)
-	operator = truncateBytes(strings.TrimSpace(operator), 50)
-	reason = truncateBytes(strings.TrimSpace(reason), 255)
+	token = textutil.TruncateRunes(strings.TrimSpace(token), 64)
+	operator = textutil.TruncateRunes(strings.TrimSpace(operator), 50)
+	reason = textutil.TruncateRunes(strings.TrimSpace(reason), 255)
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO retest_revoked_tokens (token, revoked_by, reason, revoked_at)
 		VALUES (?, ?, ?, NOW())
@@ -1011,7 +1037,7 @@ func (r *MySQLRepository) UnrevokeToken(ctx context.Context, token string) error
 	if err := r.requireDB(); err != nil {
 		return err
 	}
-	token = truncateBytes(strings.TrimSpace(token), 64)
+	token = textutil.TruncateRunes(strings.TrimSpace(token), 64)
 	_, err := r.db.ExecContext(ctx, "DELETE FROM `retest_revoked_tokens` WHERE `token` = ?", token)
 	return err
 }
@@ -1026,18 +1052,11 @@ func (r *MySQLRepository) LogAccess(ctx context.Context, token, studentName, act
 	}
 	_, _ = r.db.ExecContext(ctx,
 		"INSERT INTO retest_access_logs (`token`, `student_name`, `action`, `details`, `ip`, `user_agent`) VALUES (?, ?, ?, ?, ?, ?)",
-		truncateBytes(token, 64),
-		truncateBytes(studentName, 100),
-		truncateBytes(action, 50),
+		textutil.TruncateRunes(token, 32),
+		textutil.TruncateRunes(studentName, 50),
+		textutil.TruncateRunes(action, 50),
 		details,
-		truncateBytes(ip, 50),
-		truncateBytes(userAgent, 500),
+		textutil.TruncateRunes(ip, 50),
+		textutil.TruncateRunes(userAgent, 500),
 	)
-}
-
-func truncateBytes(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max]
 }

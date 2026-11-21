@@ -27,6 +27,7 @@ import (
 	"feedback-api/internal/senderlogs"
 	"feedback-api/internal/session"
 	"feedback-api/internal/syslogs"
+	"feedback-api/internal/tz"
 	"feedback-api/internal/vision"
 )
 
@@ -100,6 +101,26 @@ func main() {
 	authRepo := auth.NewMySQLRepository(sqlDB)
 	qbankRepo := qbank.NewMySQLRepository(sqlDB)
 	sysLogsRepo := syslogs.NewMySQLRepository(sqlDB, feedbackRoot)
+	go func() {
+		runOnce := func() {
+			cleanCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			if _, err := sysLogsRepo.CleanupOld(cleanCtx, tz.Now(), syslogs.RetentionDays); err != nil && !errors.Is(err, context.Canceled) {
+				log.Printf("warning: system_logs retention cleanup failed: %v", err)
+			}
+		}
+		runOnce()
+		ticker := time.NewTicker(6 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				runOnce()
+			}
+		}
+	}()
 	senderCtrlStore := senderctrl.NewStore(feedbackRoot, loader)
 	senderLogsMgr := senderlogs.NewManager(feedbackRoot, senderCtrlStore)
 	adminRepo := admin.NewMySQLRepository(sqlDB)
@@ -169,9 +190,14 @@ func main() {
 
 	<-ctx.Done()
 	log.Printf("shutting down feedback-api...")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("graceful shutdown error: %v", err)
+	}
+	bgCtx, bgCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer bgCancel()
+	if err := handler.WaitBackgroundCleanups(bgCtx); err != nil {
+		log.Printf("background cleanup wait interrupted: %v", err)
 	}
 }

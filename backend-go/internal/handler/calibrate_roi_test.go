@@ -238,4 +238,15 @@ func TestCalibrateROIEndpoint(t *testing.T) {
 	if rec.Code != 200 || ok || errStr == nil || *errStr != "ADMIN_DISABLED_AUTO_CALIBRATION: 管理员已关闭 AI 自动窗口校准，请改用本地手动框选" {
 		t.Fatalf("gate disabled unexpected: %d %v %v", rec.Code, ok, errStr)
 	}
+
+	// >25MB body -> MaxBytesError returns 400 size error, NOT 200 鉴权失败 (even with form token)
+	huge := make([]byte, (25<<20)+4096)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, makeMultipartReq(t, "/api/calibrate_roi.php",
+		map[string]string{"token": config.DefaultSenderToken},
+		map[string][]byte{"image": huge}))
+	ok, _, errStr = decodeEnvelope(t, rec)
+	if rec.Code != http.StatusBadRequest || ok || errStr == nil || *errStr != "截图不能超过 10MB" {
+		t.Fatalf("huge body (>25MB) unexpected: %d %v %v", rec.Code, ok, errStr)
+	}
 }

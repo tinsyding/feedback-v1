@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"errors"
 	"io"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"feedback-api/internal/config"
@@ -51,9 +53,24 @@ func CalibrateROI(loader *config.Loader, vc *vision.Client) http.HandlerFunc {
 		}
 
 		r.Body = http.MaxBytesReader(w, r.Body, 25<<20)
-		httpx.ParseRequestForm(r)
-		if r.MultipartForm != nil {
-			defer r.MultipartForm.RemoveAll()
+		ct := strings.ToLower(r.Header.Get("Content-Type"))
+		if strings.HasPrefix(ct, "multipart/form-data") {
+			if err := r.ParseMultipartForm(16 << 20); err != nil {
+				var maxErr *http.MaxBytesError
+				if errors.As(err, &maxErr) {
+					httpx.SendResponse(w, false, nil, httpx.StrPtr("截图不能超过 10MB"), http.StatusBadRequest)
+					return
+				}
+			}
+			if r.MultipartForm != nil {
+				defer func() { _ = r.MultipartForm.RemoveAll() }()
+			}
+		} else if err := r.ParseForm(); err != nil {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				httpx.SendResponse(w, false, nil, httpx.StrPtr("截图不能超过 10MB"), http.StatusBadRequest)
+				return
+			}
 		}
 
 		cfg := loader.Load()

@@ -77,17 +77,11 @@ func ParseRetestQuestionMeta(rawMeta string, qNum int) ParsedQuestionMeta {
 		if !ok || bm == nil {
 			return nil
 		}
-		if _, ok := bm["x"]; !ok {
-			return nil
-		}
-		if _, ok := bm["y"]; !ok {
-			return nil
-		}
-		if _, ok := bm["w"]; !ok {
-			return nil
-		}
-		if _, ok := bm["h"]; !ok {
-			return nil
+		for _, k := range []string{"x", "y", "w", "h"} {
+			val, ok := bm[k]
+			if !ok || val == nil {
+				return nil
+			}
 		}
 		po := config.AsPHPInt(bm["pageOffset"])
 		if po < 0 {

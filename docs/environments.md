@@ -38,11 +38,11 @@
   1. **Secrets 预检**：校验 `DEPLOY_HOST`、`DEPLOY_PORT`、`DEPLOY_USER` 与 `DEPLOY_SSH_KEY` 完整性及端口格式；
   2. **解除不可变锁**：临时解除 `.user.ini` 宝塔防跨目录不可变保护 (`chattr -i`)；
   3. **代码检出与对齐**：执行 `git fetch origin main && git reset --hard $TARGET_SHA`，保证与触发提交严格一致；
-  4. **权限收敛**：重置代码属主为 `www:www`，目录权限 `755`、文件权限 `644`，Git 目录 `700`；
+  4. **权限收敛**：重置代码属主为 `www:www`，目录权限 `755`、普通文件 `644`、`scripts/*.sh` `755`、本地密钥文件（`data/.ai_secrets.json`、`*.local.php`）`600`，Git 目录 `700`；
   5. **恢复目录锁**：重新锁定 `.user.ini` (`chattr +i`)，恢复目录隔离防御；
   6. **自动数据库迁移**：调用 PHP 8.2 执行 `scripts/migrate.php migrate`，幂等执行增量表结构补齐与升级；
   7. **重载 PHP-FPM**：重载 `php-fpm-82` 刷新字节码缓存（Opcache）；
-  8. **冒烟回归**：核验线上 HEAD Commit SHA，并对 10 个核心页面及 API 执行 HTTP 200 连通性测试；
+  8. **冒烟回归**：核验线上 HEAD Commit SHA，并对 16 项核心页面及接口执行 HTTP 状态校验（含 `vip` 域名及 401 鉴权拦截）；
   9. **凭据擦除**：清理临时 SSH 私钥文件。
 
 ### 3. 数据备份与容灾机制
@@ -61,8 +61,8 @@
 - **定时调度**：每日北京时间 03:30（UTC 19:30）执行，亦可在 GitHub Actions 页面手动即时触发；
 - **备份范围**：
   1. **MySQL 数据库**：从生产机导出全量数据库，经 gzip 压缩后同步至 Google Drive；
-  2. **教学与题库材料**：同步老师上传的 PDF 切片、错题本与采集上传资源（`/data/pdfs/`、`/data/qbank/`、`/data/uploads/`）；
-  3. **核心脱敏凭据**：同步备份服务器本地的 `config.json`、`api/db.local.php`、`api/secret_key.local.php`；
+  2. **教学与题库材料**：同步老师上传的 PDF 切片与采集上传资源（`data/pdfs/`、`data/uploads/`；题库元数据已纳入 MySQL 导出）；
+  3. **核心脱敏凭据**：同步备份服务器本地的 `config.json`、`api/db.local.php`、`api/secret_key.local.php`、`api/admin/helpers.local.php`、`data/.ai_secrets.json` 及可读的 `/etc/feedback-api/env`；
 - **生命周期**：云端快照默认保留 30 天，支持工作流输入自定义清理周期。
 
 #### (3) 源码异地增量同步
@@ -74,8 +74,9 @@
 ## 三、安全与凭据管理
 
 1. **敏感配置隔离**：
-   - 数据库凭据存放在服务器本地的 `feedback-v1/api/db.local.php` 中；
-   - 私有 Key 存放在 `feedback-v1/api/secret_key.local.php` 中；
+   - 数据库凭据存放在服务器本地的 `feedback-v1/api/db.local.php`（`0600`）中；
+   - 私有 Key 存放在 `feedback-v1/api/secret_key.local.php`（`0600`）中；
+   - DashScope AI 密钥隔离存于 `feedback-v1/data/.ai_secrets.json`（`0600`）中，后台回显自动掩码脱敏；
    - 公共脱敏配置走 `api/public_config.php`，禁止直读 `config.json`；
    - 本地凭据文件均已加入 `.gitignore`，绝不提交至代码仓库。
 

@@ -12,11 +12,17 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
+
+	"feedback-api/internal/tz"
 )
 
 const RetentionDays = 30
 
-var reISODate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+var (
+	reISODate     = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	reLogFileDate = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\.`)
+)
 
 // LogRecord represents a single system_logs entry for insertion and listing.
 type LogRecord struct {
@@ -404,11 +410,29 @@ func (r *MySQLRepository) queryDistinctStrings(ctx context.Context, query string
 			out = append(out, s.String)
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return []string{}
+	}
 	return out
 }
 
 func (r *MySQLRepository) queryDistinctDates(ctx context.Context) []string {
-	return r.queryDistinctStrings(ctx, "SELECT DISTINCT DATE(created_at) AS log_date FROM system_logs ORDER BY log_date DESC LIMIT 30")
+	rows, err := r.db.QueryContext(ctx, "SELECT DISTINCT DATE(created_at) AS log_date FROM system_logs ORDER BY log_date DESC LIMIT 30")
+	if err != nil {
+		return []string{}
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]string, 0)
+	for rows.Next() {
+		var d sql.NullTime
+		if err := rows.Scan(&d); err == nil && d.Valid {
+			out = append(out, tz.In(d.Time).Format("2006-01-02"))
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return []string{}
+	}
+	return out
 }
 
 func (r *MySQLRepository) Filters(ctx context.Context) (*FiltersResult, error) {
@@ -474,14 +498,17 @@ func (r *MySQLRepository) ExportRows(ctx context.Context, filter ListFilter, lim
 	out := make([]ExportRow, 0)
 	for rows.Next() {
 		var er ExportRow
-		var createdAt, operator, details, ctxRaw, clientIP, clientInfo sql.NullString
+		var createdAt sql.NullTime
+		var operator, details, ctxRaw, clientIP, clientInfo sql.NullString
 		if err := rows.Scan(
 			&createdAt, &er.Level, &er.Module, &er.Event,
 			&operator, &details, &ctxRaw, &clientIP, &clientInfo,
 		); err != nil {
 			return nil, err
 		}
-		er.CreatedAt = createdAt.String
+		if createdAt.Valid {
+			er.CreatedAt = tz.In(createdAt.Time).Format("2006-01-02 15:04:05")
+		}
 		er.Operator = operator.String
 		er.Details = decodeJSONMap(details)
 		er.Context = decodeJSONMap(ctxRaw)
@@ -519,14 +546,58 @@ func (r *MySQLRepository) Stats(ctx context.Context) (*StatsResult, error) {
 
 	for rows.Next() {
 		var ds DailyStat
-		var d sql.NullString
-		if err := rows.Scan(&d, &ds.Total, &ds.Error, &ds.Warn, &ds.Action, &ds.Info); err == nil {
-			ds.Date = d.String
+		var d sql.NullTime
+		if err := rows.Scan(&d, &ds.Total, &ds.Error, &ds.Warn, &ds.Action, &ds.Info); err != nil {
+			return res, err
+		}
+		if d.Valid {
+			ds.Date = tz.In(d.Time).Format("2006-01-02")
 			res.Dates = append(res.Dates, ds.Date)
 			res.DailyStats = append(res.DailyStats, ds)
 		}
 	}
 	return res, rows.Err()
+}
+
+// CleanupOld removes system_logs DB rows (up to 5000 per pass) and data/logs/*.jsonl files older than retentionDays.
+func (r *MySQLRepository) CleanupOld(ctx context.Context, now time.Time, retentionDays int) (int64, error) {
+	if r == nil {
+		return 0, nil
+	}
+	if retentionDays <= 0 {
+		retentionDays = RetentionDays
+	}
+	cutoffTime := tz.In(now).AddDate(0, 0, -retentionDays)
+	var deletedRows int64
+	if r.db != nil {
+		cutoffStr := cutoffTime.Format("2006-01-02 15:04:05")
+		res, err := r.db.ExecContext(ctx, "DELETE FROM `system_logs` WHERE `created_at` < ? LIMIT 5000", cutoffStr)
+		if err != nil {
+			return 0, err
+		}
+		if cnt, err := res.RowsAffected(); err == nil {
+			deletedRows = cnt
+		}
+	}
+
+	if logDir := r.logDir(); logDir != "" {
+		cutoffDate := cutoffTime.Format("2006-01-02")
+		if entries, err := os.ReadDir(logDir); err == nil {
+			for _, e := range entries {
+				if e.IsDir() {
+					continue
+				}
+				m := reLogFileDate.FindStringSubmatch(e.Name())
+				if len(m) != 2 {
+					continue
+				}
+				if m[1] < cutoffDate {
+					_ = os.Remove(filepath.Join(logDir, e.Name()))
+				}
+			}
+		}
+	}
+	return deletedRows, nil
 }
 
 func (r *MySQLRepository) DeleteByDate(ctx context.Context, date string) (int64, error) {

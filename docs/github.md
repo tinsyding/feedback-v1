@@ -25,12 +25,13 @@
   3. **代码检出与对齐**：
      - 临时解除 `.user.ini` 宝塔防跨目录不可变保护 (`chattr -i`)；
      - 执行 `git fetch origin main && git reset --hard $TARGET_SHA`，彻底避免分支分叉或脏数据干扰；
-     - 统一属主为 `www:www`，规范权限（目录 755 / 文件 644 / Git 目录 700）；
+     - 统一属主为 `www:www`，规范权限（目录 755 / 普通文件 644 / `scripts/*.sh` 755 / 本地密钥文件 600 / Git 目录 700）；
      - 重新对 `.user.ini` 加锁 (`chattr +i`)；
   4. **增量数据库迁移**：优先调用 PHP 8.2 执行 `scripts/migrate.php migrate`，实现幂等增量迁移；
-  5. **刷新 PHP-FPM**：重载 `php-fpm-82` 刷新 opcache 字节码缓存；
-  6. **版本与健康冒烟测试**：比对线上 HEAD 与当前 `GITHUB_SHA`，对 10 个核心页面和 API（教师端、学生端、鉴权、配置、CSS/JS 等）执行 HTTP 200 连通性测试；
-  7. **清理凭据**：无论执行成功还是失败，均安全擦除临时私钥。
+  5. **Go 服务发布**：若变更涉及 `backend-go/`，执行 `go vet ./...`、`go test -race -count=1 ./...` 并编译 Linux amd64 二进制，原子上传并重启已启用或运行中的 `feedback-api` 服务及探活 `/healthz`；
+  6. **刷新 PHP-FPM**：重载 `php-fpm-82` 刷新 opcache 字节码缓存；
+  7. **版本与健康冒烟测试**：比对线上 HEAD 与当前 `GITHUB_SHA`，对 16 项核心页面及关键 API（教师端、学生端、鉴权、配置、题库/日志/后台 401 门禁、CSS/JS 等）执行 HTTP 状态连通性校验；
+  8. **清理凭据**：无论执行成功还是失败，均安全擦除临时私钥。
 
 ### 2. 客户端构建与发布：[`build-sender.yml`](../.github/workflows/build-sender.yml)
 - **架构主线**：以 Web 版客户端（`web_main.py`）为主，Tkinter 桌面版已停止更新。
@@ -50,8 +51,8 @@
 - **触发条件**：每天北京时间凌晨 03:30（UTC 19:30）定时执行，或手动即时触发。
 - **备份内容**：
   1. 生产全量 MySQL 数据库 gzip 快照；
-  2. 教师上传与题库 PDF 材料（`/data/pdfs/`、`/data/qbank/`、`/data/uploads/`）；
-  3. 服务器敏感配置文件（`config.json`、`api/db.local.php`、`api/secret_key.local.php`）。
+  2. 教师上传与学生错题材料（`data/pdfs/`、`data/uploads/`；题库元数据已完全存入 MySQL 全量快照）；
+  3. 服务器敏感配置文件（`config.json`、`api/db.local.php`、`api/secret_key.local.php`、`api/admin/helpers.local.php`、`data/.ai_secrets.json` 及可读的 `/etc/feedback-api/env`）。
 - **保留策略**：使用 rclone 同步，云端快照默认保留 30 天并自动滚动清理超期文件。
 
 ### 5. 代码仓库异地增量同步至 Google Drive：[`sync-google-drive.yml`](../.github/workflows/sync-google-drive.yml)

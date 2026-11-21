@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -14,6 +15,8 @@ import (
 	"feedback-api/internal/config"
 	"feedback-api/internal/httpx"
 	"feedback-api/internal/session"
+	"feedback-api/internal/textutil"
+	"feedback-api/internal/tz"
 )
 
 const adminConfigComment = "defaultSeason: spring/summer/autumn/winter (春/暑/秋/寒). semesterYear: 当前学年. semesterWeeks: 学期总周/次数. retestQuestionSpacing: 错题本拼页题目间隙(pt). retestQrCodeEnabled: 下载PDF是否包含视频讲解二维码. disableQwenFlashTitle: 与senderControl.verifyMode=local联动兼容字段. identifyApiBase / calibrateModel / identifyFastModel / identifyModel / benchmarkModel: 四环节大语言模型视觉配置（API Key 独立存储于 data/.ai_secrets.json 或环境变量）."
@@ -73,7 +76,11 @@ func handleAdminConfig(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
 		httpx.SendResponse(w, true, cfgMap, nil, http.StatusOK)
 
 	case http.MethodPost:
-		input, _ := decodeAdminJSONBody(r)
+		input, err := decodeAdminJSONBodyWithLimit(w, r, maxAdminJSONBodyBytes)
+		if isMaxBytesError(err) {
+			httpx.SendResponse(w, false, nil, httpx.StrPtr("请求体大小超过限制"), http.StatusRequestEntityTooLarge)
+			return
+		}
 		if input == nil {
 			input = map[string]any{}
 		}
@@ -97,7 +104,10 @@ func handleAdminConfig(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
 		legacyKey := strings.TrimSpace(config.AsPHPString(cfgMap["dashscopeApiKey"]))
 		if legacyKey != "" && strings.TrimSpace(config.AsPHPString(aiSecrets["dashscopeApiKey"])) == "" {
 			aiSecrets["dashscopeApiKey"] = legacyKey
-			_ = deps.ConfigLoader.SaveAISecrets(aiSecrets)
+			if err := deps.ConfigLoader.SaveAISecrets(aiSecrets); err != nil {
+				httpx.SendResponse(w, false, nil, httpx.StrPtr("迁移 AI 密钥文件失败，请检查 data/ 目录权限"), http.StatusInternalServerError)
+				return
+			}
 		}
 
 		if v, ok := input["defaultSeason"]; ok && v != nil {
@@ -151,7 +161,7 @@ func handleAdminConfig(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
 			}
 			normSC := config.NormalizeGlobalSenderControl(mergedRaw, cfgMap)
 			normSC.PolicyVersion = prevSC.PolicyVersion + 1
-			normSC.UpdatedAt = deps.now().Format("2006-01-02 15:04:05")
+			normSC.UpdatedAt = tz.In(deps.now()).Format("2006-01-02 15:04:05")
 			cfgMap["senderControl"] = normSC
 			cfgMap["disableQwenFlashTitle"] = normSC.VerifyMode == "local"
 		} else if dqf, hasDQF := input["disableQwenFlashTitle"]; hasDQF {
@@ -162,7 +172,7 @@ func handleAdminConfig(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
 				prevSC.VerifyMode = "auto"
 			}
 			prevSC.PolicyVersion++
-			prevSC.UpdatedAt = deps.now().Format("2006-01-02 15:04:05")
+			prevSC.UpdatedAt = tz.In(deps.now()).Format("2006-01-02 15:04:05")
 			cfgMap["senderControl"] = prevSC
 		}
 
@@ -238,19 +248,23 @@ func handleAdminTestAIConfig(w http.ResponseWriter, r *http.Request, deps AdminD
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("不支持的请求方法"), http.StatusMethodNotAllowed)
 		return
 	}
-	input, _ := decodeAdminJSONBody(r)
+	input, err := decodeAdminJSONBodyWithLimit(w, r, maxAdminJSONBodyBytes)
+	if isMaxBytesError(err) {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("请求体大小超过限制"), http.StatusRequestEntityTooLarge)
+		return
+	}
 	if input == nil {
 		input = map[string]any{}
 	}
 	apiKey := strings.TrimSpace(config.AsPHPString(input["api_key"]))
-	apiBase := strings.TrimSpace(config.AsPHPString(input["base_url"]))
+	submittedBase := strings.TrimSpace(config.AsPHPString(input["base_url"]))
+	apiBase := submittedBase
 	model := strings.TrimSpace(config.AsPHPString(input["model"]))
 
-	if (apiKey == "" || config.IsMaskedAPIKey(apiKey) || apiBase == "" || model == "") && deps.ConfigLoader != nil {
-		rt := deps.ConfigLoader.Load()
-		if apiKey == "" || config.IsMaskedAPIKey(apiKey) {
-			apiKey = rt.VisionAPIKey()
-		}
+	var rt config.RuntimeConfig
+	hasLoader := deps.ConfigLoader != nil
+	if hasLoader {
+		rt = deps.ConfigLoader.Load()
 		if apiBase == "" {
 			apiBase = rt.IdentifyAPIBase()
 		}
@@ -259,16 +273,38 @@ func handleAdminTestAIConfig(w http.ResponseWriter, r *http.Request, deps AdminD
 		}
 	}
 
-	if apiKey == "" {
-		httpx.SendResponse(w, false, nil, httpx.StrPtr("API Key 为空，无法进行连通性测试"), http.StatusBadRequest)
-		return
-	}
 	if apiBase == "" {
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("API 端点 Base URL 为空"), http.StatusBadRequest)
 		return
 	}
 	if !strings.HasSuffix(apiBase, "/chat/completions") {
 		apiBase = strings.TrimRight(apiBase, "/") + "/chat/completions"
+	}
+	parsedBase, err := url.Parse(apiBase)
+	if err != nil || (!strings.EqualFold(parsedBase.Scheme, "http") && !strings.EqualFold(parsedBase.Scheme, "https")) || strings.TrimSpace(parsedBase.Host) == "" {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("API 端点 Base URL 格式无效"), http.StatusBadRequest)
+		return
+	}
+
+	if apiKey == "" || config.IsMaskedAPIKey(apiKey) {
+		if hasLoader {
+			canReuseStoredKey := submittedBase == ""
+			if !canReuseStoredKey {
+				if defU, defErr := url.Parse(rt.IdentifyAPIBase()); defErr == nil {
+					canReuseStoredKey = strings.EqualFold(parsedBase.Scheme, defU.Scheme) && strings.EqualFold(parsedBase.Host, defU.Host)
+				}
+			}
+			if !canReuseStoredKey {
+				httpx.SendResponse(w, false, nil, httpx.StrPtr("更换自定义 API 端点时必须重新填写 API Key，禁止复用已保存密钥"), http.StatusBadRequest)
+				return
+			}
+			apiKey = rt.VisionAPIKey()
+		}
+	}
+
+	if apiKey == "" {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("API Key 为空，无法进行连通性测试"), http.StatusBadRequest)
+		return
 	}
 
 	payload := map[string]any{
@@ -345,10 +381,7 @@ func handleAdminTestAIConfig(w http.ResponseWriter, r *http.Request, deps AdminD
 		errMsg = config.AsPHPString(decoded["message"])
 	}
 	if errMsg == "" {
-		snippet := string(raw)
-		if len(snippet) > 150 {
-			snippet = snippet[:150]
-		}
+		snippet := textutil.TruncateRunes(string(raw), 150)
 		errMsg = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, snippet)
 	}
 	httpx.SendResponse(w, false, map[string]any{

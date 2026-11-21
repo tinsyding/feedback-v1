@@ -78,11 +78,7 @@ func writeChangelogAtomic(dataFile string, logs []map[string]any) error {
 	if err := enc.Encode(logs); err != nil {
 		return err
 	}
-	tmpPath := fmt.Sprintf("%s.tmp.%d", dataFile, time.Now().UnixNano())
-	if err := os.WriteFile(tmpPath, bytes.TrimSuffix(buf.Bytes(), []byte("\n")), 0644); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, dataFile)
+	return writeFileAtomic(dataFile, bytes.TrimSuffix(buf.Bytes(), []byte("\n")), 0644)
 }
 
 func withChangelogLock(dataFile string, fn func([]map[string]any) ([]map[string]any, error)) error {

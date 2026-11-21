@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"image/png"
 	"net/http"
 	"net/http/httptest"
@@ -468,6 +469,136 @@ func TestAuthResetPasswordAndAssistantCRUD(t *testing.T) {
 	h.ServeHTTP(recDel, reqDel)
 	if recDel.Code != http.StatusOK {
 		t.Fatalf("assistant_delete status = %d, want 200 (body=%s)", recDel.Code, recDel.Body.String())
+	}
+}
+
+func TestAuthCheckResetPasswordValidationAndStatusNullPreservation(t *testing.T) {
+	repo := newMockAuthRepo()
+	oldHash, _ := auth.HashPassword("oldpass123")
+	repo.addUser(auth.User{
+		ID:           20,
+		Username:     "教师20",
+		PasswordHash: oldHash,
+		RealName:     "王老师",
+		Role:         "teacher",
+		Status:       1,
+	})
+	sessStore := session.NewMemoryStore()
+	rlStore := ratelimit.NewMemoryStore()
+	h := httpx.Middleware(Auth(AuthDeps{
+		Repo:      repo,
+		Sessions:  sessStore,
+		RateLimit: rlStore,
+		Audit:     auditlog.NoopLogger{},
+	}))
+
+	// 1. Unauthenticated check -> loggedIn=false
+	recChk0 := httptest.NewRecorder()
+	h.ServeHTTP(recChk0, httptest.NewRequest(http.MethodGet, "/api/auth.php?action=check", nil))
+	if recChk0.Code != http.StatusOK || !strings.Contains(recChk0.Body.String(), `"loggedIn":false`) {
+		t.Fatalf("unauth check unexpected: code=%d body=%s", recChk0.Code, recChk0.Body.String())
+	}
+
+	// 2. Admin-only check -> loggedIn=true with is_admin=true
+	admSID := "cccc1111dddd2222eeee3333ffff4444"
+	sessStore.Set(admSID, map[string]any{
+		"admin_logged_in": true,
+		"admin_username":  "super",
+		"admin_role":      "super_admin",
+	})
+	reqChkAdm := httptest.NewRequest(http.MethodGet, "/api/auth.php?action=check", nil)
+	reqChkAdm.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: admSID})
+	recChkAdm := httptest.NewRecorder()
+	h.ServeHTTP(recChkAdm, reqChkAdm)
+	if recChkAdm.Code != http.StatusOK || !strings.Contains(recChkAdm.Body.String(), `"is_admin":true`) {
+		t.Fatalf("admin check unexpected: code=%d body=%s", recChkAdm.Code, recChkAdm.Body.String())
+	}
+
+	// 3. reset_password: wrong old_password triggers captcha on next attempt, >72-byte password returns 400
+	reqFail := httptest.NewRequest(http.MethodPost, "/api/auth.php?action=reset_password",
+		strings.NewReader(`{"username":"教师20","old_password":"wrong","new_password":"newpass456","confirm_password":"newpass456"}`))
+	reqFail.RemoteAddr = "203.0.113.88:1234"
+	recFail := httptest.NewRecorder()
+	h.ServeHTTP(recFail, reqFail)
+	if recFail.Code != http.StatusBadRequest {
+		t.Fatalf("wrong old_password status = %d, want 400", recFail.Code)
+	}
+	failSID := extractPHPSESSIDFromRecorder(recFail)
+
+	// Missing/wrong captcha after failure -> 400
+	reqNoCap := httptest.NewRequest(http.MethodPost, "/api/auth.php?action=reset_password",
+		strings.NewReader(`{"username":"教师20","old_password":"oldpass123","new_password":"newpass456"}`))
+	reqNoCap.RemoteAddr = "203.0.113.88:1234"
+	reqNoCap.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: failSID})
+	recNoCap := httptest.NewRecorder()
+	h.ServeHTTP(recNoCap, reqNoCap)
+	if recNoCap.Code != http.StatusBadRequest || !strings.Contains(recNoCap.Body.String(), "验证码") {
+		t.Fatalf("expected captcha error, got code=%d body=%s", recNoCap.Code, recNoCap.Body.String())
+	}
+
+	// Password > 72 bytes returns HTTP 400 (not 500) on reset_password (fresh IP/session)
+	tooLongPwd := strings.Repeat("a", 80)
+	reqLong := httptest.NewRequest(http.MethodPost, "/api/auth.php?action=reset_password",
+		strings.NewReader(`{"username":"教师20","old_password":"oldpass123","new_password":"`+tooLongPwd+`","confirm_password":"`+tooLongPwd+`"}`))
+	reqLong.RemoteAddr = "203.0.113.89:1234"
+	recLong := httptest.NewRecorder()
+	h.ServeHTTP(recLong, reqLong)
+	if recLong.Code != http.StatusBadRequest {
+		t.Fatalf("reset_password >72B status = %d, want 400 (body=%s)", recLong.Code, recLong.Body.String())
+	}
+
+	// 4. Assistant create (>72B -> 400), list, and update with status:null preserves status=1
+	teacherSID := "dddd1111eeee2222ffff333300001111"
+	sessStore.Set(teacherSID, map[string]any{
+		"user_logged_in": true,
+		"user_id":        20,
+		"username":       "t20",
+		"user_role":      "teacher",
+	})
+
+	reqTooLongCreate := httptest.NewRequest(http.MethodPost, "/api/auth.php?action=assistant_create",
+		strings.NewReader(`{"username":"t20_01","real_name":"助教","password":"`+tooLongPwd+`"}`))
+	reqTooLongCreate.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+	recTooLongCreate := httptest.NewRecorder()
+	h.ServeHTTP(recTooLongCreate, reqTooLongCreate)
+	if recTooLongCreate.Code != http.StatusBadRequest {
+		t.Fatalf("assistant_create >72B status = %d, want 400", recTooLongCreate.Code)
+	}
+
+	reqCreate := httptest.NewRequest(http.MethodPost, "/api/auth.php?action=assistant_create",
+		strings.NewReader(`{"username":"T20_01","real_name":"助教一","password":"tapass123"}`))
+	reqCreate.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+	recCreate := httptest.NewRecorder()
+	h.ServeHTTP(recCreate, reqCreate)
+	if recCreate.Code != http.StatusOK {
+		t.Fatalf("assistant_create status = %d (body=%s)", recCreate.Code, recCreate.Body.String())
+	}
+
+	reqList := httptest.NewRequest(http.MethodGet, "/api/auth.php?action=assistant_list", nil)
+	reqList.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+	recList := httptest.NewRecorder()
+	h.ServeHTTP(recList, reqList)
+	if recList.Code != http.StatusOK || !strings.Contains(recList.Body.String(), `"t20_01"`) {
+		t.Fatalf("assistant_list unexpected: code=%d body=%s", recList.Code, recList.Body.String())
+	}
+
+	created, _ := repo.FindUserByUsername(context.Background(), "t20_01")
+	if created == nil || created.Status != 1 {
+		t.Fatalf("expected t20_01 status=1, got %+v", created)
+	}
+
+	// Send status: null -> must NOT disable assistant
+	updNull := fmt.Sprintf(`{"id":%d,"real_name":"助教改名","status":null}`, created.ID)
+	reqUpdNull := httptest.NewRequest(http.MethodPost, "/api/auth.php?action=assistant_update", strings.NewReader(updNull))
+	reqUpdNull.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+	recUpdNull := httptest.NewRecorder()
+	h.ServeHTTP(recUpdNull, reqUpdNull)
+	if recUpdNull.Code != http.StatusOK {
+		t.Fatalf("assistant_update status=null HTTP %d: %s", recUpdNull.Code, recUpdNull.Body.String())
+	}
+	afterUpd, _ := repo.FindUserByUsername(context.Background(), "t20_01")
+	if afterUpd == nil || afterUpd.Status != 1 || afterUpd.RealName != "助教改名" {
+		t.Fatalf("status:null disabled assistant or failed update: %+v", afterUpd)
 	}
 }
 

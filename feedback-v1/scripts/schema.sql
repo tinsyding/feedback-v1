@@ -202,6 +202,7 @@ CREATE TABLE IF NOT EXISTS `qbank_questions` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_qbank_qnum` (`qbank_id`,`question_num`),
   KEY `idx_lookup` (`bank_type`,`year`,`season`,`subject`,`grade`,`tier`,`week`,`question_num`),
+  KEY `idx_parent_lookup` (`bank_type`,`year`,`season`,`subject`,`grade`,`tier`,`week`,`parent_question_num`),
   KEY `idx_topic_search` (`subject`,`grade`,`topic`(100))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='题库题目与考点明细表';
 

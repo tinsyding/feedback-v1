@@ -24,12 +24,19 @@ var (
 func handleRetestCaptcha(w http.ResponseWriter, r *http.Request, deps RetestDeps) {
 	sess, isNew := loadAuthSession(r, deps.Sessions)
 	code, svg := retest.GenerateSVGCaptcha()
-	sess.Data["retest_captcha"] = strings.ToLower(code)
+	lowerCode := strings.ToLower(code)
 	if deps.Sessions != nil {
-		_ = deps.Sessions.Save(r.Context(), sess)
-	}
-	if isNew {
-		session.SetCookie(w, r, sess.ID)
+		if _, err := session.Update(r.Context(), deps.Sessions, sess.ID, func(data map[string]any) (bool, error) {
+			data["retest_captcha"] = lowerCode
+			return true, nil
+		}); err == nil && isNew {
+			session.SetCookie(w, r, sess.ID)
+		}
+	} else {
+		sess.Data["retest_captcha"] = lowerCode
+		if isNew {
+			session.SetCookie(w, r, sess.ID)
+		}
 	}
 
 	w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
@@ -44,7 +51,7 @@ func handleRetestDecrypt(w http.ResponseWriter, r *http.Request, deps RetestDeps
 	var rawToken, inputName, inputCaptcha string
 	q := r.URL.Query()
 	if r.Method == http.MethodPost {
-		postInput, _ := decodeAdminJSONBody(r)
+		postInput, _ := decodeRetestJSONBody(w, r, 1<<20)
 		rawToken = strings.TrimSpace(config.AsPHPString(postInput["token"]))
 		if rawToken == "" {
 			rawToken = strings.TrimSpace(q.Get("token"))
@@ -177,8 +184,19 @@ func handleRetestDecrypt(w http.ResponseWriter, r *http.Request, deps RetestDeps
 		}
 		if isAdminAuthorized {
 			isSessionVerified = true
-			sess.Data[sessKey] = keyCandidates[0]
-			persistAuthSession(w, r, deps.Sessions, sess, isNewSess)
+			if deps.Sessions != nil {
+				if _, err := session.Update(r.Context(), deps.Sessions, sess.ID, func(data map[string]any) (bool, error) {
+					data[sessKey] = keyCandidates[0]
+					return true, nil
+				}); err == nil && isNewSess {
+					session.SetCookie(w, r, sess.ID)
+				}
+			} else {
+				sess.Data[sessKey] = keyCandidates[0]
+				if isNewSess {
+					session.SetCookie(w, r, sess.ID)
+				}
+			}
 			logRetestAccess(r, deps, rawToken, studentName+" (管理员直通)", "admin_bypass", "管理员免密查看")
 		}
 	}
@@ -193,10 +211,24 @@ func handleRetestDecrypt(w http.ResponseWriter, r *http.Request, deps RetestDeps
 			return
 		}
 
-		// One-time SVG captcha check
-		savedCaptcha := strings.ToLower(sess.StringVal("retest_captcha"))
-		delete(sess.Data, "retest_captcha")
-		persistAuthSession(w, r, deps.Sessions, sess, isNewSess)
+		// One-time SVG captcha check (atomic read-and-delete)
+		var savedCaptcha string
+		if deps.Sessions != nil {
+			_, _ = session.Update(r.Context(), deps.Sessions, sess.ID, func(data map[string]any) (bool, error) {
+				savedCaptcha = strings.ToLower(config.AsPHPString(data["retest_captcha"]))
+				if _, exists := data["retest_captcha"]; exists {
+					delete(data, "retest_captcha")
+					return true, nil
+				}
+				return false, nil
+			})
+			if isNewSess && savedCaptcha != "" {
+				session.SetCookie(w, r, sess.ID)
+			}
+		} else {
+			savedCaptcha = strings.ToLower(sess.StringVal("retest_captcha"))
+			delete(sess.Data, "retest_captcha")
+		}
 
 		if savedCaptcha == "" || strings.ToLower(inputCaptcha) != savedCaptcha {
 			logRetestAccess(r, deps, rawToken, inputName, "verify_fail", "图形验证码错误")
@@ -224,8 +256,19 @@ func handleRetestDecrypt(w http.ResponseWriter, r *http.Request, deps RetestDeps
 			return
 		}
 
-		sess.Data[sessKey] = keyCandidates[0]
-		persistAuthSession(w, r, deps.Sessions, sess, isNewSess)
+		if deps.Sessions != nil {
+			if _, err := session.Update(r.Context(), deps.Sessions, sess.ID, func(data map[string]any) (bool, error) {
+				data[sessKey] = keyCandidates[0]
+				return true, nil
+			}); err == nil && isNewSess {
+				session.SetCookie(w, r, sess.ID)
+			}
+		} else {
+			sess.Data[sessKey] = keyCandidates[0]
+			if isNewSess {
+				session.SetCookie(w, r, sess.ID)
+			}
+		}
 		logRetestAccess(r, deps, rawToken, studentName, "verify_success", fmt.Sprintf("第 %d 周", currWeek))
 	} else {
 		if q.Has("w") {
@@ -259,6 +302,7 @@ func handleRetestDecrypt(w http.ResponseWriter, r *http.Request, deps RetestDeps
 	studentHistory := map[int][]int{}
 	dbStudentScores := map[int]scoreEntry{}
 	dbPreviewData := map[int]previewEntry{}
+	dbPreviewOrder := []int{}
 	dbWeekTiers := map[int]string{}
 	dbWeekBatchIDs := map[int]int{}
 
@@ -287,6 +331,9 @@ func handleRetestDecrypt(w http.ResponseWriter, r *http.Request, deps RetestDeps
 			if row.PreviewWeekNum != nil && *row.PreviewWeekNum > 0 {
 				pvWk = *row.PreviewWeekNum
 			}
+			if _, exists := dbPreviewData[wn]; !exists {
+				dbPreviewOrder = append(dbPreviewOrder, wn)
+			}
 			dbPreviewData[wn] = previewEntry{
 				errors:                  retest.ParseJSONErrorInts(row.PreviewErrorsRaw),
 				previewWeek:             pvWk,
@@ -307,9 +354,10 @@ func handleRetestDecrypt(w http.ResponseWriter, r *http.Request, deps RetestDeps
 		}
 	}
 
-	// Re-group preview errors by previewWeek topic
+	// Re-group preview errors by previewWeek topic deterministically
 	previewByTopic := map[int]previewEntry{}
-	for _, entry := range dbPreviewData {
+	for _, wn := range dbPreviewOrder {
+		entry := dbPreviewData[wn]
 		topic := entry.previewWeek
 		if topic <= 0 {
 			topic = entry.sourceWeek
@@ -330,7 +378,13 @@ func handleRetestDecrypt(w http.ResponseWriter, r *http.Request, deps RetestDeps
 		}
 	}
 
-	for topic, entry := range previewByTopic {
+	sortedPreviewTopics := make([]int, 0, len(previewByTopic))
+	for topic := range previewByTopic {
+		sortedPreviewTopics = append(sortedPreviewTopics, topic)
+	}
+	sort.Ints(sortedPreviewTopics)
+	for _, topic := range sortedPreviewTopics {
+		entry := previewByTopic[topic]
 		if len(entry.errors) > 0 {
 			if _, ok := studentHistory[topic]; !ok {
 				studentHistory[topic] = []int{}
@@ -347,11 +401,14 @@ func handleRetestDecrypt(w http.ResponseWriter, r *http.Request, deps RetestDeps
 			if _, ok := studentHistory[tokenPreviewWeek]; !ok {
 				studentHistory[tokenPreviewWeek] = []int{}
 			}
+			sortedPreviewTopics = append(sortedPreviewTopics, tokenPreviewWeek)
+			sort.Ints(sortedPreviewTopics)
 		}
 	}
 
 	defaultPreviewTopic := 0
-	for topic, entry := range previewByTopic {
+	for _, topic := range sortedPreviewTopics {
+		entry := previewByTopic[topic]
 		if entry.sourceWeek == currWeek && len(entry.errors) > 0 {
 			defaultPreviewTopic = topic
 		}

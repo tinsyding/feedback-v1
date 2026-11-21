@@ -10,7 +10,7 @@
 
 1. **零侵入并行运行**：Go 服务 `feedback-api` 作为独立 systemd 常驻进程监听本机 `127.0.0.1:8090`，直接挂载现有 `feedback-v1/` 目录，动态按请求读取 `config.json` 与 `data/identify_archive/`，不缓存后台实时修改的配置。
 2. **Nginx 精确路由覆写**：[`feedback-v1/scripts/nginx/zz-feedback-go-proxy.conf`](../feedback-v1/scripts/nginx/zz-feedback-go-proxy.conf) 使用 `location = /api/<endpoint>.php` 精确匹配转发到 `http://127.0.0.1:8090`。在 Nginx `location` 优先级规则中，精确匹配 `=` 始终高于 `enable-php-82.conf` 的正则匹配 `location ~ \.php$`（与 `include` 顺序无关）。
-3. **作用域隔离**：`client_max_body_size 15m` 与 `proxy_*` 超时配置仅写在各 `location =` 块内，不影响 PHP 端其他大文件接口（如 `upload_pdf.php` 的 20MB 或 `retest.php` 临时下载的 25MB 限制）。
+3. **作用域隔离**：各接口按需设置独立的 `client_max_body_size`（`1m`~`26m`，如 `upload_pdf` `25m`、`retest` `26m`、`logs` `12m`）与 `proxy_*` 超时配置并写在 `location =` 块内，不影响静态资源与其它匹配规则。
 4. **可观测性标识**：Go 后端所有响应均附带 `X-Backend-Engine: go` 响应头，切流或回滚后可通过 `curl` 一眼确认实际承载引擎。
 
 ---
@@ -19,10 +19,10 @@
 
 [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) 已集成 Go 自动化构建与发布，且保证在服务器尚未切流时安全无副作用：
 
-1. **Runner 构建与测试（含 `GOCACHE` 缓存）**：使用 `actions/setup-go@v5`（`cache: true`）配合 `actions/cache@v4` 缓存 `~/.cache/go-build`，运行 `go test -race -count=1 ./...`，并交叉编译静态二进制 `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/feedback-api ./cmd/feedback-api`。
+1. **Runner 构建与测试（含 Go 模块缓存）**：使用 `actions/setup-go@v5`（`cache: true`）缓存 `GOMODCACHE` 与 `GOCACHE`，运行 `go vet ./...` 与 `go test -race -count=1 ./...`，并交叉编译静态二进制 `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/feedback-api ./cmd/feedback-api`。
 2. **原子替换二进制**：通过 `scp` 上传至 `/opt/feedback-go/feedback-api.new`，设置 `www:www` 与 `755` 后原子 `mv -f` 覆盖 `/opt/feedback-go/feedback-api`。
-3. **条件重启与探活**：仅当 `systemctl is-enabled feedback-api` 成功时才重启 `feedback-api`；仅当服务处于 `active` 状态时探测 `http://127.0.0.1:8090/healthz` 返回 HTTP 200。未安装 systemd unit 前推送 `deploy.yml` 不会中断生产 PHP 链路。
-4. **PHP 发布链路保留**：原有代码检出、`.user.ini` 加解锁、`scripts/migrate.php migrate`、`php-fpm-82 reload` 及 10 项全量冒烟测试保持不变。
+3. **条件重启与探活**：当 `systemctl is-enabled feedback-api` 或 `systemctl is-active --quiet feedback-api` 成立时重启 `feedback-api`；服务处于 `active` 状态时探测 `http://127.0.0.1:8090/healthz` 返回 HTTP 200。未安装 systemd unit 前推送 `deploy.yml` 不会中断生产 PHP 链路。
+4. **PHP 发布链路保留**：原有代码检出、`.user.ini` 加解锁、本地密钥 `600` 与脚本 `755` 权限保护、`scripts/migrate.php migrate`、`php-fpm-82 reload` 及 16 项全量冒烟测试保持不变。
 
 ---
 
@@ -127,7 +127,7 @@ sudo bash /www/wwwroot/JF/feedback-git/backend-go/deploy/install_nginx_go_proxy.
 1. **切流前硬门禁**：先请求 `http://127.0.0.1:8090/healthz`，非 200 直接拒绝安装 Nginx 片段。
 2. **备份与权限收敛**：备份既有配置到 `/root/nginx-go-proxy-backups/<timestamp>/`，以 `600 root:root` 写入 `/www/server/panel/vhost/nginx/extension/feedback.wxjifang.cn/zz-feedback-go-proxy.conf`。
 3. **`nginx -t` 自动回滚保护**：校验失败自动恢复备份并退出，不 reload 坏配置。
-4. **切流后实测**：通过 `curl --resolve` 校验 `https://feedback.wxjifang.cn/api/public_config.php` 与 `/api/calibrate_roi.php` 返回 HTTP 200 且包含 `X-Backend-Engine: go`。
+4. **切流后实测**：通过 `curl --resolve` 校验 `https://feedback.wxjifang.cn` 下的 `/api/public_config.php`、`/api/calibrate_roi.php`、`/api/changelog.php?action=getActive`、`/api/auth.php?action=check` 与 `/api/retest.php?action=captcha` 均返回 HTTP 200 且包含 `X-Backend-Engine: go`。
 
 > 注意：`feedback.wxjifang.cn.conf` 的 `server_name` 同时覆盖 `vip.wxjifang.cn`（其中 `/api/public_config.php` 已放行），因此无需为 `vip` 单独建立扩展目录。
 
@@ -158,7 +158,7 @@ sudo bash /www/wwwroot/JF/feedback-git/backend-go/deploy/install_nginx_go_proxy.
   --rollback --target-dir /etc/nginx/snippets --sites feedbackbackup.wxjifang.cn
 ```
 
-脚本会备份并删除 `zz-feedback-go-proxy.conf`，执行 `nginx -t && nginx -s reload`，并确认 `/api/public_config.php` 与 `/api/calibrate_roi.php` 返回 HTTP 200 且不再带有 `X-Backend-Engine: go`。
+脚本会备份并删除 `zz-feedback-go-proxy.conf`，执行 `nginx -t && nginx -s reload`，并确认 `/api/public_config.php`、`/api/calibrate_roi.php`、`/api/changelog.php?action=getActive`、`/api/auth.php?action=check` 与 `/api/retest.php?action=captcha` 返回 HTTP 200 且不再带有 `X-Backend-Engine: go`。
 
 ### 方式 B：紧急手工 1 秒回滚
 

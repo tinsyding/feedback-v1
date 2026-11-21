@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"math"
 	mrand "math/rand/v2"
 	"net/http"
@@ -67,9 +68,24 @@ func Identify(loader *config.Loader, vc *vision.Client) http.HandlerFunc {
 		}
 
 		r.Body = http.MaxBytesReader(w, r.Body, 25<<20)
-		httpx.ParseRequestForm(r)
-		if r.MultipartForm != nil {
-			defer r.MultipartForm.RemoveAll()
+		ct := strings.ToLower(r.Header.Get("Content-Type"))
+		if strings.HasPrefix(ct, "multipart/form-data") {
+			if err := r.ParseMultipartForm(16 << 20); err != nil {
+				var maxErr *http.MaxBytesError
+				if errors.As(err, &maxErr) {
+					httpx.SendResponse(w, false, nil, httpx.StrPtr("上传图超过 5MB"), http.StatusBadRequest)
+					return
+				}
+			}
+			if r.MultipartForm != nil {
+				defer func() { _ = r.MultipartForm.RemoveAll() }()
+			}
+		} else if err := r.ParseForm(); err != nil {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				httpx.SendResponse(w, false, nil, httpx.StrPtr("上传图超过 5MB"), http.StatusBadRequest)
+				return
+			}
 		}
 
 		cfg := loader.Load()

@@ -214,8 +214,13 @@ const uploadSandbox = {
 };
 vm.createContext(uploadSandbox);
 
-const extractNamesMatch = uploadCode.match(/function extractStudentNamesFromData[\s\S]*?\n\}/);
+const fileHandlersCode = fs.readFileSync(path.join(__dirname, '../feedback-v1/js/upload/file-handlers.js'), 'utf8');
+const extractNamesMatch = fileHandlersCode.match(/^([ \t]*)function extractStudentNamesFromData\b[\s\S]*?^\1\}/m);
 const getWjxNamesMatch = uploadCode.match(/function getWenjuanxingNames[\s\S]*?\n\}/);
+if (!extractNamesMatch || !getWjxNamesMatch) {
+    console.error('FAIL: Could not extract extractStudentNamesFromData/getWenjuanxingNames');
+    process.exit(1);
+}
 vm.runInContext(extractNamesMatch[0], uploadSandbox);
 vm.runInContext(getWjxNamesMatch[0], uploadSandbox);
 

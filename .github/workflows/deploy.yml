@@ -110,6 +110,7 @@ jobs:
         if: steps.changes.outputs.go_changed == 'true'
         working-directory: backend-go
         run: |
+          go vet ./...
           go test -race -count=1 ./...
           mkdir -p dist
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/feedback-api ./cmd/feedback-api
@@ -137,8 +138,8 @@ jobs:
           $SSH "find /www/wwwroot/JF/feedback-git -name '.user.ini' -exec chattr -i {} + 2>/dev/null || true"
           # 2. 拉取最新代码并严格对齐当前目标提交（彻底避免多分支 fast-forward 失败与服务端临时改动冲突）
           $SSH "cd /www/wwwroot/JF/feedback-git && git fetch origin main && git reset --hard $TARGET_SHA && git rev-parse HEAD"
-          # 3. 统一属主与权限（pull/reset 以 root 执行，新文件交还 www 属主并规范读写位）
-          $SSH "chown -R www:www /www/wwwroot/JF/feedback-git && cd /www/wwwroot/JF/feedback-git && find feedback-v1 -type d -exec chmod 755 {} + && find feedback-v1 -type f -exec chmod 644 {} + && chmod 700 .git && echo PERMS-OK"
+          # 3. 统一属主与权限（pull/reset 以 root 执行，新文件交还 www 属主并规范读写位，保护本地密钥与脚本执行权限）
+          $SSH "chown -R www:www /www/wwwroot/JF/feedback-git && cd /www/wwwroot/JF/feedback-git && find feedback-v1 -type d -exec chmod 755 {} + && find feedback-v1 -type f -exec chmod 644 {} + && find feedback-v1/scripts -type f -name '*.sh' -exec chmod 755 {} + && for f in feedback-v1/data/.ai_secrets.json feedback-v1/api/db.local.php feedback-v1/api/secret_key.local.php feedback-v1/api/admin/helpers.local.php; do if [ -f \"\$f\" ]; then chmod 600 \"\$f\"; fi; done && chmod 700 .git && echo PERMS-OK"
           # 4. 重新加锁 .user.ini 恢复宝塔目录安全防御
           $SSH "find /www/wwwroot/JF/feedback-git -name '.user.ini' -exec chattr +i {} + 2>/dev/null || true"
           # 5. 自动执行数据库增量迁移（幂等，优先使用 PHP 8.2 避免系统默认老版本语法不兼容）
@@ -169,10 +170,10 @@ jobs:
           chown www:www /opt/feedback-go/feedback-api.new
           chmod 755 /opt/feedback-go/feedback-api.new
           mv -f /opt/feedback-go/feedback-api.new /opt/feedback-go/feedback-api
-          if systemctl is-enabled feedback-api >/dev/null 2>&1; then
+          if systemctl is-enabled feedback-api >/dev/null 2>&1 || systemctl is-active --quiet feedback-api; then
             systemctl restart feedback-api
           else
-            echo "feedback-api.service not enabled yet; skipping restart"
+            echo "feedback-api.service not enabled or active yet; skipping restart"
           fi
           if systemctl is-active --quiet feedback-api; then
             ok=0
@@ -217,10 +218,22 @@ jobs:
             exit 1
           fi
           echo "version OK: $REMOTE_SHA"
-          # 2. 关键页面与接口必须 200
+          # 2. 关键页面与接口状态校验
+          check_status() {
+            url="$1"
+            shift
+            code=$(curl -4 -sk --retry 3 --retry-delay 2 --retry-connrefused --connect-timeout 10 -m 30 -o /dev/null -w "%{http_code}" "$url")
+            for expected in "$@"; do
+              if [ "$code" = "$expected" ]; then
+                echo "PASS $url ($code)"
+                return 0
+              fi
+            done
+            echo "FAIL $url => $code (expected: $*)"
+            exit 1
+          }
           check() {
-            code=$(curl -4 -sk --retry 3 --retry-delay 2 --retry-connrefused --connect-timeout 10 -m 30 -o /dev/null -w "%{http_code}" "$1")
-            if [ "$code" = "200" ]; then echo "PASS $1"; else echo "FAIL $1 => $code"; exit 1; fi
+            check_status "$1" "200"
           }
           check "https://feedback.wxjifang.cn/upload.html"
           check "https://feedback.wxjifang.cn/viewer.html"
@@ -230,9 +243,14 @@ jobs:
           check "https://feedback.wxjifang.cn/api/public_config.php"
           check "https://feedback.wxjifang.cn/api/calibrate_roi.php"
           check "https://feedback.wxjifang.cn/api/changelog.php?action=getActive"
+          check "https://feedback.wxjifang.cn/api/admin.php?action=check"
+          check_status "https://feedback.wxjifang.cn/api/qbank.php?action=list" "401"
+          check_status "https://feedback.wxjifang.cn/api/logs.php?action=list" "401"
+          check_status "https://feedback.wxjifang.cn/api/admin.php?action=db_tables" "401"
           check "https://feedback.wxjifang.cn/css/tokens.css"
           check "https://feedback.wxjifang.cn/js/upload.js"
           check "https://vip.wxjifang.cn/retest.html"
+          check "https://vip.wxjifang.cn/api/retest.php?action=captcha"
 
       - name: Cleanup temporary credentials
         if: always()

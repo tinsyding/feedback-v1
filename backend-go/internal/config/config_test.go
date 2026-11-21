@@ -3,7 +3,9 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestLoadEnvFileDoesNotOverwriteOSVars(t *testing.T) {
@@ -360,6 +362,67 @@ func TestMultiSenderTokensAndStrictDefaultMode(t *testing.T) {
 	}
 	if strictCfg.VerifySenderToken(DefaultSenderToken) {
 		t.Fatal("DefaultSenderToken must be rejected when ALLOW_DEFAULT_SENDER_TOKEN=false")
+	}
+}
+
+func TestEnvBOMQuotedTrailingCommentsAndPHPSenderTokenArrays(t *testing.T) {
+	// 1. UTF-8 BOM and quoted trailing # comments in .env
+	envPath := filepath.Join(t.TempDir(), ".env")
+	envContent := "\xef\xbb\xbfBOM_FIRST=\"val \\\"one\\\"\" # trailing comment\nSINGLE_TRAIL='val # keep' # comment\n"
+	if err := os.WriteFile(envPath, []byte(envContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Unsetenv("BOM_FIRST")
+		_ = os.Unsetenv("SINGLE_TRAIL")
+	})
+	if err := LoadEnvFile(envPath); err != nil {
+		t.Fatalf("LoadEnvFile: %v", err)
+	}
+	if got := os.Getenv("BOM_FIRST"); got != `val "one"` {
+		t.Fatalf("BOM_FIRST = %q", got)
+	}
+	if got := os.Getenv("SINGLE_TRAIL"); got != "val # keep" {
+		t.Fatalf("SINGLE_TRAIL = %q", got)
+	}
+
+	// 2. secret_key.local.php with PHP array senderApiTokens + trimmed DASHSCOPE_API_KEY
+	root := t.TempDir()
+	apiDir := filepath.Join(root, "api")
+	if err := os.MkdirAll(apiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(apiDir, "secret_key.local.php"), []byte(`<?php
+return [
+    'senderApiTokens' => ['arr-tok-1', 'arr-tok-2'],
+    'retestSecret' => 'sec-123',
+];`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("SENDER_API_TOKENS", "")
+	t.Setenv("SENDER_API_TOKEN", "")
+	t.Setenv("DASHSCOPE_API_KEY", "  sk-trimmed-env  ")
+
+	cfg := NewLoader(root, "").Load()
+	if got := cfg.ServerSenderTokens(); len(got) != 2 || got[0] != "arr-tok-1" || got[1] != "arr-tok-2" {
+		t.Fatalf("ServerSenderTokens = %#v", got)
+	}
+	if !cfg.VerifySenderToken("arr-tok-1") || !cfg.VerifySenderToken("arr-tok-2") {
+		t.Fatal("expected PHP array senderApiTokens to verify")
+	}
+	if cfg.VerifySenderToken(DefaultSenderToken) {
+		t.Fatal("DefaultSenderToken must be blocked when PHP array senderApiTokens is configured")
+	}
+	if got := cfg.VisionAPIKey(); got != "sk-trimmed-env" {
+		t.Fatalf("VisionAPIKey = %q, want trimmed sk-trimmed-env", got)
+	}
+
+	// 3. CJK truncation in NormalizeGlobalSenderControl never splits UTF-8 rune
+	longCJK := strings.Repeat("通知", 100) // 600 UTF-8 bytes
+	sc := NormalizeGlobalSenderControl(map[string]any{"noticeMessage": longCJK}, nil)
+	if len(sc.NoticeMessage) > 500 || !utf8.ValidString(sc.NoticeMessage) {
+		t.Fatalf("invalid UTF-8 or length after truncation: len=%d valid=%v", len(sc.NoticeMessage), utf8.ValidString(sc.NoticeMessage))
 	}
 }
 

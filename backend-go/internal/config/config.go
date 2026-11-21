@@ -94,7 +94,8 @@ func LoadEnvFile(path string) error {
 	if err != nil {
 		return fmt.Errorf("read env file %q: %w", path, err)
 	}
-	lines := strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n")
+	content := strings.TrimPrefix(string(raw), "\xef\xbb\xbf")
+	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -120,19 +121,36 @@ func LoadEnvFile(path string) error {
 }
 
 func parseEnvValue(raw string) string {
-	if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
-		inner := raw[1 : len(raw)-1]
-		replacer := strings.NewReplacer(
-			`\n`, "\n",
-			`\r`, "\r",
-			`\t`, "\t",
-			`\"`, `"`,
-			`\\`, `\`,
-		)
-		return replacer.Replace(inner)
+	if len(raw) >= 2 && raw[0] == '"' {
+		for i := 1; i < len(raw); i++ {
+			if raw[i] == '\\' && i+1 < len(raw) {
+				i++
+				continue
+			}
+			if raw[i] == '"' {
+				rest := strings.TrimSpace(raw[i+1:])
+				if rest == "" || strings.HasPrefix(rest, "#") {
+					replacer := strings.NewReplacer(
+						`\n`, "\n",
+						`\r`, "\r",
+						`\t`, "\t",
+						`\"`, `"`,
+						`\\`, `\`,
+					)
+					return replacer.Replace(raw[1:i])
+				}
+				break
+			}
+		}
 	}
-	if len(raw) >= 2 && raw[0] == '\'' && raw[len(raw)-1] == '\'' {
-		return raw[1 : len(raw)-1]
+	if len(raw) >= 2 && raw[0] == '\'' {
+		if end := strings.IndexByte(raw[1:], '\''); end >= 0 {
+			closeIdx := 1 + end
+			rest := strings.TrimSpace(raw[closeIdx+1:])
+			if rest == "" || strings.HasPrefix(rest, "#") {
+				return raw[1:closeIdx]
+			}
+		}
 	}
 	// Strip unquoted inline comments preceded by whitespace.
 	for i := 0; i < len(raw); i++ {
@@ -262,7 +280,7 @@ func (l *Loader) loadSecrets() Secrets {
 		out.SenderApiToken = envSenderTokens[0]
 	}
 
-	if v := os.Getenv("DASHSCOPE_API_KEY"); v != "" {
+	if v := strings.TrimSpace(os.Getenv("DASHSCOPE_API_KEY")); v != "" {
 		out.DashscopeApiKey = v
 	}
 	if v := os.Getenv("IDENTIFY_API_BASE"); v != "" {
@@ -310,12 +328,16 @@ func applySecrets(dst *Secrets, src Secrets) {
 	}
 }
 
-// parsePHPSecretArray safely extracts simple `'key' => 'value'` (or double-quoted) string entries from secret_key.local.php.
+// parsePHPSecretArray safely extracts simple `'key' => 'value'` (or string array) entries from secret_key.local.php.
 func parsePHPSecretArray(src string) Secrets {
 	entries := extractPHPStringPairs(src)
+	tokens := splitSenderTokens(entries["senderApiTokens"])
+	if len(tokens) == 0 {
+		tokens = appendUniqueTokens(nil, extractPHPStringArrayField(src, "senderApiTokens")...)
+	}
 	return Secrets{
 		SenderApiToken:    entries["senderApiToken"],
-		SenderApiTokens:   splitSenderTokens(entries["senderApiTokens"]),
+		SenderApiTokens:   tokens,
 		DashscopeApiKey:   entries["dashscopeApiKey"],
 		IdentifyApiBase:   entries["identifyApiBase"],
 		IdentifyModel:     entries["identifyModel"],
@@ -577,7 +599,7 @@ func (c RuntimeConfig) VisionAPIKey() string {
 	if v := strings.TrimSpace(c.RawString("dashscopeApiKey")); v != "" {
 		return v
 	}
-	return c.Secrets.DashscopeApiKey
+	return strings.TrimSpace(c.Secrets.DashscopeApiKey)
 }
 
 func (c RuntimeConfig) aiSecretString(key string) string {

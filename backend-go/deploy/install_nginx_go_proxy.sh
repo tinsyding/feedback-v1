@@ -21,7 +21,7 @@
 #   1. （非回滚模式）先探测 http://127.0.0.1:8090/healthz 返回 200；Go 未就绪则拒绝切流
 #   2. 备份旧的 zz-feedback-go-proxy.conf 到 /root/nginx-go-proxy-backups/
 #   3. 安装（或 --rollback 移除）片段，执行 nginx -t（失败自动回滚）并 reload
-#   4. 通过 curl --resolve 验证 /api/public_config.php 与 /api/calibrate_roi.php：
+#   4. 通过 curl --resolve 验证 /api/public_config.php、/api/calibrate_roi.php、/api/changelog.php?action=getActive、/api/auth.php?action=check 与 /api/retest.php?action=captcha：
 #      - 切流模式：必须返回 HTTP 200 且包含响应头 X-Backend-Engine: go
 #      - 回滚模式：必须返回 HTTP 200 且不再包含 X-Backend-Engine: go
 
@@ -324,6 +324,8 @@ for domain in $SITES; do
     probe_endpoint "$domain" "/api/public_config.php" "$expect_go" || fail=1
     probe_endpoint "$domain" "/api/calibrate_roi.php" "$expect_go" || fail=1
     probe_endpoint "$domain" "/api/changelog.php?action=getActive" "$expect_go" || fail=1
+    probe_endpoint "$domain" "/api/auth.php?action=check" "$expect_go" || fail=1
+    probe_endpoint "$domain" "/api/retest.php?action=captcha" "$expect_go" || fail=1
 done
 
 if [ "$fail" -ne 0 ]; then

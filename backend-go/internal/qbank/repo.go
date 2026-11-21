@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"feedback-api/internal/tz"
 )
 
 // ListFilter holds optional filter criteria for GET ?action=list.
@@ -260,11 +262,12 @@ type weekMetaRow struct {
 
 func scanWeekMetaRow(row *sql.Row) (*weekMetaRow, error) {
 	var w weekMetaRow
-	var createdBy, updatedBy, updatedAtStr sql.NullString
+	var createdBy, updatedBy sql.NullString
+	var updatedAt sql.NullTime
 	var updatedAtMs sql.NullFloat64
 	err := row.Scan(
 		&w.id, &w.bankType, &w.year, &w.season, &w.subject, &w.grade, &w.tier, &w.week,
-		&w.questionCount, &createdBy, &updatedBy, &updatedAtStr, &updatedAtMs,
+		&w.questionCount, &createdBy, &updatedBy, &updatedAt, &updatedAtMs,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -274,7 +277,9 @@ func scanWeekMetaRow(row *sql.Row) (*weekMetaRow, error) {
 	}
 	w.createdBy = createdBy.String
 	w.updatedBy = updatedBy.String
-	w.updatedAtStr = updatedAtStr.String
+	if updatedAt.Valid {
+		w.updatedAtStr = tz.In(updatedAt.Time).Format("2006-01-02 15:04:05")
+	}
 	if updatedAtMs.Valid {
 		w.updatedAtMs = updatedAtMs.Float64
 	}
@@ -683,15 +688,21 @@ func (r *MySQLRepository) DeleteWeek(ctx context.Context, key WeekKey) ([]string
 	if err != nil {
 		return nil, err
 	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	var qbankID int64
 	if key.Year != nil && key.Season != "" {
-		err = db.QueryRowContext(
+		err = tx.QueryRowContext(
 			ctx,
 			"SELECT `id` FROM `qbank_weeks` WHERE `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? AND `bank_type` = ? LIMIT 1",
 			*key.Year, key.Season, key.Subject, key.Grade, key.Tier, key.Week, key.BankType,
 		).Scan(&qbankID)
 	} else {
-		err = db.QueryRowContext(
+		err = tx.QueryRowContext(
 			ctx,
 			"SELECT `id` FROM `qbank_weeks` WHERE `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? AND `bank_type` = ? LIMIT 1",
 			key.Subject, key.Grade, key.Tier, key.Week, key.BankType,
@@ -705,26 +716,34 @@ func (r *MySQLRepository) DeleteWeek(ctx context.Context, key WeekKey) ([]string
 	}
 
 	candidates := make([]string, 0)
-	pdfRows, err := db.QueryContext(ctx, "SELECT `exercise_pdf`, `answer_pdf` FROM `qbank_questions` WHERE `qbank_id` = ?", qbankID)
-	if err == nil {
-		for pdfRows.Next() {
-			var ex, ans sql.NullString
-			if scanErr := pdfRows.Scan(&ex, &ans); scanErr == nil {
-				if ex.String != "" {
-					candidates = append(candidates, ex.String)
-				}
-				if ans.String != "" {
-					candidates = append(candidates, ans.String)
-				}
-			}
-		}
-		_ = pdfRows.Close()
-	}
-
-	if _, err := db.ExecContext(ctx, "DELETE FROM `qbank_questions` WHERE `qbank_id` = ?", qbankID); err != nil {
+	pdfRows, err := tx.QueryContext(ctx, "SELECT `exercise_pdf`, `answer_pdf` FROM `qbank_questions` WHERE `qbank_id` = ?", qbankID)
+	if err != nil {
 		return nil, err
 	}
-	if _, err := db.ExecContext(ctx, "DELETE FROM `qbank_weeks` WHERE `id` = ?", qbankID); err != nil {
+	for pdfRows.Next() {
+		var ex, ans sql.NullString
+		if scanErr := pdfRows.Scan(&ex, &ans); scanErr == nil {
+			if ex.String != "" {
+				candidates = append(candidates, ex.String)
+			}
+			if ans.String != "" {
+				candidates = append(candidates, ans.String)
+			}
+		}
+	}
+	if err := pdfRows.Err(); err != nil {
+		_ = pdfRows.Close()
+		return nil, err
+	}
+	_ = pdfRows.Close()
+
+	if _, err := tx.ExecContext(ctx, "DELETE FROM `qbank_questions` WHERE `qbank_id` = ?", qbankID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM `qbank_weeks` WHERE `id` = ?", qbankID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return candidates, nil

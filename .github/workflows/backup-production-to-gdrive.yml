@@ -165,10 +165,10 @@ jobs:
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
-          echo "🚀 正在拉取生产环境敏感配置 (config.json, db.local.php, secret_key.local.php)..."
+          echo "🚀 正在拉取生产环境敏感配置 (config.json, db.local.php, secret_key.local.php, helpers.local.php, data/.ai_secrets.json, /etc/feedback-api/env)..."
           SSH="ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 $DEPLOY_USER@$DEPLOY_HOST"
 
-          $SSH "cd /www/wwwroot/JF/feedback-git/feedback-v1 && tar -czf - config.json api/db.local.php api/secret_key.local.php 2>/dev/null || true" > ./staging/configs/feedback_configs_${BACKUP_TIME}.tar.gz
+          $SSH "cd /www/wwwroot/JF/feedback-git/feedback-v1 && files=''; for p in config.json api/db.local.php api/secret_key.local.php api/admin/helpers.local.php data/.ai_secrets.json /etc/feedback-api/env; do if [ -f \"\$p\" ] && [ -r \"\$p\" ]; then files=\"\$files \$p\"; fi; done; if [ -n \"\$files\" ]; then tar -czf - \$files; fi" > ./staging/configs/feedback_configs_${BACKUP_TIME}.tar.gz
 
           if [ -s ./staging/configs/feedback_configs_${BACKUP_TIME}.tar.gz ]; then
             echo "✅ 生产配置归档完成，大小: $(ls -lh ./staging/configs/feedback_configs_${BACKUP_TIME}.tar.gz | awk '{print $5}')"

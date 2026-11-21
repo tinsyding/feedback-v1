@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"feedback-api/internal/tz"
 )
 
 // MySQLRepository implements Repository backed by MySQL *sql.DB.
@@ -132,7 +134,7 @@ func convertSQLValue(val any, dbType string) any {
 	}
 	switch v := val.(type) {
 	case time.Time:
-		return v.In(time.Local).Format("2006-01-02 15:04:05")
+		return tz.In(v).Format("2006-01-02 15:04:05")
 	case []byte:
 		s := string(v)
 		switch {
@@ -159,7 +161,7 @@ func parseDBTimestamp(s string) (int64, bool) {
 		return 0, false
 	}
 	for _, layout := range []string{"2006-01-02 15:04:05", time.RFC3339, "2006-01-02"} {
-		if t, err := time.ParseInLocation(layout, s, time.Local); err == nil {
+		if t, err := time.ParseInLocation(layout, s, tz.Shanghai()); err == nil {
 			return t.Unix(), true
 		}
 	}

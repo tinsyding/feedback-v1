@@ -3,12 +3,15 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 
 	"feedback-api/internal/auditlog"
 	"feedback-api/internal/auth"
@@ -17,6 +20,7 @@ import (
 	"feedback-api/internal/httpx"
 	"feedback-api/internal/ratelimit"
 	"feedback-api/internal/session"
+	"feedback-api/internal/tz"
 )
 
 var reValidAssistantUsername = regexp.MustCompile(`^[a-zA-Z0-9_\-\.]{2,30}$`)
@@ -34,7 +38,7 @@ func (d AuthDeps) nowUnix() int64 {
 	if d.NowFunc != nil {
 		return d.NowFunc().Unix()
 	}
-	return time.Now().Unix()
+	return tz.Now().Unix()
 }
 
 // Auth implements GET|POST /api/auth.php matching feedback-v1/api/auth.php.
@@ -493,7 +497,14 @@ func handleAuthLogout(w http.ResponseWriter, r *http.Request, deps AuthDeps) {
 		clearAdminSessionKeys(sess.Data)
 	}
 	if !isNew && deps.Sessions != nil {
-		_ = deps.Sessions.Save(ctx, sess)
+		_, _ = session.Update(ctx, deps.Sessions, sess.ID, func(data map[string]any) (bool, error) {
+			had := config.AsPHPBool(data["user_logged_in"])
+			clearUserSessionKeys(data)
+			if !had {
+				clearAdminSessionKeys(data)
+			}
+			return true, nil
+		})
 	}
 
 	auditlog.RecordFromRequest(ctx, deps.Audit, r, "action", "user_auth", "logout", uname, map[string]any{
@@ -613,6 +624,10 @@ func handleAuthResetPassword(w http.ResponseWriter, r *http.Request, deps AuthDe
 
 	newHash, err := auth.HashPassword(newPassword)
 	if err != nil {
+		if errors.Is(err, bcrypt.ErrPasswordTooLong) {
+			httpx.SendResponse(w, false, map[string]any{"require_captcha": true}, httpx.StrPtr("密码长度不能超过 72 字节"), http.StatusBadRequest)
+			return
+		}
 		httpx.SendResponse(w, false, map[string]any{"require_captcha": true}, httpx.StrPtr("密码更新失败，请稍后重试"), http.StatusInternalServerError)
 		return
 	}
@@ -708,13 +723,11 @@ func handleAssistantList(w http.ResponseWriter, r *http.Request, deps AuthDeps) 
 }
 
 func stripTeacherPrefix(teacherUsername, rawUsername string) string {
-	lowerRaw := strings.ToLower(rawUsername)
-	lowerPrefix := strings.ToLower(teacherUsername)
+	tRunes := []rune(teacherUsername)
+	rRunes := []rune(rawUsername)
 	s := rawUsername
-	if strings.HasPrefix(lowerRaw, lowerPrefix+"_") {
-		s = rawUsername[len(teacherUsername)+1:]
-	} else if strings.HasPrefix(lowerRaw, lowerPrefix) {
-		s = rawUsername[len(teacherUsername):]
+	if len(tRunes) > 0 && len(rRunes) >= len(tRunes) && strings.EqualFold(string(rRunes[:len(tRunes)]), teacherUsername) {
+		s = string(rRunes[len(tRunes):])
 	}
 	return strings.TrimLeft(s, "_")
 }
@@ -773,6 +786,10 @@ func handleAssistantCreate(w http.ResponseWriter, r *http.Request, deps AuthDeps
 
 	pwdHash, err := auth.HashPassword(password)
 	if err != nil {
+		if errors.Is(err, bcrypt.ErrPasswordTooLong) {
+			httpx.SendResponse(w, false, nil, httpx.StrPtr("密码长度不能超过 72 字节"), http.StatusBadRequest)
+			return
+		}
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("创建助教账号失败，数据库服务异常"), http.StatusInternalServerError)
 		return
 	}
@@ -839,7 +856,7 @@ func handleAssistantUpdate(w http.ResponseWriter, r *http.Request, deps AuthDeps
 			hasAny = true
 		}
 	}
-	if v, exists := input["status"]; exists {
+	if v, exists := input["status"]; exists && v != nil {
 		st := 0
 		if config.AsPHPInt(v) == 1 {
 			st = 1
@@ -856,6 +873,10 @@ func handleAssistantUpdate(w http.ResponseWriter, r *http.Request, deps AuthDeps
 			}
 			hash, hErr := auth.HashPassword(pwd)
 			if hErr != nil {
+				if errors.Is(hErr, bcrypt.ErrPasswordTooLong) {
+					httpx.SendResponse(w, false, nil, httpx.StrPtr("新密码长度不能超过 72 字节"), http.StatusBadRequest)
+					return
+				}
 				httpx.SendResponse(w, false, nil, httpx.StrPtr("更新助教账号失败"), http.StatusInternalServerError)
 				return
 			}

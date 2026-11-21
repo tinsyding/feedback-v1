@@ -12,6 +12,7 @@ var (
 		"０", "0", "１", "1", "２", "2", "３", "3", "４", "4",
 		"５", "5", "６", "6", "７", "7", "８", "8", "９", "9",
 	)
+	spaceReplacer = strings.NewReplacer("\r\n", "\n", "\u00a0", " ", "\u3000", " ")
 	rePureNoErrHeader = regexp.MustCompile(`(?i)^(?:本次|本周|这周|今天)?(?:的)?(?:家庭)?(?:作业|测验|测试|练习)?(?:的)?(?:错题|做错|错误)?(?:题号|序号|编号)?(?:为|是)?\s*[:：]\s*(?:无|没有|0|零|全对|无错题|全部正确|都对|暂无|none)\s*[。!！.]?\s*$`)
 	reNoErrGeneral    = regexp.MustCompile(`(?:本次|本周|今天)?(?:的)?(?:作业|测验|测试)?(?:全部做对|全部正确|全做对|完全正确|零失误|无错题|没有错题|免除加练|全对)`)
 	reErrPrefixColon  = regexp.MustCompile(`(?i)^(?:本次|本周|这周|今天)?(?:的)?(?:家庭)?(?:作业|测验|测试|练习)?(?:的)?(?:错题|做错的题|做错|错误)(?:题号|序号|编号|列表)?(?:为|是)?\s*[:：]\s*(.*)$`)
@@ -33,7 +34,7 @@ func ParseErrorQuestionsFromComment(rawComment string) []int {
 	if rawComment == "" {
 		return []int{}
 	}
-	normalized := NormalizeFullwidthDigits(strings.ReplaceAll(rawComment, "\r\n", "\n"))
+	normalized := NormalizeFullwidthDigits(spaceReplacer.Replace(rawComment))
 	rawLines := strings.Split(normalized, "\n")
 	nonEmpty := make([]string, 0, len(rawLines))
 	for _, l := range rawLines {
