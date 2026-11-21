@@ -505,7 +505,7 @@ func scanPHPTokens(src string) []phpToken {
 			tokens = append(tokens, phpToken{kind: "num", val: src[start:i]})
 			continue
 		}
-		tokens = append(tokens, phpToken{kind: "other"})
+		tokens = append(tokens, phpToken{kind: "other", val: string(ch)})
 		i++
 	}
 	return tokens

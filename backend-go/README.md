@@ -10,21 +10,23 @@ backend-go/
 ├── go.mod / go.sum                 # Go module 定义（go-sql-driver/mysql + x/crypto/bcrypt）
 ├── cmd/feedback-api/main.go        # 服务入口与路由注册
 ├── internal/
+│   ├── admin/                      # 管理后台数据表元数据、通用 CRUD、历史回滚、Token 反查与原件检索
 │   ├── auditlog/                   # MySQL system_logs + data/logs/*.jsonl 双写审计日志
 │   ├── auth/                       # 前台教师/管理员认证与助教管理仓储层（bcrypt/SHA256）
 │   ├── captcha/                    # 零外部字库 PNG 图形验证码生成器（130×42）
-│   ├── config/                     # .env / config.json / data/.ai_secrets.json / db.local.php 动态读取
+│   ├── config/                     # .env / config.json / data/.ai_secrets.json / db.local.php 动态读写
 │   ├── db/                         # MySQL 连接池初始化（mysql.Config）
 │   ├── normalize/                  # 学期/年级/学科归一化与 10 位错题本短码派生（对齐 lib_normalize.php）
 │   ├── qbank/                      # 题库专题与题目事务仓储、元数据清洗与孤儿 PDF 引用清理
 │   ├── ratelimit/                  # MySQL auth_rate_limits 共享防爆破限频存储
+│   ├── retestkeys/                 # 错题本学生身份 Key 归一化纯函数（对齐 lib_retest_keys.php）
 │   ├── senderctrl/                 # 桌面发送器单机云控覆盖与远程指令队列（data/sender_control/）
 │   ├── senderlogs/                 # 桌面发送器日志分片、批次汇总与现场快照管理（data/sender_logs/）
 │   ├── session/                    # app_sessions 共享读写会话、Regenerate 与鉴权中间件
 │   ├── syslogs/                    # system_logs 分页检索、UTF-8 BOM CSV 导出与滑动窗口上报限流
 │   ├── httpx/                      # CORS、同源/严格同主机 CSRF、真实 IP、Bearer 鉴权与统一 JSON 响应
 │   ├── vision/                     # PNG/JPEG 校验与 OpenAI 兼容多模态客户端
-│   └── handler/                    # /healthz 与 Phase 1/2/3.1~3.3 业务端点实现
+│   └── handler/                    # /healthz 与 Phase 1/2/3（全部 10 个接口）业务端点实现
 ├── deploy/
 │   ├── feedback-api.service        # systemd 服务单元模板
 │   ├── install_go_service.sh       # systemd 幂等安装脚本（支持 --user/--group/--root/--bin）
@@ -33,7 +35,7 @@ backend-go/
     └── parity_test.py              # PHP vs Go 差分一致性测试脚本（Python 3 stdlib）
 ```
 
-## 当前已接管接口（Phase 1 + Phase 2 + Phase 3.1~3.3）
+## 当前已接管接口（Phase 1 + Phase 2 + Phase 3.1~3.4）
 
 - `GET /healthz`：服务健康探针（返回 `{"success":true,"data":{"service":"feedback-api","engine":"go","status":"ok"},"error":null}`）。
 - `GET /api/public_config.php`：公开脱敏系统配置（含字段裁剪与区间收敛）。
@@ -45,6 +47,7 @@ backend-go/
 - `GET|POST /api/auth.php`：前台教师/管理员认证（`captcha`/`check`/`login`/`logout`/`reset_password`）与助教账号 CRUD（`assistant_*`），与 PHP 共用 `app_sessions` 与 `auth_rate_limits`。
 - `GET|POST|DELETE /api/qbank.php`：题库专题列表与详情查询、事务双表保存（含变式题知识点级联与孤儿 PDF 引用清理）及删除（助教仅可读禁写）。
 - `GET|POST|DELETE /api/logs.php`：前端日志限频上报、管理后台检索/筛选/7 天统计/CSV 导出/删除，以及桌面发送器日志同步、现场快照、单机云控覆盖与远程指令下发（全部 15 个 action）。
+- `GET|POST /api/admin.php`：管理后台认证与密码维护、系统与 AI 配置（密钥脱敏与 `.ai_secrets.json` 隔离 + 连通性测试）、数据表元数据与通用 CRUD（含系统表黑名单与 `class_batches` 409 级联保护）、学情版本历史与回滚、错题本 Token 反查及原件下载（全部 21 个 action）。
 
 所有 Go 响应均携带响应头 `X-Backend-Engine: go`，便于联调与灰度假期核验。
 

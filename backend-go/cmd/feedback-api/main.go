@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"feedback-api/internal/admin"
 	"feedback-api/internal/auditlog"
 	"feedback-api/internal/auth"
 	"feedback-api/internal/config"
@@ -100,6 +101,7 @@ func main() {
 	sysLogsRepo := syslogs.NewMySQLRepository(sqlDB, feedbackRoot)
 	senderCtrlStore := senderctrl.NewStore(feedbackRoot, loader)
 	senderLogsMgr := senderlogs.NewManager(feedbackRoot, senderCtrlStore)
+	adminRepo := admin.NewMySQLRepository(sqlDB)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handler.Health)
@@ -130,6 +132,14 @@ func main() {
 		SenderCtrl:   senderCtrlStore,
 		SenderLogs:   senderLogsMgr,
 		Limiter:      syslogs.NewIngestLimiter(),
+	}))
+	mux.HandleFunc("/api/admin.php", handler.Admin(handler.AdminDeps{
+		Repo:         adminRepo,
+		Sessions:     sessStore,
+		RateLimit:    rlStore,
+		ConfigLoader: loader,
+		Audit:        auditLogger,
+		FeedbackRoot: feedbackRoot,
 	}))
 
 	srv := &http.Server{
