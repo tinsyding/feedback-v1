@@ -1652,7 +1652,7 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
             let actualComment = comment;
             let errorQuestionNums = [];
 
-            if (plusData && plusData.enabled && plusData.questions && plusData.questions.length > 0 && fileCommentForPlus) {
+            if (plusData && plusData.enabled && fileCommentForPlus) {
                 const commentForPlus = parseCommentForPlus(originalCommentForPlus, fileCommentForPlus, {
                     homeworkScore: score,
                     maxScore: maxScore || 100,
@@ -1687,15 +1687,17 @@ async function doGenerateFeedback(skipUnsubmittedCheck = false) {
                 const hasAnyErrors = hasHomeworkErrors || hasPreviewErrors;
 
                 let homeworkTopics = [];
-                if (hasHomeworkErrors && plusData.questions) {
+                if (hasHomeworkErrors) {
                     const questionMap = {};
-                    plusData.questions.forEach(q => {
-                        const ids = String(q.id || q.question_num || '').split(/[,、，]/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
-                        const cleanT = typeof cleanTopicTrailingPunctuation === 'function' 
-                            ? cleanTopicTrailingPunctuation(q.topic) 
-                            : (q.topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
-                        ids.forEach(id => { questionMap[id] = cleanT; });
-                    });
+                    if (Array.isArray(plusData.questions)) {
+                        plusData.questions.forEach(q => {
+                            const ids = String(q.id || q.question_num || '').split(/[,、，]/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+                            const cleanT = typeof cleanTopicTrailingPunctuation === 'function' 
+                                ? cleanTopicTrailingPunctuation(q.topic) 
+                                : (q.topic || '').trim().replace(/[\s,，.。;；:：、\-_—]+$/u, '');
+                            ids.forEach(id => { questionMap[id] = cleanT; });
+                        });
+                    }
                     
                     homeworkTopics = [...new Set(errorQuestionNums.map(num => questionMap[num] || `第${num}题`).filter(Boolean))];
                     
