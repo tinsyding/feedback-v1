@@ -6512,12 +6512,6 @@ window.addEventListener('resize', () => {
 
 (function bindQuestionBankDelegatedEvents() {
     const QB_CLICK_ACTIONS = {
-        'history-back': (_el, _arg, e) => {
-            if (history.length > 1) {
-                e.preventDefault();
-                history.back();
-            }
-        },
         'step-click': (_el, arg) => handleStepIndicatorClick(parseInt(arg, 10)),
         'open-rg-studio': () => openRegionDebugStudio(),
         'next-step-1': () => goNextFromStep1(),
