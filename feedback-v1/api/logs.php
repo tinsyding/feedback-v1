@@ -27,33 +27,16 @@ if (!is_dir($senderLogDir)) {
     @mkdir($senderLogDir, 0755, true);
 }
 
+require_once __DIR__ . '/sender_auth_helper.php';
+
 const LOG_RETENTION_DAYS = 30;
-const DEFAULT_SENDER_LOG_TOKEN = 'jf_feedback_sender_internal_token_2026';
+const DEFAULT_SENDER_LOG_TOKEN = DEFAULT_SENDER_TOKEN;
 
 /**
  * 校验 Python 发送器访问令牌（与 api/identify.php 鉴权策略保持一致）
  */
 function verifySenderApiToken(string $given = ''): bool {
-    $serverToken = getenv('SENDER_API_TOKEN') ?: '';
-    if ($serverToken === '') {
-        $localFile = __DIR__ . '/secret_key.local.php';
-        if (is_file($localFile)) {
-            $local = require $localFile;
-            if (is_array($local) && !empty($local['senderApiToken'])) {
-                $serverToken = (string)$local['senderApiToken'];
-            }
-        }
-    }
-    if ($given === '') {
-        $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-        if (stripos($authHeader, 'bearer ') === 0) {
-            $given = trim(substr($authHeader, 7));
-        }
-    }
-    if ($serverToken !== '') {
-        return $given !== '' && hash_equals($serverToken, $given);
-    }
-    return $given !== '' && hash_equals(DEFAULT_SENDER_LOG_TOKEN, $given);
+    return verifySenderRequestToken($given);
 }
 
 function sanitizeSenderSlug(string $slug): string {

@@ -37,15 +37,16 @@ type DBConfig struct {
 
 // Secrets holds sensitive credentials loaded from env, optional JSON file, or secret_key.local.php.
 type Secrets struct {
-	SenderApiToken    string `json:"senderApiToken"`
-	DashscopeApiKey   string `json:"dashscopeApiKey"`
-	IdentifyApiBase   string `json:"identifyApiBase"`
-	IdentifyModel     string `json:"identifyModel"`
-	IdentifyFastModel string `json:"identifyFastModel"`
-	RetestSecret      string `json:"retestSecret"`
+	SenderApiToken    string   `json:"senderApiToken"`
+	SenderApiTokens   []string `json:"senderApiTokens"`
+	DashscopeApiKey   string   `json:"dashscopeApiKey"`
+	IdentifyApiBase   string   `json:"identifyApiBase"`
+	IdentifyModel     string   `json:"identifyModel"`
+	IdentifyFastModel string   `json:"identifyFastModel"`
+	RetestSecret      string   `json:"retestSecret"`
 }
 
-// Loader dynamically reads feedback-v1/config.json and secret sources per request.
+// Loader dynamically reads feedback-v1/config.json, data/.ai_secrets.json, and secret sources per request.
 type Loader struct {
 	FeedbackRoot string
 	SecretsFile  string
@@ -142,27 +143,38 @@ func parseEnvValue(raw string) string {
 	return raw
 }
 
-// RuntimeConfig represents a per-request snapshot of config.json + resolved secrets.
+// RuntimeConfig represents a per-request snapshot of config.json + data/.ai_secrets.json + resolved secrets.
 type RuntimeConfig struct {
-	Raw     map[string]any
-	Secrets Secrets
+	Raw       map[string]any
+	AISecrets map[string]any
+	Secrets   Secrets
 }
 
-// Load reads <FeedbackRoot>/config.json and resolves secrets on every call (no permanent caching).
+// Load reads <FeedbackRoot>/config.json, data/.ai_secrets.json, and resolves secrets on every call (no permanent caching).
 func (l *Loader) Load() RuntimeConfig {
 	raw := l.loadConfigJSON()
+	aiSecrets := l.loadAISecretsJSON()
 	secrets := l.loadSecrets()
 	return RuntimeConfig{
-		Raw:     raw,
-		Secrets: secrets,
+		Raw:       raw,
+		AISecrets: aiSecrets,
+		Secrets:   secrets,
 	}
 }
 
 func (l *Loader) loadConfigJSON() map[string]any {
-	if l.FeedbackRoot == "" {
+	return readJSONMapFile(filepath.Join(l.FeedbackRoot, "config.json"), l.FeedbackRoot == "")
+}
+
+func (l *Loader) loadAISecretsJSON() map[string]any {
+	return readJSONMapFile(filepath.Join(l.FeedbackRoot, "data", ".ai_secrets.json"), l.FeedbackRoot == "")
+}
+
+func readJSONMapFile(path string, skip bool) map[string]any {
+	if skip {
 		return map[string]any{}
 	}
-	data, err := os.ReadFile(filepath.Join(l.FeedbackRoot, "config.json"))
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return map[string]any{}
 	}
@@ -173,6 +185,43 @@ func (l *Loader) loadConfigJSON() map[string]any {
 		return map[string]any{}
 	}
 	return parsed
+}
+
+func splitSenderTokens(raw string) []string {
+	parts := strings.Split(raw, ",")
+	var out []string
+	seen := make(map[string]struct{}, len(parts))
+	for _, p := range parts {
+		t := strings.TrimSpace(p)
+		if t == "" {
+			continue
+		}
+		if _, exists := seen[t]; exists {
+			continue
+		}
+		seen[t] = struct{}{}
+		out = append(out, t)
+	}
+	return out
+}
+
+func appendUniqueTokens(dst []string, items ...string) []string {
+	seen := make(map[string]struct{}, len(dst)+len(items))
+	for _, t := range dst {
+		seen[t] = struct{}{}
+	}
+	for _, raw := range items {
+		t := strings.TrimSpace(raw)
+		if t == "" {
+			continue
+		}
+		if _, exists := seen[t]; exists {
+			continue
+		}
+		seen[t] = struct{}{}
+		dst = append(dst, t)
+	}
+	return dst
 }
 
 func (l *Loader) loadSecrets() Secrets {
@@ -201,9 +250,18 @@ func (l *Loader) loadSecrets() Secrets {
 	}
 
 	// Priority 1: OS environment variables
-	if v := os.Getenv("SENDER_API_TOKEN"); v != "" {
-		out.SenderApiToken = v
+	var envSenderTokens []string
+	if v := strings.TrimSpace(os.Getenv("SENDER_API_TOKENS")); v != "" {
+		envSenderTokens = appendUniqueTokens(envSenderTokens, splitSenderTokens(v)...)
 	}
+	if v := strings.TrimSpace(os.Getenv("SENDER_API_TOKEN")); v != "" {
+		envSenderTokens = appendUniqueTokens(envSenderTokens, v)
+	}
+	if len(envSenderTokens) > 0 {
+		out.SenderApiTokens = envSenderTokens
+		out.SenderApiToken = envSenderTokens[0]
+	}
+
 	if v := os.Getenv("DASHSCOPE_API_KEY"); v != "" {
 		out.DashscopeApiKey = v
 	}
@@ -224,8 +282,16 @@ func (l *Loader) loadSecrets() Secrets {
 }
 
 func applySecrets(dst *Secrets, src Secrets) {
-	if src.SenderApiToken != "" {
-		dst.SenderApiToken = src.SenderApiToken
+	var srcTokens []string
+	if len(src.SenderApiTokens) > 0 {
+		srcTokens = appendUniqueTokens(srcTokens, src.SenderApiTokens...)
+	}
+	if strings.TrimSpace(src.SenderApiToken) != "" {
+		srcTokens = appendUniqueTokens(srcTokens, src.SenderApiToken)
+	}
+	if len(srcTokens) > 0 {
+		dst.SenderApiTokens = srcTokens
+		dst.SenderApiToken = srcTokens[0]
 	}
 	if src.DashscopeApiKey != "" {
 		dst.DashscopeApiKey = src.DashscopeApiKey
@@ -249,6 +315,7 @@ func parsePHPSecretArray(src string) Secrets {
 	entries := extractPHPStringPairs(src)
 	return Secrets{
 		SenderApiToken:    entries["senderApiToken"],
+		SenderApiTokens:   splitSenderTokens(entries["senderApiTokens"]),
 		DashscopeApiKey:   entries["dashscopeApiKey"],
 		IdentifyApiBase:   entries["identifyApiBase"],
 		IdentifyModel:     entries["identifyModel"],
@@ -444,30 +511,84 @@ func scanPHPTokens(src string) []phpToken {
 	return tokens
 }
 
-// ServerSenderToken returns the configured sender token (env -> secrets) or empty string if using default.
+// ServerSenderTokens returns all configured custom sender tokens (env -> secrets) or nil if none configured.
+func (c RuntimeConfig) ServerSenderTokens() []string {
+	var out []string
+	if len(c.Secrets.SenderApiTokens) > 0 {
+		out = appendUniqueTokens(out, c.Secrets.SenderApiTokens...)
+	}
+	if strings.TrimSpace(c.Secrets.SenderApiToken) != "" {
+		out = appendUniqueTokens(out, c.Secrets.SenderApiToken)
+	}
+	return out
+}
+
+// ServerSenderToken returns the primary configured sender token (env -> secrets) or empty string if using default.
 func (c RuntimeConfig) ServerSenderToken() string {
-	return c.Secrets.SenderApiToken
+	tokens := c.ServerSenderTokens()
+	if len(tokens) == 0 {
+		return ""
+	}
+	return tokens[0]
+}
+
+// AllowDefaultSenderToken returns whether fallback to DefaultSenderToken is permitted when no custom token is set.
+// Defaults to true for backward compatibility; set ALLOW_DEFAULT_SENDER_TOKEN=false/0/no/off to enforce strict mode.
+func (c RuntimeConfig) AllowDefaultSenderToken() bool {
+	raw, ok := os.LookupEnv("ALLOW_DEFAULT_SENDER_TOKEN")
+	if !ok || strings.TrimSpace(raw) == "" {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
 }
 
 // VerifySenderToken validates a sender request token using constant-time comparison.
-// If ServerSenderToken is non-empty, only it is accepted; otherwise only DefaultSenderToken is accepted.
+// If custom tokens are configured, only those tokens are accepted (DefaultSenderToken is blocked);
+// otherwise DefaultSenderToken is accepted only when AllowDefaultSenderToken() is true.
 func (c RuntimeConfig) VerifySenderToken(given string) bool {
 	if given == "" {
 		return false
 	}
-	expected := c.ServerSenderToken()
-	if expected == "" {
-		expected = DefaultSenderToken
+	customTokens := c.ServerSenderTokens()
+	if len(customTokens) > 0 {
+		for _, expected := range customTokens {
+			if subtle.ConstantTimeCompare([]byte(expected), []byte(given)) == 1 {
+				return true
+			}
+		}
+		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(expected), []byte(given)) == 1
+	if !c.AllowDefaultSenderToken() {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(DefaultSenderToken), []byte(given)) == 1
 }
 
-// VisionAPIKey resolves dashscopeApiKey: trimmed config.json -> DASHSCOPE_API_KEY env -> secrets.
+// VisionAPIKey resolves dashscopeApiKey: data/.ai_secrets.json -> legacy config.json -> DASHSCOPE_API_KEY env -> secrets.
 func (c RuntimeConfig) VisionAPIKey() string {
+	if v := strings.TrimSpace(c.aiSecretString("dashscopeApiKey")); v != "" {
+		return v
+	}
 	if v := strings.TrimSpace(c.RawString("dashscopeApiKey")); v != "" {
 		return v
 	}
 	return c.Secrets.DashscopeApiKey
+}
+
+func (c RuntimeConfig) aiSecretString(key string) string {
+	if c.AISecrets == nil {
+		return ""
+	}
+	v, ok := c.AISecrets[key]
+	if !ok || v == nil {
+		return ""
+	}
+	return AsPHPString(v)
 }
 
 // IdentifyAPIBase resolves the chat completions endpoint and ensures it ends with /chat/completions.

@@ -22,6 +22,7 @@ config.local.json
 
 # v1 生产凭据与密钥（绝不入库；部署时手动放置）
 feedback-v1/config.json
+feedback-v1/data/.ai_secrets.json
 feedback-v1/data/vision_config.json
 feedback-v1/data/.schema_*.lock
 

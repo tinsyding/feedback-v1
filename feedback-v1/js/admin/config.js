@@ -384,7 +384,7 @@
             const baseUrl = document.getElementById('ai-api-base')?.value.trim() || '';
             const model = document.getElementById('ai-model')?.value.trim() || '';
 
-            if (!apiKey && !(currentConfig && currentConfig.dashscopeApiKey)) {
+            if (!apiKey && !(currentConfig && (currentConfig.hasApiKey || currentConfig.dashscopeApiKey))) {
                 showToast('请先输入 API Key 再进行连通性测试', 'warning');
                 return;
             }

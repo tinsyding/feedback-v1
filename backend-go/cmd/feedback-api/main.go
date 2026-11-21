@@ -40,6 +40,13 @@ func main() {
 
 	feedbackRoot := config.ResolveFeedbackRoot(strings.TrimSpace(*rootFlag))
 	loader := config.NewLoader(feedbackRoot, "")
+	if bootCfg := loader.Load(); len(bootCfg.ServerSenderTokens()) == 0 {
+		if bootCfg.AllowDefaultSenderToken() {
+			log.Printf("[SECURITY WARNING] SENDER_API_TOKEN / SENDER_API_TOKENS not configured; falling back to built-in DefaultSenderToken (configure SENDER_API_TOKEN or set ALLOW_DEFAULT_SENDER_TOKEN=false in production)")
+		} else {
+			log.Printf("info: SENDER_API_TOKEN not configured and ALLOW_DEFAULT_SENDER_TOKEN=false; sender endpoints will fail closed")
+		}
+	}
 	vc := vision.NewClient()
 
 	var sqlDB *sql.DB

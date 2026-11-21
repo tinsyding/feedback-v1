@@ -1,7 +1,7 @@
 /**
  * ============================================================================
  * 极方管理后台 (Admin Console) 前端运行脚本 - 生产环境合并包
- * 自动生成时间: 2026-11-16 16:12:41
+ * 自动生成时间: 2026-11-21 03:04:25
  * 源码模块目录: js/admin/
  * 请勿直接手动修改此文件，开发时请修改 js/admin/ 中的子模块并执行本打包脚本。
  * ============================================================================
@@ -989,7 +989,7 @@
             const baseUrl = document.getElementById('ai-api-base')?.value.trim() || '';
             const model = document.getElementById('ai-model')?.value.trim() || '';
 
-            if (!apiKey && !(currentConfig && currentConfig.dashscopeApiKey)) {
+            if (!apiKey && !(currentConfig && (currentConfig.hasApiKey || currentConfig.dashscopeApiKey))) {
                 showToast('请先输入 API Key 再进行连通性测试', 'warning');
                 return;
             }

@@ -15,6 +15,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/sender_auth_helper.php';
 
 // 健康探针支持 GET 返回 200
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
@@ -25,39 +26,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     sendResponse(false, null, '仅支持 POST', 405);
 }
 
-// 鉴权（配置了自定义 Token 时只接受自定义 Token；未配置时仅接受内置默认 Token）
-const DEFAULT_SENDER_TOKEN = 'jf_feedback_sender_internal_token_2026';
-
-$serverToken = getenv('SENDER_API_TOKEN') ?: '';
-if ($serverToken === '') {
-    $localFile = __DIR__ . '/secret_key.local.php';
-    if (is_file($localFile)) {
-        $local = require $localFile;
-        if (is_array($local) && !empty($local['senderApiToken'])) {
-            $serverToken = (string)$local['senderApiToken'];
-        }
-    }
-}
-
-$given = $_POST['token'] ?? '';
-$authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-if ($given === '' && stripos($authHeader, 'bearer ') === 0) {
-    $given = trim(substr($authHeader, 7));
-}
-
-// 鉴权策略：
-// 1. 配置了自定义 Token 时，只接受自定义 Token；内置默认 Token 不再绕过
-// 2. 未配置自定义 Token 时，仅接受内置默认 Token；不再允许空 Token 直接放行
-$authorized = false;
-if ($serverToken !== '') {
-    if ($given !== '' && hash_equals($serverToken, (string)$given)) {
-        $authorized = true;
-    }
-} elseif ($given !== '' && hash_equals(DEFAULT_SENDER_TOKEN, (string)$given)) {
-    $authorized = true;
-}
-
-if (!$authorized) {
+// 鉴权（支持 SENDER_API_TOKENS 多令牌轮换与 ALLOW_DEFAULT_SENDER_TOKEN 开关）
+if (!verifySenderRequestToken()) {
     sendResponse(false, null, '鉴权失败', 200);
 }
 
@@ -79,7 +49,7 @@ if ($imgW < 300 || $imgH < 200) {
     sendResponse(false, null, '截图尺寸过小，无法进行界面分析', 200);
 }
 
-// 视觉模型配置（config.json 优先，环境变量次之，secret_key.local.php 兜底）
+// 视觉模型配置（data/.ai_secrets.json 优先，兼容旧 config.json，环境变量次之，secret_key.local.php 兜底）
 require_once __DIR__ . '/sender_control_helper.php';
 $cfgFile = __DIR__ . '/../config.json';
 $cfgJson = file_exists($cfgFile) ? @json_decode(file_get_contents($cfgFile), true) : [];
@@ -92,7 +62,7 @@ if (empty($sc['enableAutoCalibration'])) {
 }
 $keys = require __DIR__ . '/secret_key.php';
 $localKeys = is_array($keys) ? $keys : [];
-$visionKey = trim((string)($cfgJson['dashscopeApiKey'] ?? '')) ?: (getenv('DASHSCOPE_API_KEY') ?: ($localKeys['dashscopeApiKey'] ?? ''));
+$visionKey = resolveDashscopeApiKey($cfgJson, $localKeys);
 if ($visionKey === '') {
     sendResponse(false, null, '服务端视觉模型未配置，请联系管理员', 200);
 }

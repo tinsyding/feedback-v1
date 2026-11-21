@@ -28,7 +28,6 @@
         "batchBreakMax": 3.0,
         "updatedAt": ""
     },
-    "dashscopeApiKey": "",
     "identifyApiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
     "calibrateModel": "qwen3.8-max",
     "identifyFastModel": "qwen3.8-flash",

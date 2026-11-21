@@ -27,44 +27,14 @@
 
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/sender_control_helper.php';
+require_once __DIR__ . '/sender_auth_helper.php';
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     sendResponse(false, null, '仅支持 POST', 405);
 }
 
-// ---- 访问令牌（配置了自定义 Token 时只接受自定义 Token；未配置时仅接受内置默认 Token）----
-const DEFAULT_SENDER_TOKEN = 'jf_feedback_sender_internal_token_2026';
-
-$serverToken = getenv('SENDER_API_TOKEN') ?: '';
-if ($serverToken === '') {
-    $localFile = __DIR__ . '/secret_key.local.php';
-    if (is_file($localFile)) {
-        $local = require $localFile;
-        if (is_array($local) && !empty($local['senderApiToken'])) {
-            $serverToken = (string)$local['senderApiToken'];
-        }
-    }
-}
-
-$given = $_POST['token'] ?? '';
-$authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-if ($given === '' && stripos($authHeader, 'bearer ') === 0) {
-    $given = trim(substr($authHeader, 7));
-}
-
-// 鉴权策略：
-// 1. 配置了自定义 Token 时，只接受自定义 Token；内置默认 Token 不再绕过
-// 2. 未配置自定义 Token 时，仅接受内置默认 Token；不再允许空 Token 直接放行
-$authorized = false;
-if ($serverToken !== '') {
-    if ($given !== '' && hash_equals($serverToken, (string)$given)) {
-        $authorized = true;
-    }
-} elseif ($given !== '' && hash_equals(DEFAULT_SENDER_TOKEN, (string)$given)) {
-    $authorized = true;
-}
-
-if (!$authorized) {
+// ---- 访问令牌校验（支持 SENDER_API_TOKENS 多令牌轮换与 ALLOW_DEFAULT_SENDER_TOKEN 开关）----
+if (!verifySenderRequestToken()) {
     sendResponse(false, null, '鉴权失败', 200);
 }
 
@@ -145,10 +115,10 @@ foreach ($requiredFields as $field) {
     }
 }
 
-// ---- 视觉模型配置（config.json 优先，环境变量次之，secret_key.local.php 兜底，均无则 fail-closed）----
+// ---- 视觉模型配置（data/.ai_secrets.json 优先，兼容旧 config.json，环境变量次之，secret_key.local.php 兜底，均无则 fail-closed）----
 $keys = require __DIR__ . '/secret_key.php';
 $localKeys = is_array($keys) ? $keys : [];
-$visionKey = trim((string)($cfgJson['dashscopeApiKey'] ?? '')) ?: (getenv('DASHSCOPE_API_KEY') ?: ($localKeys['dashscopeApiKey'] ?? ''));
+$visionKey = resolveDashscopeApiKey($cfgJson, $localKeys);
 if ($visionKey === '') {
     sendResponse(false, null, '服务端视觉模型未配置，请联系管理员', 200);
 }

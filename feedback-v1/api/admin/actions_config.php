@@ -4,6 +4,7 @@
  */
 
 require_once dirname(__DIR__) . '/sender_control_helper.php';
+require_once dirname(__DIR__) . '/sender_auth_helper.php';
 
 switch ($action) {
         case 'config':
@@ -19,13 +20,13 @@ switch ($action) {
                     sendResponse(false, null, '配置文件格式错误', 500);
                 }
                 
-                // 补充回显 AI 相关配置（若 config.json 中未显式保存，回退读取 secret_key.php 或环境变量）
+                // 补充回显 AI 相关配置（密钥统一脱敏返回，绝不回传明文）
                 $keys = @include dirname(__DIR__) . '/secret_key.php';
                 $localKeys = is_array($keys) ? $keys : [];
 
-                if (!isset($config['dashscopeApiKey'])) {
-                    $config['dashscopeApiKey'] = getenv('DASHSCOPE_API_KEY') ?: ($localKeys['dashscopeApiKey'] ?? '');
-                }
+                $realApiKey = resolveDashscopeApiKey($config, $localKeys);
+                $config['hasApiKey'] = ($realApiKey !== '');
+                $config['dashscopeApiKey'] = maskApiKey($realApiKey);
                 if (!isset($config['identifyApiBase'])) {
                     $config['identifyApiBase'] = getenv('IDENTIFY_API_BASE') ?: ($localKeys['identifyApiBase'] ?? 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions');
                 }
@@ -62,6 +63,14 @@ switch ($action) {
                 $config = json_decode(file_get_contents($configFile), true);
                 if ($config === null) {
                     $config = [];
+                }
+
+                // 若旧 config.json 中遗留了明文 dashscopeApiKey，先迁移至 data/.ai_secrets.json
+                $legacyKey = trim((string)($config['dashscopeApiKey'] ?? ''));
+                $aiSecrets = loadAiSecrets();
+                if ($legacyKey !== '' && trim((string)($aiSecrets['dashscopeApiKey'] ?? '')) === '') {
+                    $aiSecrets['dashscopeApiKey'] = $legacyKey;
+                    saveAiSecrets($aiSecrets);
                 }
                 
                 // Update fields
@@ -112,8 +121,21 @@ switch ($action) {
                     $config['senderControl'] = $prevControl;
                 }
                 if (isset($input['dashscopeApiKey'])) {
-                    $config['dashscopeApiKey'] = trim((string)$input['dashscopeApiKey']);
+                    $submittedKey = trim((string)$input['dashscopeApiKey']);
+                    if ($submittedKey !== '' && !isMaskedApiKey($submittedKey)) {
+                        $aiSecrets['dashscopeApiKey'] = $submittedKey;
+                        if (!saveAiSecrets($aiSecrets)) {
+                            sendResponse(false, null, '保存 AI 密钥文件失败，请检查 data/ 目录权限', 500);
+                        }
+                    } elseif ($submittedKey === '' && !empty($input['clearApiKey'])) {
+                        unset($aiSecrets['dashscopeApiKey']);
+                        if (!saveAiSecrets($aiSecrets)) {
+                            sendResponse(false, null, '清理 AI 密钥文件失败，请检查 data/ 目录权限', 500);
+                        }
+                    }
                 }
+                // 始终从 config.json 移除明文密钥，保持公开配置与密钥完全隔离
+                unset($config['dashscopeApiKey'], $config['hasApiKey']);
                 if (isset($input['identifyApiBase'])) {
                     $config['identifyApiBase'] = trim((string)$input['identifyApiBase']);
                 }
@@ -131,7 +153,7 @@ switch ($action) {
                 }
                 
                 // Keep comment
-                $config['_comment'] = "defaultSeason: spring/summer/autumn/winter (春/暑/秋/寒). semesterYear: 当前学年. semesterWeeks: 学期总周/次数. retestQuestionSpacing: 错题本拼页题目间隙(pt). retestQrCodeEnabled: 下载PDF是否包含视频讲解二维码. disableQwenFlashTitle: 与senderControl.verifyMode=local联动兼容字段. dashscopeApiKey / identifyApiBase / calibrateModel / identifyFastModel / identifyModel / benchmarkModel: 四环节大语言模型视觉配置.";
+                $config['_comment'] = "defaultSeason: spring/summer/autumn/winter (春/暑/秋/寒). semesterYear: 当前学年. semesterWeeks: 学期总周/次数. retestQuestionSpacing: 错题本拼页题目间隙(pt). retestQrCodeEnabled: 下载PDF是否包含视频讲解二维码. disableQwenFlashTitle: 与senderControl.verifyMode=local联动兼容字段. identifyApiBase / calibrateModel / identifyFastModel / identifyModel / benchmarkModel: 四环节大语言模型视觉配置（API Key 独立存储于 data/.ai_secrets.json 或环境变量）.";
                 
                 // Save
                 $result = file_put_contents($configFile, json_encode($config, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
@@ -140,21 +162,29 @@ switch ($action) {
                     sendResponse(false, null, '保存配置失败，请检查服务器权限', 500);
                 }
 
+                $keys = @include dirname(__DIR__) . '/secret_key.php';
+                $localKeys = is_array($keys) ? $keys : [];
+                $effectiveApiKey = resolveDashscopeApiKey($config, $localKeys);
+
                 recordServerLog('action', 'admin', 'config_updated', [
                     'semesterYear' => $config['semesterYear'] ?? 2026,
                     'defaultSeason' => $config['defaultSeason'] ?? 'autumn',
                     'semesterWeeks' => $config['semesterWeeks'] ?? 14,
                     'retestQrCodeEnabled' => $config['retestQrCodeEnabled'] ?? true,
                     'disableQwenFlashTitle' => $config['disableQwenFlashTitle'] ?? false,
-                    'hasApiKey' => !empty($config['dashscopeApiKey']),
+                    'hasApiKey' => ($effectiveApiKey !== ''),
                     'identifyModel' => $config['identifyModel'] ?? '',
                     'identifyFastModel' => $config['identifyFastModel'] ?? '',
                     'message' => '管理员修改系统配置及 AI 大模型接口设置'
                 ]);
+
+                $responseConfig = $config;
+                $responseConfig['hasApiKey'] = ($effectiveApiKey !== '');
+                $responseConfig['dashscopeApiKey'] = maskApiKey($effectiveApiKey);
                 
                 sendResponse(true, [
                     'message' => '配置已更新',
-                    'config' => $config
+                    'config' => $responseConfig
                 ]);
             } else {
                 sendResponse(false, null, '不支持的请求方法', 405);
@@ -173,13 +203,13 @@ switch ($action) {
             $apiBase = trim((string)($input['base_url'] ?? ''));
             $model = trim((string)($input['model'] ?? ''));
 
-            if ($apiKey === '' || $apiBase === '' || $model === '') {
+            if ($apiKey === '' || isMaskedApiKey($apiKey) || $apiBase === '' || $model === '') {
                 $currConfig = file_exists($configFile) ? (json_decode(file_get_contents($configFile), true) ?: []) : [];
                 $keys = @include dirname(__DIR__) . '/secret_key.php';
                 $localKeys = is_array($keys) ? $keys : [];
 
-                if ($apiKey === '') {
-                    $apiKey = ($currConfig['dashscopeApiKey'] ?? '') ?: (getenv('DASHSCOPE_API_KEY') ?: ($localKeys['dashscopeApiKey'] ?? ''));
+                if ($apiKey === '' || isMaskedApiKey($apiKey)) {
+                    $apiKey = resolveDashscopeApiKey($currConfig, $localKeys);
                 }
                 if ($apiBase === '') {
                     $apiBase = ($currConfig['identifyApiBase'] ?? '') ?: (getenv('IDENTIFY_API_BASE') ?: ($localKeys['identifyApiBase'] ?? 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'));

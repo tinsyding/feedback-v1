@@ -304,3 +304,62 @@ return [
 		t.Fatalf("unexpected env-overridden db config: %+v", cfg2)
 	}
 }
+
+func TestAISecretsIsolationAndPrecedence(t *testing.T) {
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "data")
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "config.json"), []byte(`{"dashscopeApiKey": "legacy-cfg-key"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DASHSCOPE_API_KEY", "env-key")
+
+	loader := NewLoader(root, "")
+	if got := loader.Load().VisionAPIKey(); got != "legacy-cfg-key" {
+		t.Fatalf("expected legacy config.json fallback, got %q", got)
+	}
+
+	if err := os.WriteFile(filepath.Join(dataDir, ".ai_secrets.json"), []byte(`{"dashscopeApiKey": "  isolated-secret-key  "}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := loader.Load().VisionAPIKey(); got != "isolated-secret-key" {
+		t.Fatalf("expected data/.ai_secrets.json to override config.json, got %q", got)
+	}
+}
+
+func TestMultiSenderTokensAndStrictDefaultMode(t *testing.T) {
+	root := t.TempDir()
+	loader := NewLoader(root, "")
+
+	// 1. Multi-token rotation via SENDER_API_TOKENS
+	t.Setenv("SENDER_API_TOKENS", "tok-primary, tok-secondary , tok-primary")
+	t.Setenv("SENDER_API_TOKEN", "")
+	t.Setenv("ALLOW_DEFAULT_SENDER_TOKEN", "")
+
+	cfg := loader.Load()
+	if got := cfg.ServerSenderTokens(); len(got) != 2 || got[0] != "tok-primary" || got[1] != "tok-secondary" {
+		t.Fatalf("unexpected ServerSenderTokens: %#v", got)
+	}
+	if !cfg.VerifySenderToken("tok-primary") || !cfg.VerifySenderToken("tok-secondary") {
+		t.Fatal("expected both rotated sender tokens to verify")
+	}
+	if cfg.VerifySenderToken(DefaultSenderToken) {
+		t.Fatal("default token must be blocked when SENDER_API_TOKENS is configured")
+	}
+
+	// 2. Strict mode: ALLOW_DEFAULT_SENDER_TOKEN=false blocks DefaultSenderToken when no custom token is set
+	t.Setenv("SENDER_API_TOKENS", "")
+	t.Setenv("SENDER_API_TOKEN", "")
+	t.Setenv("ALLOW_DEFAULT_SENDER_TOKEN", "false")
+
+	strictCfg := loader.Load()
+	if strictCfg.AllowDefaultSenderToken() {
+		t.Fatal("expected AllowDefaultSenderToken() == false")
+	}
+	if strictCfg.VerifySenderToken(DefaultSenderToken) {
+		t.Fatal("DefaultSenderToken must be rejected when ALLOW_DEFAULT_SENDER_TOKEN=false")
+	}
+}
+
