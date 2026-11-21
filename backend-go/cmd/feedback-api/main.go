@@ -19,6 +19,7 @@ import (
 	"feedback-api/internal/db"
 	"feedback-api/internal/handler"
 	"feedback-api/internal/httpx"
+	"feedback-api/internal/qbank"
 	"feedback-api/internal/ratelimit"
 	"feedback-api/internal/session"
 	"feedback-api/internal/vision"
@@ -92,6 +93,7 @@ func main() {
 
 	auditLogger := auditlog.NewDualLogger(sqlDB, feedbackRoot)
 	authRepo := auth.NewMySQLRepository(sqlDB)
+	qbankRepo := qbank.NewMySQLRepository(sqlDB)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handler.Health)
@@ -106,6 +108,13 @@ func main() {
 		Sessions:  sessStore,
 		RateLimit: rlStore,
 		Audit:     auditLogger,
+	}))
+	mux.HandleFunc("/api/qbank.php", handler.QBank(handler.QBankDeps{
+		Repo:         qbankRepo,
+		Sessions:     sessStore,
+		ConfigLoader: loader,
+		Audit:        auditLogger,
+		FeedbackRoot: feedbackRoot,
 	}))
 
 	srv := &http.Server{

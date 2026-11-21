@@ -1,0 +1,48 @@
+package qbank
+
+import (
+	"reflect"
+	"testing"
+)
+
+func TestCleanTopicAndSanitizeMeta(t *testing.T) {
+	if got := CleanTopic("  一元一次方程，。；：—  "); got != "一元一次方程" {
+		t.Fatalf("CleanTopic = %q", got)
+	}
+
+	meta := SanitizeQuestionMeta(`{
+		"groupNums": [3, 1, 3, 0, 999, 2],
+		"box": {"x": -0.2, "y": 1.5, "w": 0.001, "h": 0.123456, "pageOffset": -2},
+		"mode": "region_crop",
+		"regions": [{"x": 0.1, "y": 0.2, "w": 0.3, "h": 0.4, "pageOffset": 1}]
+	}`)
+	if meta == nil {
+		t.Fatal("expected non-nil sanitized meta")
+	}
+	if !reflect.DeepEqual(meta["groupNums"], []int{1, 2, 3}) {
+		t.Fatalf("groupNums = %#v", meta["groupNums"])
+	}
+	box := meta["box"].(map[string]any)
+	if box["x"] != 0.0 || box["y"] != 1.0 || box["w"] != 0.005 || box["h"] != 0.1235 || box["pageOffset"] != 0 {
+		t.Fatalf("unexpected clamped box: %#v", box)
+	}
+	if meta["mode"] != "region_crop" {
+		t.Fatalf("mode = %v", meta["mode"])
+	}
+}
+
+func TestIsValidManagedPDFPath(t *testing.T) {
+	if fn, ok := IsValidManagedPDFPath("data/pdfs/pdf_2026_abc-1.pdf"); !ok || fn != "pdf_2026_abc-1.pdf" {
+		t.Fatalf("expected valid pdf path, got (%q, %v)", fn, ok)
+	}
+	for _, bad := range []string{
+		"data/pdfs/../config.json",
+		"data/pdfs/other.pdf",
+		"data/uploads/pdf_1.pdf",
+		"/etc/passwd",
+	} {
+		if _, ok := IsValidManagedPDFPath(bad); ok {
+			t.Fatalf("expected %q to be rejected", bad)
+		}
+	}
+}

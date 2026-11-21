@@ -15,11 +15,13 @@ backend-go/
 │   ├── captcha/                    # 零外部字库 PNG 图形验证码生成器（130×42）
 │   ├── config/                     # .env / config.json / data/.ai_secrets.json / db.local.php 动态读取
 │   ├── db/                         # MySQL 连接池初始化（mysql.Config）
+│   ├── normalize/                  # 学期/年级/学科归一化与 10 位错题本短码派生（对齐 lib_normalize.php）
+│   ├── qbank/                      # 题库专题与题目事务仓储、元数据清洗与孤儿 PDF 引用清理
 │   ├── ratelimit/                  # MySQL auth_rate_limits 共享防爆破限频存储
 │   ├── session/                    # app_sessions 共享读写会话、Regenerate 与鉴权中间件
 │   ├── httpx/                      # CORS、同源/严格同主机 CSRF、真实 IP、Bearer 鉴权与统一 JSON 响应
 │   ├── vision/                     # PNG/JPEG 校验与 OpenAI 兼容多模态客户端
-│   └── handler/                    # /healthz 与 Phase 1/2/3.1 业务端点实现
+│   └── handler/                    # /healthz 与 Phase 1/2/3.1/3.2 业务端点实现
 ├── deploy/
 │   ├── feedback-api.service        # systemd 服务单元模板
 │   ├── install_go_service.sh       # systemd 幂等安装脚本（支持 --user/--group/--root/--bin）
@@ -28,7 +30,7 @@ backend-go/
     └── parity_test.py              # PHP vs Go 差分一致性测试脚本（Python 3 stdlib）
 ```
 
-## 当前已接管接口（Phase 1 + Phase 2 + Phase 3.1）
+## 当前已接管接口（Phase 1 + Phase 2 + Phase 3.1/3.2）
 
 - `GET /healthz`：服务健康探针（返回 `{"success":true,"data":{"service":"feedback-api","engine":"go","status":"ok"},"error":null}`）。
 - `GET /api/public_config.php`：公开脱敏系统配置（含字段裁剪与区间收敛）。
@@ -38,6 +40,7 @@ backend-go/
 - `POST /api/upload_capture.php`：前端原始采集文件归档（需登录态，写 `data/uploads/` 与 `index.jsonl`，30 天概率清理）。
 - `GET|POST /api/changelog.php`：系统更新日志读取（`getAll`/`getActive` 公开）与管理维护（`save`/`delete`/`setActive` 需管理员会话）。
 - `GET|POST /api/auth.php`：前台教师/管理员认证（`captcha`/`check`/`login`/`logout`/`reset_password`）与助教账号 CRUD（`assistant_*`），与 PHP 共用 `app_sessions` 与 `auth_rate_limits`。
+- `GET|POST|DELETE /api/qbank.php`：题库专题列表与详情查询、事务双表保存（含变式题知识点级联与孤儿 PDF 引用清理）及删除（助教仅可读禁写）。
 
 所有 Go 响应均携带响应头 `X-Backend-Engine: go`，便于联调与灰度假期核验。
 
