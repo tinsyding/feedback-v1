@@ -13,10 +13,13 @@ import (
 	"syscall"
 	"time"
 
+	"feedback-api/internal/auditlog"
+	"feedback-api/internal/auth"
 	"feedback-api/internal/config"
 	"feedback-api/internal/db"
 	"feedback-api/internal/handler"
 	"feedback-api/internal/httpx"
+	"feedback-api/internal/ratelimit"
 	"feedback-api/internal/session"
 	"feedback-api/internal/vision"
 )
@@ -65,6 +68,31 @@ func main() {
 	sessStore := session.NewMySQLStore(sqlDB)
 	sessStore.StartCleanupLoop(ctx, 10*time.Minute)
 
+	var rlStore ratelimit.Store
+	if sqlDB != nil {
+		rlMySQL := ratelimit.NewMySQLStore(sqlDB)
+		rlStore = rlMySQL
+		go func() {
+			ticker := time.NewTicker(30 * time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					cleanCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+					_, _ = rlMySQL.CleanupExpired(cleanCtx)
+					cancel()
+				}
+			}
+		}()
+	} else {
+		rlStore = ratelimit.NewMemoryStore()
+	}
+
+	auditLogger := auditlog.NewDualLogger(sqlDB, feedbackRoot)
+	authRepo := auth.NewMySQLRepository(sqlDB)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handler.Health)
 	mux.HandleFunc("/api/public_config.php", handler.PublicConfig(loader))
@@ -73,6 +101,12 @@ func main() {
 	mux.HandleFunc("/api/upload_pdf.php", handler.UploadPDF(feedbackRoot, sessStore))
 	mux.HandleFunc("/api/upload_capture.php", handler.UploadCapture(feedbackRoot, sessStore))
 	mux.HandleFunc("/api/changelog.php", handler.Changelog(feedbackRoot, sessStore))
+	mux.HandleFunc("/api/auth.php", handler.Auth(handler.AuthDeps{
+		Repo:      authRepo,
+		Sessions:  sessStore,
+		RateLimit: rlStore,
+		Audit:     auditLogger,
+	}))
 
 	srv := &http.Server{
 		Addr:              listenAddr,

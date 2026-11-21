@@ -2,7 +2,9 @@ package session
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log"
@@ -83,19 +85,37 @@ func (s *Session) AdminUsername() string {
 	return config.AsPHPString(s.Data["admin_username"])
 }
 
-// Store loads session state by PHPSESSID.
-type Store interface {
-	Load(ctx context.Context, sessionID string) (*Session, error)
+// StringVal returns a string value from session Data using PHP string coercion.
+func (s *Session) StringVal(key string) string {
+	if s == nil || s.Data == nil {
+		return ""
+	}
+	return config.AsPHPString(s.Data[key])
 }
 
-// MySQLStore reads shared PHP/Go sessions from the `app_sessions` MySQL table.
+// IntVal returns an int value from session Data using PHP int coercion.
+func (s *Session) IntVal(key string) int {
+	if s == nil || s.Data == nil {
+		return 0
+	}
+	return config.AsPHPInt(s.Data[key])
+}
+
+// Store loads, saves, and destroys session state by PHPSESSID.
+type Store interface {
+	Load(ctx context.Context, sessionID string) (*Session, error)
+	Save(ctx context.Context, sess *Session) error
+	Destroy(ctx context.Context, sessionID string) error
+}
+
+// MySQLStore reads and writes shared PHP/Go sessions in the `app_sessions` MySQL table.
 type MySQLStore struct {
 	db      *sql.DB
 	ttl     time.Duration
 	nowFunc func() time.Time
 }
 
-// NewMySQLStore creates a Store backed by *sql.DB. If db is nil, Load fails closed.
+// NewMySQLStore creates a Store backed by *sql.DB. If db is nil, operations fail closed.
 func NewMySQLStore(db *sql.DB) *MySQLStore {
 	return &MySQLStore{
 		db:      db,
@@ -174,6 +194,57 @@ func (s *MySQLStore) Load(ctx context.Context, sessionID string) (*Session, erro
 	}
 
 	return sess, nil
+}
+
+// Save persists session data as JSON into `app_sessions` with empty `payload_php` so PHP MySqlSessionHandler
+// automatically re-encodes `payload_json` into $_SESSION on cross-engine reads.
+// Empty sessions are deleted to avoid app_sessions bloat.
+func (s *MySQLStore) Save(ctx context.Context, sess *Session) error {
+	if sess == nil {
+		return nil
+	}
+	sid := strings.TrimSpace(sess.ID)
+	if !reValidSessionID.MatchString(sid) {
+		return errors.New("invalid session id")
+	}
+	if s == nil || s.db == nil {
+		return errors.New("session store database is not configured")
+	}
+	if len(sess.Data) == 0 {
+		return s.Destroy(ctx, sid)
+	}
+	rawJSON, err := json.Marshal(sess.Data)
+	if err != nil {
+		return err
+	}
+	expiresAt := s.now().Unix() + int64(s.effectiveTTL().Seconds())
+	_, err = s.db.ExecContext(
+		ctx,
+		`INSERT INTO `+"`app_sessions`"+` (`+"`session_id`, `payload_php`, `payload_json`, `expires_at`"+`)
+		 VALUES (?, '', ?, ?)
+		 ON DUPLICATE KEY UPDATE
+		   `+"`payload_php`"+` = '',
+		   `+"`payload_json`"+` = VALUES(`+"`payload_json`"+`),
+		   `+"`expires_at`"+` = VALUES(`+"`expires_at`"+`),
+		   `+"`updated_at`"+` = CURRENT_TIMESTAMP`,
+		sid,
+		string(rawJSON),
+		expiresAt,
+	)
+	return err
+}
+
+// Destroy deletes a session row from `app_sessions`.
+func (s *MySQLStore) Destroy(ctx context.Context, sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if !reValidSessionID.MatchString(sessionID) {
+		return nil
+	}
+	if s == nil || s.db == nil {
+		return errors.New("session store database is not configured")
+	}
+	_, err := s.db.ExecContext(ctx, "DELETE FROM `app_sessions` WHERE `session_id` = ?", sessionID)
+	return err
 }
 
 // CleanupExpired deletes expired rows from `app_sessions` and returns the deleted row count.
@@ -258,7 +329,113 @@ func (m *MemoryStore) Load(_ context.Context, sessionID string) (*Session, error
 	if !ok {
 		return nil, nil
 	}
-	return &Session{ID: sessionID, Data: data}, nil
+	copied := make(map[string]any, len(data))
+	for k, v := range data {
+		copied[k] = v
+	}
+	return &Session{ID: sessionID, Data: copied}, nil
+}
+
+// Save persists a session payload in MemoryStore (deletes if empty).
+func (m *MemoryStore) Save(_ context.Context, sess *Session) error {
+	if sess == nil {
+		return nil
+	}
+	sid := strings.TrimSpace(sess.ID)
+	if !reValidSessionID.MatchString(sid) {
+		return errors.New("invalid session id")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(sess.Data) == 0 {
+		delete(m.sessions, sid)
+		return nil
+	}
+	copied := make(map[string]any, len(sess.Data))
+	for k, v := range sess.Data {
+		copied[k] = v
+	}
+	m.sessions[sid] = copied
+	return nil
+}
+
+// Destroy deletes a session from MemoryStore.
+func (m *MemoryStore) Destroy(_ context.Context, sessionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.sessions, strings.TrimSpace(sessionID))
+	return nil
+}
+
+// NewSessionID generates a cryptographically random 32-char hex PHPSESSID.
+func NewSessionID() (string, error) {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
+}
+
+// SetCookie writes the PHPSESSID cookie matching PHP bootstrap.php attributes (HttpOnly, SameSite=Lax, Secure on HTTPS).
+func SetCookie(w http.ResponseWriter, r *http.Request, sessionID string) {
+	isSecure := r.TLS != nil || strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
+	http.SetCookie(w, &http.Cookie{
+		Name:     "PHPSESSID",
+		Value:    sessionID,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   isSecure,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+// LoadOrInit loads an existing session by PHPSESSID cookie or initializes a new in-memory Session with a fresh ID.
+// The second return value (isNew) is true when no valid PHPSESSID cookie was present on the request.
+func LoadOrInit(ctx context.Context, r *http.Request, store Store) (*Session, bool, error) {
+	sid := extractSessionID(r)
+	if sid != "" && reValidSessionID.MatchString(sid) {
+		if store != nil {
+			sess, err := store.Load(ctx, sid)
+			if err != nil {
+				return nil, false, err
+			}
+			if sess != nil {
+				if sess.Data == nil {
+					sess.Data = make(map[string]any)
+				}
+				return sess, false, nil
+			}
+		}
+		return &Session{ID: sid, Data: make(map[string]any)}, false, nil
+	}
+	newID, err := NewSessionID()
+	if err != nil {
+		return nil, true, err
+	}
+	return &Session{ID: newID, Data: make(map[string]any)}, true, nil
+}
+
+// Regenerate rotates the session ID to defend against session fixation, deleting the old row and writing Set-Cookie.
+func Regenerate(ctx context.Context, w http.ResponseWriter, r *http.Request, store Store, sess *Session) error {
+	if sess == nil {
+		return errors.New("nil session")
+	}
+	oldID := strings.TrimSpace(sess.ID)
+	newID, err := NewSessionID()
+	if err != nil {
+		return err
+	}
+	if oldID != "" && store != nil {
+		_ = store.Destroy(ctx, oldID)
+	}
+	sess.ID = newID
+	if store != nil {
+		if err := store.Save(ctx, sess); err != nil {
+			return err
+		}
+	}
+	SetCookie(w, r, newID)
+	return nil
 }
 
 func extractSessionID(r *http.Request) string {
