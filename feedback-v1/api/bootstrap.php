@@ -120,7 +120,7 @@ require_once __DIR__ . '/lib_normalize.php';
 
 // 5. 全局写请求同源 CSRF 校验（当请求携带 Origin 或 Referer 时校验是否属于当前站点或白名单域名）
 if (!function_exists('verifySameOriginRequest')) {
-    function verifySameOriginRequest(): void {
+    function verifySameOriginRequest(bool $strictSameHost = false, ?string $errorMessage = null): void {
         $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
         if (!in_array($method, ['POST', 'PUT', 'DELETE', 'PATCH'], true)) {
             return;
@@ -138,17 +138,20 @@ if (!function_exists('verifySameOriginRequest')) {
             ? strtolower((string)parse_url($reqOrigin, PHP_URL_HOST))
             : strtolower((string)parse_url($reqReferer, PHP_URL_HOST));
 
-        if ($checkHost === $host) {
+        if ($checkHost !== '' && hash_equals($host, $checkHost)) {
             return;
         }
-        // 允许受信白名单域名或 wxjifang.cn 子域
-        if ($checkHost !== '' && (
+        // 非严格模式下，允许受信白名单域名或 wxjifang.cn 子域
+        if (!$strictSameHost && $checkHost !== '' && (
             in_array($checkHost, ['localhost', '127.0.0.1', 'feedback.wxjifang.cn', 'vip.wxjifang.cn', 'vip.jokerx.top'], true) ||
             preg_match('/(^|\.)wxjifang\.cn$/', $checkHost)
         )) {
             return;
         }
-        sendResponse(false, null, '非法跨站请求 (CSRF Origin Mismatch)', 403);
+        $msg = $errorMessage ?? ($strictSameHost
+            ? '跨站请求已拦截（Origin 校验失败）'
+            : '非法跨站请求 (CSRF Origin Mismatch)');
+        sendResponse(false, null, $msg, 403);
     }
 }
 verifySameOriginRequest();
@@ -212,7 +215,7 @@ if (!function_exists('requireAdmin')) {
     }
 }
 
-// 7. 持久化服务端认证防爆破限频器（基于 IP + 账号落盘，防止不带 PHPSESSID Cookie 绕过）
+// 7. 持久化服务端认证防爆破限频器（优先 MySQL auth_rate_limits 共享表，DB 离线/未迁移时自动回退本地文件）
 if (!function_exists('getAuthRateLimitFilePath')) {
     function getAuthRateLimitFilePath(): string {
         $dir = __DIR__ . '/../data';
@@ -220,6 +223,33 @@ if (!function_exists('getAuthRateLimitFilePath')) {
             @mkdir($dir, 0755, true);
         }
         return $dir . '/.rate_limit_auth.json';
+    }
+}
+
+if (!function_exists('getAuthRateLimitPdo')) {
+    function getAuthRateLimitPdo(): ?PDO {
+        if (strtolower(trim((string)getenv('FEEDBACK_RATELIMIT_DRIVER'))) === 'files') {
+            return null;
+        }
+        $dbFile = __DIR__ . '/db.php';
+        if (!is_file($dbFile)) {
+            return null;
+        }
+        require_once $dbFile;
+        if (!class_exists('DB')) {
+            return null;
+        }
+        return DB::getConnection();
+    }
+}
+
+if (!function_exists('normalizeAuthRateLimitKey')) {
+    function normalizeAuthRateLimitKey(string $scope, string $identifier): string {
+        $key = $scope . ':' . strtolower(trim($identifier));
+        if (strlen($key) > 191) {
+            $key = substr($key, 0, 158) . ':' . md5($key);
+        }
+        return $key;
     }
 }
 
@@ -269,8 +299,42 @@ if (!function_exists('getAuthRateLimitStatus')) {
      * @return array{count:int, locked:bool, remaining_seconds:int}
      */
     function getAuthRateLimitStatus(string $scope, string $identifier, int $windowSeconds = 900): array {
-        $key = $scope . ':' . strtolower(trim($identifier));
+        $key = normalizeAuthRateLimitKey($scope, $identifier);
         $now = time();
+
+        $pdo = getAuthRateLimitPdo();
+        if ($pdo) {
+            try {
+                $stmt = $pdo->prepare(
+                    'SELECT `fail_count`, `first_at`, `updated_at`, `lock_until` FROM `auth_rate_limits` WHERE `bucket_key` = ? LIMIT 1'
+                );
+                $stmt->execute([$key]);
+                $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                if (!$row) {
+                    return ['count' => 0, 'locked' => false, 'remaining_seconds' => 0];
+                }
+                $lockUntil = intval($row['lock_until'] ?? 0);
+                if ($lockUntil > $now) {
+                    return [
+                        'count' => intval($row['fail_count'] ?? 0),
+                        'locked' => true,
+                        'remaining_seconds' => $lockUntil - $now
+                    ];
+                }
+                $firstAt = intval($row['first_at'] ?? ($row['updated_at'] ?? 0));
+                if ($windowSeconds > 0 && ($now - $firstAt) > $windowSeconds) {
+                    return ['count' => 0, 'locked' => false, 'remaining_seconds' => 0];
+                }
+                return [
+                    'count' => intval($row['fail_count'] ?? 0),
+                    'locked' => false,
+                    'remaining_seconds' => 0
+                ];
+            } catch (Throwable $e) {
+                error_log('getAuthRateLimitStatus MySQL fallback: ' . $e->getMessage());
+            }
+        }
+
         return withAuthRateLimitStore(function (array &$store) use ($key, $now, $windowSeconds) {
             $entry = $store[$key] ?? null;
             if (!is_array($entry)) {
@@ -303,8 +367,84 @@ if (!function_exists('recordAuthRateLimitFailure')) {
      * @return array{count:int, locked:bool, remaining_seconds:int}
      */
     function recordAuthRateLimitFailure(string $scope, string $identifier, int $maxAttempts = 5, int $windowSeconds = 900, int $lockoutSeconds = 900): array {
-        $key = $scope . ':' . strtolower(trim($identifier));
+        $key = normalizeAuthRateLimitKey($scope, $identifier);
         $now = time();
+
+        $pdo = getAuthRateLimitPdo();
+        if ($pdo) {
+            $inTx = false;
+            try {
+                if (!$pdo->inTransaction()) {
+                    $pdo->beginTransaction();
+                    $inTx = true;
+                }
+                $stmt = $pdo->prepare(
+                    'SELECT `fail_count`, `first_at`, `updated_at`, `lock_until` FROM `auth_rate_limits` WHERE `bucket_key` = ? FOR UPDATE'
+                );
+                $stmt->execute([$key]);
+                $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                $count = 0;
+                $firstAt = $now;
+                $lockUntil = 0;
+                if ($row) {
+                    $prevFirst = intval($row['first_at'] ?? 0);
+                    $prevLock = intval($row['lock_until'] ?? 0);
+                    if ($prevLock <= $now && $windowSeconds > 0 && ($now - $prevFirst) > $windowSeconds) {
+                        $count = 0;
+                        $firstAt = $now;
+                        $lockUntil = 0;
+                    } else {
+                        $count = intval($row['fail_count'] ?? 0);
+                        $firstAt = $prevFirst > 0 ? $prevFirst : $now;
+                        $lockUntil = $prevLock;
+                    }
+                }
+                $count++;
+                if ($maxAttempts > 0 && $count >= $maxAttempts && $lockoutSeconds > 0) {
+                    $lockUntil = $now + $lockoutSeconds;
+                }
+
+                $upsert = $pdo->prepare(
+                    'INSERT INTO `auth_rate_limits` (`bucket_key`, `fail_count`, `first_at`, `updated_at`, `lock_until`)
+                     VALUES (?, ?, ?, ?, ?)
+                     ON DUPLICATE KEY UPDATE
+                       `fail_count` = VALUES(`fail_count`),
+                       `first_at` = VALUES(`first_at`),
+                       `updated_at` = VALUES(`updated_at`),
+                       `lock_until` = VALUES(`lock_until`)'
+                );
+                $upsert->execute([$key, $count, $firstAt, $now, $lockUntil]);
+
+                if ($inTx) {
+                    $pdo->commit();
+                    $inTx = false;
+                }
+
+                // 2% 概率清理超过 24 小时的过期桶
+                if (mt_rand(1, 50) === 1) {
+                    try {
+                        $gc = $pdo->prepare('DELETE FROM `auth_rate_limits` WHERE `lock_until` < ? AND `updated_at` < ?');
+                        $gc->execute([$now, $now - 86400]);
+                    } catch (Throwable $ignore) {}
+                }
+
+                $rem = max(0, $lockUntil - $now);
+                return [
+                    'count' => $count,
+                    'locked' => $rem > 0,
+                    'remaining_seconds' => $rem
+                ];
+            } catch (Throwable $e) {
+                if ($inTx && $pdo->inTransaction()) {
+                    try {
+                        $pdo->rollBack();
+                    } catch (Throwable $ignore) {}
+                }
+                error_log('recordAuthRateLimitFailure MySQL fallback: ' . $e->getMessage());
+            }
+        }
+
         return withAuthRateLimitStore(function (array &$store, bool &$modified = false) use ($key, $now, $maxAttempts, $windowSeconds, $lockoutSeconds) {
             $modified = true;
             $entry = $store[$key] ?? null;
@@ -338,7 +478,19 @@ if (!function_exists('clearAuthRateLimitFailures')) {
      * 认证成功后清理对应桶的失败记录
      */
     function clearAuthRateLimitFailures(string $scope, string $identifier): void {
-        $key = $scope . ':' . strtolower(trim($identifier));
+        $key = normalizeAuthRateLimitKey($scope, $identifier);
+
+        $pdo = getAuthRateLimitPdo();
+        if ($pdo) {
+            try {
+                $stmt = $pdo->prepare('DELETE FROM `auth_rate_limits` WHERE `bucket_key` = ?');
+                $stmt->execute([$key]);
+                return;
+            } catch (Throwable $e) {
+                error_log('clearAuthRateLimitFailures MySQL fallback: ' . $e->getMessage());
+            }
+        }
+
         withAuthRateLimitStore(function (array &$store, bool &$modified = false) use ($key) {
             if (isset($store[$key])) {
                 unset($store[$key]);

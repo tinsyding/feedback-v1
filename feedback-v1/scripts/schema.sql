@@ -254,3 +254,26 @@ CREATE TABLE IF NOT EXISTS `retest_revoked_tokens` (
   PRIMARY KEY (`token`),
   KEY `idx_revoked_at` (`revoked_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='错题本吊销Token黑名单表';
+
+-- ---------- PHP 与 Go 共享会话表 ----------
+CREATE TABLE IF NOT EXISTS `app_sessions` (
+  `session_id` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'PHPSESSID',
+  `payload_php` mediumtext COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'PHP原生序列化会话载荷',
+  `payload_json` json DEFAULT NULL COMMENT '标准JSON会话镜像（供Go后端共享读取/写入）',
+  `expires_at` int unsigned NOT NULL COMMENT '过期Unix时间戳',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`session_id`),
+  KEY `idx_expires_at` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='PHP与Go共享会话表';
+
+-- ---------- PHP 与 Go 共享认证防爆破限频表 ----------
+CREATE TABLE IF NOT EXISTS `auth_rate_limits` (
+  `bucket_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'scope:identifier 限频桶键',
+  `fail_count` int unsigned NOT NULL DEFAULT 0 COMMENT '当前时间窗口内失败次数',
+  `first_at` int unsigned NOT NULL DEFAULT 0 COMMENT '当前时间窗口起始Unix时间戳',
+  `updated_at` int unsigned NOT NULL DEFAULT 0 COMMENT '最后一次失败Unix时间戳',
+  `lock_until` int unsigned NOT NULL DEFAULT 0 COMMENT '锁定截止Unix时间戳',
+  PRIMARY KEY (`bucket_key`),
+  KEY `idx_cleanup` (`lock_until`, `updated_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='PHP与Go共享认证防爆破限频表';
+

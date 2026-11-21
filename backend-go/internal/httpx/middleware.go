@@ -78,6 +78,21 @@ func isOriginAllowed(origin string) bool {
 }
 
 func verifySameOriginRequest(r *http.Request) bool {
+	return verifySameOrigin(r, false)
+}
+
+// RequireStrictSameOrigin enforces strict same-host Origin/Referer matching on write requests
+// (disallowing cross-subdomain requests), mirroring PHP verifySameOriginRequest(true).
+// Returns true if allowed; otherwise writes HTTP 403 and returns false.
+func RequireStrictSameOrigin(w http.ResponseWriter, r *http.Request) bool {
+	if verifySameOrigin(r, true) {
+		return true
+	}
+	SendResponse(w, false, nil, StrPtr("跨站请求已拦截（Origin 校验失败）"), http.StatusForbidden)
+	return false
+}
+
+func verifySameOrigin(r *http.Request, strictSameHost bool) bool {
 	switch strings.ToUpper(r.Method) {
 	case http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch:
 	default:
@@ -100,10 +115,10 @@ func verifySameOriginRequest(r *http.Request) bool {
 		rawCheck = reqReferer
 	}
 	checkHost := extractURLHost(rawCheck)
-	if checkHost == host {
+	if checkHost != "" && checkHost == host {
 		return true
 	}
-	if checkHost != "" {
+	if !strictSameHost && checkHost != "" {
 		if _, ok := allowedCSRFHosts[checkHost]; ok {
 			return true
 		}

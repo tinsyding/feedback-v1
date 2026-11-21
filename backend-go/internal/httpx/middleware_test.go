@@ -105,6 +105,55 @@ func TestMiddlewareSameOriginCSRF(t *testing.T) {
 	}
 }
 
+func TestRequireStrictSameOrigin(t *testing.T) {
+	cases := []struct {
+		name       string
+		method     string
+		host       string
+		origin     string
+		referer    string
+		wantOK     bool
+		wantStatus int
+	}{
+		{"get bypasses", http.MethodGet, "feedback.wxjifang.cn", "https://evil.example", "", true, http.StatusOK},
+		{"no origin/referer allowed", http.MethodPost, "feedback.wxjifang.cn", "", "", true, http.StatusOK},
+		{"exact same host allowed", http.MethodPost, "feedback.wxjifang.cn:443", "https://feedback.wxjifang.cn", "", true, http.StatusOK},
+		{"cross subdomain rejected in strict mode", http.MethodPost, "feedback.wxjifang.cn", "https://vip.wxjifang.cn", "", false, http.StatusForbidden},
+		{"cross subdomain referer rejected in strict mode", http.MethodDelete, "feedback.wxjifang.cn", "", "https://staging.wxjifang.cn/page", false, http.StatusForbidden},
+		{"evil origin rejected", http.MethodPost, "feedback.wxjifang.cn", "https://evil.example", "", false, http.StatusForbidden},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, "/api/admin.php", nil)
+			req.Host = tc.host
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			if tc.referer != "" {
+				req.Header.Set("Referer", tc.referer)
+			}
+			rec := httptest.NewRecorder()
+			ok := RequireStrictSameOrigin(rec, req)
+			if ok != tc.wantOK {
+				t.Fatalf("RequireStrictSameOrigin = %v, want %v (body=%s)", ok, tc.wantOK, rec.Body.String())
+			}
+			if !tc.wantOK {
+				if rec.Code != tc.wantStatus {
+					t.Fatalf("status = %d, want %d", rec.Code, tc.wantStatus)
+				}
+				var env Envelope
+				if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+					t.Fatal(err)
+				}
+				if env.Error == nil || *env.Error != "跨站请求已拦截（Origin 校验失败）" {
+					t.Fatalf("unexpected strict CSRF error: %+v", env)
+				}
+			}
+		})
+	}
+}
+
 func TestGetClientIP(t *testing.T) {
 	cases := []struct {
 		name       string

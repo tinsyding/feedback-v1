@@ -20,19 +20,8 @@ require_once __DIR__ . '/admin/helpers.php';
 $action = $_GET['action'] ?? '';
 $method = $_SERVER['REQUEST_METHOD'];
 
-// CSRF 缓解：所有 POST 写操作要求 Origin/Referer 同源。
-// 浏览器同源 fetch/form 都会携带二者之一；无头客户端（无头时放行）不受影响。
-if ($method === 'POST') {
-    $host = strtolower(preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST'] ?? ''));
-    $originHost = isset($_SERVER['HTTP_ORIGIN']) && $_SERVER['HTTP_ORIGIN'] !== ''
-        ? strtolower((string)parse_url($_SERVER['HTTP_ORIGIN'], PHP_URL_HOST)) : '';
-    $refererHost = isset($_SERVER['HTTP_REFERER']) && $_SERVER['HTTP_REFERER'] !== ''
-        ? strtolower((string)parse_url($_SERVER['HTTP_REFERER'], PHP_URL_HOST)) : '';
-    if (($originHost !== '' && !hash_equals($host, $originHost)) ||
-        ($originHost === '' && $refererHost !== '' && !hash_equals($host, $refererHost))) {
-        sendResponse(false, null, '跨站请求已拦截（Origin 校验失败）', 403);
-    }
-}
+// CSRF 缓解：后台所有写操作要求 Origin/Referer 严格同主机（不放行跨子域）
+verifySameOriginRequest(true, '跨站请求已拦截（Origin 校验失败）');
 
 try {
     switch ($action) {

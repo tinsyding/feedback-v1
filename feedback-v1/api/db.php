@@ -51,102 +51,12 @@ class DB {
             try {
                 self::$instance = new PDO($dsn, $cfg['username'], $cfg['password'], $options);
                 self::$instance->exec("SET NAMES {$cfg['charset']} COLLATE utf8mb4_unicode_ci");
-                self::ensureSchemaUpgrades(self::$instance);
             } catch (PDOException $e) {
                 error_log("Database connection failed: " . $e->getMessage());
                 return null;
             }
         }
         return self::$instance;
-    }
-
-    /**
-     * 一次性轻量数据库结构自愈升级（通过 lock 文件标记，仅在首次连接时执行一次，零运行时开销）
-     * 1. 为 student_records 补齐 submission_status / preview_submission_status 显式提交状态字段
-     * 2. 归一化 class_batches.season，归并历史重复批次并添加 uk_batch_identity 唯一索引
-     * 3. 创建 retest_revoked_tokens 错题本吊销黑名单表，并将旧 revoked_tokens.json 一次性迁入数据库
-     */
-    private static function ensureSchemaUpgrades(PDO $pdo): void {
-        $lockFile = dirname(__DIR__) . '/data/.schema_v202611_db_only.lock';
-        if (is_file($lockFile)) {
-            return;
-        }
-        try {
-            // 1. 检查并补齐 student_records.submission_status 与 preview_submission_status
-            $colStmt = $pdo->query("SHOW COLUMNS FROM `student_records` LIKE 'submission_status'");
-            if ($colStmt && !$colStmt->fetch()) {
-                $pdo->exec("ALTER TABLE `student_records`
-                    ADD COLUMN `submission_status` VARCHAR(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'submitted' COMMENT '课后作业提交状态: submitted/unsubmitted/exempt' AFTER `total_score`,
-                    ADD COLUMN `preview_submission_status` VARCHAR(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'submitted' COMMENT '预习作业提交状态: submitted/unsubmitted/exempt' AFTER `submission_status`");
-            }
-
-            // 2. 归一化 class_batches 的 season 并归并重复批次后添加 uk_batch_identity 唯一索引
-            $idxStmt = $pdo->query("SHOW INDEX FROM `class_batches` WHERE Key_name = 'uk_batch_identity'");
-            if ($idxStmt && !$idxStmt->fetch()) {
-                $pdo->exec("UPDATE `class_batches` SET `season` = '春' WHERE LOWER(`season`) IN ('spring', '春季')");
-                $pdo->exec("UPDATE `class_batches` SET `season` = '暑' WHERE LOWER(`season`) IN ('summer', '暑假', '夏')");
-                $pdo->exec("UPDATE `class_batches` SET `season` = '秋' WHERE LOWER(`season`) IN ('autumn', 'fall', '秋季')");
-                $pdo->exec("UPDATE `class_batches` SET `season` = '寒' WHERE LOWER(`season`) IN ('winter', '寒假', '冬')");
-
-                $dupGroups = $pdo->query("
-                    SELECT `year`, `season`, `grade`, `tier`, `subject`, `class_name`, MIN(`id`) AS `keep_id`, COUNT(*) AS `cnt`
-                    FROM `class_batches`
-                    GROUP BY `year`, `season`, `grade`, `tier`, `subject`, `class_name`
-                    HAVING `cnt` > 1
-                ")->fetchAll();
-
-                foreach ($dupGroups as $grp) {
-                    $keepId = (int)$grp['keep_id'];
-                    $dupStmt = $pdo->prepare("SELECT `id` FROM `class_batches` WHERE `year` = ? AND `season` = ? AND `grade` = ? AND `tier` = ? AND `subject` = ? AND `class_name` = ? AND `id` <> ?");
-                    $dupStmt->execute([$grp['year'], $grp['season'], $grp['grade'], $grp['tier'], $grp['subject'], $grp['class_name'], $keepId]);
-                    $dupIds = array_map('intval', array_column($dupStmt->fetchAll(), 'id'));
-                    foreach ($dupIds as $dupId) {
-                        // 将重复批次下的 student_records 迁移到主批次（若同周同生已存在则忽略旧重复行）
-                        $pdo->exec("UPDATE IGNORE `student_records` SET `batch_id` = {$keepId} WHERE `batch_id` = {$dupId}");
-                        $pdo->exec("DELETE FROM `student_records` WHERE `batch_id` = {$dupId}");
-                        $pdo->exec("UPDATE `generation_batches` SET `class_id` = {$keepId} WHERE `class_id` = {$dupId}");
-                        $pdo->exec("DELETE FROM `class_batches` WHERE `id` = {$dupId}");
-                    }
-                }
-
-                $pdo->exec("ALTER TABLE `class_batches` ADD UNIQUE KEY `uk_batch_identity` (`year`, `season`, `grade`, `tier`, `subject`, `class_name`)");
-            }
-
-            // 3. 创建 retest_revoked_tokens 表并迁移遗留的 revoked_tokens.json
-            $pdo->exec("CREATE TABLE IF NOT EXISTS `retest_revoked_tokens` (
-                `token` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '被吊销的错题本Token',
-                `revoked_by` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT '执行作废的操作人',
-                `reason` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT '作废原因',
-                `revoked_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '作废时间',
-                PRIMARY KEY (`token`),
-                KEY `idx_revoked_at` (`revoked_at`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='错题本吊销Token黑名单表'");
-
-            $legacyRevokedFile = dirname(__DIR__) . '/data/history/revoked_tokens.json';
-            if (is_file($legacyRevokedFile)) {
-                $legacyMap = json_decode((string)@file_get_contents($legacyRevokedFile), true);
-                if (is_array($legacyMap) && !empty($legacyMap)) {
-                    $insStmt = $pdo->prepare("INSERT IGNORE INTO `retest_revoked_tokens` (`token`, `revoked_by`, `reason`, `revoked_at`) VALUES (?, ?, ?, ?)");
-                    foreach ($legacyMap as $tok => $info) {
-                        $tokStr = substr(trim((string)$tok), 0, 64);
-                        if ($tokStr === '') continue;
-                        $by = is_array($info) ? substr(trim((string)($info['by'] ?? '')), 0, 50) : '';
-                        $reason = is_array($info) ? substr(trim((string)($info['reason'] ?? '')), 0, 255) : '';
-                        $at = is_array($info) && !empty($info['at']) ? (string)$info['at'] : date('Y-m-d H:i:s');
-                        $insStmt->execute([$tokStr, $by, $reason, $at]);
-                    }
-                }
-                @unlink($legacyRevokedFile);
-            }
-
-            $dataDir = dirname($lockFile);
-            if (!is_dir($dataDir)) {
-                @mkdir($dataDir, 0755, true);
-            }
-            @file_put_contents($lockFile, date('Y-m-d H:i:s'));
-        } catch (Throwable $e) {
-            error_log("DB::ensureSchemaUpgrades non-fatal warning: " . $e->getMessage());
-        }
     }
 
     private static ?string $lastError = null;

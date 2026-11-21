@@ -57,15 +57,7 @@ function sanitizeSenderDate(string $date): string {
 }
 
 function verifySameOriginAdminPost(): void {
-    $host = strtolower(preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST'] ?? ''));
-    $originHost = isset($_SERVER['HTTP_ORIGIN']) && $_SERVER['HTTP_ORIGIN'] !== ''
-        ? strtolower((string)parse_url($_SERVER['HTTP_ORIGIN'], PHP_URL_HOST)) : '';
-    $refererHost = isset($_SERVER['HTTP_REFERER']) && $_SERVER['HTTP_REFERER'] !== ''
-        ? strtolower((string)parse_url($_SERVER['HTTP_REFERER'], PHP_URL_HOST)) : '';
-    if (($originHost !== '' && !hash_equals($host, $originHost)) ||
-        ($originHost === '' && $refererHost !== '' && !hash_equals($host, $refererHost))) {
-        sendResponse(false, null, '跨站请求已拦截（Origin 校验失败）', 403);
-    }
+    verifySameOriginRequest(true, '跨站请求已拦截（Origin 校验失败）');
 }
 
 function updateSenderClientMeta(string $clientDir, array $clientInfo, array $activeFiles, string $ip, ?array $runtimeState = null): array {

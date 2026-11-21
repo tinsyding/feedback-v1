@@ -26,6 +26,7 @@ $configFile = dirname(__DIR__, 2) . '/config.json';
 if (!defined('ADMIN_HIDDEN_TABLES')) {
     define('ADMIN_HIDDEN_TABLES', [
         'app_sessions',
+        'auth_rate_limits',
         'schema_migrations'
     ]);
 }
