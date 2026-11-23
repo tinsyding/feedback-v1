@@ -10,9 +10,30 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"feedback-api/internal/tz"
 )
+
+// AttestationPDFRetention is the minimum retention period for orphan PDFs still referenced in attestation snapshots.
+const AttestationPDFRetention = 180 * 24 * time.Hour
+
+// PDFReferenceChecker checks whether a managed PDF URL was referenced in recent attestation snapshots.
+type PDFReferenceChecker interface {
+	HasRecentPDFReference(ctx context.Context, relURL string, maxAge time.Duration) (bool, error)
+}
+
+// WeekScope describes the canonical 7-dimension question bank scope and primary row id.
+type WeekScope struct {
+	QBankID  int64
+	BankType string
+	Year     int
+	Season   string
+	Subject  string
+	Grade    string
+	Tier     string
+	Week     int
+}
 
 // ListFilter holds optional filter criteria for GET ?action=list.
 type ListFilter struct {
@@ -26,27 +47,35 @@ type ListFilter struct {
 
 // WeekListItem matches a row returned by GET ?action=list.
 type WeekListItem struct {
-	ID            int64   `json:"id"`
-	BankType      string  `json:"bankType"`
-	Year          int     `json:"year"`
-	Season        string  `json:"season"`
-	Subject       string  `json:"subject"`
-	Grade         string  `json:"grade"`
-	Tier          string  `json:"tier"`
-	Week          int     `json:"week"`
-	QuestionCount int     `json:"questionCount"`
-	UpdatedAt     float64 `json:"updatedAt"`
+	ID                int64   `json:"id"`
+	BankType          string  `json:"bankType"`
+	Year              int     `json:"year"`
+	Season            string  `json:"season"`
+	Subject           string  `json:"subject"`
+	Grade             string  `json:"grade"`
+	Tier              string  `json:"tier"`
+	Week              int     `json:"week"`
+	QuestionCount     int     `json:"questionCount"`
+	UpdatedAt         float64 `json:"updatedAt"`
+	LatestReceiptCode string  `json:"latestReceiptCode,omitempty"`
+	UpdatedBy         string  `json:"updatedBy,omitempty"`
+	UpdatedByName     string  `json:"updatedByName,omitempty"`
 }
 
 // WeekKey identifies a question bank topic week.
 type WeekKey struct {
-	Year     *int
-	Season   string
-	Subject  string
-	Grade    string
-	Tier     string
-	Week     int
-	BankType string
+	Year         *int
+	Season       string
+	Subject      string
+	Grade        string
+	Tier         string
+	Week         int
+	BankType     string
+	Strict       bool
+	Operator     string
+	OperatorName string
+	ClientIP     string
+	OnDeleteTx   func(ctx context.Context, tx *sql.Tx, scope WeekScope) error
 }
 
 // PDFInfo matches exercisePdf / answerPdf JSON structure.
@@ -85,6 +114,9 @@ type WeekDetail struct {
 	OperatorName       string         `json:"operatorName"`
 	UpdatedAt          float64        `json:"updatedAt"`
 	UpdatedAtFormatted string         `json:"updatedAtFormatted"`
+	MatchedExactTerm   bool           `json:"matchedExactTerm"`
+	LatestReceiptCode  string         `json:"latestReceiptCode,omitempty"`
+	LatestRevisionNo   int            `json:"latestRevisionNo,omitempty"`
 	Questions          []QuestionItem `json:"questions"`
 }
 
@@ -105,16 +137,20 @@ type SaveQuestionInput struct {
 
 // SaveWeekRequest holds all inputs for transactional POST save.
 type SaveWeekRequest struct {
-	BankType  string
-	Year      int
-	Season    string
-	Subject   string
-	Grade     string
-	Tier      string
-	Week      int
-	Operator  string
-	Questions []SaveQuestionInput
-	RawMaps   []map[string]any
+	BankType     string
+	Year         int
+	Season       string
+	Subject      string
+	Grade        string
+	Tier         string
+	Week         int
+	Operator     string
+	OperatorName string
+	ClientIP     string
+	SaveMode     string
+	Questions    []SaveQuestionInput
+	RawMaps      []map[string]any
+	OnRecordTx   func(ctx context.Context, tx *sql.Tx, qbankID int64, action string) error
 }
 
 // Repository abstracts persistence for /api/qbank.php.
@@ -126,8 +162,19 @@ type Repository interface {
 	CountPDFReferences(ctx context.Context, relURL string) (int, error)
 }
 
-// CleanupUnreferencedPDFs deletes orphan files under <feedbackRoot>/data/pdfs/ when DB reference count == 0.
+// CleanupUnreferencedPDFs deletes orphan files under <feedbackRoot>/data/pdfs/ when DB reference count == 0
+// and no recent attestation snapshot (180 days) references the PDF.
 func CleanupUnreferencedPDFs(ctx context.Context, repo Repository, feedbackRoot string, candidates []string) int {
+	var checker PDFReferenceChecker
+	if c, ok := repo.(PDFReferenceChecker); ok {
+		checker = c
+	}
+	return CleanupUnreferencedPDFsWithAttest(ctx, repo, checker, feedbackRoot, candidates)
+}
+
+// CleanupUnreferencedPDFsWithAttest deletes orphan PDFs only when DB reference count == 0
+// and checker (if non-nil) confirms no attestation snapshot within 180 days references the file.
+func CleanupUnreferencedPDFsWithAttest(ctx context.Context, repo Repository, checker PDFReferenceChecker, feedbackRoot string, candidates []string) int {
 	if repo == nil || strings.TrimSpace(feedbackRoot) == "" || len(candidates) == 0 {
 		return 0
 	}
@@ -154,10 +201,16 @@ func CleanupUnreferencedPDFs(ctx context.Context, repo Repository, feedbackRoot 
 			continue
 		}
 		refCount, err := repo.CountPDFReferences(ctx, relURL)
-		if err == nil && refCount == 0 {
-			if os.Remove(fullPath) == nil {
-				deleted++
+		if err != nil || refCount != 0 {
+			continue
+		}
+		if checker != nil {
+			if hasRecent, checkErr := checker.HasRecentPDFReference(ctx, relURL, AttestationPDFRetention); checkErr == nil && hasRecent {
+				continue
 			}
+		}
+		if os.Remove(fullPath) == nil {
+			deleted++
 		}
 	}
 	return deleted
@@ -165,12 +218,33 @@ func CleanupUnreferencedPDFs(ctx context.Context, repo Repository, feedbackRoot 
 
 // MySQLRepository implements Repository backed by *sql.DB.
 type MySQLRepository struct {
-	db *sql.DB
+	db         *sql.DB
+	pdfChecker PDFReferenceChecker
 }
 
 // NewMySQLRepository creates a MySQLRepository.
 func NewMySQLRepository(db *sql.DB) *MySQLRepository {
 	return &MySQLRepository{db: db}
+}
+
+// NewMySQLRepositoryWithAttest creates a MySQLRepository wired with an attestation PDF retention checker.
+func NewMySQLRepositoryWithAttest(db *sql.DB, checker PDFReferenceChecker) *MySQLRepository {
+	return &MySQLRepository{db: db, pdfChecker: checker}
+}
+
+// SetPDFReferenceChecker attaches an attestation PDF retention checker to MySQLRepository.
+func (r *MySQLRepository) SetPDFReferenceChecker(checker PDFReferenceChecker) {
+	if r != nil {
+		r.pdfChecker = checker
+	}
+}
+
+// HasRecentPDFReference delegates 180-day attestation PDF retention checks when a checker is configured.
+func (r *MySQLRepository) HasRecentPDFReference(ctx context.Context, relURL string, maxAge time.Duration) (bool, error) {
+	if r == nil || r.pdfChecker == nil {
+		return false, nil
+	}
+	return r.pdfChecker.HasRecentPDFReference(ctx, relURL, maxAge)
 }
 
 func (r *MySQLRepository) requireDB() (*sql.DB, error) {
@@ -241,7 +315,109 @@ func (r *MySQLRepository) ListWeeks(ctx context.Context, filter ListFilter) ([]W
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(items) > 0 {
+		r.enrichListItems(ctx, db, items)
+	}
+	return items, nil
+}
+
+type listScopeKey struct {
+	bankType string
+	year     int
+	season   string
+	subject  string
+	grade    string
+	tier     string
+	week     int
+}
+
+func (r *MySQLRepository) enrichListItems(ctx context.Context, db *sql.DB, items []WeekListItem) {
+	byID := make(map[int64]*WeekListItem, len(items))
+	byScope := make(map[listScopeKey]*WeekListItem, len(items))
+	idPH := make([]string, len(items))
+	idArgs := make([]any, len(items))
+	for i := range items {
+		it := &items[i]
+		byID[it.ID] = it
+		sk := listScopeKey{
+			bankType: NormalizeBankType(it.BankType),
+			year:     it.Year,
+			season:   strings.TrimSpace(it.Season),
+			subject:  strings.TrimSpace(it.Subject),
+			grade:    strings.TrimSpace(it.Grade),
+			tier:     strings.TrimSpace(it.Tier),
+			week:     it.Week,
+		}
+		byScope[sk] = it
+		idPH[i] = "?"
+		idArgs[i] = it.ID
+	}
+
+	// Best-effort lookup of updated_by + users.real_name (gracefully degraded on older schema/mocks).
+	metaSQL := "SELECT qw.`id`, COALESCE(NULLIF(qw.`updated_by`, ''), qw.`created_by`, ''), COALESCE(u.`real_name`, '') " +
+		"FROM `qbank_weeks` qw " +
+		"LEFT JOIN `users` u ON u.`username` = COALESCE(NULLIF(qw.`updated_by`, ''), qw.`created_by`) " +
+		"WHERE qw.`id` IN (" + strings.Join(idPH, ",") + ")"
+	if mRows, err := db.QueryContext(ctx, metaSQL, idArgs...); err == nil {
+		for mRows.Next() {
+			var id int64
+			var ub, ubName sql.NullString
+			if scanErr := mRows.Scan(&id, &ub, &ubName); scanErr == nil {
+				if it, ok := byID[id]; ok {
+					it.UpdatedBy = ub.String
+					it.UpdatedByName = ubName.String
+				}
+			}
+		}
+		_ = mRows.Close()
+	}
+
+	// Best-effort lookup of latest attestation receipt_code per scope (gracefully degraded if qbank_revisions absent).
+	revSQL := "SELECT r1.`qbank_id`, r1.`bank_type`, r1.`year`, r1.`season`, r1.`subject`, r1.`grade`, r1.`tier`, r1.`week`, " +
+		"r1.`receipt_code`, r1.`action`, r1.`operator`, r1.`operator_name` " +
+		"FROM `qbank_revisions` r1 " +
+		"INNER JOIN (" +
+		"  SELECT `year`, `season`, `bank_type`, `subject`, `grade`, `tier`, `week`, MAX(`id`) AS `max_id` " +
+		"  FROM `qbank_revisions` GROUP BY `year`, `season`, `bank_type`, `subject`, `grade`, `tier`, `week`" +
+		") r2 ON r1.`id` = r2.`max_id`"
+	if rRows, err := db.QueryContext(ctx, revSQL); err == nil {
+		for rRows.Next() {
+			var qbankID int64
+			var year, week int
+			var bt, season, subj, grade, tier, code, action, op, opName sql.NullString
+			if scanErr := rRows.Scan(&qbankID, &bt, &year, &season, &subj, &grade, &tier, &week, &code, &action, &op, &opName); scanErr == nil {
+				if action.String == "delete" || action.String == "admin_delete" {
+					continue
+				}
+				sk := listScopeKey{
+					bankType: NormalizeBankType(bt.String),
+					year:     year,
+					season:   strings.TrimSpace(season.String),
+					subject:  strings.TrimSpace(subj.String),
+					grade:    strings.TrimSpace(grade.String),
+					tier:     strings.TrimSpace(tier.String),
+					week:     week,
+				}
+				it := byScope[sk]
+				if it == nil && qbankID > 0 {
+					it = byID[qbankID]
+				}
+				if it != nil {
+					it.LatestReceiptCode = code.String
+					if it.UpdatedBy == "" && op.String != "" {
+						it.UpdatedBy = op.String
+					}
+					if it.UpdatedByName == "" && opName.String != "" {
+						it.UpdatedByName = opName.String
+					}
+				}
+			}
+		}
+		_ = rRows.Close()
+	}
 }
 
 type weekMetaRow struct {
@@ -300,6 +476,7 @@ func (r *MySQLRepository) GetWeek(ctx context.Context, key WeekKey) (*WeekDetail
 		return nil, err
 	}
 	var w *weekMetaRow
+	matchedExact := false
 	if key.Year != nil && key.Season != "" {
 		w, err = scanWeekMetaRow(db.QueryRowContext(
 			ctx,
@@ -309,6 +486,11 @@ func (r *MySQLRepository) GetWeek(ctx context.Context, key WeekKey) (*WeekDetail
 		))
 		if err != nil {
 			return nil, err
+		}
+		if w != nil {
+			matchedExact = true
+		} else if key.Strict {
+			return nil, nil
 		}
 	}
 	if w == nil {
@@ -428,6 +610,25 @@ func (r *MySQLRepository) GetWeek(ctx context.Context, key WeekKey) (*WeekDetail
 		qCount = len(questions)
 	}
 
+	var latestReceiptCode string
+	var latestRevisionNo int
+	var revCode, revAction sql.NullString
+	var revNo sql.NullInt64
+	if revErr := db.QueryRowContext(
+		ctx,
+		"SELECT `receipt_code`, `revision_no`, `action` FROM `qbank_revisions` "+
+			"WHERE `year` = ? AND `season` = ? AND `bank_type` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? "+
+			"ORDER BY `revision_no` DESC, `id` DESC LIMIT 1",
+		w.year, w.season, resolvedBankType, w.subject, w.grade, w.tier, w.week,
+	).Scan(&revCode, &revNo, &revAction); revErr == nil {
+		if revAction.String != "delete" && revAction.String != "admin_delete" {
+			latestReceiptCode = revCode.String
+			if revNo.Valid {
+				latestRevisionNo = int(revNo.Int64)
+			}
+		}
+	}
+
 	return &WeekDetail{
 		BankType:           resolvedBankType,
 		Year:               w.year,
@@ -443,6 +644,9 @@ func (r *MySQLRepository) GetWeek(ctx context.Context, key WeekKey) (*WeekDetail
 		OperatorName:       operatorName,
 		UpdatedAt:          w.updatedAtMs,
 		UpdatedAtFormatted: formatUpdatedAtMinute(w.updatedAtStr),
+		MatchedExactTerm:   matchedExact,
+		LatestReceiptCode:  latestReceiptCode,
+		LatestRevisionNo:   latestRevisionNo,
 		Questions:          questions,
 	}, nil
 }
@@ -479,6 +683,17 @@ func (r *MySQLRepository) SaveWeek(ctx context.Context, req SaveWeekRequest) ([]
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	var existingWeekID int64
+	existErr := tx.QueryRowContext(
+		ctx,
+		"SELECT `id` FROM `qbank_weeks` WHERE `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? AND `bank_type` = ? LIMIT 1 FOR UPDATE",
+		req.Year, req.Season, req.Subject, req.Grade, req.Tier, req.Week, req.BankType,
+	).Scan(&existingWeekID)
+	if existErr != nil && !errors.Is(existErr, sql.ErrNoRows) {
+		return nil, existErr
+	}
+	existed := existErr == nil && existingWeekID > 0
 
 	_, err = tx.ExecContext(
 		ctx,
@@ -602,6 +817,18 @@ func (r *MySQLRepository) SaveWeek(ctx context.Context, req SaveWeekRequest) ([]
 		}
 	} else {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM `qbank_questions` WHERE `qbank_id` = ?", qbankID); err != nil {
+			return nil, err
+		}
+	}
+
+	if req.OnRecordTx != nil {
+		action := "create"
+		if strings.TrimSpace(req.SaveMode) == "tier_sync" {
+			action = "tier_sync"
+		} else if existed {
+			action = "update"
+		}
+		if err := req.OnRecordTx(ctx, tx, qbankID, action); err != nil {
 			return nil, err
 		}
 	}
@@ -737,11 +964,60 @@ func (r *MySQLRepository) DeleteWeek(ctx context.Context, key WeekKey) ([]string
 	}
 	_ = pdfRows.Close()
 
+	scope := WeekScope{
+		QBankID:  qbankID,
+		BankType: NormalizeBankType(key.BankType),
+		Season:   strings.TrimSpace(key.Season),
+		Subject:  strings.TrimSpace(key.Subject),
+		Grade:    strings.TrimSpace(key.Grade),
+		Tier:     strings.TrimSpace(key.Tier),
+		Week:     key.Week,
+	}
+	if key.Year != nil {
+		scope.Year = *key.Year
+	}
+	if key.OnDeleteTx != nil {
+		var dbBT, dbSeason, dbSubject, dbGrade, dbTier sql.NullString
+		var dbYear, dbWeek sql.NullInt64
+		if sErr := tx.QueryRowContext(
+			ctx,
+			"SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ? LIMIT 1",
+			qbankID,
+		).Scan(&dbBT, &dbYear, &dbSeason, &dbSubject, &dbGrade, &dbTier, &dbWeek); sErr == nil {
+			if dbBT.String != "" {
+				scope.BankType = NormalizeBankType(dbBT.String)
+			}
+			if dbYear.Valid && dbYear.Int64 > 0 {
+				scope.Year = int(dbYear.Int64)
+			}
+			if dbSeason.String != "" {
+				scope.Season = dbSeason.String
+			}
+			if dbSubject.String != "" {
+				scope.Subject = dbSubject.String
+			}
+			if dbGrade.String != "" {
+				scope.Grade = dbGrade.String
+			}
+			if dbTier.String != "" {
+				scope.Tier = dbTier.String
+			}
+			if dbWeek.Valid && dbWeek.Int64 > 0 {
+				scope.Week = int(dbWeek.Int64)
+			}
+		}
+	}
+
 	if _, err := tx.ExecContext(ctx, "DELETE FROM `qbank_questions` WHERE `qbank_id` = ?", qbankID); err != nil {
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM `qbank_weeks` WHERE `id` = ?", qbankID); err != nil {
 		return nil, err
+	}
+	if key.OnDeleteTx != nil {
+		if err := key.OnDeleteTx(ctx, tx, scope); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err

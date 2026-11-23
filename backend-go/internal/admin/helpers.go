@@ -14,9 +14,10 @@ import (
 // HiddenTables lists system infrastructure tables forbidden from generic admin CRUD / metadata endpoints.
 // Mirrors PHP ADMIN_HIDDEN_TABLES in feedback-v1/api/admin/helpers.php.
 var HiddenTables = map[string]struct{}{
-	"app_sessions":      {},
-	"auth_rate_limits":  {},
-	"schema_migrations": {},
+	"app_sessions":           {},
+	"auth_rate_limits":       {},
+	"schema_migrations":      {},
+	"qbank_attestation_keys": {},
 }
 
 // FriendlyTableNames mirrors $friendlyNames in feedback-v1/api/admin/actions_tables.php.
@@ -30,6 +31,8 @@ var FriendlyTableNames = map[string]string{
 	"retest_revoked_tokens":  "错题本吊销黑名单",
 	"qbank_weeks":            "题库专题期次",
 	"qbank_questions":        "题库题目与考点",
+	"qbank_revisions":        "题库存证版本台账",
+	"qbank_attempt_logs":     "题库过程取证日志",
 	"admin_users":            "系统管理员表",
 	"system_logs":            "系统运行日志",
 }

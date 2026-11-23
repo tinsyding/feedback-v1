@@ -21,6 +21,7 @@ import (
 	"feedback-api/internal/handler"
 	"feedback-api/internal/httpx"
 	"feedback-api/internal/qbank"
+	"feedback-api/internal/qbankattest"
 	"feedback-api/internal/ratelimit"
 	"feedback-api/internal/retest"
 	"feedback-api/internal/senderctrl"
@@ -50,12 +51,29 @@ func main() {
 
 	feedbackRoot := config.ResolveFeedbackRoot(strings.TrimSpace(*rootFlag))
 	loader := config.NewLoader(feedbackRoot, "")
-	if bootCfg := loader.Load(); len(bootCfg.ServerSenderTokens()) == 0 {
+	bootCfg := loader.Load()
+	if len(bootCfg.ServerSenderTokens()) == 0 {
 		if bootCfg.AllowDefaultSenderToken() {
 			log.Printf("[SECURITY WARNING] SENDER_API_TOKEN / SENDER_API_TOKENS not configured; falling back to built-in DefaultSenderToken (configure SENDER_API_TOKEN or set ALLOW_DEFAULT_SENDER_TOKEN=false in production)")
 		} else {
 			log.Printf("info: SENDER_API_TOKEN not configured and ALLOW_DEFAULT_SENDER_TOKEN=false; sender endpoints will fail closed")
 		}
+	}
+	retestSecret := strings.TrimSpace(bootCfg.Secrets.RetestSecret)
+	if retestSecret == "" {
+		retestSecret = strings.TrimSpace(bootCfg.RawString("retestSecret"))
+	}
+	if retestSecret == "default_fallback_secret_please_change" || retestSecret == "your-secret-key-template-placeholder" {
+		retestSecret = ""
+	}
+	attestSigner, err := qbankattest.LoadSigner(retestSecret)
+	if err != nil {
+		log.Fatalf("load qbank attestation signer failed: %v", err)
+	}
+	if attestSigner.IsEphemeral() {
+		log.Printf("[WARNING] qbank attestation using ephemeral Ed25519 key (kid=%s); configure QBANK_ATTESTATION_PRIVATE_KEY or retestSecret in production", attestSigner.Kid())
+	} else {
+		log.Printf("info: qbank attestation signer ready (kid=%s, issuer=%s)", attestSigner.Kid(), qbankattest.ResolveIssuer())
 	}
 	vc := vision.NewClient()
 
@@ -97,9 +115,18 @@ func main() {
 		rlStore = ratelimit.NewMemoryStore()
 	}
 
+	attestStore := qbankattest.NewMySQLStore(sqlDB, attestSigner, feedbackRoot)
+	if sqlDB != nil {
+		regCtx, regCancel := context.WithTimeout(ctx, 5*time.Second)
+		if err := attestStore.EnsureKeyRegistered(regCtx); err != nil {
+			log.Printf("warning: qbank attestation key registration failed: %v", err)
+		}
+		regCancel()
+	}
+
 	auditLogger := auditlog.NewDualLogger(sqlDB, feedbackRoot)
 	authRepo := auth.NewMySQLRepository(sqlDB)
-	qbankRepo := qbank.NewMySQLRepository(sqlDB)
+	qbankRepo := qbank.NewMySQLRepositoryWithAttest(sqlDB, attestStore)
 	sysLogsRepo := syslogs.NewMySQLRepository(sqlDB, feedbackRoot)
 	go func() {
 		runOnce := func() {
@@ -123,15 +150,21 @@ func main() {
 	}()
 	senderCtrlStore := senderctrl.NewStore(feedbackRoot, loader)
 	senderLogsMgr := senderlogs.NewManager(feedbackRoot, senderCtrlStore)
-	adminRepo := admin.NewMySQLRepository(sqlDB)
+	adminRepo := admin.NewMySQLRepositoryWithAttest(sqlDB, attestStore)
 	retestRepo := retest.NewMySQLRepository(sqlDB)
+	verifyLimiter := syslogs.NewIngestLimiter()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handler.Health)
+	mux.HandleFunc("/.well-known/jwks.json", handler.QBankJWKS(attestStore, attestSigner))
+	mux.HandleFunc("/api/v1/qbank/verify", handler.QBankVerify(handler.QBankVerifyDeps{
+		Attest:  attestStore,
+		Limiter: verifyLimiter,
+	}))
 	mux.HandleFunc("/api/public_config.php", handler.PublicConfig(loader))
 	mux.HandleFunc("/api/calibrate_roi.php", handler.CalibrateROI(loader, vc))
 	mux.HandleFunc("/api/identify.php", handler.Identify(loader, vc))
-	mux.HandleFunc("/api/upload_pdf.php", handler.UploadPDF(feedbackRoot, sessStore))
+	mux.HandleFunc("/api/upload_pdf.php", handler.UploadPDFWithAttest(feedbackRoot, sessStore, attestStore))
 	mux.HandleFunc("/api/upload_capture.php", handler.UploadCapture(feedbackRoot, sessStore))
 	mux.HandleFunc("/api/changelog.php", handler.Changelog(feedbackRoot, sessStore))
 	mux.HandleFunc("/api/auth.php", handler.Auth(handler.AuthDeps{
@@ -145,6 +178,8 @@ func main() {
 		Sessions:     sessStore,
 		ConfigLoader: loader,
 		Audit:        auditLogger,
+		Attest:       attestStore,
+		DB:           sqlDB,
 		FeedbackRoot: feedbackRoot,
 	}))
 	mux.HandleFunc("/api/logs.php", handler.Logs(handler.LogsDeps{
@@ -162,6 +197,7 @@ func main() {
 		RateLimit:    rlStore,
 		ConfigLoader: loader,
 		Audit:        auditLogger,
+		Attest:       attestStore,
 		FeedbackRoot: feedbackRoot,
 	}))
 	mux.HandleFunc("/api/retest.php", handler.Retest(handler.RetestDeps{

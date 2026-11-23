@@ -2,6 +2,7 @@ package handler
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -12,7 +13,11 @@ import (
 	"strings"
 	"time"
 
+	"feedback-api/internal/config"
 	"feedback-api/internal/httpx"
+	"feedback-api/internal/normalize"
+	"feedback-api/internal/qbank"
+	"feedback-api/internal/qbankattest"
 	"feedback-api/internal/session"
 )
 
@@ -35,6 +40,11 @@ func phpBaseName(name string) string {
 
 // UploadPDF ports feedback-v1/api/upload_pdf.php (requires teacher/admin session, blocks assistants).
 func UploadPDF(feedbackRoot string, store session.Store) http.HandlerFunc {
+	return UploadPDFWithAttest(feedbackRoot, store, nil)
+}
+
+// UploadPDFWithAttest uploads a PDF, returns SHA-256 + byte size, and records upload_pdf attempt logs when metadata is attached.
+func UploadPDFWithAttest(feedbackRoot string, store session.Store, attest qbankattest.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := session.RequireAuth(w, r, store)
 		if !ok {
@@ -145,10 +155,79 @@ func UploadPDF(feedbackRoot string, store session.Store) http.HandlerFunc {
 			return
 		}
 
+		sum := sha256.Sum256(data)
+		sha256Hex := hex.EncodeToString(sum[:])
+		size := int64(len(data))
+		relURL := "data/pdfs/" + safeName
+
+		if attest != nil {
+			rawBT := strings.TrimSpace(r.FormValue("bankType"))
+			if rawBT == "" {
+				rawBT = strings.TrimSpace(r.FormValue("bank_type"))
+			}
+			rawYear := strings.TrimSpace(r.FormValue("year"))
+			rawSeason := strings.TrimSpace(r.FormValue("season"))
+			subject := strings.TrimSpace(r.FormValue("subject"))
+			grade := strings.TrimSpace(r.FormValue("grade"))
+			tier := strings.TrimSpace(r.FormValue("tier"))
+			rawWeek := strings.TrimSpace(r.FormValue("week"))
+			role := strings.TrimSpace(r.FormValue("role"))
+
+			if rawBT != "" || rawYear != "" || rawSeason != "" || subject != "" || grade != "" || tier != "" || rawWeek != "" || role != "" {
+				bankType := ""
+				if rawBT != "" {
+					bankType = qbank.NormalizeBankType(rawBT)
+				}
+				season := ""
+				if rawSeason != "" {
+					season = normalize.Season(rawSeason, rawSeason)
+				}
+				op := strings.TrimSpace(sess.Username())
+				opName := strings.TrimSpace(sess.StringVal("real_name"))
+				if op == "" && sess.IsAdminLoggedIn() {
+					op = strings.TrimSpace(sess.AdminUsername())
+					if opName == "" {
+						opName = strings.TrimSpace(sess.StringVal("admin_realname"))
+					}
+				}
+				details := map[string]any{
+					"url":           relURL,
+					"sha256":        sha256Hex,
+					"size":          size,
+					"original_name": originalName,
+				}
+				if role != "" {
+					details["role"] = role
+				}
+				_ = attest.RecordAttempt(r.Context(), qbankattest.AttemptInput{
+					EventType: qbankattest.EventUploadPDF,
+					Scope: qbankattest.Scope{
+						BankType: bankType,
+						Year:     config.AsPHPInt(rawYear),
+						Season:   season,
+						Subject:  subject,
+						Grade:    grade,
+						Tier:     tier,
+						Week:     config.AsPHPInt(rawWeek),
+					},
+					Operator:     op,
+					OperatorName: opName,
+					ClientIP:     httpx.GetClientIP(r),
+					FileURL:      relURL,
+					FileName:     originalName,
+					FileSHA256:   sha256Hex,
+					FileSize:     size,
+					Details:      details,
+				})
+			}
+		}
+
 		httpx.SendJSON(w, http.StatusOK, map[string]any{
 			"success":      true,
-			"url":          "data/pdfs/" + safeName,
+			"url":          relURL,
 			"originalName": originalName,
+			"sha256":       sha256Hex,
+			"size":         size,
 		})
 	}
 }

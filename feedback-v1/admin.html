@@ -139,6 +139,18 @@
                             </div>
                             <span class="nav-item-badge" id="nav-batches-badge">0 批</span>
                         </a>
+                        <a href="#" class="nav-item" data-tab="qbank-audit">
+                            <div class="nav-item-left">
+                                <div class="nav-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                                        <polyline points="9 12 11 14 15 10"></polyline>
+                                    </svg>
+                                </div>
+                                <span class="nav-text">题库存证</span>
+                            </div>
+                            <span class="nav-item-badge" id="nav-qbank-audit-badge">-</span>
+                        </a>
                         <a href="#" class="nav-item" data-tab="logs">
                             <div class="nav-item-left">
                                 <div class="nav-icon">
@@ -858,6 +870,244 @@
                     </div>
                 </div>
 
+                <!-- TAB: QBANK AUDIT & ATTESTATION TIMELINE -->
+                <div id="qbank-audit-tab" class="tab-content">
+                    <!-- Subview Switcher -->
+                    <div class="db-tabs-bar" style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                            <button type="button" class="btn primary" id="qba-view-btn-both" data-action="qba-switch-view" data-arg="both" style="padding: 7px 14px; font-size: 0.86rem;">
+                                <span>双区联查（配置总览 + 操作时间线）</span>
+                            </button>
+                            <button type="button" class="btn secondary" id="qba-view-btn-matrix" data-action="qba-switch-view" data-arg="matrix" style="padding: 7px 14px; font-size: 0.86rem;">
+                                <span>配置回执总览</span>
+                                <span id="qba-matrix-count-badge" class="db-pill-count">0</span>
+                            </button>
+                            <button type="button" class="btn secondary" id="qba-view-btn-timeline" data-action="qba-switch-view" data-arg="timeline" style="padding: 7px 14px; font-size: 0.86rem;">
+                                <span>教师操作复盘时间线</span>
+                                <span id="qba-timeline-count-badge" class="db-pill-count">0</span>
+                            </button>
+                        </div>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <a href="verify-qbank.html" target="_blank" rel="noopener noreferrer" class="btn secondary" style="padding: 6px 12px; font-size: 0.82rem;">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                    <polyline points="15 3 21 3 21 9"></polyline>
+                                    <line x1="10" y1="14" x2="21" y2="3"></line>
+                                </svg>
+                                <span>打开公开核验页</span>
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- Section 1: 配置回执总览 (qbank_matrix) -->
+                    <section id="qba-matrix-section" style="margin-bottom: 22px;">
+                        <div class="pro-toolbar">
+                            <div class="toolbar-filter-group">
+                                <select id="qba-mat-year" class="custom-select" data-change="qba-matrix-reload" aria-label="筛选学年">
+                                    <option value="">全部学年</option>
+                                </select>
+                                <select id="qba-mat-season" class="custom-select" data-change="qba-matrix-reload" aria-label="筛选学期">
+                                    <option value="">全部学期</option>
+                                    <option value="春">春季</option>
+                                    <option value="暑">暑假</option>
+                                    <option value="秋">秋季</option>
+                                    <option value="寒">寒假</option>
+                                </select>
+                                <select id="qba-mat-bank-type" class="custom-select" data-change="qba-matrix-reload" aria-label="筛选题库类型">
+                                    <option value="">全部类型</option>
+                                    <option value="homework">课后巩固</option>
+                                    <option value="preview">预习</option>
+                                    <option value="variation">课后举一反三</option>
+                                </select>
+                                <select id="qba-mat-subject" class="custom-select" data-change="qba-matrix-reload" aria-label="筛选学科">
+                                    <option value="">全部学科</option>
+                                </select>
+                                <select id="qba-mat-grade" class="custom-select" data-change="qba-matrix-reload" aria-label="筛选年级">
+                                    <option value="">全部年级</option>
+                                </select>
+                                <div class="search-input-wrap" style="width: 240px;">
+                                    <svg class="search-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <circle cx="11" cy="11" r="8"></circle>
+                                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                    </svg>
+                                    <input type="text" id="qba-mat-search" placeholder="搜索回执号、班层、教师..." data-input="qba-matrix-search">
+                                </div>
+                                <button type="button" class="btn secondary" id="qba-mat-reset-btn" data-action="qba-matrix-reset" style="display: none; padding: 6px 12px; font-size: 0.82rem;">
+                                    <span>重置筛选</span>
+                                </button>
+                            </div>
+                            <div class="toolbar-actions-group">
+                                <button type="button" class="btn secondary" data-action="qba-matrix-reload" title="刷新配置回执总览">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                                    </svg>
+                                    <span>刷新总览</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="table-card">
+                            <div class="table-wrapper" id="qba-matrix-table-wrapper" style="max-height: 420px; overflow-y: auto;">
+                                <table class="data-table" id="qba-matrix-table">
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 120px;">学期 / 类型</th>
+                                            <th style="width: 190px;">学科 / 年级 / 班层 / 专题</th>
+                                            <th style="width: 255px;">最新存证回执号</th>
+                                            <th style="width: 125px;">最新版本 / 动作</th>
+                                            <th style="width: 70px; text-align: center;">题数</th>
+                                            <th style="width: 125px; text-align: center;">版本 / 过程日志</th>
+                                            <th style="width: 135px;">最后修改人</th>
+                                            <th style="width: 140px;">更新时间</th>
+                                            <th style="width: 125px; text-align: right;">操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="qba-matrix-tbody">
+                                        <tr>
+                                            <td colspan="9" class="table-empty">
+                                                <div class="empty-state"><span>正在加载配置回执总览...</span></div>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="table-pagination" id="qba-matrix-summary" style="font-size: 0.82rem; color: var(--text-muted);">
+                                共 0 个已配置专题
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Section 2: 教师操作复盘时间线 (qbank_timeline) -->
+                    <section id="qba-timeline-section">
+                        <!-- KPI Stats Cards -->
+                        <div class="metrics-pill-bar">
+                            <div class="metric-pill-card">
+                                <div class="metric-icon-bubble action">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg>
+                                </div>
+                                <div class="metric-data-col">
+                                    <span class="metric-data-num stat-action" id="qba-stat-revisions">0</span>
+                                    <span class="metric-data-title">存证版本数</span>
+                                </div>
+                            </div>
+                            <div class="metric-pill-card">
+                                <div class="metric-icon-bubble info">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                                </div>
+                                <div class="metric-data-col">
+                                    <span class="metric-data-num stat-info" id="qba-stat-uploads">0</span>
+                                    <span class="metric-data-title">PDF 上传数</span>
+                                </div>
+                            </div>
+                            <div class="metric-pill-card">
+                                <div class="metric-icon-bubble error">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+                                </div>
+                                <div class="metric-data-col">
+                                    <span class="metric-data-num stat-error" id="qba-stat-blocked">0</span>
+                                    <span class="metric-data-title">被拦截 / 报错数</span>
+                                </div>
+                            </div>
+                            <div class="metric-pill-card">
+                                <div class="metric-icon-bubble warn">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                                </div>
+                                <div class="metric-data-col">
+                                    <span class="metric-data-num stat-warn" id="qba-stat-cancelled">0</span>
+                                    <span class="metric-data-title">取消保存数</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Linked Scope Indicator -->
+                        <div id="qba-linked-scope-bar" style="display: none; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 10px 14px; margin-bottom: 12px; border-radius: var(--radius-md); background: var(--primary-light); border: 1px solid var(--primary-border);">
+                            <div style="font-size: 0.84rem; color: var(--text-primary);">
+                                <span style="color: var(--primary); font-weight: 600;">已联动专题筛选：</span>
+                                <span id="qba-linked-scope-text">-</span>
+                            </div>
+                            <button type="button" class="btn secondary" data-action="qba-tl-clear-scope" style="padding: 4px 10px; font-size: 0.78rem;">清除专题联动</button>
+                        </div>
+
+                        <!-- Timeline Filter Toolbar -->
+                        <div class="records-filter-panel" style="gap: 10px;">
+                            <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+                                <select id="qba-tl-teacher-select" class="custom-select" data-change="qba-tl-teacher-select" aria-label="按教师账号选择">
+                                    <option value="">全部教师</option>
+                                </select>
+                                <div class="search-input-wrap" style="width: 200px;">
+                                    <svg class="search-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <circle cx="11" cy="11" r="8"></circle>
+                                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                    </svg>
+                                    <input type="text" id="qba-tl-operator" placeholder="搜索教师账号/姓名..." data-input="qba-tl-search">
+                                </div>
+                                <select id="qba-tl-event-type" class="custom-select" data-change="qba-tl-reload" aria-label="事件类型">
+                                    <option value="">全部事件类型</option>
+                                    <option value="revision">存证版本 (保存/同步/删除)</option>
+                                    <option value="upload_pdf">上传切片 (upload_pdf)</option>
+                                    <option value="client_blocked,save_rejected">校验拦截 (client_blocked + save_rejected)</option>
+                                    <option value="save_cancelled">取消保存 (save_cancelled)</option>
+                                    <option value="save_error">保存异常 (save_error)</option>
+                                </select>
+                                <select id="qba-tl-year" class="custom-select" data-change="qba-tl-reload" aria-label="时间线学年">
+                                    <option value="">全部学年</option>
+                                </select>
+                                <select id="qba-tl-season" class="custom-select" data-change="qba-tl-reload" aria-label="时间线学期">
+                                    <option value="">全部学期</option>
+                                    <option value="春">春季</option>
+                                    <option value="暑">暑假</option>
+                                    <option value="秋">秋季</option>
+                                    <option value="寒">寒假</option>
+                                </select>
+                                <select id="qba-tl-bank-type" class="custom-select" data-change="qba-tl-reload" aria-label="时间线题库类型">
+                                    <option value="">全部类型</option>
+                                    <option value="homework">课后巩固</option>
+                                    <option value="preview">预习</option>
+                                    <option value="variation">课后举一反三</option>
+                                </select>
+                            </div>
+                            <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;">
+                                <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+                                    <select id="qba-tl-subject" class="custom-select" data-change="qba-tl-reload" aria-label="时间线学科">
+                                        <option value="">全部学科</option>
+                                    </select>
+                                    <select id="qba-tl-grade" class="custom-select" data-change="qba-tl-reload" aria-label="时间线年级">
+                                        <option value="">全部年级</option>
+                                    </select>
+                                    <select id="qba-tl-tier" class="custom-select" data-change="qba-tl-reload" aria-label="时间线班层">
+                                        <option value="">全部班层</option>
+                                    </select>
+                                    <select id="qba-tl-week" class="custom-select" data-change="qba-tl-reload" aria-label="时间线专题周次">
+                                        <option value="">全部周次</option>
+                                    </select>
+                                    <div style="display: inline-flex; align-items: center; gap: 6px;">
+                                        <input type="date" id="qba-tl-date-from" class="custom-input" style="width: 142px;" data-change="qba-tl-reload" aria-label="开始日期" title="开始日期">
+                                        <span style="color: var(--text-muted); font-size: 0.8rem;">至</span>
+                                        <input type="date" id="qba-tl-date-to" class="custom-input" style="width: 142px;" data-change="qba-tl-reload" aria-label="结束日期" title="结束日期">
+                                    </div>
+                                    <select id="qba-tl-page-size" class="custom-select" data-change="qba-tl-pagesize" aria-label="每页条数">
+                                        <option value="20">20 条/页</option>
+                                        <option value="50">50 条/页</option>
+                                        <option value="100">100 条/页</option>
+                                    </select>
+                                </div>
+                                <div style="display: flex; gap: 8px; align-items: center;">
+                                    <button type="button" class="btn secondary" data-action="qba-tl-reset" style="padding: 6px 12px; font-size: 0.82rem;">重置筛选</button>
+                                    <button type="button" class="btn secondary" data-action="qba-tl-reload" style="padding: 6px 12px; font-size: 0.82rem;">刷新时间线</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Timeline Feed Card -->
+                        <div class="table-card">
+                            <div id="qba-timeline-list">
+                                <div style="padding: 36px; text-align: center; color: var(--text-muted);">正在加载教师操作复盘时间线...</div>
+                            </div>
+                            <div class="table-pagination" id="qba-timeline-pagination"></div>
+                        </div>
+                    </section>
+                </div>
+
                 <!-- TAB: TEACHERS (独立教师账号管理) -->
                 <div id="teachers-tab" class="tab-content">
                     <!-- Pro Toolbar -->
@@ -1420,6 +1670,22 @@
         </div>
     </dialog>
 
+    <!-- Modal: Qbank Revisions History -->
+    <dialog class="modal-overlay native-dialog" id="qba-revisions-modal" closedby="any">
+        <div class="modal-box" style="max-width: 900px; max-height: 90vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <h4 id="qba-rev-modal-title">历史存证版本链</h4>
+                <button type="button" class="modal-close" data-action="qba-close-revisions" aria-label="关闭">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="modal-body" id="qba-rev-modal-body" style="overflow-y: auto; padding: 18px 20px;"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn secondary" data-action="qba-close-revisions">关闭</button>
+            </div>
+        </div>
+    </dialog>
+
     <!-- JAVASCRIPT APPLICATION LOGIC -->
 
     <!-- Floating Batch Action Dock -->
@@ -1443,7 +1709,7 @@
     </div>
 
     <!-- JAVASCRIPT APPLICATION LOGIC -->
-    <script defer src="js/admin.js?v=20261120-154810"></script>
+    <script defer src="js/admin.js?v=20261123-000001"></script>
 </body>
 
 </html>

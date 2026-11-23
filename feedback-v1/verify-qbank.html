@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="color-scheme" content="light dark">
+    <meta name="theme-color" content="#141415">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>题库配置存证核验 - 极方教研</title>
+    <meta name="description" content="极方教学反馈系统题库配置数字存证公开核验页，支持在线回执查询、哈希链查验与离线 Ed25519 独立验真">
+    <script src="js/theme-boot.js?v=20261120-154810"></script>
+    <link rel="stylesheet" href="css/common.css?v=20261120-154810">
+    <link rel="stylesheet" href="css/verify-qbank.css?v=20261123-000001">
+    <link rel="stylesheet" href="css/tokens.css?v=20261120-154810">
+    <script defer src="js/libs/polyfill-at.js"></script>
+    <script defer src="js/verify-qbank.js?v=20261123-000001"></script>
+</head>
+<body class="verify-page">
+
+    <div class="toast-container" id="toast-container" popover="manual"></div>
+
+    <div class="vq-shell">
+        <!-- Topbar -->
+        <header class="vq-topbar">
+            <div class="vq-brand">
+                <div class="vq-brand-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                        <polyline points="9 12 11 14 15 10"></polyline>
+                    </svg>
+                </div>
+                <div class="vq-brand-text">
+                    <div class="vq-brand-title">题库配置存证核验</div>
+                    <div class="vq-brand-sub">免登录公开核验 · Ed25519 + SHA-256 哈希链</div>
+                </div>
+            </div>
+
+            <div class="vq-topbar-actions">
+                <button type="button" class="vq-jwks-pill" id="btn-open-jwks" title="查看系统公开验签公钥 (JWKS)">
+                    <span class="vq-jwks-dot" id="jwks-status-dot"></span>
+                    <span id="jwks-status-text">公钥库加载中</span>
+                </button>
+
+                <div class="theme-segmented" role="group" aria-label="主题模式">
+                    <button type="button" class="theme-seg-btn" data-theme-set="light" title="浅色模式" aria-label="浅色模式" aria-pressed="false">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="12" cy="12" r="4"></circle>
+                            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+                        </svg>
+                    </button>
+                    <button type="button" class="theme-seg-btn" data-theme-set="system" title="跟随系统" aria-label="跟随系统" aria-pressed="false">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                            <line x1="8" y1="21" x2="16" y2="21"></line>
+                            <line x1="12" y1="17" x2="12" y2="21"></line>
+                        </svg>
+                    </button>
+                    <button type="button" class="theme-seg-btn" data-theme-set="dark" title="深色模式" aria-label="深色模式" aria-pressed="false">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Dual Mode Switcher -->
+        <nav class="vq-mode-bar" role="tablist" aria-label="核验模式">
+            <button type="button" class="vq-mode-btn active" id="mode-btn-online" role="tab" aria-selected="true" data-vq-mode="online">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <span>在线回执核验</span>
+            </button>
+            <button type="button" class="vq-mode-btn" id="mode-btn-offline" role="tab" aria-selected="false" data-vq-mode="offline">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <polyline points="9 15 11 17 15 13"></polyline>
+                </svg>
+                <span>离线凭证验真 (.json)</span>
+            </button>
+        </nav>
+
+        <!-- MODE 1: ONLINE VERIFICATION -->
+        <section id="panel-online" class="vq-panel active" role="tabpanel" aria-labelledby="mode-btn-online">
+            <div class="vq-card vq-query-card">
+                <div class="vq-section-head">
+                    <div>
+                        <h1 class="vq-title">查询并核验题库存证回执</h1>
+                        <p class="vq-subtitle">输入回执编号或扫描回执卡二维码，核实配置版本有效性、操作教师、修改时间与数字签名。</p>
+                    </div>
+                </div>
+
+                <form id="online-verify-form" class="vq-search-row">
+                    <div class="vq-input-wrap">
+                        <input
+                            type="text"
+                            id="online-code-input"
+                            class="vq-input vq-mono"
+                            placeholder="请输入回执编号，如 QB-20261123-102430-A1B2（支持粘贴完整核验链接）"
+                            autocomplete="off"
+                            spellcheck="false"
+                            aria-label="存证回执编号"
+                        >
+                        <button type="button" class="vq-input-clear" id="btn-online-clear" title="清空输入" aria-label="清空输入" hidden>
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                        </button>
+                    </div>
+                    <div class="vq-search-btns">
+                        <button type="button" class="vq-btn secondary" id="btn-online-paste">
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>
+                            <span>粘贴</span>
+                        </button>
+                        <button type="submit" class="vq-btn primary" id="btn-online-submit">
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg>
+                            <span>立即核验</span>
+                        </button>
+                    </div>
+                </form>
+
+                <div class="vq-format-guide">
+                    <span class="vq-guide-label">编号格式示例：</span>
+                    <code class="vq-code-chip">QB-20261123-143015-9F2A</code>
+                    <span class="vq-guide-sep">·</span>
+                    <span>核验过程脱敏保护，仅展示知识点覆盖与文件 SHA-256 指纹，不提供题目原文件下载。</span>
+                </div>
+            </div>
+
+            <!-- Online States -->
+            <div id="online-loading" class="vq-card vq-state-box" hidden>
+                <div class="vq-spinner" aria-hidden="true"></div>
+                <div class="vq-state-title">正在检索存证台账并重验密码学签名...</div>
+                <div class="vq-state-desc">同步向服务端台账与 /.well-known/jwks.json 拉取公钥进行浏览器本地独立验签</div>
+            </div>
+
+            <div id="online-error" class="vq-card vq-state-box" hidden>
+                <div class="vq-state-icon error" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                </div>
+                <div class="vq-state-title" id="online-error-title">核验请求失败</div>
+                <div class="vq-state-desc" id="online-error-desc">请检查网络连接后重试。</div>
+                <div class="vq-state-actions">
+                    <button type="button" class="vq-btn primary" id="btn-online-retry">重新核验</button>
+                </div>
+            </div>
+
+            <div id="online-empty" class="vq-card vq-empty-guide">
+                <div class="vq-empty-grid">
+                    <div class="vq-empty-item">
+                        <span class="vq-status-pill valid">VALID 有效最新版本</span>
+                        <p>该题库配置已在系统存证生效，且当前仍是对应专题的最新版本。</p>
+                    </div>
+                    <div class="vq-empty-item">
+                        <span class="vq-status-pill superseded">SUPERSEDED 已被覆盖</span>
+                        <p>历史曾存在此配置，但已被后续保存覆盖，页面将指向继任回执号与变更摘要。</p>
+                    </div>
+                    <div class="vq-empty-item">
+                        <span class="vq-status-pill deleted">DELETED 已被删除</span>
+                        <p>历史曾保存此配置，现已从当前生效题库删除，保留删除人与删除时间存证。</p>
+                    </div>
+                    <div class="vq-empty-item">
+                        <span class="vq-status-pill not-found">NOT_FOUND 查无记录</span>
+                        <p>系统存证台账中未检索到该回执编号，请检查编号拼写或改用离线凭证验真。</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="online-result" class="vq-result-stack" hidden></div>
+        </section>
+
+        <!-- MODE 2: OFFLINE CREDENTIAL VERIFICATION -->
+        <section id="panel-offline" class="vq-panel" role="tabpanel" aria-labelledby="mode-btn-offline" hidden>
+            <div class="vq-card vq-query-card">
+                <div class="vq-section-head">
+                    <div>
+                        <h1 class="vq-title">离线存证凭证独立验真</h1>
+                        <p class="vq-subtitle">无需信任任何界面截图，直接在本地浏览器使用 WebCrypto Ed25519 校验教师导出的 <code>.json</code> 存证凭证。</p>
+                    </div>
+                </div>
+
+                <!-- Dropzone -->
+                <div id="offline-dropzone" class="vq-dropzone" tabindex="0" role="button" aria-label="拖拽或点击选择离线凭证 JSON 文件">
+                    <input type="file" id="offline-file-input" accept=".json,application/json" hidden>
+                    <div class="vq-dropzone-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="17 8 12 3 7 8"></polyline>
+                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                        </svg>
+                    </div>
+                    <div class="vq-dropzone-title">拖拽 <code>.json</code> 凭证文件到此处，或点击选择文件</div>
+                    <div class="vq-dropzone-sub" id="offline-file-name">支持教师端回执卡下载的标准存证凭证文件（纯本地解析，不上传文件）</div>
+                </div>
+
+                <!-- Paste JSON -->
+                <div class="vq-field-block">
+                    <div class="vq-field-label-row">
+                        <label for="offline-json-input" class="vq-field-label">凭证 JSON 内容</label>
+                        <button type="button" class="vq-link-btn" id="btn-offline-format">格式化 JSON</button>
+                    </div>
+                    <textarea
+                        id="offline-json-input"
+                        class="vq-textarea vq-mono"
+                        rows="6"
+                        spellcheck="false"
+                        placeholder='在此粘贴离线凭证 JSON，例如 { "receipt": { ... }, "canonical_payload": "...", "signature": "...", "kid": "..." }'
+                    ></textarea>
+                </div>
+
+                <!-- Public Key Source -->
+                <div class="vq-field-block">
+                    <div class="vq-field-label-row">
+                        <span class="vq-field-label">验签公钥 (JWK) 来源</span>
+                        <div class="vq-key-source-tabs" role="group" aria-label="公钥来源">
+                            <button type="button" class="vq-key-src-btn active" id="btn-keysrc-jwks" data-keysrc="jwks">自动拉取 JWKS 公钥库</button>
+                            <button type="button" class="vq-key-src-btn" id="btn-keysrc-manual" data-keysrc="manual">手动粘贴 JWK 公钥</button>
+                        </div>
+                    </div>
+
+                    <div id="offline-keysrc-jwks" class="vq-keysrc-box">
+                        <div class="vq-keysrc-status">
+                            <span id="offline-jwks-summary">正在连接 /.well-known/jwks.json ...</span>
+                            <button type="button" class="vq-btn sm secondary" id="btn-refresh-jwks">刷新公钥库</button>
+                        </div>
+                    </div>
+
+                    <div id="offline-keysrc-manual" class="vq-keysrc-box" hidden>
+                        <textarea
+                            id="offline-jwk-input"
+                            class="vq-textarea vq-mono"
+                            rows="4"
+                            spellcheck="false"
+                            placeholder='粘贴单个 OKP Ed25519 JWK（如 {"kty":"OKP","crv":"Ed25519","kid":"...","x":"..."}）或完整 JWKS {"keys":[...]}'
+                        ></textarea>
+                    </div>
+                </div>
+
+                <div class="vq-offline-actions">
+                    <button type="button" class="vq-btn primary" id="btn-offline-verify">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg>
+                        <span>本地浏览器独立验真</span>
+                    </button>
+                    <button type="button" class="vq-btn secondary" id="btn-offline-clear">清空输入</button>
+                </div>
+            </div>
+
+            <div id="offline-result" class="vq-result-stack" hidden></div>
+        </section>
+
+        <footer class="vq-footer">
+            <span>极方教学反馈系统 · 题库配置存证平台</span>
+            <span>·</span>
+            <span>签名算法：Ed25519 (RFC 8037 OKP)</span>
+        </footer>
+    </div>
+
+    <!-- JWKS Inspector Modal -->
+    <dialog id="jwks-modal" class="modal-overlay native-dialog" closedby="any">
+        <div class="vq-modal-card">
+            <div class="vq-modal-head">
+                <div>
+                    <h2 class="vq-modal-title">系统公开验签公钥 (JWKS)</h2>
+                    <div class="vq-modal-sub">端点：<code>/.well-known/jwks.json</code></div>
+                </div>
+                <button type="button" class="vq-modal-close" id="btn-close-jwks" aria-label="关闭">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="vq-modal-body" id="jwks-modal-body">
+                <div class="vq-state-desc">正在加载公钥列表...</div>
+            </div>
+            <div class="vq-modal-foot">
+                <button type="button" class="vq-btn secondary" id="btn-modal-refresh-jwks">重新拉取</button>
+                <button type="button" class="vq-btn primary" id="btn-modal-close-jwks">关闭</button>
+            </div>
+        </div>
+    </dialog>
+
+</body>
+</html>

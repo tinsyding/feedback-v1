@@ -18,6 +18,7 @@ import (
 	"feedback-api/internal/auditlog"
 	"feedback-api/internal/config"
 	"feedback-api/internal/httpx"
+	"feedback-api/internal/qbankattest"
 	"feedback-api/internal/ratelimit"
 	"feedback-api/internal/session"
 	"feedback-api/internal/tz"
@@ -30,6 +31,7 @@ type AdminDeps struct {
 	RateLimit    ratelimit.Store
 	ConfigLoader *config.Loader
 	Audit        auditlog.Logger
+	Attest       qbankattest.Store
 	FeedbackRoot string
 	HTTPClient   *http.Client
 	NowFunc      func() time.Time
@@ -114,6 +116,14 @@ func Admin(deps AdminDeps) http.HandlerFunc {
 			handleAdminRecordHistory(w, r, deps)
 		case "record_rollback":
 			handleAdminRecordRollback(w, r, deps)
+
+		// 7. QBank Attestation Audit
+		case "qbank_timeline":
+			handleAdminQBankTimeline(w, r, deps)
+		case "qbank_matrix":
+			handleAdminQBankMatrix(w, r, deps)
+		case "qbank_revisions":
+			handleAdminQBankRevisions(w, r, deps)
 
 		default:
 			httpx.SendResponse(w, false, nil, httpx.StrPtr("未知操作: "+html.EscapeString(action)), http.StatusBadRequest)

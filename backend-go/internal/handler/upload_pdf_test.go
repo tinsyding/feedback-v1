@@ -2,6 +2,9 @@ package handler
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
@@ -12,6 +15,7 @@ import (
 	"testing"
 
 	"feedback-api/internal/httpx"
+	"feedback-api/internal/qbankattest"
 	"feedback-api/internal/session"
 )
 
@@ -133,5 +137,90 @@ func TestUploadPDF(t *testing.T) {
 	}
 	if tmps, err := filepath.Glob(filepath.Join(root, "data", "pdfs", ".tmp-*")); err != nil || len(tmps) != 0 {
 		t.Fatalf("unexpected leftover temp files: %v (err=%v)", tmps, err)
+	}
+}
+
+func TestUploadPDFWithAttestSHA256AndAttemptLog(t *testing.T) {
+	root := t.TempDir()
+	store := session.NewMemoryStore()
+	teacherSID := "sess_teacher_upload_pdf_attest"
+	store.Set(teacherSID, map[string]any{
+		"user_logged_in": true,
+		"username":       "t101",
+		"real_name":      "张老师",
+		"user_role":      "teacher",
+	})
+
+	signer, err := qbankattest.NewEphemeralSigner("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	attestStore := qbankattest.NewMemoryStore(signer, root)
+	h := httpx.Middleware(UploadPDFWithAttest(root, store, attestStore))
+
+	// 1. Upload with scope metadata -> returns sha256 & size AND logs upload_pdf attempt
+	pdfPayload := []byte("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n")
+	wantSum := sha256.Sum256(pdfPayload)
+	wantSHA := hex.EncodeToString(wantSum[:])
+
+	body, ct := buildSingleFileMultipart(t, "file", "slice_q1.pdf", pdfPayload, map[string]string{
+		"bankType": "homework",
+		"year":     "2026",
+		"season":   "autumn",
+		"subject":  "数学",
+		"grade":    "七年级",
+		"tier":     "S+",
+		"week":     "3",
+		"role":     "exercise",
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/upload_pdf.php", body)
+	req.Header.Set("Content-Type", ct)
+	req.RemoteAddr = "198.51.100.88:4321"
+	req.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("upload with attest status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	var out struct {
+		Success      bool   `json:"success"`
+		URL          string `json:"url"`
+		OriginalName string `json:"originalName"`
+		SHA256       string `json:"sha256"`
+		Size         int64  `json:"size"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.Success || out.SHA256 != wantSHA || out.Size != int64(len(pdfPayload)) {
+		t.Fatalf("unexpected upload response: %+v (want sha256=%s size=%d)", out, wantSHA, len(pdfPayload))
+	}
+
+	tl, err := attestStore.ListTimeline(context.Background(), qbankattest.TimelineFilter{EventType: qbankattest.EventUploadPDF})
+	if err != nil || tl.Total != 1 {
+		t.Fatalf("expected 1 upload_pdf attempt log, got tl=%+v err=%v", tl, err)
+	}
+	item := tl.Items[0]
+	if item.Operator != "t101" || item.OperatorName != "张老师" || item.Season != "秋" || item.Subject != "数学" || item.Week != 3 || item.FileName != "slice_q1.pdf" || item.FileSHA256 != wantSHA {
+		t.Fatalf("unexpected upload_pdf timeline item: %+v", item)
+	}
+	if item.Details["role"] != "exercise" || item.Details["url"] != out.URL {
+		t.Fatalf("unexpected upload_pdf details: %+v", item.Details)
+	}
+
+	// 2. Upload without scope metadata -> still returns sha256 & size, no extra attempt log
+	bodyNoMeta, ctNoMeta := buildSingleFileMultipart(t, "file", "plain.pdf", pdfPayload, nil)
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/api/upload_pdf.php", bodyNoMeta)
+	req2.Header.Set("Content-Type", ctNoMeta)
+	req2.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+	h.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK || !strings.Contains(rec2.Body.String(), wantSHA) {
+		t.Fatalf("upload without metadata failed: code=%d body=%s", rec2.Code, rec2.Body.String())
+	}
+	tl2, _ := attestStore.ListTimeline(context.Background(), qbankattest.TimelineFilter{EventType: qbankattest.EventUploadPDF})
+	if tl2.Total != 1 {
+		t.Fatalf("expected upload without scope metadata to skip attempt log, got total=%d", tl2.Total)
 	}
 }

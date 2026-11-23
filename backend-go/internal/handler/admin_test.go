@@ -20,6 +20,7 @@ import (
 	"feedback-api/internal/auditlog"
 	"feedback-api/internal/config"
 	"feedback-api/internal/httpx"
+	"feedback-api/internal/qbankattest"
 	"feedback-api/internal/ratelimit"
 	"feedback-api/internal/session"
 )
@@ -715,5 +716,146 @@ func TestAdminConfigClearKeyAndSSRFGuards(t *testing.T) {
 	}
 	if gotKey := loader.Load().VisionAPIKey(); gotKey != "" {
 		t.Fatalf("expected stored API key to be cleared, still got %q", gotKey)
+	}
+}
+
+func TestAdminQBankAuditEndpoints(t *testing.T) {
+	dir := t.TempDir()
+	signer, err := qbankattest.NewEphemeralSigner("jf-qb-adm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 23, 8, 0, 0, 0, time.UTC)
+	attestStore := qbankattest.NewMemoryStore(signer, dir, qbankattest.WithNowFunc(func() time.Time { return now }))
+
+	scope := qbankattest.Scope{
+		BankType: "homework",
+		Year:     2026,
+		Season:   "秋",
+		Subject:  "数学",
+		Grade:    "七年级",
+		Tier:     "S+",
+		Week:     3,
+	}
+	_, err = attestStore.RecordRevisionTx(context.Background(), nil, qbankattest.RecordRevisionInput{
+		QBankID:      12,
+		Action:       qbankattest.ActionCreate,
+		Scope:        scope,
+		Operator:     "t101",
+		OperatorName: "张老师",
+		Questions:    []qbankattest.SnapshotQuestion{{QuestionNum: 1, Topic: "有理数"}},
+		Now:          now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = attestStore.RecordAttempt(context.Background(), qbankattest.AttemptInput{
+		EventType: qbankattest.EventUploadPDF, Scope: scope, Operator: "t101", OperatorName: "张老师",
+		FileName: "q1.pdf", FileSHA256: strings.Repeat("a", 64), Now: now.Add(time.Minute),
+	})
+	_ = attestStore.RecordAttempt(context.Background(), qbankattest.AttemptInput{
+		EventType: qbankattest.EventClientBlocked, Scope: scope, Operator: "t101", OperatorName: "张老师",
+		Reason: "缺少知识点", Now: now.Add(2 * time.Minute),
+	})
+	_ = attestStore.RecordAttempt(context.Background(), qbankattest.AttemptInput{
+		EventType: qbankattest.EventSaveRejected, Scope: scope, Operator: "t101", OperatorName: "张老师",
+		Reason: "服务端校验失败", Now: now.Add(3 * time.Minute),
+	})
+	_ = attestStore.RecordAttempt(context.Background(), qbankattest.AttemptInput{
+		EventType: qbankattest.EventSaveCancelled, Scope: scope, Operator: "t101", OperatorName: "张老师",
+		Reason: "取消覆盖", Now: now.Add(4 * time.Minute),
+	})
+
+	sessions := session.NewMemoryStore()
+	ck := addAdminCookie(t, sessions, nil)
+	h := httpx.Middleware(Admin(AdminDeps{
+		Repo:         newFakeAdminRepo(),
+		Sessions:     sessions,
+		RateLimit:    ratelimit.NewMemoryStore(),
+		ConfigLoader: config.NewLoader(dir, ""),
+		Audit:        auditlog.NoopLogger{},
+		Attest:       attestStore,
+		FeedbackRoot: dir,
+	}))
+
+	// 1. Unauthenticated -> 401; POST -> 405
+	for _, act := range []string{"qbank_matrix", "qbank_timeline", "qbank_revisions"} {
+		recUnauth := httptest.NewRecorder()
+		h.ServeHTTP(recUnauth, httptest.NewRequest(http.MethodGet, "http://feedback.wxjifang.cn/api/admin.php?action="+act, nil))
+		if recUnauth.Code != http.StatusUnauthorized {
+			t.Fatalf("%s unauth status = %d, want 401", act, recUnauth.Code)
+		}
+		reqPost := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/admin.php?action="+act, nil)
+		reqPost.Host = "feedback.wxjifang.cn"
+		reqPost.Header.Set("Origin", "http://feedback.wxjifang.cn")
+		reqPost.AddCookie(ck)
+		recPost := httptest.NewRecorder()
+		h.ServeHTTP(recPost, reqPost)
+		if recPost.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("%s POST status = %d, want 405", act, recPost.Code)
+		}
+	}
+
+	// 2. qbank_matrix
+	reqMat := httptest.NewRequest(http.MethodGet, "http://feedback.wxjifang.cn/api/admin.php?action=qbank_matrix&year=2026&season=%E7%A7%8B&bank_type=homework&subject=%E6%95%B0%E5%AD%A6", nil)
+	reqMat.AddCookie(ck)
+	recMat := httptest.NewRecorder()
+	h.ServeHTTP(recMat, reqMat)
+	if recMat.Code != http.StatusOK {
+		t.Fatalf("qbank_matrix status = %d, body=%s", recMat.Code, recMat.Body.String())
+	}
+	var matResp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Items []qbankattest.MatrixItem `json:"items"`
+			Total int                      `json:"total"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recMat.Body.Bytes(), &matResp); err != nil {
+		t.Fatal(err)
+	}
+	if !matResp.Success || matResp.Data.Total != 1 || len(matResp.Data.Items) != 1 || matResp.Data.Items[0].AttemptCount != 4 {
+		t.Fatalf("unexpected qbank_matrix response: %+v", matResp)
+	}
+
+	// 3. qbank_revisions
+	reqRev := httptest.NewRequest(http.MethodGet, "http://feedback.wxjifang.cn/api/admin.php?action=qbank_revisions&year=2026&season=autumn&bank_type=homework&subject=%E6%95%B0%E5%AD%A6&grade=%E4%B8%83%E5%B9%B4%E7%BA%A7&tier=S%2B&week=3", nil)
+	reqRev.AddCookie(ck)
+	recRev := httptest.NewRecorder()
+	h.ServeHTTP(recRev, reqRev)
+	if recRev.Code != http.StatusOK {
+		t.Fatalf("qbank_revisions status = %d, body=%s", recRev.Code, recRev.Body.String())
+	}
+	var revResp struct {
+		Success bool                       `json:"success"`
+		Data    struct {
+			Items []qbankattest.RevisionItem `json:"items"`
+			Total int                        `json:"total"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recRev.Body.Bytes(), &revResp); err != nil {
+		t.Fatal(err)
+	}
+	if !revResp.Success || len(revResp.Data.Items) != 1 || revResp.Data.Items[0].RevisionNo != 1 {
+		t.Fatalf("unexpected qbank_revisions response: %+v", revResp)
+	}
+
+	// 4. qbank_timeline with comma-separated event_type=client_blocked,save_rejected
+	reqTL := httptest.NewRequest(http.MethodGet, "http://feedback.wxjifang.cn/api/admin.php?action=qbank_timeline&page=1&page_size=20&operator=%E5%BC%A0&event_type=client_blocked,save_rejected", nil)
+	reqTL.AddCookie(ck)
+	recTL := httptest.NewRecorder()
+	h.ServeHTTP(recTL, reqTL)
+	if recTL.Code != http.StatusOK {
+		t.Fatalf("qbank_timeline status = %d, body=%s", recTL.Code, recTL.Body.String())
+	}
+	var tlResp struct {
+		Success bool                       `json:"success"`
+		Data    *qbankattest.TimelineResult `json:"data"`
+	}
+	if err := json.Unmarshal(recTL.Body.Bytes(), &tlResp); err != nil {
+		t.Fatal(err)
+	}
+	if !tlResp.Success || tlResp.Data == nil || tlResp.Data.Total != 2 || tlResp.Data.Stats.Revisions != 1 || tlResp.Data.Stats.Uploads != 1 || tlResp.Data.Stats.BlockedOrFailed != 2 || tlResp.Data.Stats.Cancelled != 1 {
+		t.Fatalf("unexpected qbank_timeline response: %+v", tlResp.Data)
 	}
 }

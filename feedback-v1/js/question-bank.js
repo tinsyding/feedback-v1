@@ -69,6 +69,16 @@ function escapeInlineJs(str) {
 
 let currentQuestions = [];
 let isDirty = false;
+let currentLoadedReceiptCode = '';
+let currentLoadedRevisionNo = 0;
+let currentLoadedReceipt = null;
+let currentLoadedMeta = null;
+let savedShowAllTerms = false;
+let activeReceiptModalData = null;
+let activeReceiptModalOptions = {};
+let activeSyncSummaryContext = null;
+let activeRevisionsContext = null;
+let cachedRevisionsList = [];
 let browserFingerprint = '';
 let currentStep = 1;
 let batchExerciseFile = null;
@@ -323,6 +333,7 @@ async function initQuestionBank() {
             }
             if (config.semesterYear) {
                 window.adminSemesterYear = config.semesterYear;
+                ensureYearOption(config.semesterYear);
                 if (yearSelect) yearSelect.value = String(config.semesterYear);
             }
             if (config.defaultSeason !== undefined) {
@@ -333,6 +344,7 @@ async function initQuestionBank() {
                     seasonSelect.value = window.adminDefaultSeasonZh;
                 }
             }
+            updateActiveTermIndicator();
             populateWeekSelector();
             if (subjectSelect) subjectSelect.value = '';
             if (gradeSelect) gradeSelect.value = '';
@@ -342,6 +354,7 @@ async function initQuestionBank() {
             renderSavedDataList();
         })
         .catch(() => {
+            updateActiveTermIndicator();
             populateWeekSelector();
             if (subjectSelect) subjectSelect.value = '';
             if (gradeSelect) gradeSelect.value = '';
@@ -493,12 +506,169 @@ function onBankTypeChange() {
     updateBankTypeUi();
     // 切换题库类型时清空当前编辑内容，避免把课后巩固题目误存到预习题库
     currentQuestions = [];
+    currentLoadedReceiptCode = '';
+    currentLoadedRevisionNo = 0;
+    currentLoadedReceipt = null;
+    currentLoadedMeta = null;
     isDirty = false;
     batchImported = false;
     renderQuestionList();
     updateStatus();
     loadCurrentData();
     if (typeof applySavedDataFilter === 'function') applySavedDataFilter();
+}
+
+function ensureYearOption(yearVal) {
+    if (!yearSelect || !yearVal) return;
+    const strVal = String(yearVal);
+    if (!Array.from(yearSelect.options).some(o => o.value === strVal)) {
+        const opt = document.createElement('option');
+        opt.value = strVal;
+        opt.textContent = `${strVal} 年`;
+        yearSelect.appendChild(opt);
+    }
+}
+
+function getDefaultTerm() {
+    const year = Number(window.adminSemesterYear || (yearSelect ? yearSelect.value : 2026)) || 2026;
+    const season = String(window.adminDefaultSeasonZh || (seasonSelect ? seasonSelect.value : '秋') || '秋').trim();
+    return { year, season };
+}
+
+function getCurrentScope(override = null) {
+    const o = override && typeof override === 'object' ? override : {};
+    const rawYear = o.year !== undefined ? o.year : (yearSelect ? yearSelect.value : 2026);
+    const rawSeason = o.season !== undefined ? o.season : (seasonSelect ? seasonSelect.value : '春');
+    const rawBankType = o.bankType !== undefined ? o.bankType : (o.bank_type !== undefined ? o.bank_type : getBankType());
+    const rawSubject = o.subject !== undefined ? o.subject : (subjectSelect ? subjectSelect.value : '');
+    const rawGrade = o.grade !== undefined ? o.grade : (gradeSelect ? gradeSelect.value : '');
+    const rawTier = o.tier !== undefined ? o.tier : (tierSelect ? tierSelect.value : '');
+    const rawWeek = o.week !== undefined ? o.week : (weekSelect ? weekSelect.value : 0);
+    return {
+        bankType: rawBankType || 'homework',
+        year: parseInt(rawYear, 10) || 2026,
+        season: String(rawSeason || '春').trim(),
+        subject: String(rawSubject || '').trim(),
+        grade: String(rawGrade || '').trim(),
+        tier: String(rawTier || '').trim(),
+        week: parseInt(rawWeek, 10) || 0
+    };
+}
+
+function isExactTermMatch(data, expectedYear, expectedSeason) {
+    if (!data || typeof data !== 'object') return false;
+    if (data.matchedExactTerm === false || data.matched_exact_term === false) return false;
+    if (data.year !== undefined && data.year !== null && Number(data.year) !== Number(expectedYear)) return false;
+    if (data.season !== undefined && data.season !== null && String(data.season).trim() !== String(expectedSeason).trim()) return false;
+    return true;
+}
+
+function updateActiveTermIndicator() {
+    const def = getDefaultTerm();
+    const curYear = yearSelect ? (parseInt(yearSelect.value, 10) || def.year) : def.year;
+    const curSeason = seasonSelect ? (seasonSelect.value || def.season) : def.season;
+    const isHistorical = curYear !== def.year || curSeason !== def.season;
+    const pill = document.getElementById('qb-active-term-pill');
+    const resetBtn = document.getElementById('qb-reset-term-btn');
+    if (pill) {
+        pill.textContent = isHistorical ? `历史学期：${curYear}年${curSeason}季` : `当前学期：${curYear}年${curSeason}季`;
+        pill.classList.toggle('is-historical', isHistorical);
+    }
+    if (resetBtn) {
+        resetBtn.style.display = isHistorical ? 'inline-flex' : 'none';
+    }
+    const curTermBtn = document.getElementById('saved-term-current-btn');
+    if (curTermBtn) {
+        curTermBtn.textContent = `本学期 (${def.year}${def.season})`;
+    }
+}
+
+async function resetToCurrentTerm() {
+    const applyReset = async () => {
+        const def = getDefaultTerm();
+        ensureYearOption(def.year);
+        if (yearSelect) yearSelect.value = String(def.year);
+        if (seasonSelect) seasonSelect.value = def.season;
+        isDirty = false;
+        batchImported = false;
+        updateActiveTermIndicator();
+        await loadCurrentData();
+        if (currentStep !== 1) goToStep(1);
+        showToast(`已切回本学期 (${def.year}年${def.season}季)`, 'info');
+    };
+    if (isDirty) {
+        showCustomDialog({
+            title: '未保存的更改',
+            body: '当前题目配置尚未保存，切回本学期将放弃未保存更改，是否继续？',
+            confirmText: '放弃并切换',
+            danger: true,
+            onConfirm: applyReset
+        });
+        return;
+    }
+    await applyReset();
+}
+
+function logQbankAttempt(eventType, reason, details = {}, scopeOverride = null) {
+    try {
+        const scope = getCurrentScope(scopeOverride);
+        const payload = {
+            event_type: String(eventType || '').trim(),
+            bankType: scope.bankType,
+            year: scope.year,
+            season: scope.season,
+            subject: scope.subject,
+            grade: scope.grade,
+            tier: scope.tier,
+            week: scope.week,
+            reason: String(reason || '').slice(0, 250),
+            details: (details && typeof details === 'object') ? details : {}
+        };
+        fetch(`${API_BASE}?action=log_attempt`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            keepalive: true,
+            body: JSON.stringify(payload)
+        }).catch(() => {});
+    } catch (_) {}
+}
+window.logQbankAttempt = logQbankAttempt;
+
+function buildVerifyUrl(receiptCode) {
+    const code = String(receiptCode || '').trim();
+    if (!code) return '';
+    const lastSlash = window.location.pathname.lastIndexOf('/');
+    const basePath = lastSlash > 0 ? window.location.pathname.substring(0, lastSlash) : '';
+    return `${window.location.origin}${basePath}/verify-qbank.html?code=${encodeURIComponent(code)}`;
+}
+
+async function copyTextToClipboard(text) {
+    const value = String(text ?? '');
+    if (!value) return false;
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function' && window.isSecureContext) {
+        try {
+            await navigator.clipboard.writeText(value);
+            return true;
+        } catch (_) {}
+    }
+    try {
+        const openDialogs = Array.from(document.querySelectorAll('dialog[open]'));
+        const mountTarget = openDialogs.length > 0 ? openDialogs[openDialogs.length - 1] : document.body;
+        const ta = document.createElement('textarea');
+        ta.value = value;
+        ta.setAttribute('readonly', '');
+        ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;';
+        mountTarget.appendChild(ta);
+        ta.focus();
+        ta.select();
+        ta.setSelectionRange(0, value.length);
+        const ok = document.execCommand('copy');
+        ta.remove();
+        return Boolean(ok);
+    } catch (_) {
+        return false;
+    }
 }
 
 function populateWeekSelector() {
@@ -885,9 +1055,9 @@ async function loadHomeworkQuestionsForVariation() {
 
     try {
         const res = await apiGet('get', {
-            year, season, bankType: 'homework', subject, grade, tier, week
+            year, season, bankType: 'homework', subject, grade, tier, week, strict: 1
         });
-        if (res && res.success && res.data && Array.isArray(res.data.questions) && res.data.questions.length > 0) {
+        if (res && res.success && res.data && isExactTermMatch(res.data, year, season) && Array.isArray(res.data.questions) && res.data.questions.length > 0) {
             homeworkQuestionsForVariation = res.data.questions;
         } else {
             homeworkQuestionsForVariation = [];
@@ -2975,13 +3145,18 @@ function selectBatchPdf(type) {
 
 // ========== Load / Save ==========
 async function loadCurrentData() {
-    const year = yearSelect ? parseInt(yearSelect.value) : 2026;
+    const year = yearSelect ? (parseInt(yearSelect.value, 10) || 2026) : 2026;
     const season = seasonSelect ? seasonSelect.value : '春';
     const bankType = getBankType();
     const subject = subjectSelect ? subjectSelect.value : '';
     const grade = gradeSelect ? gradeSelect.value : '';
     const tier = tierSelect ? tierSelect.value : '';
     const week = weekSelect ? weekSelect.value : '';
+
+    currentLoadedReceiptCode = '';
+    currentLoadedRevisionNo = 0;
+    currentLoadedReceipt = null;
+    currentLoadedMeta = null;
 
     if (!bankType || !subject || !grade || !tier || !week) {
         currentQuestions = [];
@@ -2990,6 +3165,7 @@ async function loadCurrentData() {
         updateStatus();
         highlightActiveSavedItem();
         updateStep1ButtonState();
+        updateActiveTermIndicator();
         return;
     }
 
@@ -2997,19 +3173,31 @@ async function loadCurrentData() {
         if (bankType === 'variation') {
             await loadHomeworkQuestionsForVariation();
         }
-        const result = await apiGet('get', { year, season, bankType, subject, grade, tier, week });
-        if (result.success && result.data) {
-            currentQuestions = result.data.questions || [];
+        const result = await apiGet('get', { year, season, bankType, subject, grade, tier, week, strict: 1 });
+        if (result && result.success && result.data && isExactTermMatch(result.data, year, season)) {
+            currentQuestions = Array.isArray(result.data.questions) ? result.data.questions : [];
+            currentLoadedMeta = result.data;
+            currentLoadedReceiptCode = String(result.data.latestReceiptCode || result.data.latest_receipt_code || '').trim();
+            currentLoadedRevisionNo = Number(result.data.latestRevisionNo || result.data.latest_revision_no || 0) || 0;
+            currentLoadedReceipt = (result.data.receipt && typeof result.data.receipt === 'object') ? result.data.receipt : null;
             if (bankType === 'variation') {
                 recalcVariationSubNums(currentQuestions);
             }
             if (window.Logger) Logger.action('load_question_bank', { year, season, bankType, subject, grade, tier, week, questionCount: currentQuestions.length });
         } else {
             currentQuestions = [];
+            currentLoadedMeta = null;
+            currentLoadedReceiptCode = '';
+            currentLoadedRevisionNo = 0;
+            currentLoadedReceipt = null;
         }
     } catch (e) {
         console.error('加载数据失败:', e);
         currentQuestions = [];
+        currentLoadedMeta = null;
+        currentLoadedReceiptCode = '';
+        currentLoadedRevisionNo = 0;
+        currentLoadedReceipt = null;
         showToast('加载数据失败，请检查网络');
     }
 
@@ -3018,6 +3206,7 @@ async function loadCurrentData() {
     updateStatus();
     highlightActiveSavedItem();
     updateStep1ButtonState();
+    updateActiveTermIndicator();
 }
 
 // 查找某道题对应的卡片 DOM（兼容单题行与大题聚合卡片）
@@ -3081,6 +3270,7 @@ async function saveQuestions() {
     });
 
     if (!currentQuestions || currentQuestions.length === 0) {
+        logQbankAttempt('client_blocked', '题目列表为空', { step: currentStep, questionCount: 0 });
         showToast('题目列表为空，请先添加或导入题目', 'warn');
         return;
     }
@@ -3090,6 +3280,7 @@ async function saveQuestions() {
         (q.answerPdf && q.answerPdf.status === 'uploading')
     );
     if (isSlicing) {
+        logQbankAttempt('client_blocked', '题目切片上传中', { questionCount: currentQuestions.length });
         showToast('题目切片正在后台生成与上传中，请稍候...', 'warn');
         return;
     }
@@ -3105,6 +3296,11 @@ async function saveQuestions() {
         const isPreview = getBankType() === 'preview';
 
         if (!topic && !isPreview) {
+            logQbankAttempt('client_blocked', isVar ? '变式题关联原题缺少知识点' : '缺少知识点', {
+                questionId: qNum,
+                index: i,
+                questionCount: currentQuestions.length
+            });
             if (isVar) {
                 showToast(`第 ${qNum} 题关联的原题缺少知识点，请在课后巩固中完善`, 'warn');
             } else {
@@ -3124,6 +3320,11 @@ async function saveQuestions() {
         }
 
         if (!hasExercise) {
+            logQbankAttempt('client_blocked', '缺少题目PDF', {
+                questionId: qNum,
+                index: i,
+                questionCount: currentQuestions.length
+            });
             showToast(`第 ${qNum} 题【错题文件】（题目PDF）为必传项，请上传`, 'warn');
             const targetCard = findQuestionCardDomByIndex(i);
             if (targetCard) {
@@ -3139,6 +3340,11 @@ async function saveQuestions() {
 
         const hasAnswer = Boolean(q.answerPdf && q.answerPdf.url);
         if (!hasAnswer) {
+            logQbankAttempt('client_blocked', '缺少答案PDF', {
+                questionId: qNum,
+                index: i,
+                questionCount: currentQuestions.length
+            });
             showToast(`第 ${qNum} 题【答案解析】（答案PDF）为必传项，请上传`, 'warn');
             const targetCard = findQuestionCardDomByIndex(i);
             if (targetCard) {
@@ -3184,9 +3390,10 @@ async function saveQuestions() {
             subject: data.subject,
             grade: data.grade,
             tier: data.tier,
-            week: data.week
+            week: data.week,
+            strict: 1
         });
-        if (checkRes && checkRes.success && checkRes.data && Array.isArray(checkRes.data.questions) && checkRes.data.questions.length > 0) {
+        if (checkRes && checkRes.success && checkRes.data && isExactTermMatch(checkRes.data, data.year, data.season) && Array.isArray(checkRes.data.questions) && checkRes.data.questions.length > 0) {
             const diffs = compareQuestions(checkRes.data.questions, questionsForSave);
             // 如果对比没有任何变动，则不弹窗，直接保存
             if (diffs.length > 0) {
@@ -3199,7 +3406,13 @@ async function saveQuestions() {
                     diffs: diffs,
                     confirmText: '确认覆盖保存',
                     onConfirm: () => executeSaveQuestions(data),
-                    onCancel: () => setSaveButtonLoading(false)
+                    onCancel: () => {
+                        setSaveButtonLoading(false);
+                        logQbankAttempt('save_cancelled', '用户取消覆盖保存确认弹窗', {
+                            diffCount: diffs.length,
+                            questionCount: questionsForSave.length
+                        }, data);
+                    }
                 });
                 return;
             }
@@ -3403,31 +3616,61 @@ async function doBatchSyncTiers(data, targetTiers, currentTier, isAutoPrompt = f
         showToast(`正在同步至 ${tierLabels}...`);
         let successCount = 0;
         const errors = [];
+        const syncResults = [];
+        const baseQuestions = Array.isArray(data.questions) && data.questions.length > 0 ? data.questions : currentQuestions;
+
         for (const targetTier of targetTiers) {
             try {
                 const syncData = {
                     ...data,
                     tier: targetTier,
-                    questions: JSON.parse(JSON.stringify(currentQuestions))
+                    saveMode: 'tier_sync',
+                    questions: JSON.parse(JSON.stringify(baseQuestions))
                 };
                 const syncRes = await apiPost(syncData);
                 if (syncRes && syncRes.success) {
                     successCount++;
+                    const rec = (syncRes.receipt && typeof syncRes.receipt === 'object') ? syncRes.receipt : null;
+                    const recCode = String(rec?.receipt_code || syncRes.latestReceiptCode || '').trim();
+                    syncResults.push({
+                        tier: targetTier,
+                        success: true,
+                        receipt: rec,
+                        receiptCode: recCode,
+                        error: ''
+                    });
                     if (window.Logger) {
                         Logger.action('sync_question_bank_tier', {
                             fromTier: currentTier,
                             toTier: targetTier,
                             grade: data.grade,
                             subject: data.subject,
-                            week: data.week
+                            week: data.week,
+                            receiptCode: recCode || undefined
                         });
                     }
                 } else {
-                    errors.push(`${targetTier}班: ${syncRes?.error || '保存失败'}`);
+                    const errMsg = syncRes?.error || '保存失败';
+                    errors.push(`${targetTier}班: ${errMsg}`);
+                    syncResults.push({
+                        tier: targetTier,
+                        success: false,
+                        receipt: null,
+                        receiptCode: '',
+                        error: errMsg
+                    });
                 }
             } catch (err) {
                 console.error(`同步至 ${targetTier}班 失败:`, err);
-                errors.push(`${targetTier}班: 网络异常`);
+                const errMsg = (err && err.message) ? err.message : '网络异常';
+                errors.push(`${targetTier}班: ${errMsg}`);
+                syncResults.push({
+                    tier: targetTier,
+                    success: false,
+                    receipt: null,
+                    receiptCode: '',
+                    error: errMsg
+                });
             }
         }
         renderSavedDataList();
@@ -3438,6 +3681,7 @@ async function doBatchSyncTiers(data, targetTiers, currentTier, isAutoPrompt = f
         } else {
             showToast(`同步失败: ${errors.join('; ')}`, 'warn');
         }
+        openTierSyncSummaryModal(data, currentTier, syncResults);
     } finally {
         isSyncingTiers = false;
         if (tierSyncBtn) {
@@ -3464,9 +3708,10 @@ async function handleTierSyncConfirm(data, targetTiers, isAutoPrompt = false) {
                 subject: data.subject,
                 grade: data.grade,
                 tier: targetTier,
-                week: data.week
+                week: data.week,
+                strict: 1
             });
-            if (checkRes && checkRes.success && checkRes.data && Array.isArray(checkRes.data.questions) && checkRes.data.questions.length > 0) {
+            if (checkRes && checkRes.success && checkRes.data && isExactTermMatch(checkRes.data, data.year, data.season) && Array.isArray(checkRes.data.questions) && checkRes.data.questions.length > 0) {
                 const diffs = compareQuestions(checkRes.data.questions, currentQuestions);
                 if (diffs.length > 0) {
                     diffTiers.push({
@@ -3517,6 +3762,10 @@ async function handleTierSyncConfirm(data, targetTiers, isAutoPrompt = false) {
             danger: true,
             onConfirm: () => doBatchSyncTiers(data, targetTiers, data.tier, isAutoPrompt),
             onCancel: () => {
+                logQbankAttempt('save_cancelled', '用户取消班层同步覆盖确认弹窗', {
+                    targetTiers,
+                    diffTierCount: diffTiers.length
+                }, data);
                 if (isAutoPrompt) {
                     showToast('保存成功（已取消同步至其他班层）', 'info');
                 }
@@ -3653,6 +3902,16 @@ async function executeSaveQuestions(data) {
         const result = await apiPost(data);
         if (result.success) {
             isDirty = false;
+            const receiptObj = (result.receipt && typeof result.receipt === 'object') ? result.receipt : null;
+            if (receiptObj && receiptObj.receipt_code) {
+                currentLoadedReceipt = receiptObj;
+                currentLoadedReceiptCode = String(receiptObj.receipt_code || '').trim();
+                currentLoadedRevisionNo = Number(receiptObj.revision_no || 0) || 0;
+            } else if (result.data && result.data.latestReceiptCode) {
+                currentLoadedReceipt = null;
+                currentLoadedReceiptCode = String(result.data.latestReceiptCode || '').trim();
+                currentLoadedRevisionNo = Number(result.data.latestRevisionNo || 0) || 0;
+            }
             // 性能优化：不再执行全量 DOM 清空重绘 renderQuestionList()，仅更新保存状态与已有统计
             updateStatus();
             renderSavedDataList();
@@ -3678,8 +3937,13 @@ async function executeSaveQuestions(data) {
                     grade: data.grade,
                     tier: data.tier,
                     week: data.week,
-                    questionCount: currentQuestions.length
+                    questionCount: currentQuestions.length,
+                    receiptCode: currentLoadedReceiptCode || undefined
                 });
+            }
+
+            if (receiptObj && receiptObj.receipt_code) {
+                openReceiptModal(receiptObj, { allowTierSync: true, saveData: data });
             }
         } else {
             showToast('保存失败: ' + (result.error || '未知错误'), 'error');
@@ -4972,6 +5236,8 @@ function renderQuestionList() {
 
 function updateStatus() {
     const hasAllSelectors = Boolean(bankTypeSelect && bankTypeSelect.value && subjectSelect && subjectSelect.value && gradeSelect && gradeSelect.value && tierSelect && tierSelect.value && weekSelect && weekSelect.value);
+    const curYear = yearSelect ? (parseInt(yearSelect.value, 10) || 2026) : 2026;
+    const curSeason = seasonSelect ? seasonSelect.value : '春';
 
     if (isDirty) {
         statusEl.className = 'qb-status unsaved';
@@ -4991,7 +5257,42 @@ function updateStatus() {
         if (!hasAllSelectors) {
             saveInfo.textContent = '请先选择题库类型、学科、年级、班层和专题';
         } else {
-            saveInfo.textContent = `${getBankTypeLabel(getBankType())} · ${subjectSelect.value} · ${gradeSelect.value} · ${tierSelect.value} · ${getTopicLabel(weekSelect.value)} · ${currentQuestions.length}道题`;
+            saveInfo.textContent = `${curYear}年${curSeason}季 · ${getBankTypeLabel(getBankType())} · ${subjectSelect.value} · ${gradeSelect.value} · ${tierSelect.value} · ${getTopicLabel(weekSelect.value)} · ${currentQuestions.length}道题`;
+        }
+    }
+
+    const headerBadge = document.getElementById('qb-header-receipt-badge');
+    const headerCodeEl = document.getElementById('qb-header-receipt-code');
+    const savebarBadge = document.getElementById('qb-savebar-receipt-badge');
+    const savebarCodeEl = document.getElementById('qb-savebar-receipt-code');
+    const showReceiptBadge = Boolean(hasAllSelectors && currentLoadedReceiptCode);
+
+    if (headerBadge && headerCodeEl) {
+        if (showReceiptBadge) {
+            headerCodeEl.textContent = currentLoadedRevisionNo > 0
+                ? `${currentLoadedReceiptCode} · v${currentLoadedRevisionNo}`
+                : currentLoadedReceiptCode;
+            headerBadge.style.display = 'inline-flex';
+            headerBadge.classList.toggle('is-stale', Boolean(isDirty));
+            headerBadge.title = isDirty
+                ? '当前有未保存修改（点击查看上一已存回执卡）'
+                : '点击查看当前最新存证回执卡';
+        } else {
+            headerBadge.style.display = 'none';
+            headerCodeEl.textContent = '';
+        }
+    }
+    if (savebarBadge && savebarCodeEl) {
+        if (showReceiptBadge) {
+            savebarCodeEl.textContent = `回执 ${currentLoadedReceiptCode}`;
+            savebarBadge.style.display = 'inline-flex';
+            savebarBadge.classList.toggle('is-stale', Boolean(isDirty));
+            savebarBadge.title = isDirty
+                ? '当前有未保存修改（点击查看上一已存回执卡）'
+                : '点击查看当前最新存证回执卡';
+        } else {
+            savebarBadge.style.display = 'none';
+            savebarCodeEl.textContent = '';
         }
     }
 }
@@ -5015,28 +5316,60 @@ function getSubjectBadgeClass(subject) {
     }
 }
 
+function updateSavedTermSwitcherUi() {
+    const defTerm = getDefaultTerm();
+    const curBtn = document.getElementById('saved-term-current-btn');
+    const allBtn = document.getElementById('saved-term-all-btn');
+    if (curBtn) {
+        curBtn.textContent = `本学期 (${defTerm.year}${defTerm.season})`;
+        curBtn.classList.toggle('active', !savedShowAllTerms);
+    }
+    if (allBtn) {
+        allBtn.classList.toggle('active', savedShowAllTerms);
+    }
+}
+
+function setSavedTermMode(mode) {
+    const nextAll = (mode === 'all');
+    if (savedShowAllTerms === nextAll) return;
+    savedShowAllTerms = nextAll;
+    updateSavedTermSwitcherUi();
+    renderSavedDataList();
+}
+window.setSavedTermMode = setSavedTermMode;
+
 async function renderSavedDataList() {
     const grid = document.getElementById('saved-data-grid');
     const emptyEl = document.getElementById('saved-empty');
     const emptyText = document.getElementById('saved-empty-text');
+    const emptyActions = document.getElementById('saved-empty-actions');
     const countBadge = document.getElementById('saved-total-count');
+    updateSavedTermSwitcherUi();
 
     try {
-        const adminYear = window.adminSemesterYear || (yearSelect ? parseInt(yearSelect.value) : 2026);
-        const adminSeason = window.adminDefaultSeasonZh || (seasonSelect ? seasonSelect.value : '秋');
+        const defTerm = getDefaultTerm();
+        const adminYear = defTerm.year;
+        const adminSeason = defTerm.season;
 
-        let result = await apiGet('list', { year: adminYear, season: adminSeason });
-        if (!result.success || !Array.isArray(result.data) || result.data.length === 0) {
-            const fallbackResult = await apiGet('list');
-            if (fallbackResult.success && Array.isArray(fallbackResult.data) && fallbackResult.data.length > 0) {
-                const matched = fallbackResult.data.filter(it => (!it.year || it.year == adminYear) && (!it.season || it.season === adminSeason));
-                result = { success: true, data: matched.length > 0 ? matched : fallbackResult.data };
-            }
+        const result = savedShowAllTerms
+            ? await apiGet('list')
+            : await apiGet('list', { year: adminYear, season: adminSeason });
+
+        const rawList = (result && result.success && Array.isArray(result.data)) ? result.data : [];
+        if (savedShowAllTerms) {
+            allSavedDataList = rawList;
+        } else {
+            // 防御性前端核验：绝不把其他学期的题库静默混入“本学期已保存”列表
+            allSavedDataList = rawList.filter(it =>
+                Number(it.year) === Number(adminYear) &&
+                String(it.season || '').trim() === String(adminSeason).trim()
+            );
         }
 
-        allSavedDataList = (result.success && Array.isArray(result.data)) ? result.data : [];
         if (countBadge) {
-            countBadge.textContent = `共 ${allSavedDataList.length} 个专题`;
+            countBadge.textContent = savedShowAllTerms
+                ? `全部历史 ${allSavedDataList.length} 个专题`
+                : `本学期 ${allSavedDataList.length} 个专题`;
         }
 
         renderSavedBankTypeTabs();
@@ -5049,6 +5382,7 @@ async function renderSavedDataList() {
         console.error('加载已保存数据失败:', e);
         if (grid) grid.style.display = 'none';
         if (emptyEl) emptyEl.style.display = 'flex';
+        if (emptyActions) emptyActions.style.display = 'none';
         if (emptyText) emptyText.textContent = '加载已保存数据失败，请检查网络连接';
     }
 }
@@ -5342,11 +5676,48 @@ function resetSavedFilters() {
     applySavedDataFilter();
 }
 
+const savedCardMetaMap = new WeakMap();
+let savedGridDelegationBound = false;
+
+function ensureSavedGridDelegation(grid) {
+    if (!grid || savedGridDelegationBound) return;
+    savedGridDelegationBound = true;
+    grid.addEventListener('click', (e) => {
+        const cardEl = e.target.closest('.saved-data-card');
+        if (!cardEl) return;
+        const meta = savedCardMetaMap.get(cardEl);
+        if (!meta) return;
+
+        const actionEl = e.target.closest('[data-card-action]');
+        if (actionEl) {
+            e.stopPropagation();
+            const act = actionEl.dataset.cardAction;
+            if (act === 'edit') {
+                editSavedItem(meta.subject, meta.grade, meta.tier, meta.week, meta.year, meta.season, meta.bankType);
+            } else if (act === 'history') {
+                openRevisionsModal(meta);
+            } else if (act === 'delete') {
+                deleteStoredData(meta.subject, meta.grade, meta.tier, meta.week, meta.year, meta.season, meta.bankType);
+            } else if (act === 'copy-receipt') {
+                if (meta.latestReceiptCode) {
+                    copyTextToClipboard(meta.latestReceiptCode).then(ok => {
+                        showToast(ok ? `已复制回执号：${meta.latestReceiptCode}` : '复制失败，请手动复制', ok ? 'success' : 'warn');
+                    });
+                }
+            }
+            return;
+        }
+        editSavedItem(meta.subject, meta.grade, meta.tier, meta.week, meta.year, meta.season, meta.bankType);
+    });
+}
+
 function applySavedDataFilter() {
     const grid = document.getElementById('saved-data-grid');
     const emptyEl = document.getElementById('saved-empty');
     const emptyText = document.getElementById('saved-empty-text');
+    const emptyActions = document.getElementById('saved-empty-actions');
     if (!grid) return;
+    ensureSavedGridDelegation(grid);
     const isAssistant = Boolean(window.currentUser && window.currentUser.role === 'assistant');
 
     let filtered = allSavedDataList.filter(item => {
@@ -5358,7 +5729,7 @@ function applySavedDataFilter() {
         if (savedSearchQuery) {
             const topicLabel = getTopicLabel(item.week);
             const typeLabel = getBankTypeLabel(item.bankType);
-            const fullSearch = `${typeLabel} ${item.subject} ${item.grade} ${item.tier} ${topicLabel} 专题${item.week} 第${item.week}周`.toLowerCase();
+            const fullSearch = `${typeLabel} ${item.year || ''} ${item.season || ''} ${item.subject} ${item.grade} ${item.tier} ${topicLabel} 专题${item.week} 第${item.week}周 ${item.latestReceiptCode || ''} ${item.updatedByName || ''} ${item.updatedBy || ''}`.toLowerCase();
             if (!fullSearch.includes(savedSearchQuery)) return false;
         }
         return true;
@@ -5369,11 +5740,17 @@ function applySavedDataFilter() {
         if (emptyEl) {
             emptyEl.style.display = 'flex';
             if (emptyText) {
-                if (allSavedDataList.length === 0) {
+                if (allSavedDataList.length === 0 && !savedShowAllTerms) {
+                    const defTerm = getDefaultTerm();
+                    emptyText.textContent = `本学期（${defTerm.year}年${defTerm.season}季）暂无已保存的题库数据，可在上方选择分类后录入新题库`;
+                } else if (allSavedDataList.length === 0) {
                     emptyText.textContent = '暂无保存的题目数据，可通过上方选择学科后录入新题库';
                 } else {
                     emptyText.textContent = '未找到匹配当前筛选条件的已保存题库';
                 }
+            }
+            if (emptyActions) {
+                emptyActions.style.display = (allSavedDataList.length === 0 && !savedShowAllTerms) ? 'flex' : 'none';
             }
         }
         return;
@@ -5381,9 +5758,10 @@ function applySavedDataFilter() {
 
     grid.style.display = 'grid';
     if (emptyEl) emptyEl.style.display = 'none';
+    if (emptyActions) emptyActions.style.display = 'none';
     grid.innerHTML = '';
 
-    const currentYear = yearSelect ? parseInt(yearSelect.value) : 2026;
+    const currentYear = yearSelect ? (parseInt(yearSelect.value, 10) || 2026) : 2026;
     const currentSeason = seasonSelect ? seasonSelect.value : '春';
     const currentBankType = getBankType();
     const currentSubject = subjectSelect ? subjectSelect.value : '';
@@ -5394,11 +5772,11 @@ function applySavedDataFilter() {
     const fragment = document.createDocumentFragment();
 
     filtered.forEach(item => {
-        const itemYear = item.year || 2026;
+        const itemYear = parseInt(item.year, 10) || 2026;
         const itemSeason = item.season || '春';
         const itemGrade = item.grade || '未指定年级';
         const itemBankType = item.bankType === 'preview' ? 'preview' : (item.bankType === 'variation' ? 'variation' : 'homework');
-        const isActive = itemBankType === currentBankType && item.year === currentYear && item.season === currentSeason && item.subject === currentSubject && item.grade === currentGrade && item.tier === currentTier && String(item.week) === currentWeek;
+        const isActive = itemBankType === currentBankType && Number(itemYear) === Number(currentYear) && itemSeason === currentSeason && item.subject === currentSubject && item.grade === currentGrade && item.tier === currentTier && String(item.week) === String(currentWeek);
         const topicName = getTopicLabel(item.week);
         const subjectClass = getSubjectBadgeClass(item.subject);
         const typeBadge = itemBankType === 'preview'
@@ -5406,15 +5784,28 @@ function applySavedDataFilter() {
             : (itemBankType === 'variation'
                 ? '<span class="saved-badge badge-variation" style="background:#ecfdf5;color:#059669;border-color:#a7f3d0;">举一反三</span>'
                 : '<span class="saved-badge badge-homework">课后巩固</span>');
+        const latestReceiptCode = String(item.latestReceiptCode || item.latest_receipt_code || '').trim();
+        const operatorDisplay = String(item.updatedByName || item.updated_by_name || item.updatedBy || item.updated_by || '').trim();
 
         const card = document.createElement('div');
         card.className = 'saved-data-card' + (isActive ? ' active' : '');
-        card.onclick = () => editSavedItem(item.subject, itemGrade, item.tier, item.week, itemYear, itemSeason, itemBankType);
+        savedCardMetaMap.set(card, {
+            subject: item.subject,
+            grade: itemGrade,
+            tier: item.tier,
+            week: item.week,
+            year: itemYear,
+            season: itemSeason,
+            bankType: itemBankType,
+            latestReceiptCode,
+            updatedByName: operatorDisplay
+        });
         card.innerHTML = `
             <div class="saved-card-header">
                 <div class="saved-card-tags">
                     ${typeBadge}
                     <span class="saved-badge ${subjectClass}">${escapeHtml(item.subject)}</span>
+                    <span class="saved-season-tag">${escapeHtml(String(itemYear))}${escapeHtml(itemSeason)}</span>
                     <span class="saved-grade-tag">${escapeHtml(itemGrade)} · ${escapeHtml(item.tier)}层</span>
                 </div>
             </div>
@@ -5428,18 +5819,38 @@ function applySavedDataFilter() {
                         </svg>
                         共 ${item.questionCount} 道题
                     </span>
+                    ${operatorDisplay ? `<span class="saved-card-operator" title="最后修改教师">修改人：${escapeHtml(operatorDisplay)}</span>` : ''}
                 </div>
+                ${latestReceiptCode ? `
+                <div class="saved-card-receipt-row">
+                    <button type="button" class="saved-receipt-badge" data-card-action="copy-receipt" title="最新存证回执号（点击复制）">
+                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                            <polyline points="9 12 11 14 15 10"></polyline>
+                        </svg>
+                        <span>${escapeHtml(latestReceiptCode)}</span>
+                    </button>
+                </div>` : ''}
             </div>
             <div class="saved-card-actions">
-                <button type="button" class="saved-btn edit-btn" onclick="event.stopPropagation(); editSavedItem('${escapeInlineJs(item.subject)}', '${escapeInlineJs(itemGrade)}', '${escapeInlineJs(item.tier)}', ${item.week}, ${itemYear}, '${escapeInlineJs(itemSeason)}', '${itemBankType}')">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                    </svg>
-                    ${isAssistant ? '查看题目' : '查看 / 更改题目'}
-                </button>
+                <div class="saved-card-actions-left">
+                    <button type="button" class="saved-btn edit-btn" data-card-action="edit">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                        </svg>
+                        ${isAssistant ? '查看题目' : '查看 / 更改题目'}
+                    </button>
+                    <button type="button" class="saved-btn history-btn" data-card-action="history" title="查看存证回执与版本历史">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                        存证 / 历史
+                    </button>
+                </div>
                 ${isAssistant ? '' : `
-                <button type="button" class="saved-btn delete-btn" onclick="event.stopPropagation(); deleteStoredData('${escapeInlineJs(item.subject)}', '${escapeInlineJs(itemGrade)}', '${escapeInlineJs(item.tier)}', ${item.week}, ${itemYear}, '${escapeInlineJs(itemSeason)}', '${itemBankType}')" title="删除此专题数据">
+                <button type="button" class="saved-btn delete-btn" data-card-action="delete" title="删除此专题数据">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"></line>
                         <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -5459,8 +5870,12 @@ async function editSavedItem(subject, grade, tier, week, year, season, bankType)
     showToast('正在载入专题题目数据...', 'info');
 
     try {
-        if (year && yearSelect) yearSelect.value = String(year);
+        if (year && yearSelect) {
+            ensureYearOption(year);
+            yearSelect.value = String(year);
+        }
         if (season && seasonSelect) seasonSelect.value = season;
+        updateActiveTermIndicator();
         if (bankType && bankTypeSelect) {
             bankTypeSelect.value = (bankType === 'preview' || bankType === 'variation') ? bankType : 'homework';
             updateBankTypeUi();
@@ -5676,29 +6091,44 @@ function triggerPdfUpload(index, type) {
     input.click();
 }
 
-async function uploadPdfBlob(file) {
+async function uploadPdfBlob(file, role = '') {
     const formData = new FormData();
     formData.append('file', file);
-    
+    const scope = getCurrentScope();
+    if (scope.bankType) formData.append('bankType', scope.bankType);
+    if (scope.year) formData.append('year', String(scope.year));
+    if (scope.season) formData.append('season', scope.season);
+    if (scope.subject) formData.append('subject', scope.subject);
+    if (scope.grade) formData.append('grade', scope.grade);
+    if (scope.tier) formData.append('tier', scope.tier);
+    if (scope.week) formData.append('week', String(scope.week));
+    if (role) formData.append('role', role);
+
     const res = await fetch('api/upload_pdf.php', {
         method: 'POST',
         credentials: 'same-origin',
         body: formData
     });
-    
+
     if (res.status === 401) {
         const err = new Error('unauthorized');
         err.unauthorized = true;
         throw err;
     }
-    
+
     const json = await res.json();
-    
+
     if (json.success) {
-        return { url: json.url, originalName: json.originalName };
+        return {
+            url: json.url,
+            originalName: json.originalName,
+            sha256: json.sha256 || '',
+            size: Number(json.size) || file.size || 0
+        };
     }
     throw new Error(json.error || '未知错误');
 }
+window.uploadPdfBlob = uploadPdfBlob;
 
 function updateQuestionPdfActionsOnly(index) {
     const q = currentQuestions[index];
@@ -5727,6 +6157,7 @@ async function doUploadPdf(file, index, type) {
     
     if (!currentQuestions[index]) return;
     const targetKey = type === 'exercise' ? 'exercisePdf' : 'answerPdf';
+    const role = type === 'answer' ? 'answer' : 'exercise';
     const memberIndices = getBigQuestionGroupMemberIndices(index);
     memberIndices.forEach(idx => {
         if (currentQuestions[idx]) {
@@ -5737,12 +6168,14 @@ async function doUploadPdf(file, index, type) {
     updateQuestionPdfActionsOnly(index);
     
     try {
-        const result = await uploadPdfBlob(file);
+        const result = await uploadPdfBlob(file, role);
         const uploadedObj = {
             url: result.url,
             name: result.originalName,
             status: 'uploaded'
         };
+        if (result.sha256) uploadedObj.sha256 = result.sha256;
+        if (result.size) uploadedObj.size = result.size;
         memberIndices.forEach(idx => {
             if (currentQuestions[idx]) {
                 currentQuestions[idx][targetKey] = { ...uploadedObj };
@@ -6035,9 +6468,11 @@ async function startBackgroundSlicing(exerciseSrc, answerSrc, groups, sliceNums,
         try {
             const exBlob = await mergePages(exerciseSrc, grp.question);
             const exFile = new File([exBlob], exFileName, { type: 'application/pdf' });
-            const exRes = await uploadPdfBlob(exFile);
+            const exRes = await uploadPdfBlob(exFile, 'exercise');
             if (sessionId === currentSlicingSessionId) {
                 const exObj = { url: exRes.url, name: exRes.originalName, status: 'uploaded' };
+                if (exRes.sha256) exObj.sha256 = exRes.sha256;
+                if (exRes.size) exObj.size = exRes.size;
                 targetIndices.forEach(tIdx => {
                     if (currentQuestions[tIdx]) {
                         currentQuestions[tIdx].exercisePdf = { ...exObj };
@@ -6062,9 +6497,11 @@ async function startBackgroundSlicing(exerciseSrc, answerSrc, groups, sliceNums,
             try {
                 const anBlob = await mergePages(answerSrc, answerPages);
                 const anFile = new File([anBlob], anFileName, { type: 'application/pdf' });
-                const anRes = await uploadPdfBlob(anFile);
+                const anRes = await uploadPdfBlob(anFile, 'answer');
                 if (sessionId === currentSlicingSessionId) {
                     const anObj = { url: anRes.url, name: anRes.originalName, status: 'uploaded' };
+                    if (anRes.sha256) anObj.sha256 = anRes.sha256;
+                    if (anRes.size) anObj.size = anRes.size;
                     targetIndices.forEach(tIdx => {
                         if (currentQuestions[tIdx]) {
                             currentQuestions[tIdx].answerPdf = { ...anObj };
@@ -6466,8 +6903,11 @@ async function doBatchImportPdfs(exerciseFile, answerFile) {
         try {
             const exBlob = await splitSinglePage(exerciseSrc, i);
             const exFile = new File([exBlob], exFileName, { type: 'application/pdf' });
-            const exRes = await uploadPdfBlob(exFile);
-            currentQuestions[i].exercisePdf = { url: exRes.url, name: exRes.originalName, status: 'uploaded' };
+            const exRes = await uploadPdfBlob(exFile, 'exercise');
+            const exPdf = { url: exRes.url, name: exRes.originalName, status: 'uploaded' };
+            if (exRes.sha256) exPdf.sha256 = exRes.sha256;
+            if (exRes.size) exPdf.size = exRes.size;
+            currentQuestions[i].exercisePdf = exPdf;
         } catch (e) {
             console.error('题目页上传失败', no, e);
             currentQuestions[i].exercisePdf = null;
@@ -6477,8 +6917,11 @@ async function doBatchImportPdfs(exerciseFile, answerFile) {
         try {
             const anBlob = await splitSinglePage(answerSrc, i);
             const anFile = new File([anBlob], anFileName, { type: 'application/pdf' });
-            const anRes = await uploadPdfBlob(anFile);
-            currentQuestions[i].answerPdf = { url: anRes.url, name: anRes.originalName, status: 'uploaded' };
+            const anRes = await uploadPdfBlob(anFile, 'answer');
+            const anPdf = { url: anRes.url, name: anRes.originalName, status: 'uploaded' };
+            if (anRes.sha256) anPdf.sha256 = anRes.sha256;
+            if (anRes.size) anPdf.size = anRes.size;
+            currentQuestions[i].answerPdf = anPdf;
         } catch (e) {
             console.error('答案页上传失败', no, e);
             currentQuestions[i].answerPdf = null;
@@ -6492,6 +6935,711 @@ async function doBatchImportPdfs(exerciseFile, answerFile) {
         showToast(`导入完成，但有 ${failCount} 个页面上传失败`);
     } else {
         showToast(`已导入 ${pageCount} 道题`);
+    }
+}
+
+// ========== 存证回执卡、班层同步汇总与版本历史弹窗 ==========
+
+function formatActionLabel(action) {
+    const map = {
+        create: '首次创建',
+        update: '更新配置',
+        tier_sync: '班层同步',
+        delete: '删除留痕',
+        admin_edit: '后台修改',
+        admin_delete: '后台删除'
+    };
+    return map[action] || (action ? String(action) : '配置存证');
+}
+
+function normalizeReceiptObject(raw, fallbackScope = null) {
+    if (!raw || typeof raw !== 'object') return null;
+    let nested = null;
+    if (raw.receipt && typeof raw.receipt === 'object') {
+        nested = raw.receipt;
+    } else if (typeof raw.receipt === 'string' && raw.receipt.trim().startsWith('{')) {
+        try {
+            const parsedNested = JSON.parse(raw.receipt);
+            if (parsedNested && typeof parsedNested === 'object') nested = parsedNested;
+        } catch (_) {}
+    }
+    const src = nested ? { ...raw, ...nested } : raw;
+
+    let canonicalObj = null;
+    if (typeof src.canonical_payload === 'string' && src.canonical_payload.trim().startsWith('{')) {
+        try {
+            const parsedCanon = JSON.parse(src.canonical_payload);
+            if (parsedCanon && typeof parsedCanon === 'object') canonicalObj = parsedCanon;
+        } catch (_) {}
+    } else if (src.canonical_payload && typeof src.canonical_payload === 'object') {
+        canonicalObj = src.canonical_payload;
+    }
+
+    const scopeRaw = src.scope || canonicalObj?.scope || fallbackScope || getCurrentScope();
+    const scope = {
+        bank_type: scopeRaw.bank_type || scopeRaw.bankType || getBankType() || 'homework',
+        year: parseInt(scopeRaw.year, 10) || 2026,
+        season: scopeRaw.season || '春',
+        subject: scopeRaw.subject || '',
+        grade: scopeRaw.grade || '',
+        tier: scopeRaw.tier || '',
+        week: parseInt(scopeRaw.week, 10) || 0
+    };
+    const opRaw = (src.operator && typeof src.operator === 'object')
+        ? src.operator
+        : ((canonicalObj?.operator && typeof canonicalObj.operator === 'object') ? canonicalObj.operator : {});
+    const operator = {
+        username: opRaw.username || (typeof src.operator === 'string' ? src.operator : '') || src.operator_username || '',
+        real_name: opRaw.real_name || src.operator_name || src.real_name || ''
+    };
+    const sumRaw = (src.summary && typeof src.summary === 'object') ? src.summary : {};
+    const canonSum = (canonicalObj?.summary && typeof canonicalObj.summary === 'object') ? canonicalObj.summary : {};
+    const topics = Array.isArray(sumRaw.topics)
+        ? sumRaw.topics
+        : (Array.isArray(canonSum.topics) ? canonSum.topics : undefined);
+    const summary = {
+        ...canonSum,
+        ...sumRaw,
+        question_count: Number(sumRaw.question_count ?? src.question_count ?? canonSum.question_count ?? 0) || 0,
+        exercise_pdf_count: Number(sumRaw.exercise_pdf_count ?? src.exercise_pdf_count ?? canonSum.exercise_pdf_count ?? 0) || 0,
+        answer_pdf_count: Number(sumRaw.answer_pdf_count ?? src.answer_pdf_count ?? canonSum.answer_pdf_count ?? 0) || 0,
+        topic_filled_count: Number(sumRaw.topic_filled_count ?? src.topic_filled_count ?? canonSum.topic_filled_count ?? 0) || 0
+    };
+    if (topics !== undefined) {
+        summary.topics = topics;
+    }
+    const receiptCode = String(src.receipt_code || src.receiptCode || canonicalObj?.receipt_code || '').trim();
+    const verifyUrl = String(src.verify_url || '').trim() || buildVerifyUrl(receiptCode);
+    const supersedesVal = src.supersedes || src.supersedes_receipt_code || canonicalObj?.supersedes || '';
+    const issuerVal = src.issuer || canonicalObj?.issuer || '';
+    const normalized = {
+        schema: src.schema || canonicalObj?.schema || 'jifang.qbank.attestation.v1',
+        receipt_code: receiptCode,
+        revision_no: Number(src.revision_no ?? canonicalObj?.revision_no ?? 0) || 0,
+        action: src.action || canonicalObj?.action || 'update',
+        issued_at: src.issued_at || src.issued_at_utc || canonicalObj?.issued_at || '',
+        issued_at_cst: src.issued_at_cst || src.issued_at || src.issued_at_utc || canonicalObj?.issued_at || '',
+        supersedes: supersedesVal,
+        supersedes_receipt_code: src.supersedes_receipt_code || supersedesVal,
+        scope,
+        operator,
+        summary,
+        content_sha256: src.content_sha256 || canonicalObj?.content_sha256 || '',
+        entry_hash: src.entry_hash || '',
+        prev_entry_hash: src.prev_entry_hash || canonicalObj?.prev_entry_hash || '',
+        kid: src.kid || '',
+        signature: src.signature || '',
+        canonical_payload: src.canonical_payload ?? '',
+        verify_url: verifyUrl
+    };
+    if (issuerVal) {
+        normalized.issuer = issuerVal;
+    }
+    return normalized;
+}
+window.normalizeReceiptObject = normalizeReceiptObject;
+
+function buildReceiptPlainText(receipt) {
+    const r = normalizeReceiptObject(receipt);
+    if (!r) return '';
+    const s = r.scope;
+    const op = r.operator.real_name && r.operator.username && r.operator.real_name !== r.operator.username
+        ? `${r.operator.real_name} (${r.operator.username})`
+        : (r.operator.real_name || r.operator.username || '未知教师');
+    const q = r.summary.question_count;
+    const verifyUrl = buildVerifyUrl(r.receipt_code);
+    const scopeLine = `${s.year}年 ${s.season}季 · ${getBankTypeLabel(s.bank_type) || s.bank_type} · ${s.subject} · ${s.grade} · ${s.tier}班 · ${getTopicLabel(s.week) || ('专题' + s.week)}`;
+    return [
+        '【极方题库配置存证回执】',
+        `回执编号：${r.receipt_code || '-'}`,
+        `版本序号：第 ${r.revision_no || 1} 版（${formatActionLabel(r.action)}）`,
+        `配置范围：${scopeLine}`,
+        `内容完整度：${q} 题 · 题目PDF ${r.summary.exercise_pdf_count}/${q} · 答案PDF ${r.summary.answer_pdf_count}/${q} · 知识点 ${r.summary.topic_filled_count}/${q}`,
+        `操作教师：${op}`,
+        `签发时间：${r.issued_at_cst || r.issued_at || '-'}`,
+        `内容指纹：${r.content_sha256 || '-'}`,
+        `公开核验：${verifyUrl}`
+    ].join('\n');
+}
+
+function renderReceiptQrCode(receiptCode) {
+    const qrBox = document.getElementById('receipt-qr-box');
+    if (!qrBox) return;
+    qrBox.innerHTML = '';
+    const verifyUrl = buildVerifyUrl(receiptCode);
+    if (receiptCode && verifyUrl && typeof QRCode !== 'undefined') {
+        try {
+            const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+            new QRCode(qrBox, {
+                text: verifyUrl,
+                width: 132,
+                height: 132,
+                colorDark: '#0f172a',
+                colorLight: isLight ? '#ffffff' : '#f4f4f5',
+                correctLevel: QRCode.CorrectLevel.M
+            });
+        } catch (err) {
+            console.warn('生成存证二维码失败:', err);
+            qrBox.innerHTML = '<div class="qb-receipt-qr-fallback">二维码生成失败，请使用「前往公开核验」</div>';
+        }
+    } else if (receiptCode) {
+        qrBox.innerHTML = '<div class="qb-receipt-qr-fallback">二维码组件未就绪，请点击「前往公开核验」</div>';
+    } else {
+        qrBox.innerHTML = '<div class="qb-receipt-qr-fallback">暂无回执编号</div>';
+    }
+}
+
+function applyReceiptToModalDom(r) {
+    if (!r) return;
+    const codeEl = document.getElementById('receipt-code-text');
+    const badgesEl = document.getElementById('receipt-modal-badges');
+    const cryptoTagEl = document.getElementById('receipt-crypto-tag');
+    const scopeEl = document.getElementById('receipt-scope-tags');
+    const compEl = document.getElementById('receipt-completeness-text');
+    const opEl = document.getElementById('receipt-operator-text');
+    const timeEl = document.getElementById('receipt-issued-at-text');
+    const shaEl = document.getElementById('receipt-sha-text');
+    const supRowEl = document.getElementById('receipt-supersedes-row');
+    const supTextEl = document.getElementById('receipt-supersedes-text');
+
+    if (codeEl) codeEl.textContent = r.receipt_code || '-';
+    if (badgesEl) {
+        const actionCls = `action-${String(r.action || 'update').replace(/[^a-z0-9_]/gi, '')}`;
+        badgesEl.innerHTML = `
+            <span class="qb-rev-action-badge ${actionCls}">${escapeHtml(formatActionLabel(r.action))}</span>
+            ${r.revision_no ? `<span class="qb-rev-no-pill">v${escapeHtml(String(r.revision_no))}</span>` : ''}
+        `;
+    }
+    if (cryptoTagEl) {
+        if (r.signature) {
+            cryptoTagEl.textContent = r.kid ? `Ed25519 · ${r.kid}` : 'Ed25519 存证已签发';
+        } else {
+            cryptoTagEl.textContent = '存证记录摘要';
+        }
+    }
+    if (scopeEl) {
+        const s = r.scope;
+        const dims = [
+            ['题库', getBankTypeLabel(s.bank_type) || s.bank_type],
+            ['年份', `${s.year}年`],
+            ['学期', `${s.season}季`],
+            ['学科', s.subject || '-'],
+            ['年级', s.grade || '-'],
+            ['班层', s.tier ? `${s.tier}班` : '-'],
+            ['专题', getTopicLabel(s.week) || (s.week ? `专题${s.week}` : '-')]
+        ];
+        scopeEl.innerHTML = dims.map(([k, v]) =>
+            `<span class="qb-scope-chip"><span class="qb-scope-chip-k">${escapeHtml(k)}</span><span>${escapeHtml(v)}</span></span>`
+        ).join('');
+    }
+    if (compEl) {
+        const q = r.summary.question_count;
+        compEl.textContent = `${q} 题 · 题目PDF ${r.summary.exercise_pdf_count}/${q} · 答案PDF ${r.summary.answer_pdf_count}/${q} · 知识点 ${r.summary.topic_filled_count}/${q}`;
+    }
+    if (opEl) {
+        const opName = r.operator.real_name;
+        const opUser = r.operator.username;
+        opEl.textContent = (opName && opUser && opName !== opUser)
+            ? `${opName} (${opUser})`
+            : (opName || opUser || '未知教师');
+    }
+    if (timeEl) {
+        timeEl.textContent = r.issued_at_cst || r.issued_at || '-';
+    }
+    if (shaEl) {
+        const sha = String(r.content_sha256 || '').trim();
+        if (sha.length > 24) {
+            shaEl.textContent = `${sha.slice(0, 16)}...${sha.slice(-8)}`;
+            shaEl.title = sha;
+        } else {
+            shaEl.textContent = sha || '-';
+            shaEl.title = sha;
+        }
+    }
+    if (supRowEl && supTextEl) {
+        if (r.supersedes_receipt_code) {
+            supRowEl.style.display = 'flex';
+            supTextEl.textContent = r.supersedes_receipt_code;
+        } else {
+            supRowEl.style.display = 'none';
+            supTextEl.textContent = '';
+        }
+    }
+    renderReceiptQrCode(r.receipt_code);
+}
+
+let activeReceiptEnrichPromise = null;
+
+async function enrichReceiptCredentialIfNeeded(receiptCode) {
+    if (!receiptCode) return null;
+    try {
+        const resp = await fetch(`api/v1/qbank/verify?code=${encodeURIComponent(receiptCode)}`, { credentials: 'same-origin' });
+        if (!resp.ok) return null;
+        const json = await resp.json();
+        if (!json || !json.success || !json.data || !json.data.receipt) return null;
+        const fullNorm = normalizeReceiptObject(json.data.receipt);
+        if (fullNorm && activeReceiptModalData && activeReceiptModalData.receipt_code === receiptCode) {
+            activeReceiptModalData = { ...activeReceiptModalData, ...fullNorm };
+            applyReceiptToModalDom(activeReceiptModalData);
+            if (currentLoadedReceiptCode === receiptCode) {
+                currentLoadedReceipt = activeReceiptModalData;
+            }
+            return activeReceiptModalData;
+        }
+        return fullNorm;
+    } catch (_) {
+        return null;
+    }
+}
+
+function openReceiptModal(rawReceipt, options = {}) {
+    const r = normalizeReceiptObject(rawReceipt, options.fallbackScope || null);
+    if (!r) {
+        showToast('暂无可展示的回执信息', 'warn');
+        return;
+    }
+    activeReceiptModalData = r;
+    activeReceiptModalOptions = options || {};
+    applyReceiptToModalDom(r);
+
+    const isAssistant = Boolean(window.currentUser && window.currentUser.role === 'assistant');
+    const syncBtn = document.getElementById('receipt-tier-sync-btn');
+    if (syncBtn) {
+        syncBtn.style.display = (options.allowTierSync && !isAssistant) ? 'inline-flex' : 'none';
+    }
+    const verifyBtn = document.getElementById('receipt-verify-btn');
+    if (verifyBtn) {
+        verifyBtn.disabled = !r.receipt_code;
+    }
+    const copyCodeBtn = document.getElementById('receipt-copy-code-btn');
+    if (copyCodeBtn) copyCodeBtn.disabled = !r.receipt_code;
+    const dlBtn = document.getElementById('receipt-download-json-btn');
+    if (dlBtn) dlBtn.disabled = !r.receipt_code;
+
+    openNativeDialog('qbank-receipt-dialog', { dismissible: true });
+
+    const missingTopics = Boolean(r.summary && r.summary.question_count > 0 && !Array.isArray(r.summary.topics));
+    if (r.receipt_code && (!r.signature || !r.canonical_payload || missingTopics)) {
+        const enrichTask = enrichReceiptCredentialIfNeeded(r.receipt_code).finally(() => {
+            if (activeReceiptEnrichPromise === enrichTask) {
+                activeReceiptEnrichPromise = null;
+            }
+        });
+        activeReceiptEnrichPromise = enrichTask;
+    } else {
+        activeReceiptEnrichPromise = null;
+    }
+}
+window.openReceiptModal = openReceiptModal;
+
+function closeReceiptModal() {
+    closeNativeDialog('qbank-receipt-dialog');
+}
+
+async function openCurrentReceiptModal() {
+    if (!currentLoadedReceiptCode) {
+        showToast('当前专题暂无已签发的存证回执', 'info');
+        return;
+    }
+    const isAssistant = Boolean(window.currentUser && window.currentUser.role === 'assistant');
+    const scope = getCurrentScope();
+    if (currentLoadedReceipt && currentLoadedReceipt.receipt_code === currentLoadedReceiptCode) {
+        openReceiptModal(currentLoadedReceipt, { allowTierSync: !isAssistant, fallbackScope: scope });
+        return;
+    }
+
+    try {
+        const res = await apiGet('revisions', {
+            year: scope.year,
+            season: scope.season,
+            bankType: scope.bankType,
+            subject: scope.subject,
+            grade: scope.grade,
+            tier: scope.tier,
+            week: scope.week
+        });
+        if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
+            const matched = res.data.find(it => (it.receipt_code || it.receipt?.receipt_code) === currentLoadedReceiptCode) || res.data[0];
+            const norm = normalizeReceiptObject(matched, scope);
+            if (norm) {
+                currentLoadedReceipt = norm;
+                openReceiptModal(norm, { allowTierSync: !isAssistant, fallbackScope: scope });
+                return;
+            }
+        }
+    } catch (_) {}
+
+    const qCount = currentQuestions.length;
+    const exCount = currentQuestions.filter(q => q && q.exercisePdf && q.exercisePdf.url).length;
+    const ansCount = currentQuestions.filter(q => q && q.answerPdf && q.answerPdf.url).length;
+    const topicCount = currentQuestions.filter(q => q && q.topic && String(q.topic).trim()).length;
+    const fallback = {
+        receipt_code: currentLoadedReceiptCode,
+        revision_no: currentLoadedRevisionNo || 1,
+        action: 'update',
+        issued_at_cst: currentLoadedMeta?.updatedAtFormatted || '',
+        scope,
+        operator: {
+            username: currentLoadedMeta?.operator || currentLoadedMeta?.updatedBy || currentLoadedMeta?.createdBy || '',
+            real_name: currentLoadedMeta?.operatorName || ''
+        },
+        summary: {
+            question_count: qCount,
+            exercise_pdf_count: exCount,
+            answer_pdf_count: ansCount,
+            topic_filled_count: topicCount
+        }
+    };
+    openReceiptModal(fallback, { allowTierSync: !isAssistant, fallbackScope: scope });
+}
+
+async function copyActiveReceiptCode() {
+    const code = activeReceiptModalData?.receipt_code;
+    if (!code) return;
+    const ok = await copyTextToClipboard(code);
+    showToast(ok ? `已复制回执编号：${code}` : '复制失败，请手动复制', ok ? 'success' : 'warn');
+}
+
+async function copyActiveReceiptText() {
+    if (!activeReceiptModalData) return;
+    const text = buildReceiptPlainText(activeReceiptModalData);
+    const ok = await copyTextToClipboard(text);
+    showToast(ok ? '已复制纯文本回执，可直接粘贴至企微群' : '复制失败，请手动复制', ok ? 'success' : 'warn');
+}
+
+function buildOfflineCredentialPayload(receipt) {
+    const r = normalizeReceiptObject(receipt);
+    if (!r) return null;
+    let schema = r.schema || 'jifang.qbank.attestation.v1';
+    if (typeof r.canonical_payload === 'string' && r.canonical_payload.trim().startsWith('{')) {
+        try {
+            const parsed = JSON.parse(r.canonical_payload);
+            if (parsed && parsed.schema) schema = parsed.schema;
+        } catch (_) {}
+    }
+    return {
+        schema,
+        receipt: r,
+        canonical_payload: r.canonical_payload || '',
+        signature: r.signature || '',
+        kid: r.kid || '',
+        verify_url: buildVerifyUrl(r.receipt_code)
+    };
+}
+window.buildOfflineCredentialPayload = buildOfflineCredentialPayload;
+
+async function downloadActiveReceiptJson() {
+    let r = activeReceiptModalData;
+    if (!r || !r.receipt_code) {
+        showToast('暂无可下载的回执凭证', 'warn');
+        return;
+    }
+
+    const dlBtn = document.getElementById('receipt-download-json-btn');
+    const origLabel = dlBtn ? dlBtn.textContent : '';
+    const missingTopics = Boolean(r.summary && r.summary.question_count > 0 && !Array.isArray(r.summary.topics));
+    if (!r.signature || !r.canonical_payload || missingTopics) {
+        if (dlBtn) {
+            dlBtn.disabled = true;
+            dlBtn.textContent = '补全凭证中...';
+        }
+        try {
+            if (activeReceiptEnrichPromise) {
+                await activeReceiptEnrichPromise;
+            } else {
+                await enrichReceiptCredentialIfNeeded(r.receipt_code);
+            }
+            r = activeReceiptModalData;
+        } finally {
+            if (dlBtn) {
+                dlBtn.disabled = false;
+                dlBtn.textContent = origLabel || '下载离线凭证 (.json)';
+            }
+        }
+    }
+
+    if (!r || !r.signature || !r.canonical_payload) {
+        showToast('暂未获取到完整签名原文（可能为历史无签名记录或网络异常），无法导出可离线验真凭证', 'warn');
+        return;
+    }
+
+    const payload = buildOfflineCredentialPayload(r);
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `qbank-receipt-${r.receipt_code}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast('已下载离线凭证 (.json)', 'success');
+}
+
+function openActiveReceiptVerify() {
+    const code = activeReceiptModalData?.receipt_code;
+    if (!code) return;
+    window.open(buildVerifyUrl(code), '_blank', 'noopener,noreferrer');
+}
+
+function triggerTierSyncFromReceiptModal() {
+    const saveData = activeReceiptModalOptions?.saveData || null;
+    closeReceiptModal();
+    openTierSyncModal(saveData, false);
+}
+
+// ---------- 班层批量同步存证汇总弹窗 ----------
+
+let syncSummaryDelegationBound = false;
+function ensureSyncSummaryDelegation() {
+    const listEl = document.getElementById('sync-summary-list');
+    if (!listEl || syncSummaryDelegationBound) return;
+    syncSummaryDelegationBound = true;
+    listEl.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-sync-action]');
+        if (!btn || !activeSyncSummaryContext) return;
+        const idx = parseInt(btn.dataset.syncIndex, 10);
+        const row = activeSyncSummaryContext.results[idx];
+        if (!row) return;
+        const act = btn.dataset.syncAction;
+        if (act === 'copy') {
+            if (row.receiptCode) {
+                const ok = await copyTextToClipboard(`${row.tier}班：${row.receiptCode}\n核验：${buildVerifyUrl(row.receiptCode)}`);
+                showToast(ok ? `已复制 ${row.tier}班 回执` : '复制失败', ok ? 'success' : 'warn');
+            }
+        } else if (act === 'view') {
+            if (row.receipt || row.receiptCode) {
+                const scope = {
+                    ...activeSyncSummaryContext.data,
+                    tier: row.tier
+                };
+                openReceiptModal(row.receipt || {
+                    receipt_code: row.receiptCode,
+                    action: 'tier_sync',
+                    scope
+                }, { allowTierSync: false, fallbackScope: scope });
+            }
+        } else if (act === 'verify') {
+            if (row.receiptCode) {
+                window.open(buildVerifyUrl(row.receiptCode), '_blank', 'noopener,noreferrer');
+            }
+        }
+    });
+}
+
+function openTierSyncSummaryModal(data, sourceTier, syncResults) {
+    ensureSyncSummaryDelegation();
+    const results = Array.isArray(syncResults) ? syncResults : [];
+    activeSyncSummaryContext = { data, sourceTier, results };
+
+    const okCount = results.filter(r => r.success).length;
+    const statsEl = document.getElementById('sync-summary-stats');
+    const scopeEl = document.getElementById('sync-summary-scope');
+    const listEl = document.getElementById('sync-summary-list');
+
+    if (statsEl) {
+        statsEl.textContent = `成功 ${okCount} / ${results.length}`;
+    }
+    if (scopeEl) {
+        const topicLabel = getTopicLabel(data.week) || `专题${data.week}`;
+        scopeEl.innerHTML = `同步范围：<strong>${escapeHtml(String(data.year))}年 ${escapeHtml(data.season)}季 · ${escapeHtml(getBankTypeLabel(data.bankType))} · ${escapeHtml(data.subject)} · ${escapeHtml(data.grade)} · ${escapeHtml(topicLabel)}</strong>（来源：${escapeHtml(sourceTier)}班）`;
+    }
+    if (listEl) {
+        listEl.innerHTML = results.map((r, idx) => {
+            if (r.success) {
+                const hasCode = Boolean(r.receiptCode);
+                return `
+                    <div class="qb-sync-summary-row is-ok">
+                        <div class="qb-sync-summary-row-info">
+                            <span class="qb-sync-summary-tier">✅ ${escapeHtml(r.tier)}班</span>
+                            ${hasCode
+                                ? `<span class="qb-sync-summary-code">${escapeHtml(r.receiptCode)}</span>`
+                                : `<span style="font-size:0.8rem; color:var(--text-secondary);">同步成功（未签发回执编号）</span>`}
+                        </div>
+                        ${hasCode ? `
+                        <div class="qb-sync-summary-row-actions">
+                            <button type="button" class="btn sm secondary" data-sync-action="copy" data-sync-index="${idx}">复制</button>
+                            <button type="button" class="btn sm secondary" data-sync-action="view" data-sync-index="${idx}">回执卡</button>
+                            <button type="button" class="btn sm secondary" data-sync-action="verify" data-sync-index="${idx}">核验</button>
+                        </div>` : ''}
+                    </div>
+                `;
+            }
+            return `
+                <div class="qb-sync-summary-row is-err">
+                    <div class="qb-sync-summary-row-info">
+                        <span class="qb-sync-summary-tier">❌ ${escapeHtml(r.tier)}班</span>
+                        <span class="qb-sync-summary-err">${escapeHtml(r.error || '同步失败')}</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+    openNativeDialog('qbank-tier-sync-summary-dialog', { dismissible: true });
+}
+
+function closeTierSyncSummaryModal() {
+    closeNativeDialog('qbank-tier-sync-summary-dialog');
+}
+
+async function copyAllSyncSummaryReceipts() {
+    if (!activeSyncSummaryContext) return;
+    const { data, sourceTier, results } = activeSyncSummaryContext;
+    const okCount = results.filter(r => r.success).length;
+    const topicLabel = getTopicLabel(data.week) || `专题${data.week}`;
+    const lines = [
+        '【极方题库班层同步存证汇总】',
+        `配置范围：${data.year}年 ${data.season}季 · ${getBankTypeLabel(data.bankType)} · ${data.subject} · ${data.grade} · ${topicLabel}（同步源：${sourceTier}班）`,
+        `同步结果：成功 ${okCount} / ${results.length} 个班层`
+    ];
+    results.forEach(r => {
+        if (r.success) {
+            if (r.receiptCode) {
+                lines.push(`✅ ${r.tier}班：${r.receiptCode}（核验：${buildVerifyUrl(r.receiptCode)}）`);
+            } else {
+                lines.push(`✅ ${r.tier}班：同步成功`);
+            }
+        } else {
+            lines.push(`❌ ${r.tier}班：${r.error || '同步失败'}`);
+        }
+    });
+    const ok = await copyTextToClipboard(lines.join('\n'));
+    showToast(ok ? '已复制全部班层同步回执汇总' : '复制失败，请手动复制', ok ? 'success' : 'warn');
+}
+
+// ---------- 版本历史时间线弹窗 ----------
+
+let revisionsDelegationBound = false;
+function ensureRevisionsDelegation() {
+    const bodyEl = document.getElementById('revisions-modal-body');
+    if (!bodyEl || revisionsDelegationBound) return;
+    revisionsDelegationBound = true;
+    bodyEl.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-rev-action]');
+        if (!btn) return;
+        const idx = parseInt(btn.dataset.revIndex, 10);
+        const rev = cachedRevisionsList[idx];
+        if (!rev) return;
+        const act = btn.dataset.revAction;
+        const code = String(rev.receipt_code || rev.receipt?.receipt_code || '').trim();
+        if (act === 'view') {
+            const norm = normalizeReceiptObject(rev, activeRevisionsContext);
+            if (norm) openReceiptModal(norm, { allowTierSync: false, fallbackScope: activeRevisionsContext });
+        } else if (act === 'copy') {
+            if (code) {
+                const ok = await copyTextToClipboard(code);
+                showToast(ok ? `已复制回执编号：${code}` : '复制失败', ok ? 'success' : 'warn');
+            }
+        } else if (act === 'verify') {
+            if (code) {
+                window.open(buildVerifyUrl(code), '_blank', 'noopener,noreferrer');
+            }
+        }
+    });
+}
+
+async function fetchAndRenderRevisions(scopeMeta) {
+    const bodyEl = document.getElementById('revisions-modal-body');
+    if (!bodyEl || !scopeMeta) return;
+    bodyEl.innerHTML = `<div class="qb-rev-loading"><span>正在加载存证版本历史...</span></div>`;
+    cachedRevisionsList = [];
+
+    try {
+        const res = await apiGet('revisions', {
+            year: scopeMeta.year,
+            season: scopeMeta.season,
+            bankType: scopeMeta.bankType,
+            subject: scopeMeta.subject,
+            grade: scopeMeta.grade,
+            tier: scopeMeta.tier,
+            week: scopeMeta.week
+        });
+        if (!res || !res.success) {
+            bodyEl.innerHTML = `<div class="qb-rev-empty"><p>${escapeHtml(res?.error || '加载版本历史失败')}</p></div>`;
+            return;
+        }
+        const rawList = Array.isArray(res.data) ? res.data : [];
+        if (rawList.length === 0) {
+            bodyEl.innerHTML = `<div class="qb-rev-empty"><p>暂无存证版本记录</p><span style="font-size:0.78rem; color:var(--text-muted);">该专题可能是在存证体系上线前保存的，重新保存一次即可签发首条存证回执。</span></div>`;
+            return;
+        }
+
+        const sorted = [...rawList].sort((a, b) => (Number(b.revision_no || 0) - Number(a.revision_no || 0)));
+        cachedRevisionsList = sorted;
+
+        bodyEl.innerHTML = `<div class="qb-rev-timeline">${sorted.map((rev, idx) => {
+            const revNo = rev.revision_no || (sorted.length - idx);
+            const action = rev.action || rev.receipt?.action || 'update';
+            const actionCls = `action-${String(action).replace(/[^a-z0-9_]/gi, '')}`;
+            const code = String(rev.receipt_code || rev.receipt?.receipt_code || '').trim();
+            const opName = rev.operator_name || rev.receipt?.operator?.real_name || '';
+            const opUser = (typeof rev.operator === 'string' ? rev.operator : rev.operator?.username) || rev.receipt?.operator?.username || '';
+            const opText = (opName && opUser && opName !== opUser) ? `${opName} (${opUser})` : (opName || opUser || '未知教师');
+            const issuedAt = rev.issued_at_cst || rev.receipt?.issued_at_cst || rev.issued_at || '';
+            const qCount = rev.question_count ?? rev.summary?.question_count ?? rev.receipt?.summary?.question_count ?? 0;
+            const exCount = rev.exercise_pdf_count ?? rev.summary?.exercise_pdf_count ?? rev.receipt?.summary?.exercise_pdf_count ?? '-';
+            const ansCount = rev.answer_pdf_count ?? rev.summary?.answer_pdf_count ?? rev.receipt?.summary?.answer_pdf_count ?? '-';
+            const topicCount = rev.topic_filled_count ?? rev.summary?.topic_filled_count ?? rev.receipt?.summary?.topic_filled_count ?? '-';
+            const sha = String(rev.content_sha256 || rev.receipt?.content_sha256 || '').trim();
+            const shaShort = sha ? `${sha.slice(0, 12)}...` : '';
+            const supersedes = rev.supersedes_receipt_code || rev.receipt?.supersedes_receipt_code || '';
+            const isLatest = idx === 0;
+
+            return `
+                <div class="qb-rev-item${isLatest ? ' is-latest' : ''}">
+                    <span class="qb-rev-dot" aria-hidden="true"></span>
+                    <div class="qb-rev-card">
+                        <div class="qb-rev-card-top">
+                            <div class="qb-rev-card-title">
+                                <span class="qb-rev-no-pill">v${escapeHtml(String(revNo))}</span>
+                                <span class="qb-rev-action-badge ${actionCls}">${escapeHtml(formatActionLabel(action))}</span>
+                                ${isLatest ? '<span class="qb-rev-action-badge action-create">最新记录</span>' : ''}
+                                ${code ? `<span class="qb-rev-code">${escapeHtml(code)}</span>` : ''}
+                            </div>
+                            <span class="qb-rev-time">${escapeHtml(issuedAt)}</span>
+                        </div>
+                        <div class="qb-rev-card-meta">
+                            <span>操作人：${escapeHtml(opText)}</span>
+                            <span>${escapeHtml(String(qCount))} 题（题目PDF ${escapeHtml(String(exCount))} · 答案PDF ${escapeHtml(String(ansCount))} · 知识点 ${escapeHtml(String(topicCount))}）</span>
+                            ${supersedes ? `<span>覆盖：${escapeHtml(supersedes)}</span>` : ''}
+                            ${shaShort ? `<span class="qb-rev-sha" title="${escapeHtml(sha)}">SHA256: ${escapeHtml(shaShort)}</span>` : ''}
+                        </div>
+                        ${code ? `
+                        <div class="qb-rev-actions">
+                            <button type="button" class="btn sm secondary" data-rev-action="view" data-rev-index="${idx}">查看回执</button>
+                            <button type="button" class="btn sm secondary" data-rev-action="copy" data-rev-index="${idx}">复制回执</button>
+                            <button type="button" class="btn sm secondary" data-rev-action="verify" data-rev-index="${idx}">公开核验</button>
+                        </div>` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('')}</div>`;
+    } catch (err) {
+        console.error('加载版本历史失败:', err);
+        bodyEl.innerHTML = `<div class="qb-rev-empty"><p>加载版本历史失败，请检查网络连接</p></div>`;
+    }
+}
+
+async function openRevisionsModal(scopeMeta) {
+    if (!scopeMeta) return;
+    ensureRevisionsDelegation();
+    activeRevisionsContext = scopeMeta;
+    const subEl = document.getElementById('revisions-modal-subtitle');
+    if (subEl) {
+        const topicLabel = getTopicLabel(scopeMeta.week) || `专题${scopeMeta.week}`;
+        subEl.textContent = `${scopeMeta.year}年 ${scopeMeta.season}季 · ${getBankTypeLabel(scopeMeta.bankType)} · ${scopeMeta.subject} · ${scopeMeta.grade} · ${scopeMeta.tier}班 · ${topicLabel}`;
+    }
+    openNativeDialog('qbank-revisions-dialog', { dismissible: true });
+    await fetchAndRenderRevisions(scopeMeta);
+}
+
+function closeRevisionsModal() {
+    closeNativeDialog('qbank-revisions-dialog');
+}
+
+function refreshRevisionsModal() {
+    if (activeRevisionsContext) {
+        fetchAndRenderRevisions(activeRevisionsContext);
     }
 }
 
@@ -6528,6 +7676,8 @@ window.addEventListener('resize', () => {
         'step-click': (_el, arg) => handleStepIndicatorClick(parseInt(arg, 10)),
         'open-rg-studio': () => openRegionDebugStudio(),
         'next-step-1': () => goNextFromStep1(),
+        'reset-to-current-term': () => resetToCurrentTerm(),
+        'set-saved-term-mode': (_el, arg) => setSavedTermMode(arg),
         'reset-saved-filters': () => resetSavedFilters(),
         'select-batch-pdf': (_el, arg) => selectBatchPdf(arg),
         'go-back': () => goBack(),
@@ -6538,6 +7688,17 @@ window.addEventListener('resize', () => {
         'add-question': () => addQuestion(),
         'clear-all-questions': () => clearAllQuestions(),
         'open-tier-sync': () => openTierSyncModal(),
+        'open-current-receipt': () => openCurrentReceiptModal(),
+        'close-receipt-modal': () => closeReceiptModal(),
+        'copy-receipt-code': () => copyActiveReceiptCode(),
+        'copy-receipt-text': () => copyActiveReceiptText(),
+        'download-receipt-json': () => downloadActiveReceiptJson(),
+        'open-receipt-verify': () => openActiveReceiptVerify(),
+        'receipt-tier-sync': () => triggerTierSyncFromReceiptModal(),
+        'close-sync-summary-modal': () => closeTierSyncSummaryModal(),
+        'copy-all-sync-receipts': () => copyAllSyncSummaryReceipts(),
+        'close-revisions-modal': () => closeRevisionsModal(),
+        'refresh-revisions-modal': () => refreshRevisionsModal(),
         'save-questions': () => saveQuestions(),
         'go-config-step': () => goToConfigStep(),
         'go-home': () => goToHome(),

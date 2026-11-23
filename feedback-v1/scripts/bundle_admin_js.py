@@ -27,6 +27,7 @@ MODULE_ORDER = [
     ("database.js", "Tab 3: 底层数据库通用 CRUD 与版本回滚"),
     ("changelog.js", "Tab 4: 更新日志管理"),
     ("token-search.js", "错题本 Token 快捷反查学情"),
+    ("qbank-audit.js", "题库存证回执总览与操作复盘时间线"),
     ("main.js", "路由调度、事件监听与系统启动 (Bootstrap)")
 ]
 

@@ -2,18 +2,26 @@ package handler
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"feedback-api/internal/auditlog"
 	"feedback-api/internal/config"
 	"feedback-api/internal/httpx"
 	"feedback-api/internal/qbank"
+	"feedback-api/internal/qbankattest"
 	"feedback-api/internal/session"
 )
 
@@ -21,6 +29,8 @@ type mockQBankRepo struct {
 	listItems     []qbank.WeekListItem
 	weekDetail    *qbank.WeekDetail
 	savedReq      *qbank.SaveWeekRequest
+	saveErr       error
+	existingWeeks map[string]bool
 	removedPDFs   []string
 	deletedPDFs   []string
 	pdfRefCount   map[string]int
@@ -39,14 +49,56 @@ func (m *mockQBankRepo) GetWeek(_ context.Context, k qbank.WeekKey) (*qbank.Week
 	return m.weekDetail, nil
 }
 
-func (m *mockQBankRepo) SaveWeek(_ context.Context, req qbank.SaveWeekRequest) ([]string, error) {
+func (m *mockQBankRepo) SaveWeek(ctx context.Context, req qbank.SaveWeekRequest) ([]string, error) {
 	cp := req
 	m.savedReq = &cp
+	if m.saveErr != nil {
+		return nil, m.saveErr
+	}
+	scopeKey := fmt.Sprintf("%s|%d|%s|%s|%s|%s|%d", req.BankType, req.Year, req.Season, req.Subject, req.Grade, req.Tier, req.Week)
+	if m.existingWeeks == nil {
+		m.existingWeeks = make(map[string]bool)
+	}
+	existed := m.existingWeeks[scopeKey]
+	if req.OnRecordTx != nil {
+		action := qbankattest.ActionCreate
+		if req.SaveMode == "tier_sync" {
+			action = qbankattest.ActionTierSync
+		} else if existed {
+			action = qbankattest.ActionUpdate
+		}
+		if err := req.OnRecordTx(ctx, nil, 42, action); err != nil {
+			return nil, err
+		}
+	}
+	m.existingWeeks[scopeKey] = true
 	return m.removedPDFs, nil
 }
 
-func (m *mockQBankRepo) DeleteWeek(_ context.Context, k qbank.WeekKey) ([]string, error) {
+func (m *mockQBankRepo) DeleteWeek(ctx context.Context, k qbank.WeekKey) ([]string, error) {
 	m.lastDeleteKey = k
+	if k.OnDeleteTx != nil {
+		yr := 2026
+		if k.Year != nil {
+			yr = *k.Year
+		}
+		season := k.Season
+		if season == "" {
+			season = "秋"
+		}
+		if err := k.OnDeleteTx(ctx, nil, qbank.WeekScope{
+			QBankID:  42,
+			BankType: k.BankType,
+			Year:     yr,
+			Season:   season,
+			Subject:  k.Subject,
+			Grade:    k.Grade,
+			Tier:     k.Tier,
+			Week:     k.Week,
+		}); err != nil {
+			return nil, err
+		}
+	}
 	return m.deletedPDFs, nil
 }
 
@@ -277,5 +329,507 @@ func TestQBankListGetZeroParamsAndBodyLimit(t *testing.T) {
 	h.ServeHTTP(recDelZero, reqDelZero)
 	if recDelZero.Code != http.StatusOK || repo.lastDeleteKey.Year != nil || repo.lastDeleteKey.Season != "" {
 		t.Fatalf("unexpected DELETE year=0&season=0: code=%d key=%+v", recDelZero.Code, repo.lastDeleteKey)
+	}
+}
+
+func TestQBankAttestationSaveDeleteRevisionsStrictAndAttempts(t *testing.T) {
+	root := t.TempDir()
+	pdfDir := filepath.Join(root, "data", "pdfs")
+	if err := os.MkdirAll(pdfDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	retainedPDF := "data/pdfs/pdf_retained_180d.pdf"
+	unreferencedPDF := "data/pdfs/pdf_never_attested.pdf"
+	oldExpiredPDF := "data/pdfs/pdf_old_200d.pdf"
+	_ = os.WriteFile(filepath.Join(pdfDir, "pdf_retained_180d.pdf"), []byte("%PDF-1.4\nretained"), 0o644)
+	_ = os.WriteFile(filepath.Join(pdfDir, "pdf_never_attested.pdf"), []byte("%PDF-1.4\nunref"), 0o644)
+	_ = os.WriteFile(filepath.Join(pdfDir, "pdf_old_200d.pdf"), []byte("%PDF-1.4\nexpired"), 0o644)
+
+	now := time.Date(2026, 11, 23, 6, 0, 0, 0, time.UTC)
+	signer, err := qbankattest.NewEphemeralSigner("jf-qb-handler-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	attestStore := qbankattest.NewMemoryStore(signer, root, qbankattest.WithNowFunc(func() time.Time { return now }))
+
+	// Seed an expired (>200 days) snapshot referencing pdf_old_200d.pdf
+	_, err = attestStore.RecordRevisionTx(context.Background(), nil, qbankattest.RecordRevisionInput{
+		QBankID: 99, Action: qbankattest.ActionCreate,
+		Scope:     qbankattest.Scope{BankType: "homework", Year: 2025, Season: "春", Subject: "数学", Grade: "七年级", Tier: "A", Week: 9},
+		Operator:  "t101",
+		Questions: []qbankattest.SnapshotQuestion{{QuestionNum: 1, Topic: "旧期", ExercisePDF: oldExpiredPDF}},
+		Now:       now.Add(-200 * 24 * time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sessStore := session.NewMemoryStore()
+	teacherSID := "3333cccc4444dddd5555eeee6666ffff"
+	sessStore.Set(teacherSID, map[string]any{
+		"user_logged_in": true,
+		"username":       "t101",
+		"real_name":      "张老师",
+		"user_role":      "teacher",
+	})
+
+	repo := &mockQBankRepo{
+		removedPDFs: []string{retainedPDF, unreferencedPDF, oldExpiredPDF},
+		pdfRefCount: map[string]int{retainedPDF: 0, unreferencedPDF: 0, oldExpiredPDF: 0},
+	}
+	h := httpx.Middleware(QBank(QBankDeps{
+		Repo:         repo,
+		Sessions:     sessStore,
+		ConfigLoader: config.NewLoader(root, ""),
+		Audit:        auditlog.NoopLogger{},
+		Attest:       attestStore,
+		FeedbackRoot: root,
+	}))
+
+	// 1. First POST -> create receipt (referencing retainedPDF)
+	body1 := `{"bankType":"homework","year":2026,"season":"autumn","subject":"数学","grade":"七年级","tier":"S+","week":3,"questions":[{"id":1,"topic":"有理数","exercisePdf":{"url":"` + retainedPDF + `","name":"ex1.pdf"}}]}`
+	req1 := httptest.NewRequest(http.MethodPost, "/api/qbank.php", strings.NewReader(body1))
+	req1.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+	req1.RemoteAddr = "198.51.100.20:1001"
+	rec1 := httptest.NewRecorder()
+	h.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("first POST status = %d, body=%s", rec1.Code, rec1.Body.String())
+	}
+	var resp1 struct {
+		Success bool                 `json:"success"`
+		DBSaved bool                 `json:"dbSaved"`
+		Receipt *qbankattest.Receipt `json:"receipt"`
+	}
+	if err := json.Unmarshal(rec1.Body.Bytes(), &resp1); err != nil {
+		t.Fatal(err)
+	}
+	if !resp1.Success || !resp1.DBSaved || resp1.Receipt == nil || resp1.Receipt.Action != qbankattest.ActionCreate || resp1.Receipt.RevisionNo != 1 || resp1.Receipt.Operator.RealName != "张老师" {
+		t.Fatalf("unexpected v1 receipt response: %+v", resp1)
+	}
+	// Retained PDF referenced within 180d must NOT be deleted; unreferenced & >180d expired PDFs must be deleted.
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(retainedPDF))); err != nil {
+		t.Fatalf("expected 180d attested PDF %s to be retained, stat err=%v", retainedPDF, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(unreferencedPDF))); !os.IsNotExist(err) {
+		t.Fatalf("expected unreferenced PDF %s to be deleted", unreferencedPDF)
+	}
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(oldExpiredPDF))); !os.IsNotExist(err) {
+		t.Fatalf("expected >180d expired PDF %s to be deleted", oldExpiredPDF)
+	}
+
+	// 2. Second POST (update) + Third POST (saveMode=tier_sync)
+	req2 := httptest.NewRequest(http.MethodPost, "/api/qbank.php", strings.NewReader(body1))
+	req2.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, req2)
+	var resp2 struct {
+		Receipt *qbankattest.Receipt `json:"receipt"`
+	}
+	_ = json.Unmarshal(rec2.Body.Bytes(), &resp2)
+	if resp2.Receipt == nil || resp2.Receipt.Action != qbankattest.ActionUpdate || resp2.Receipt.RevisionNo != 2 || resp2.Receipt.Supersedes != resp1.Receipt.ReceiptCode {
+		t.Fatalf("unexpected v2 receipt: %+v", resp2.Receipt)
+	}
+
+	bodySync := `{"bankType":"homework","year":2026,"season":"autumn","subject":"数学","grade":"七年级","tier":"S+","week":3,"saveMode":"tier_sync","questions":[{"id":1,"topic":"有理数","exercisePdf":{"url":"` + retainedPDF + `","name":"ex1.pdf"}}]}`
+	req3 := httptest.NewRequest(http.MethodPost, "/api/qbank.php", strings.NewReader(bodySync))
+	req3.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+	rec3 := httptest.NewRecorder()
+	h.ServeHTTP(rec3, req3)
+	var resp3 struct {
+		Receipt *qbankattest.Receipt `json:"receipt"`
+	}
+	_ = json.Unmarshal(rec3.Body.Bytes(), &resp3)
+	if resp3.Receipt == nil || resp3.Receipt.Action != qbankattest.ActionTierSync || resp3.Receipt.RevisionNo != 3 {
+		t.Fatalf("unexpected v3 tier_sync receipt: %+v", resp3.Receipt)
+	}
+
+	// 3. GET action=revisions returns newest-first [v3, v2, v1]
+	reqRevs := httptest.NewRequest(http.MethodGet, "/api/qbank.php?action=revisions&year=2026&season=autumn&bankType=homework&subject=%E6%95%B0%E5%AD%A6&grade=%E4%B8%83%E5%B9%B4%E7%BA%A7&tier=S%2B&week=3", nil)
+	reqRevs.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+	recRevs := httptest.NewRecorder()
+	h.ServeHTTP(recRevs, reqRevs)
+	if recRevs.Code != http.StatusOK {
+		t.Fatalf("GET revisions status = %d, body=%s", recRevs.Code, recRevs.Body.String())
+	}
+	var revsResp struct {
+		Success bool                       `json:"success"`
+		Data    []qbankattest.RevisionItem `json:"data"`
+	}
+	if err := json.Unmarshal(recRevs.Body.Bytes(), &revsResp); err != nil {
+		t.Fatal(err)
+	}
+	if !revsResp.Success || len(revsResp.Data) != 3 || revsResp.Data[0].RevisionNo != 3 || revsResp.Data[2].RevisionNo != 1 {
+		t.Fatalf("unexpected revisions response: %+v", revsResp)
+	}
+
+	// 4. GET action=get&strict=1 propagates Strict: true
+	reqStrict := httptest.NewRequest(http.MethodGet, "/api/qbank.php?action=get&year=2026&season=autumn&subject=%E6%95%B0%E5%AD%A6&grade=%E4%B8%83%E5%B9%B4%E7%BA%A7&tier=S%2B&week=3&strict=1", nil)
+	reqStrict.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+	recStrict := httptest.NewRecorder()
+	h.ServeHTTP(recStrict, reqStrict)
+	if recStrict.Code != http.StatusOK || !repo.lastGetKey.Strict {
+		t.Fatalf("expected Strict=true in repo.lastGetKey, got code=%d key=%+v", recStrict.Code, repo.lastGetKey)
+	}
+
+	// 5. Validation error -> 400 + save_rejected attempt; Repo error -> 500 + save_error attempt
+	badBody := `{"bankType":"homework","year":2026,"season":"autumn","subject":"数学","grade":"七年级","tier":"S+","week":3,"questions":[{"id":1,"topic":"","exercisePdf":{"url":"` + retainedPDF + `"}}]}`
+	reqRej := httptest.NewRequest(http.MethodPost, "/api/qbank.php", strings.NewReader(badBody))
+	reqRej.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+	recRej := httptest.NewRecorder()
+	h.ServeHTTP(recRej, reqRej)
+	if recRej.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 on missing topic, got %d", recRej.Code)
+	}
+
+	repo.saveErr = errors.New("simulated mysql timeout")
+	reqErr := httptest.NewRequest(http.MethodPost, "/api/qbank.php", strings.NewReader(body1))
+	reqErr.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+	recErr := httptest.NewRecorder()
+	h.ServeHTTP(recErr, reqErr)
+	if recErr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 on repo error, got %d", recErr.Code)
+	}
+	repo.saveErr = nil
+
+	// 6. POST action=log_attempt (client_blocked + save_cancelled + invalid event_type)
+	for _, ev := range []string{"client_blocked", "save_cancelled"} {
+		reqLog := httptest.NewRequest(http.MethodPost, "/api/qbank.php?action=log_attempt", strings.NewReader(`{"event_type":"`+ev+`","bankType":"homework","year":2026,"season":"autumn","subject":"数学","grade":"七年级","tier":"S+","week":3,"reason":"test reason","details":{"step":2}}`))
+		reqLog.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+		recLog := httptest.NewRecorder()
+		h.ServeHTTP(recLog, reqLog)
+		if recLog.Code != http.StatusOK {
+			t.Fatalf("log_attempt(%s) status = %d, body=%s", ev, recLog.Code, recLog.Body.String())
+		}
+	}
+	reqLogBad := httptest.NewRequest(http.MethodPost, "/api/qbank.php?action=log_attempt", strings.NewReader(`{"event_type":"bogus_event"}`))
+	reqLogBad.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+	recLogBad := httptest.NewRecorder()
+	h.ServeHTTP(recLogBad, reqLogBad)
+	if recLogBad.Code != http.StatusBadRequest {
+		t.Fatalf("invalid log_attempt event_type status = %d, want 400", recLogBad.Code)
+	}
+
+	tl, err := attestStore.ListTimeline(context.Background(), qbankattest.TimelineFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tl.Stats.BlockedOrFailed != 3 || tl.Stats.Cancelled != 1 {
+		t.Fatalf("expected 3 blocked_or_failed (save_rejected+save_error+client_blocked) and 1 cancelled, got %+v", tl.Stats)
+	}
+
+	// 7. DELETE /api/qbank.php emits delete receipt & marks earlier receipts DELETED
+	reqDel := httptest.NewRequest(http.MethodDelete, "/api/qbank.php?year=2026&season=autumn&bankType=homework&subject=%E6%95%B0%E5%AD%A6&grade=%E4%B8%83%E5%B9%B4%E7%BA%A7&tier=S%2B&week=3", nil)
+	reqDel.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: teacherSID})
+	recDel := httptest.NewRecorder()
+	h.ServeHTTP(recDel, reqDel)
+	if recDel.Code != http.StatusOK {
+		t.Fatalf("DELETE status = %d, body=%s", recDel.Code, recDel.Body.String())
+	}
+	var delResp struct {
+		Success     bool                 `json:"success"`
+		ReceiptCode string               `json:"receipt_code"`
+		Receipt     *qbankattest.Receipt `json:"receipt"`
+	}
+	if err := json.Unmarshal(recDel.Body.Bytes(), &delResp); err != nil {
+		t.Fatal(err)
+	}
+	if !delResp.Success || delResp.Receipt == nil || delResp.ReceiptCode == "" || delResp.Receipt.Action != qbankattest.ActionDelete {
+		t.Fatalf("unexpected DELETE receipt response: %+v", delResp)
+	}
+	vr, err := attestStore.VerifyReceipt(context.Background(), resp3.Receipt.ReceiptCode)
+	if err != nil || vr.Status != qbankattest.StatusDeleted || vr.DeletedInfo == nil || vr.DeletedInfo.ReceiptCode != delResp.ReceiptCode {
+		t.Fatalf("expected v3 status DELETED pointing to %s, got %+v err=%v", delResp.ReceiptCode, vr, err)
+	}
+}
+
+// ---------- SQL-level tests for qbank.MySQLRepository Strict, ListWeeks enrichment & Tx hooks ----------
+
+type sqlQBankWireState struct {
+	mu               sync.Mutex
+	txCommitted      int
+	txRolledBack     int
+	exactMissing     bool
+	failRevisionsTbl bool
+	existingWeekID   int64
+}
+
+var (
+	wireSQLMu       sync.Mutex
+	wireSQLRegistry = make(map[string]*sqlQBankWireState)
+)
+
+func init() {
+	sql.Register("mock_qbank_wire_mysql", &wireQBankDriver{})
+}
+
+type wireQBankDriver struct{}
+
+func (d *wireQBankDriver) Open(name string) (driver.Conn, error) {
+	wireSQLMu.Lock()
+	st := wireSQLRegistry[name]
+	wireSQLMu.Unlock()
+	if st == nil {
+		return nil, fmt.Errorf("unknown dsn %q", name)
+	}
+	return &wireQBankConn{state: st}, nil
+}
+
+type wireQBankConn struct{ state *sqlQBankWireState }
+
+func (c *wireQBankConn) Prepare(query string) (driver.Stmt, error) {
+	return &wireQBankStmt{state: c.state, query: query}, nil
+}
+func (c *wireQBankConn) PrepareContext(_ context.Context, query string) (driver.Stmt, error) {
+	return &wireQBankStmt{state: c.state, query: query}, nil
+}
+func (c *wireQBankConn) Close() error              { return nil }
+func (c *wireQBankConn) Begin() (driver.Tx, error) { return c.BeginTx(context.Background(), driver.TxOptions{}) }
+func (c *wireQBankConn) BeginTx(_ context.Context, _ driver.TxOptions) (driver.Tx, error) {
+	return &wireQBankTx{state: c.state}, nil
+}
+func (c *wireQBankConn) ExecContext(_ context.Context, _ string, _ []driver.NamedValue) (driver.Result, error) {
+	return wireQBankRes{lastID: 42, affected: 1}, nil
+}
+func (c *wireQBankConn) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
+	c.state.mu.Lock()
+	st := c.state
+	exactMissing := st.exactMissing
+	failRev := st.failRevisionsTbl
+	existingID := st.existingWeekID
+	c.state.mu.Unlock()
+
+	ts := time.Date(2026, 11, 22, 4, 0, 0, 0, time.UTC)
+	switch {
+	case strings.Contains(query, "FROM `qbank_weeks`") && strings.Contains(query, "ROUND(UNIX_TIMESTAMP(`updated_at`)*1000)") && !strings.Contains(query, "`created_by`"):
+		return &wireQBankRows{
+			cols: []string{"id", "bank_type", "year", "season", "subject", "grade", "tier", "week", "question_count", "updated_at_ms"},
+			rows: [][]driver.Value{{int64(42), "homework", int64(2026), "秋", "数学", "七年级", "S+", int64(3), int64(1), float64(ts.UnixMilli())}},
+		}, nil
+	case strings.Contains(query, "FROM `qbank_weeks` qw"):
+		return &wireQBankRows{
+			cols: []string{"id", "ub", "real_name"},
+			rows: [][]driver.Value{{int64(42), "t101", "张老师"}},
+		}, nil
+	case strings.Contains(query, "FROM `qbank_revisions` r1"):
+		if failRev {
+			return nil, errors.New("Table 'feedback.qbank_revisions' doesn't exist")
+		}
+		return &wireQBankRows{
+			cols: []string{"qbank_id", "bank_type", "year", "season", "subject", "grade", "tier", "week", "receipt_code", "action", "operator", "operator_name"},
+			rows: [][]driver.Value{{int64(42), "homework", int64(2026), "秋", "数学", "七年级", "S+", int64(3), "QB-20261123-AAAAAA-BBBB", "create", "t101", "张老师"}},
+		}, nil
+	case strings.Contains(query, "FROM `qbank_weeks`") && strings.Contains(query, "`created_by`"):
+		cols := []string{"id", "bank_type", "year", "season", "subject", "grade", "tier", "week", "question_count", "created_by", "updated_by", "updated_at", "updated_at_ms"}
+		if exactMissing && strings.Contains(query, "`year` = ? AND `season` = ?") {
+			return &wireQBankRows{cols: cols}, nil
+		}
+		return &wireQBankRows{
+			cols: cols,
+			rows: [][]driver.Value{{int64(42), "homework", int64(2025), "秋", "数学", "七年级", "S+", int64(3), int64(1), "t101", "t101", ts, float64(ts.UnixMilli())}},
+		}, nil
+	case strings.Contains(query, "SELECT `question_num`, `parent_question_num`"):
+		return &wireQBankRows{
+			cols: []string{"question_num", "parent_question_num", "parent_question_nums", "sub_num", "topic", "video_url", "question_meta", "exercise_pdf", "exercise_name", "answer_pdf", "answer_name"},
+			rows: [][]driver.Value{{int64(1), nil, nil, int64(1), "代数", "", "", "data/pdfs/pdf_1.pdf", "1.pdf", "", ""}},
+		}, nil
+	case strings.Contains(query, "SELECT `real_name` FROM `users`"):
+		return &wireQBankRows{cols: []string{"real_name"}, rows: [][]driver.Value{{"张老师"}}}, nil
+	case strings.Contains(query, "SELECT `receipt_code`, `revision_no`, `action` FROM `qbank_revisions`"):
+		if failRev {
+			return nil, errors.New("Table 'feedback.qbank_revisions' doesn't exist")
+		}
+		return &wireQBankRows{
+			cols: []string{"receipt_code", "revision_no", "action"},
+			rows: [][]driver.Value{{"QB-20261123-CCCCCC-DDDD", int64(4), "update"}},
+		}, nil
+	case strings.Contains(query, "LIMIT 1 FOR UPDATE") && strings.Contains(query, "FROM `qbank_weeks`"):
+		cols := []string{"id"}
+		if existingID <= 0 {
+			return &wireQBankRows{cols: cols}, nil
+		}
+		return &wireQBankRows{cols: cols, rows: [][]driver.Value{{existingID}}}, nil
+	case strings.Contains(query, "SELECT `id` FROM `qbank_weeks`"):
+		return &wireQBankRows{cols: []string{"id"}, rows: [][]driver.Value{{int64(42)}}}, nil
+	case strings.Contains(query, "SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks`"):
+		return &wireQBankRows{
+			cols: []string{"bank_type", "year", "season", "subject", "grade", "tier", "week"},
+			rows: [][]driver.Value{{"homework", int64(2025), "秋", "数学", "七年级", "S+", int64(3)}},
+		}, nil
+	case strings.Contains(query, "SELECT `exercise_pdf`, `answer_pdf` FROM `qbank_questions`"):
+		return &wireQBankRows{cols: []string{"exercise_pdf", "answer_pdf"}}, nil
+	default:
+		return nil, fmt.Errorf("unexpected wire query: %s", query)
+	}
+}
+
+type wireQBankTx struct{ state *sqlQBankWireState }
+
+func (t *wireQBankTx) Commit() error {
+	t.state.mu.Lock()
+	t.state.txCommitted++
+	t.state.mu.Unlock()
+	return nil
+}
+func (t *wireQBankTx) Rollback() error {
+	t.state.mu.Lock()
+	t.state.txRolledBack++
+	t.state.mu.Unlock()
+	return nil
+}
+
+type wireQBankStmt struct {
+	state *sqlQBankWireState
+	query string
+}
+
+func (s *wireQBankStmt) Close() error  { return nil }
+func (s *wireQBankStmt) NumInput() int { return -1 }
+func (s *wireQBankStmt) Exec([]driver.Value) (driver.Result, error) {
+	return wireQBankRes{lastID: 1, affected: 1}, nil
+}
+func (s *wireQBankStmt) ExecContext(_ context.Context, _ []driver.NamedValue) (driver.Result, error) {
+	return wireQBankRes{lastID: 1, affected: 1}, nil
+}
+func (s *wireQBankStmt) Query([]driver.Value) (driver.Rows, error) { return nil, driver.ErrSkip }
+
+type wireQBankRes struct {
+	lastID   int64
+	affected int64
+}
+
+func (r wireQBankRes) LastInsertId() (int64, error) { return r.lastID, nil }
+func (r wireQBankRes) RowsAffected() (int64, error) { return r.affected, nil }
+
+type wireQBankRows struct {
+	cols []string
+	rows [][]driver.Value
+	idx  int
+}
+
+func (r *wireQBankRows) Columns() []string { return r.cols }
+func (r *wireQBankRows) Close() error      { return nil }
+func (r *wireQBankRows) Next(dest []driver.Value) error {
+	if r.idx >= len(r.rows) {
+		return io.EOF
+	}
+	copy(dest, r.rows[r.idx])
+	r.idx++
+	return nil
+}
+
+func TestQBankMySQLRepositoryStrictTermAttestAndEnrichment(t *testing.T) {
+	st := &sqlQBankWireState{exactMissing: true}
+	dsn := t.Name()
+	wireSQLMu.Lock()
+	wireSQLRegistry[dsn] = st
+	wireSQLMu.Unlock()
+	defer func() {
+		wireSQLMu.Lock()
+		delete(wireSQLRegistry, dsn)
+		wireSQLMu.Unlock()
+	}()
+	db, err := sql.Open("mock_qbank_wire_mysql", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+
+	repo := qbank.NewMySQLRepository(db)
+	ctx := context.Background()
+	yr2026 := 2026
+
+	// 1. Strict=true returns nil, nil when exact term is missing
+	strictRes, err := repo.GetWeek(ctx, qbank.WeekKey{
+		Year: &yr2026, Season: "春", Subject: "数学", Grade: "七年级", Tier: "S+", Week: 3, BankType: "homework", Strict: true,
+	})
+	if err != nil || strictRes != nil {
+		t.Fatalf("expected nil,nil for Strict miss, got res=%+v err=%v", strictRes, err)
+	}
+
+	// 2. Strict=false falls back to old term with MatchedExactTerm=false and LatestReceiptCode
+	fbRes, err := repo.GetWeek(ctx, qbank.WeekKey{
+		Year: &yr2026, Season: "春", Subject: "数学", Grade: "七年级", Tier: "S+", Week: 3, BankType: "homework", Strict: false,
+	})
+	if err != nil || fbRes == nil || fbRes.MatchedExactTerm || fbRes.LatestReceiptCode != "QB-20261123-CCCCCC-DDDD" || fbRes.LatestRevisionNo != 4 {
+		t.Fatalf("unexpected fallback GetWeek result: %+v err=%v", fbRes, err)
+	}
+
+	// 3. Exact match sets MatchedExactTerm=true
+	st.exactMissing = false
+	exactRes, err := repo.GetWeek(ctx, qbank.WeekKey{
+		Year: &yr2026, Season: "秋", Subject: "数学", Grade: "七年级", Tier: "S+", Week: 3, BankType: "homework", Strict: true,
+	})
+	if err != nil || exactRes == nil || !exactRes.MatchedExactTerm || exactRes.LatestReceiptCode != "QB-20261123-CCCCCC-DDDD" {
+		t.Fatalf("unexpected exact GetWeek result: %+v err=%v", exactRes, err)
+	}
+
+	// 4. ListWeeks enriches UpdatedBy, UpdatedByName, LatestReceiptCode, and degrades gracefully if qbank_revisions errors
+	items, err := repo.ListWeeks(ctx, qbank.ListFilter{})
+	if err != nil || len(items) != 1 || items[0].UpdatedBy != "t101" || items[0].UpdatedByName != "张老师" || items[0].LatestReceiptCode != "QB-20261123-AAAAAA-BBBB" {
+		t.Fatalf("unexpected enriched ListWeeks items: %+v err=%v", items, err)
+	}
+	st.failRevisionsTbl = true
+	degradedItems, err := repo.ListWeeks(ctx, qbank.ListFilter{})
+	if err != nil || len(degradedItems) != 1 || degradedItems[0].UpdatedBy != "t101" || degradedItems[0].LatestReceiptCode != "" {
+		t.Fatalf("unexpected degraded ListWeeks items: %+v err=%v", degradedItems, err)
+	}
+
+	// 5. SaveWeek resolves create vs update vs tier_sync and rolls back when OnRecordTx fails
+	var gotAction string
+	_, err = repo.SaveWeek(ctx, qbank.SaveWeekRequest{
+		BankType: "homework", Year: 2026, Season: "秋", Subject: "数学", Grade: "七年级", Tier: "S+", Week: 3, Operator: "t101",
+		Questions: []qbank.SaveQuestionInput{{QuestionNum: 1, SubNum: 1, Topic: "T", ExerciseURL: "data/pdfs/pdf_1.pdf"}},
+		OnRecordTx: func(_ context.Context, tx *sql.Tx, qbankID int64, action string) error {
+			if tx == nil || qbankID != 42 {
+				return fmt.Errorf("expected non-nil tx and qbankID=42")
+			}
+			gotAction = action
+			return nil
+		},
+	})
+	if err != nil || gotAction != "create" {
+		t.Fatalf("SaveWeek create hook: action=%q err=%v", gotAction, err)
+	}
+	st.existingWeekID = 42
+	_, err = repo.SaveWeek(ctx, qbank.SaveWeekRequest{
+		BankType: "homework", Year: 2026, Season: "秋", Subject: "数学", Grade: "七年级", Tier: "S+", Week: 3, Operator: "t101",
+		Questions: []qbank.SaveQuestionInput{{QuestionNum: 1, SubNum: 1, Topic: "T", ExerciseURL: "data/pdfs/pdf_1.pdf"}},
+		OnRecordTx: func(_ context.Context, _ *sql.Tx, _ int64, action string) error {
+			gotAction = action
+			return nil
+		},
+	})
+	if err != nil || gotAction != "update" {
+		t.Fatalf("SaveWeek update hook: action=%q err=%v", gotAction, err)
+	}
+	prevRB := st.txRolledBack
+	_, err = repo.SaveWeek(ctx, qbank.SaveWeekRequest{
+		BankType: "homework", Year: 2026, Season: "秋", Subject: "数学", Grade: "七年级", Tier: "S+", Week: 3, Operator: "t101",
+		SaveMode:  "tier_sync",
+		Questions: []qbank.SaveQuestionInput{{QuestionNum: 1, SubNum: 1, Topic: "T", ExerciseURL: "data/pdfs/pdf_1.pdf"}},
+		OnRecordTx: func(_ context.Context, _ *sql.Tx, _ int64, action string) error {
+			gotAction = action
+			return errors.New("attest failed")
+		},
+	})
+	if err == nil || gotAction != "tier_sync" || st.txRolledBack <= prevRB {
+		t.Fatalf("expected rollback on SaveWeek OnRecordTx failure: action=%q err=%v rb=%d/%d", gotAction, err, st.txRolledBack, prevRB)
+	}
+
+	// 6. DeleteWeek resolves DB year/season inside tx and calls OnDeleteTx
+	var deletedScope qbank.WeekScope
+	_, err = repo.DeleteWeek(ctx, qbank.WeekKey{
+		Subject: "数学", Grade: "七年级", Tier: "S+", Week: 3, BankType: "homework",
+		OnDeleteTx: func(_ context.Context, tx *sql.Tx, sc qbank.WeekScope) error {
+			if tx == nil {
+				return errors.New("expected non-nil tx")
+			}
+			deletedScope = sc
+			return nil
+		},
+	})
+	if err != nil || deletedScope.Year != 2025 || deletedScope.Season != "秋" || deletedScope.QBankID != 42 {
+		t.Fatalf("unexpected DeleteWeek scope: %+v err=%v", deletedScope, err)
 	}
 }

@@ -22,6 +22,10 @@
                 title: '生成批次记录',
                 breadcrumb: '生成批次记录'
             },
+            'qbank-audit': {
+                title: '题库存证',
+                breadcrumb: '题库存证'
+            },
             logs: {
                 title: '操作日志',
                 breadcrumb: '操作日志'
@@ -65,6 +69,8 @@
                 initTeachersTab();
             } else if (tab === 'batches') {
                 initBatchesTab();
+            } else if (tab === 'qbank-audit') {
+                initQbankAuditTab();
             } else if (tab === 'logs') {
                 loadFilters();
                 loadLogs(1);
@@ -189,7 +195,14 @@
             'add-changelog-row': () => addChangelogItemRow(),
             'save-changelog': () => saveChangelog(),
             'dock-batch-delete': () => triggerDockBatchDelete(),
-            'clear-all-selections': () => clearAllSelections()
+            'clear-all-selections': () => clearAllSelections(),
+            'qba-switch-view': (_el, arg) => switchQbankAuditView(arg),
+            'qba-matrix-reload': () => loadQbankMatrix(),
+            'qba-matrix-reset': () => resetQbankMatrixFilters(),
+            'qba-tl-clear-scope': () => clearQbankLinkedScope(),
+            'qba-tl-reset': () => resetQbankTimelineFilters(),
+            'qba-tl-reload': () => loadQbankTimeline(1),
+            'qba-close-revisions': () => closeQbankRevisionsModal()
         };
 
         const ADMIN_CHANGE_ACTIONS = {
@@ -206,7 +219,11 @@
             'load-logs': () => loadLogs(),
             'load-sender-clients': () => loadSenderClients(),
             'db-per-page': (el) => changeDbPerPage(el.value),
-            'select-all-db': (el) => toggleDbSelectAll(el)
+            'select-all-db': (el) => toggleDbSelectAll(el),
+            'qba-matrix-reload': () => loadQbankMatrix(),
+            'qba-tl-teacher-select': (el) => onQbaTeacherSelectChange(el.value),
+            'qba-tl-reload': () => loadQbankTimeline(1),
+            'qba-tl-pagesize': (el) => changeQbaTimelinePageSize(el.value)
         };
 
         const ADMIN_INPUT_ACTIONS = {
@@ -217,7 +234,9 @@
             'debounce-logs': () => debounceLoadLogs(),
             'render-sender-clients': () => renderSenderClientsList(),
             'debounce-db': () => debounceLoadDbData(),
-            'token-modal-clear': () => toggleTokenModalClearBtn()
+            'token-modal-clear': () => toggleTokenModalClearBtn(),
+            'qba-matrix-search': () => debounceQbaMatrixSearch(),
+            'qba-tl-search': () => debounceQbaTimelineSearch()
         };
 
         document.addEventListener('click', (e) => {

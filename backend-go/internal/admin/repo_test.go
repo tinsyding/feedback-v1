@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"feedback-api/internal/qbankattest"
 	"feedback-api/internal/retestkeys"
 )
 
@@ -213,12 +214,21 @@ func (c *mockAdminConn) QueryContext(_ context.Context, query string, args []dri
 			{"grade", "varchar(32)", "NO", "", "", "", ""},
 			{"tier", "varchar(16)", "NO", "", "", "", ""},
 			{"week", "int", "NO", "", "1", "", ""},
+			{"updated_by", "varchar(50)", "YES", "", "<nil>", "", ""},
 		}), nil
 
 	case strings.HasPrefix(query, "SHOW FULL COLUMNS FROM `qbank_questions`"):
 		return fullColRows([][7]string{
 			{"id", "int", "NO", "PRI", "<nil>", "auto_increment", ""},
 			{"qbank_id", "int", "NO", "", "0", "", ""},
+			{"bank_type", "varchar(16)", "NO", "", "homework", "", ""},
+			{"year", "int", "NO", "", "2026", "", ""},
+			{"season", "varchar(16)", "NO", "", "秋", "", ""},
+			{"subject", "varchar(32)", "NO", "", "", "", ""},
+			{"grade", "varchar(32)", "NO", "", "", "", ""},
+			{"tier", "varchar(16)", "NO", "", "", "", ""},
+			{"week", "int", "NO", "", "1", "", ""},
+			{"question_num", "int", "NO", "", "1", "", ""},
 			{"topic", "varchar(255)", "YES", "", "<nil>", "", ""},
 		}), nil
 
@@ -354,6 +364,30 @@ func (c *mockAdminConn) QueryContext(_ context.Context, query string, args []dri
 		return &mockAdminRows{
 			cols: []string{"id", "student_name", "action", "details", "ip", "user_agent", "created_at"},
 			rows: [][]driver.Value{{int64(1), "张三", "view", "", "127.0.0.1", "UA", utcTS}},
+		}, nil
+
+	case strings.Contains(query, "SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks`"):
+		return &mockAdminRows{
+			cols: []string{"bank_type", "year", "season", "subject", "grade", "tier", "week"},
+			rows: [][]driver.Value{{"homework", int64(2026), "秋", "数学", "七年级", "S+", int64(3)}},
+		}, nil
+
+	case strings.Contains(query, "SELECT `id`, `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks`"):
+		return &mockAdminRows{
+			cols: []string{"id", "bank_type", "year", "season", "subject", "grade", "tier", "week"},
+			rows: [][]driver.Value{{int64(9), "homework", int64(2026), "秋", "数学", "七年级", "S+", int64(3)}},
+		}, nil
+
+	case strings.Contains(query, "SELECT `qbank_id`, `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_questions`"):
+		return &mockAdminRows{
+			cols: []string{"qbank_id", "bank_type", "year", "season", "subject", "grade", "tier", "week"},
+			rows: [][]driver.Value{{int64(9), "homework", int64(2026), "秋", "数学", "七年级", "S+", int64(3)}},
+		}, nil
+
+	case strings.Contains(query, "SELECT `question_num`, `parent_question_num`, `parent_question_nums`, `sub_num`, `topic`"):
+		return &mockAdminRows{
+			cols: []string{"question_num", "parent_question_num", "parent_question_nums", "sub_num", "topic", "video_url", "question_meta", "exercise_pdf", "exercise_name", "answer_pdf", "answer_name"},
+			rows: [][]driver.Value{{int64(1), nil, nil, int64(1), "一元一次方程", "", "", "data/pdfs/pdf_1.pdf", "1.pdf", "", ""}},
 		}, nil
 
 	default:
@@ -665,5 +699,80 @@ func TestMySQLRepositoryHistoryRollbackTokenAndSourceMeta(t *testing.T) {
 	meta, err := repo.LookupSourceFileMeta(ctx, 12, 77, "")
 	if err != nil || meta.BatchCode != "B20261121_100000_ab12" || len(meta.RefTimestamps) != 4 {
 		t.Fatalf("LookupSourceFileMeta: %+v err=%v", meta, err)
+	}
+}
+
+func TestMySQLRepositoryAttestationGuardsAndAdminAudit(t *testing.T) {
+	if !IsHiddenTable("qbank_attestation_keys") {
+		t.Fatal("expected qbank_attestation_keys to be in HiddenTables")
+	}
+	if FriendlyTableNames["qbank_revisions"] != "题库存证版本台账" || FriendlyTableNames["qbank_attempt_logs"] != "题库过程取证日志" {
+		t.Fatalf("unexpected FriendlyTableNames for attestation tables: %+v", FriendlyTableNames)
+	}
+
+	st := &mockAdminDBState{}
+	signer, err := qbankattest.NewEphemeralSigner("jf-qb-adm-crud")
+	if err != nil {
+		t.Fatal(err)
+	}
+	attestStore := qbankattest.NewMemoryStore(signer, "")
+	repo := NewMySQLRepositoryWithAttest(openMockAdminDB(t, st), attestStore)
+	ctx := context.Background()
+
+	// 1. qbank_attestation_keys is blocked from schema & list
+	if _, _, err := repo.GetTableSchema(ctx, "qbank_attestation_keys"); err == nil {
+		t.Fatal("expected 403 for qbank_attestation_keys schema")
+	} else if he, ok := err.(*HTTPError); !ok || he.Status != 403 {
+		t.Fatalf("expected 403, got %v", err)
+	}
+
+	// 2. qbank_revisions & qbank_attempt_logs forbid Create/Update/Delete with HTTP 403
+	for _, tbl := range []string{"qbank_revisions", "qbank_attempt_logs"} {
+		if _, err := repo.CreateRecord(ctx, tbl, map[string]any{"action": "fake"}, ""); err == nil {
+			t.Fatalf("expected 403 CreateRecord on %s", tbl)
+		} else if he, ok := err.(*HTTPError); !ok || he.Status != 403 || he.Message != immutableAttestationErrMsg {
+			t.Fatalf("CreateRecord(%s) unexpected error: %v", tbl, err)
+		}
+		if _, _, err := repo.UpdateRecord(ctx, tbl, "1", map[string]any{"action": "fake"}, "boss"); err == nil {
+			t.Fatalf("expected 403 UpdateRecord on %s", tbl)
+		} else if he, ok := err.(*HTTPError); !ok || he.Status != 403 || he.Message != immutableAttestationErrMsg {
+			t.Fatalf("UpdateRecord(%s) unexpected error: %v", tbl, err)
+		}
+		if _, err := repo.DeleteRecords(ctx, tbl, []string{"1"}, "boss", false); err == nil {
+			t.Fatalf("expected 403 DeleteRecords on %s", tbl)
+		} else if he, ok := err.(*HTTPError); !ok || he.Status != 403 || he.Message != immutableAttestationErrMsg {
+			t.Fatalf("DeleteRecords(%s) unexpected error: %v", tbl, err)
+		}
+	}
+
+	// 3. Updating qbank_weeks, updating qbank_questions, deleting qbank_questions, deleting qbank_weeks all append immutable revisions
+	if _, _, err := repo.UpdateRecord(ctx, "qbank_weeks", "9", map[string]any{"updated_by": "t102"}, "boss"); err != nil {
+		t.Fatalf("UpdateRecord(qbank_weeks): %v", err)
+	}
+	if _, _, err := repo.UpdateRecord(ctx, "qbank_questions", "55", map[string]any{"topic": "二次根式"}, "boss"); err != nil {
+		t.Fatalf("UpdateRecord(qbank_questions): %v", err)
+	}
+	if _, err := repo.DeleteRecords(ctx, "qbank_questions", []string{"55"}, "boss", false); err != nil {
+		t.Fatalf("DeleteRecords(qbank_questions): %v", err)
+	}
+	if _, err := repo.DeleteRecords(ctx, "qbank_weeks", []string{"9"}, "boss", false); err != nil {
+		t.Fatalf("DeleteRecords(qbank_weeks): %v", err)
+	}
+
+	revs, err := attestStore.ListRevisions(ctx, qbankattest.RevisionFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(revs) != 4 {
+		t.Fatalf("expected 4 admin audit revisions (3 admin_edit + 1 admin_delete), got %d: %+v", len(revs), revs)
+	}
+	// ListRevisions returns newest-first: [0]=admin_delete, [1..3]=admin_edit
+	if revs[0].Action != qbankattest.ActionAdminDelete || revs[0].Operator != "boss" {
+		t.Fatalf("expected newest revision to be admin_delete by boss, got %+v", revs[0])
+	}
+	for i := 1; i < 4; i++ {
+		if revs[i].Action != qbankattest.ActionAdminEdit || revs[i].Operator != "boss" {
+			t.Fatalf("expected revision %d to be admin_edit by boss, got %+v", i, revs[i])
+		}
 	}
 }

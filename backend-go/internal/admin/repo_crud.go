@@ -7,16 +7,79 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"weak"
 
 	"golang.org/x/crypto/bcrypt"
 
 	"feedback-api/internal/config"
 	"feedback-api/internal/normalize"
+	"feedback-api/internal/qbank"
+	"feedback-api/internal/qbankattest"
 	"feedback-api/internal/retestkeys"
 )
+
+const immutableAttestationErrMsg = "存证台账与过程取证日志为只增不可变记录，禁止通过后台修改或删除"
+
+func isImmutableAttestationTable(table string) bool {
+	switch strings.ToLower(strings.TrimSpace(table)) {
+	case "qbank_revisions", "qbank_attempt_logs":
+		return true
+	default:
+		return false
+	}
+}
+
+var (
+	adminAttestMu    sync.RWMutex
+	adminAttestStore = make(map[weak.Pointer[MySQLRepository]]qbankattest.Store)
+)
+
+// NewMySQLRepositoryWithAttest creates a MySQLRepository wired with an attestation Store.
+func NewMySQLRepositoryWithAttest(db *sql.DB, store qbankattest.Store) *MySQLRepository {
+	r := NewMySQLRepository(db)
+	r.SetAttestStore(store)
+	return r
+}
+
+// SetAttestStore attaches or clears the attestation Store used to audit generic CRUD edits/deletes on qbank tables.
+func (r *MySQLRepository) SetAttestStore(store qbankattest.Store) {
+	if r == nil {
+		return
+	}
+	wp := weak.Make(r)
+	adminAttestMu.Lock()
+	if store == nil {
+		delete(adminAttestStore, wp)
+		adminAttestMu.Unlock()
+		return
+	}
+	_, existed := adminAttestStore[wp]
+	adminAttestStore[wp] = store
+	adminAttestMu.Unlock()
+	if !existed {
+		runtime.AddCleanup(r, func(key weak.Pointer[MySQLRepository]) {
+			adminAttestMu.Lock()
+			delete(adminAttestStore, key)
+			adminAttestMu.Unlock()
+		}, wp)
+	}
+}
+
+func (r *MySQLRepository) getAttestStore() qbankattest.Store {
+	if r == nil {
+		return nil
+	}
+	wp := weak.Make(r)
+	adminAttestMu.RLock()
+	store := adminAttestStore[wp]
+	adminAttestMu.RUnlock()
+	return store
+}
 
 func placeholders(n int) string {
 	if n <= 0 {
@@ -718,6 +781,9 @@ func (r *MySQLRepository) GetRecord(ctx context.Context, table, id string) (map[
 
 // CreateRecord mirrors PHP actions_crud.php action=db_create.
 func (r *MySQLRepository) CreateRecord(ctx context.Context, table string, input map[string]any, retestSecret string) (int64, error) {
+	if isImmutableAttestationTable(table) {
+		return 0, NewHTTPError(403, immutableAttestationErrMsg, nil)
+	}
 	validTbl, err := r.validateTable(ctx, table)
 	if err != nil {
 		return 0, err
@@ -870,6 +936,43 @@ func (r *MySQLRepository) CreateRecord(ctx context.Context, table string, input 
 	}
 
 	insertSQL := fmt.Sprintf("INSERT INTO `%s` (%s) VALUES (%s)", validTbl, strings.Join(fields, ", "), strings.Join(phs, ", "))
+
+	attest := r.getAttestStore()
+	if validTbl == "qbank_questions" && attest != nil {
+		tx, txErr := r.db.BeginTx(ctx, nil)
+		if txErr != nil {
+			return 0, NewHTTPError(500, "新增记录失败: "+txErr.Error(), nil)
+		}
+		defer func() { _ = tx.Rollback() }()
+
+		res, err := tx.ExecContext(ctx, insertSQL, values...)
+		if err != nil {
+			return 0, NewHTTPError(500, "新增记录失败: "+err.Error(), nil)
+		}
+		newID, _ := res.LastInsertId()
+		qid := int64(config.AsPHPInt(data["qbank_id"]))
+		if qid > 0 {
+			if _, err := tx.ExecContext(ctx,
+				"UPDATE `qbank_weeks` SET `question_count` = (SELECT COUNT(*) FROM `qbank_questions` WHERE `qbank_id` = ?), `updated_at` = NOW() WHERE `id` = ?",
+				qid, qid,
+			); err != nil {
+				return 0, NewHTTPError(500, "更新题数失败: "+err.Error(), nil)
+			}
+		}
+		fallbackScope := scopeFromDataMap(data)
+		adminOp := strings.TrimSpace(config.AsPHPString(data["updated_by"]))
+		if adminOp == "" {
+			adminOp = strings.TrimSpace(config.AsPHPString(data["created_by"]))
+		}
+		if err := recordQBankQuestionAdminEditTx(ctx, tx, attest, qid, fallbackScope, adminOp); err != nil {
+			return 0, NewHTTPError(500, "写入题库存证失败: "+err.Error(), nil)
+		}
+		if err := tx.Commit(); err != nil {
+			return 0, NewHTTPError(500, "新增记录失败: "+err.Error(), nil)
+		}
+		return newID, nil
+	}
+
 	res, err := r.db.ExecContext(ctx, insertSQL, values...)
 	if err != nil {
 		return 0, NewHTTPError(500, "新增记录失败: "+err.Error(), nil)
@@ -888,6 +991,9 @@ func (r *MySQLRepository) CreateRecord(ctx context.Context, table string, input 
 
 // UpdateRecord mirrors PHP actions_crud.php action=db_update.
 func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, input map[string]any, adminOp string) (int64, []string, error) {
+	if isImmutableAttestationTable(table) {
+		return 0, nil, NewHTTPError(403, immutableAttestationErrMsg, nil)
+	}
 	validTbl, err := r.validateTable(ctx, table)
 	if err != nil {
 		return 0, nil, err
@@ -1032,7 +1138,9 @@ func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, in
 	updateSQL := fmt.Sprintf("UPDATE `%s` SET %s WHERE `%s` = ?", validTbl, strings.Join(setParts, ", "), pk)
 
 	var affected int64
-	if validTbl == "student_records" {
+	attest := r.getAttestStore()
+	switch {
+	case validTbl == "student_records":
 		tx, txErr := r.db.BeginTx(ctx, nil)
 		if txErr != nil {
 			return 0, nil, NewHTTPError(500, "更新失败: "+txErr.Error(), nil)
@@ -1047,7 +1155,80 @@ func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, in
 		if err := tx.Commit(); err != nil {
 			return 0, nil, NewHTTPError(500, "更新失败: "+err.Error(), nil)
 		}
-	} else {
+	case attest != nil && validTbl == "qbank_weeks":
+		tx, txErr := r.db.BeginTx(ctx, nil)
+		if txErr != nil {
+			return 0, nil, NewHTTPError(500, "更新失败: "+txErr.Error(), nil)
+		}
+		defer func() { _ = tx.Rollback() }()
+		qid, _ := strconv.ParseInt(strings.TrimSpace(id), 10, 64)
+		oldScope, hasOldScope := loadQBankWeekScopeTx(ctx, tx, qid)
+		res, err := tx.ExecContext(ctx, updateSQL, values...)
+		if err != nil {
+			return 0, nil, NewHTTPError(500, "更新失败: "+err.Error(), nil)
+		}
+		affected, _ = res.RowsAffected()
+		newScope, hasNewScope := loadQBankWeekScopeTx(ctx, tx, qid)
+		if hasNewScope {
+			if _, err := tx.ExecContext(ctx,
+				"UPDATE `qbank_questions` SET `bank_type` = ?, `year` = ?, `season` = ?, `subject` = ?, `grade` = ?, `tier` = ?, `week` = ?, `updated_at` = NOW() WHERE `qbank_id` = ?",
+				newScope.BankType, newScope.Year, newScope.Season, newScope.Subject, newScope.Grade, newScope.Tier, newScope.Week, id,
+			); err != nil {
+				return 0, nil, NewHTTPError(500, "同步题目维度失败: "+err.Error(), nil)
+			}
+			if hasOldScope && oldScope != newScope {
+				if err := recordQBankAdminRevisionTx(ctx, tx, attest, qid, oldScope, qbankattest.ActionAdminDelete, adminOp, nil); err != nil {
+					return 0, nil, NewHTTPError(500, "写入旧专题存证失败: "+err.Error(), nil)
+				}
+			}
+			qs, qErr := loadQBankQuestionsForAttestTx(ctx, tx, qid, &newScope)
+			if qErr != nil {
+				return 0, nil, NewHTTPError(500, "读取题目快照失败: "+qErr.Error(), nil)
+			}
+			if err := recordQBankAdminRevisionTx(ctx, tx, attest, qid, newScope, qbankattest.ActionAdminEdit, adminOp, qs); err != nil {
+				return 0, nil, NewHTTPError(500, "写入题库存证失败: "+err.Error(), nil)
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return 0, nil, NewHTTPError(500, "更新失败: "+err.Error(), nil)
+		}
+	case attest != nil && validTbl == "qbank_questions":
+		tx, txErr := r.db.BeginTx(ctx, nil)
+		if txErr != nil {
+			return 0, nil, NewHTTPError(500, "更新失败: "+txErr.Error(), nil)
+		}
+		defer func() { _ = tx.Rollback() }()
+		oldQID, oldScope, _ := loadQBankQuestionScopeByRowIDTx(ctx, tx, id)
+		res, err := tx.ExecContext(ctx, updateSQL, values...)
+		if err != nil {
+			return 0, nil, NewHTTPError(500, "更新失败: "+err.Error(), nil)
+		}
+		affected, _ = res.RowsAffected()
+		newQID, newScope, hasNewRow := loadQBankQuestionScopeByRowIDTx(ctx, tx, id)
+		if oldQID > 0 && oldQID != newQID {
+			_, _ = tx.ExecContext(ctx,
+				"UPDATE `qbank_weeks` SET `question_count` = (SELECT COUNT(*) FROM `qbank_questions` WHERE `qbank_id` = ?), `updated_at` = NOW() WHERE `id` = ?",
+				oldQID, oldQID,
+			)
+			if err := recordQBankQuestionAdminEditTx(ctx, tx, attest, oldQID, oldScope, adminOp); err != nil {
+				return 0, nil, NewHTTPError(500, "写入原专题存证失败: "+err.Error(), nil)
+			}
+		}
+		if newQID > 0 {
+			_, _ = tx.ExecContext(ctx,
+				"UPDATE `qbank_weeks` SET `question_count` = (SELECT COUNT(*) FROM `qbank_questions` WHERE `qbank_id` = ?), `updated_at` = NOW() WHERE `id` = ?",
+				newQID, newQID,
+			)
+		}
+		if hasNewRow {
+			if err := recordQBankQuestionAdminEditTx(ctx, tx, attest, newQID, newScope, adminOp); err != nil {
+				return 0, nil, NewHTTPError(500, "写入题库存证失败: "+err.Error(), nil)
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return 0, nil, NewHTTPError(500, "更新失败: "+err.Error(), nil)
+		}
+	default:
 		res, err := r.db.ExecContext(ctx, updateSQL, values...)
 		if err != nil {
 			return 0, nil, NewHTTPError(500, "更新失败: "+err.Error(), nil)
@@ -1055,7 +1236,7 @@ func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, in
 		affected, _ = res.RowsAffected()
 	}
 
-	if validTbl == "qbank_weeks" {
+	if attest == nil && validTbl == "qbank_weeks" {
 		if qRows, err := r.db.QueryContext(ctx,
 			"SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ? LIMIT 1",
 			id,
@@ -1141,6 +1322,9 @@ func archiveStudentRecordForAdminEditTx(ctx context.Context, tx *sql.Tx, id, adm
 
 // DeleteRecords mirrors PHP actions_crud.php action=db_delete.
 func (r *MySQLRepository) DeleteRecords(ctx context.Context, table string, ids []string, currentAdmin string, forceCascade bool) (int64, error) {
+	if isImmutableAttestationTable(table) {
+		return 0, NewHTTPError(403, immutableAttestationErrMsg, nil)
+	}
 	validTbl, err := r.validateTable(ctx, table)
 	if err != nil {
 		return 0, err
@@ -1198,12 +1382,19 @@ func (r *MySQLRepository) DeleteRecords(ctx context.Context, table string, ids [
 		}
 	}
 
+	attest := r.getAttestStore()
+
 	if validTbl == "qbank_weeks" {
 		tx, err := r.db.BeginTx(ctx, nil)
 		if err != nil {
 			return 0, NewHTTPError(500, "删除失败", nil)
 		}
 		defer func() { _ = tx.Rollback() }()
+
+		var targets []qbankWeekTarget
+		if attest != nil {
+			targets = loadQBankWeekTargetsTx(ctx, tx, inPH, args)
+		}
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM `qbank_questions` WHERE `qbank_id` IN (%s)", inPH), args...); err != nil {
 			return 0, NewHTTPError(500, "删除失败", nil)
 		}
@@ -1212,6 +1403,46 @@ func (r *MySQLRepository) DeleteRecords(ctx context.Context, table string, ids [
 			return 0, NewHTTPError(500, "删除失败", nil)
 		}
 		deleted, _ := res.RowsAffected()
+		if attest != nil {
+			for _, tgt := range targets {
+				if err := recordQBankAdminRevisionTx(ctx, tx, attest, tgt.id, tgt.scope, qbankattest.ActionAdminDelete, currentAdmin, nil); err != nil {
+					return 0, NewHTTPError(500, "写入题库存证失败: "+err.Error(), nil)
+				}
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return 0, NewHTTPError(500, "删除失败", nil)
+		}
+		return deleted, nil
+	}
+
+	if validTbl == "qbank_questions" && attest != nil {
+		tx, err := r.db.BeginTx(ctx, nil)
+		if err != nil {
+			return 0, NewHTTPError(500, "删除失败", nil)
+		}
+		defer func() { _ = tx.Rollback() }()
+
+		affectedQIDs, fallbackScopes := loadAffectedQBankQuestionsTx(ctx, tx, inPH, args)
+		res, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM `%s` WHERE `%s` IN (%s)", validTbl, pk, inPH), args...)
+		if err != nil {
+			return 0, NewHTTPError(500, "删除失败", nil)
+		}
+		deleted, _ := res.RowsAffected()
+		for _, qid := range affectedQIDs {
+			_, _ = tx.ExecContext(ctx,
+				"UPDATE `qbank_weeks` SET `question_count` = (SELECT COUNT(*) FROM `qbank_questions` WHERE `qbank_id` = ?), `updated_at` = NOW() WHERE `id` = ?",
+				qid, qid,
+			)
+			if err := recordQBankQuestionAdminEditTx(ctx, tx, attest, qid, qbankattest.Scope{}, currentAdmin); err != nil {
+				return 0, NewHTTPError(500, "写入题库存证失败: "+err.Error(), nil)
+			}
+		}
+		for _, sc := range fallbackScopes {
+			if err := recordQBankQuestionAdminEditTx(ctx, tx, attest, 0, sc, currentAdmin); err != nil {
+				return 0, NewHTTPError(500, "写入题库存证失败: "+err.Error(), nil)
+			}
+		}
 		if err := tx.Commit(); err != nil {
 			return 0, NewHTTPError(500, "删除失败", nil)
 		}
@@ -1302,4 +1533,270 @@ func marshalIfComposite(v any) any {
 		}
 	}
 	return v
+}
+
+type sqlTxRunner interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+type qbankWeekTarget struct {
+	id    int64
+	scope qbankattest.Scope
+}
+
+func isValidQBankScope(sc qbankattest.Scope) bool {
+	return sc.Subject != "" && sc.Grade != "" && sc.Tier != "" && sc.Week != 0
+}
+
+func scopeFromDataMap(data map[string]any) qbankattest.Scope {
+	return qbankattest.NormalizeScope(qbankattest.Scope{
+		BankType: config.AsPHPString(data["bank_type"]),
+		Year:     config.AsPHPInt(data["year"]),
+		Season:   config.AsPHPString(data["season"]),
+		Subject:  config.AsPHPString(data["subject"]),
+		Grade:    config.AsPHPString(data["grade"]),
+		Tier:     config.AsPHPString(data["tier"]),
+		Week:     config.AsPHPInt(data["week"]),
+	})
+}
+
+func loadQBankWeekScopeTx(ctx context.Context, runner sqlTxRunner, qbankID int64) (qbankattest.Scope, bool) {
+	if qbankID <= 0 {
+		return qbankattest.Scope{}, false
+	}
+	var bt, season, subj, grade, tier sql.NullString
+	var year, week sql.NullInt64
+	err := runner.QueryRowContext(
+		ctx,
+		"SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ? LIMIT 1",
+		qbankID,
+	).Scan(&bt, &year, &season, &subj, &grade, &tier, &week)
+	if err != nil {
+		return qbankattest.Scope{}, false
+	}
+	sc := qbankattest.NormalizeScope(qbankattest.Scope{
+		BankType: bt.String,
+		Year:     int(year.Int64),
+		Season:   season.String,
+		Subject:  subj.String,
+		Grade:    grade.String,
+		Tier:     tier.String,
+		Week:     int(week.Int64),
+	})
+	return sc, isValidQBankScope(sc)
+}
+
+func loadQBankWeekTargetsTx(ctx context.Context, runner sqlTxRunner, inPH string, args []any) []qbankWeekTarget {
+	rows, err := runner.QueryContext(
+		ctx,
+		fmt.Sprintf("SELECT `id`, `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` IN (%s)", inPH),
+		args...,
+	)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []qbankWeekTarget
+	for rows.Next() {
+		var id int64
+		var bt, season, subj, grade, tier sql.NullString
+		var year, week sql.NullInt64
+		if scanErr := rows.Scan(&id, &bt, &year, &season, &subj, &grade, &tier, &week); scanErr == nil {
+			sc := qbankattest.NormalizeScope(qbankattest.Scope{
+				BankType: bt.String,
+				Year:     int(year.Int64),
+				Season:   season.String,
+				Subject:  subj.String,
+				Grade:    grade.String,
+				Tier:     tier.String,
+				Week:     int(week.Int64),
+			})
+			if isValidQBankScope(sc) {
+				out = append(out, qbankWeekTarget{id: id, scope: sc})
+			}
+		}
+	}
+	return out
+}
+
+func loadQBankQuestionScopeByRowIDTx(ctx context.Context, runner sqlTxRunner, rowID string) (int64, qbankattest.Scope, bool) {
+	var qid sql.NullInt64
+	var bt, season, subj, grade, tier sql.NullString
+	var year, week sql.NullInt64
+	err := runner.QueryRowContext(
+		ctx,
+		"SELECT `qbank_id`, `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_questions` WHERE `id` = ? LIMIT 1",
+		rowID,
+	).Scan(&qid, &bt, &year, &season, &subj, &grade, &tier, &week)
+	if err != nil {
+		return 0, qbankattest.Scope{}, false
+	}
+	sc := qbankattest.NormalizeScope(qbankattest.Scope{
+		BankType: bt.String,
+		Year:     int(year.Int64),
+		Season:   season.String,
+		Subject:  subj.String,
+		Grade:    grade.String,
+		Tier:     tier.String,
+		Week:     int(week.Int64),
+	})
+	return qid.Int64, sc, true
+}
+
+func loadAffectedQBankQuestionsTx(ctx context.Context, runner sqlTxRunner, inPH string, args []any) ([]int64, []qbankattest.Scope) {
+	rows, err := runner.QueryContext(
+		ctx,
+		fmt.Sprintf("SELECT `qbank_id`, `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_questions` WHERE `id` IN (%s)", inPH),
+		args...,
+	)
+	if err != nil {
+		return nil, nil
+	}
+	defer func() { _ = rows.Close() }()
+
+	qidSeen := make(map[int64]struct{})
+	scopeSeen := make(map[qbankattest.Scope]struct{})
+	var qids []int64
+	var scopes []qbankattest.Scope
+	for rows.Next() {
+		var qid sql.NullInt64
+		var bt, season, subj, grade, tier sql.NullString
+		var year, week sql.NullInt64
+		if scanErr := rows.Scan(&qid, &bt, &year, &season, &subj, &grade, &tier, &week); scanErr != nil {
+			continue
+		}
+		if qid.Valid && qid.Int64 > 0 {
+			if _, ok := qidSeen[qid.Int64]; !ok {
+				qidSeen[qid.Int64] = struct{}{}
+				qids = append(qids, qid.Int64)
+			}
+			continue
+		}
+		sc := qbankattest.NormalizeScope(qbankattest.Scope{
+			BankType: bt.String,
+			Year:     int(year.Int64),
+			Season:   season.String,
+			Subject:  subj.String,
+			Grade:    grade.String,
+			Tier:     tier.String,
+			Week:     int(week.Int64),
+		})
+		if isValidQBankScope(sc) {
+			if _, ok := scopeSeen[sc]; !ok {
+				scopeSeen[sc] = struct{}{}
+				scopes = append(scopes, sc)
+			}
+		}
+	}
+	return qids, scopes
+}
+
+func loadQBankQuestionsForAttestTx(ctx context.Context, runner sqlTxRunner, qbankID int64, scope *qbankattest.Scope) ([]qbankattest.SnapshotQuestion, error) {
+	var rows *sql.Rows
+	var err error
+	if qbankID > 0 {
+		rows, err = runner.QueryContext(
+			ctx,
+			"SELECT `question_num`, `parent_question_num`, `parent_question_nums`, `sub_num`, `topic`, `video_url`, `question_meta`, `exercise_pdf`, `exercise_name`, `answer_pdf`, `answer_name` "+
+				"FROM `qbank_questions` WHERE `qbank_id` = ? ORDER BY `question_num` ASC",
+			qbankID,
+		)
+	} else if scope != nil && isValidQBankScope(*scope) {
+		rows, err = runner.QueryContext(
+			ctx,
+			"SELECT `question_num`, `parent_question_num`, `parent_question_nums`, `sub_num`, `topic`, `video_url`, `question_meta`, `exercise_pdf`, `exercise_name`, `answer_pdf`, `answer_name` "+
+				"FROM `qbank_questions` WHERE `bank_type` = ? AND `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? ORDER BY `question_num` ASC",
+			scope.BankType, scope.Year, scope.Season, scope.Subject, scope.Grade, scope.Tier, scope.Week,
+		)
+	} else {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var items []qbank.QuestionItem
+	for rows.Next() {
+		var qNum, subNum int
+		var parentNum sql.NullInt64
+		var parentNumsStr, topic, videoURL, qMetaStr, exURL, exName, ansURL, ansName sql.NullString
+		if scanErr := rows.Scan(
+			&qNum, &parentNum, &parentNumsStr, &subNum,
+			&topic, &videoURL, &qMetaStr, &exURL, &exName, &ansURL, &ansName,
+		); scanErr != nil {
+			return nil, scanErr
+		}
+		var primaryAny any
+		if parentNum.Valid {
+			primaryAny = int(parentNum.Int64)
+		}
+		primaryPtr, parsedNums := qbank.ParseParentNums(primaryAny, parentNumsStr.String)
+		if subNum <= 0 {
+			subNum = 1
+		}
+		item := qbank.QuestionItem{
+			ID:                 qNum,
+			ParentQuestionNum:  primaryPtr,
+			ParentQuestionNums: parsedNums,
+			SubNum:             subNum,
+			Topic:              topic.String,
+			VideoURL:           videoURL.String,
+			ExercisePDF:        qbank.PDFInfo{URL: exURL.String, Name: exName.String},
+			AnswerPDF:          qbank.PDFInfo{URL: ansURL.String, Name: ansName.String},
+		}
+		if qMetaStr.Valid && strings.TrimSpace(qMetaStr.String) != "" {
+			item.QuestionMeta = qbank.SanitizeQuestionMeta(qMetaStr.String)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return qbankattest.SnapshotQuestionsFromWeekDetail(items), nil
+}
+
+func recordQBankQuestionAdminEditTx(ctx context.Context, tx *sql.Tx, attest qbankattest.Store, qbankID int64, fallbackScope qbankattest.Scope, adminOp string) error {
+	if attest == nil {
+		return nil
+	}
+	scope := qbankattest.NormalizeScope(fallbackScope)
+	if qbankID > 0 {
+		if weekScope, ok := loadQBankWeekScopeTx(ctx, tx, qbankID); ok {
+			scope = weekScope
+		}
+	}
+	if !isValidQBankScope(scope) {
+		return nil
+	}
+	qs, err := loadQBankQuestionsForAttestTx(ctx, tx, qbankID, &scope)
+	if err != nil {
+		return err
+	}
+	return recordQBankAdminRevisionTx(ctx, tx, attest, qbankID, scope, qbankattest.ActionAdminEdit, adminOp, qs)
+}
+
+func recordQBankAdminRevisionTx(ctx context.Context, tx *sql.Tx, attest qbankattest.Store, qbankID int64, scope qbankattest.Scope, action, adminOp string, questions []qbankattest.SnapshotQuestion) error {
+	if attest == nil {
+		return nil
+	}
+	norm := qbankattest.NormalizeScope(scope)
+	if !isValidQBankScope(norm) {
+		return nil
+	}
+	op := strings.TrimSpace(adminOp)
+	if op == "" {
+		op = "admin"
+	}
+	_, err := attest.RecordRevisionTx(ctx, tx, qbankattest.RecordRevisionInput{
+		QBankID:   qbankID,
+		Action:    action,
+		Scope:     norm,
+		Operator:  op,
+		Questions: questions,
+	})
+	return err
 }
