@@ -168,7 +168,8 @@ func TestGetClientIP(t *testing.T) {
 		{"untrusted remote ignores headers", "8.8.8.8:1234", "1.2.3.4", "5.6.7.8", "8.8.8.8"},
 		{"trusted proxy uses X-Real-IP", "127.0.0.1:1234", "203.0.113.10", "198.51.100.1", "203.0.113.10"},
 		{"trusted proxy right-to-left public XFF", "192.168.1.10:443", "", "1.1.1.1, 8.8.4.4, 10.0.0.5", "8.8.4.4"},
-		{"trusted proxy falls back to first valid IP if all private", "::1", "", "10.1.2.3, 192.168.0.1", "10.1.2.3"},
+		{"trusted proxy falls back to rightmost valid IP if all private", "::1", "", "10.1.2.3, 192.168.0.1", "192.168.0.1"},
+		{"ipv4-mapped ipv6 loopback is trusted proxy", "[::ffff:127.0.0.1]:54321", "203.0.113.5", "", "203.0.113.5"},
 		{"invalid headers fallback to remote", "172.16.5.2:9000", "not-an-ip", "also-bad", "172.16.5.2"},
 	}
 
@@ -186,6 +187,37 @@ func TestGetClientIP(t *testing.T) {
 				t.Fatalf("GetClientIP = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestMiddlewarePanicRecovery(t *testing.T) {
+	h := Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("boom")
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/api/public_config.php", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	var env Envelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal panic response: %v", err)
+	}
+	if env.Success || env.Error == nil || *env.Error == "" {
+		t.Fatalf("unexpected panic envelope: %+v", env)
+	}
+}
+
+func TestIsBlockedSSRFHostEdgeCases(t *testing.T) {
+	blocked := []string{"localhost.", "sub.localhost.", "metadata.google.internal.", "fe80::1%eth0", "127.0.0.1"}
+	for _, host := range blocked {
+		if !IsBlockedSSRFHost(host) {
+			t.Fatalf("expected IsBlockedSSRFHost(%q) == true", host)
+		}
+	}
+	if IsBlockedSSRFHost("dashscope.aliyuncs.com") {
+		t.Fatal("expected dashscope.aliyuncs.com to be allowed")
 	}
 }
 

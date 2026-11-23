@@ -544,14 +544,17 @@ func handleAuthLogout(w http.ResponseWriter, r *http.Request, deps AuthDeps) {
 		clearAdminSessionKeys(sess.Data)
 	}
 	if !isNew && deps.Sessions != nil {
-		_, _ = session.Update(ctx, deps.Sessions, sess.ID, func(data map[string]any) (bool, error) {
+		if _, err := session.Update(ctx, deps.Sessions, sess.ID, func(data map[string]any) (bool, error) {
 			had := config.AsPHPBool(data["user_logged_in"])
 			clearUserSessionKeys(data)
 			if !had {
 				clearAdminSessionKeys(data)
 			}
 			return true, nil
-		})
+		}); err != nil {
+			httpx.SendResponse(w, false, nil, httpx.StrPtr("退出登录失败，请稍后重试"), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	auditlog.RecordFromRequest(ctx, deps.Audit, r, "action", "user_auth", "logout", uname, map[string]any{

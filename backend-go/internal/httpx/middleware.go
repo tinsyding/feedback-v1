@@ -3,6 +3,7 @@ package httpx
 import (
 	"bytes"
 	"encoding/json"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -28,7 +29,6 @@ var (
 		"vip.jokerx.top":       {},
 	}
 	reAllowedCSRFHost = regexp.MustCompile(`(^|\.)wxjifang\.cn$`)
-	reTrustedRFC1918  = regexp.MustCompile(`^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)`)
 )
 
 // Envelope mirrors the PHP sendResponse JSON envelope, always keeping "error" even when null.
@@ -38,33 +38,63 @@ type Envelope struct {
 	Error   *string `json:"error"`
 }
 
+type headerTrackingWriter struct {
+	http.ResponseWriter
+	wroteHeader bool
+}
+
+func (w *headerTrackingWriter) WriteHeader(code int) {
+	w.wroteHeader = true
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *headerTrackingWriter) Write(p []byte) (int, error) {
+	w.wroteHeader = true
+	return w.ResponseWriter.Write(p)
+}
+
+func (w *headerTrackingWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 // Middleware applies PHP bootstrap.php CORS headers, OPTIONS preflight, X-Backend-Engine,
-// default JSON Content-Type, and write-method CSRF Origin/Referer verification.
+// default JSON Content-Type, write-method CSRF Origin/Referer verification, and panic recovery.
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tw := &headerTrackingWriter{ResponseWriter: w}
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("[PANIC] %s %s: %v", r.Method, r.URL.Path, rec)
+				if !tw.wroteHeader {
+					tw.Header().Set("Content-Type", "application/json; charset=utf-8")
+					SendResponse(tw, false, nil, StrPtr("服务器内部错误，请稍后重试"), http.StatusInternalServerError)
+				}
+			}
+		}()
+
 		origin := r.Header.Get("Origin")
 		if isOriginAllowed(origin) {
-			w.Header().Add("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			tw.Header().Add("Vary", "Origin")
+			tw.Header().Set("Access-Control-Allow-Origin", origin)
+			tw.Header().Set("Access-Control-Allow-Credentials", "true")
 		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
-		w.Header().Set("X-Backend-Engine", "go")
+		tw.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		tw.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+		tw.Header().Set("X-Backend-Engine", "go")
 
 		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
+			tw.WriteHeader(http.StatusNoContent)
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		tw.Header().Set("Content-Type", "application/json; charset=utf-8")
 
 		if !verifySameOriginRequest(r) {
-			SendResponse(w, false, nil, StrPtr("非法跨站请求 (CSRF Origin Mismatch)"), http.StatusForbidden)
+			SendResponse(tw, false, nil, StrPtr("非法跨站请求 (CSRF Origin Mismatch)"), http.StatusForbidden)
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(tw, r)
 	})
 }
 
@@ -214,7 +244,8 @@ func GetClientIP(r *http.Request) string {
 		remoteAddr = "127.0.0.1"
 	}
 
-	isTrustedProxy := remoteAddr == "127.0.0.1" || remoteAddr == "::1" || reTrustedRFC1918.MatchString(remoteAddr)
+	remoteIP := net.ParseIP(remoteAddr)
+	isTrustedProxy := remoteIP != nil && (remoteIP.IsLoopback() || remoteIP.IsPrivate())
 	if isTrustedProxy {
 		if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
 			if net.ParseIP(realIP) != nil {
@@ -223,15 +254,20 @@ func GetClientIP(r *http.Request) string {
 		}
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 			parts := strings.Split(xff, ",")
+			var lastValid string
 			for i := len(parts) - 1; i >= 0; i-- {
 				candidate := strings.TrimSpace(parts[i])
-				if ip := net.ParseIP(candidate); ip != nil && isPublicIP(ip) {
-					return clip50(candidate)
+				if ip := net.ParseIP(candidate); ip != nil {
+					if isPublicIP(ip) {
+						return clip50(candidate)
+					}
+					if lastValid == "" {
+						lastValid = candidate
+					}
 				}
 			}
-			first := strings.TrimSpace(parts[0])
-			if net.ParseIP(first) != nil {
-				return clip50(first)
+			if lastValid != "" {
+				return clip50(lastValid)
 			}
 		}
 	}

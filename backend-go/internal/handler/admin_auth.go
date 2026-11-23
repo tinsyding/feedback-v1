@@ -58,12 +58,12 @@ func handleAdminLogin(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
 		u, err := deps.Repo.FindAdminByUsername(r.Context(), username)
 		if err == nil && u != nil {
 			adminUser = u
-			if u.Status != 1 {
-				httpx.SendResponse(w, false, nil, httpx.StrPtr("该管理员账号已被禁用，请联系系统管理"), http.StatusForbidden)
-				return
-			}
 			ok, needsUpgrade := verifyAdminPassword(password, u.PasswordHash)
 			if ok {
+				if u.Status != 1 {
+					httpx.SendResponse(w, false, nil, httpx.StrPtr("该管理员账号已被禁用，请联系系统管理"), http.StatusForbidden)
+					return
+				}
 				authenticated = true
 				if needsUpgrade {
 					if newHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost); err == nil {
@@ -160,7 +160,7 @@ func handleAdminLogout(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
 	if !isNew && sess != nil && deps.Sessions != nil {
 		var loggedOutAdmin string
 		var auditSess *session.Session
-		_, _ = session.Update(r.Context(), deps.Sessions, sess.ID, func(data map[string]any) (bool, error) {
+		if _, err := session.Update(r.Context(), deps.Sessions, sess.ID, func(data map[string]any) (bool, error) {
 			if config.AsPHPBool(data["admin_logged_in"]) {
 				loggedOutAdmin = strings.TrimSpace(config.AsPHPString(data["admin_username"]))
 				if loggedOutAdmin == "" {
@@ -182,7 +182,10 @@ func handleAdminLogout(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
 				}
 			}
 			return true, nil
-		})
+		}); err != nil {
+			httpx.SendResponse(w, false, nil, httpx.StrPtr("退出登录失败，请稍后重试"), http.StatusInternalServerError)
+			return
+		}
 		if loggedOutAdmin != "" {
 			adminAuditLog(r, deps, auditSess, "info", "admin_logout", map[string]any{
 				"username": loggedOutAdmin,

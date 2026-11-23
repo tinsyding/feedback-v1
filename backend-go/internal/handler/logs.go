@@ -1020,7 +1020,7 @@ func handleLogsSenderLogFile(w http.ResponseWriter, r *http.Request, deps LogsDe
 			w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, dlName))
 			w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 			w.WriteHeader(http.StatusOK)
-			_, dlErr = io.Copy(w, f)
+			_, dlErr = io.CopyN(w, f, size)
 			return nil
 		})
 		if err != nil {

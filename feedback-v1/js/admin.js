@@ -1,7 +1,7 @@
 /**
  * ============================================================================
  * 极方管理后台 (Admin Console) 前端运行脚本 - 生产环境合并包
- * 自动生成时间: 2026-11-23 09:28:48
+ * 自动生成时间: 2026-11-23 18:29:04
  * 源码模块目录: js/admin/
  * 请勿直接手动修改此文件，开发时请修改 js/admin/ 中的子模块并执行本打包脚本。
  * ============================================================================
@@ -1110,15 +1110,24 @@
                 if (result.success) {
                     const moduleSelect = document.getElementById('log-module-filter');
                     if (moduleSelect) {
-                        moduleSelect.innerHTML = '<option value="">全部模块</option>' + (result.data.modules || []).map(m => `<option value="${m}">${m}</option>`).join('');
+                        moduleSelect.innerHTML = '<option value="">全部模块</option>' + (result.data.modules || []).map(m => {
+                            const safe = escapeHtml(m);
+                            return `<option value="${safe}">${safe}</option>`;
+                        }).join('');
                     }
                     const eventSelect = document.getElementById('log-event-filter');
                     if (eventSelect) {
-                        eventSelect.innerHTML = '<option value="">全部事件</option>' + (result.data.events || []).map(e => `<option value="${e}">${e}</option>`).join('');
+                        eventSelect.innerHTML = '<option value="">全部事件</option>' + (result.data.events || []).map(e => {
+                            const safe = escapeHtml(e);
+                            return `<option value="${safe}">${safe}</option>`;
+                        }).join('');
                     }
                     const dateSelect = document.getElementById('log-date-filter');
                     if (dateSelect) {
-                        dateSelect.innerHTML = '<option value="">近7天</option>' + (result.data.dates || []).map(d => `<option value="${d}">${d}</option>`).join('');
+                        dateSelect.innerHTML = '<option value="">近7天</option>' + (result.data.dates || []).map(d => {
+                            const safe = escapeHtml(d);
+                            return `<option value="${safe}">${safe}</option>`;
+                        }).join('');
                     }
                 }
             } catch (err) {
@@ -1177,7 +1186,7 @@
                     renderLogs(globalLogsCache);
                     renderPagination(result.data.pagination);
                 } else {
-                    tbody.innerHTML = `<tr><td colspan="5" class="table-empty"><div class="empty-state"><span>${result.error || '加载失败'}</span></div></td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="5" class="table-empty"><div class="empty-state"><span>${escapeHtml(result.error || '加载失败')}</span></div></td></tr>`;
                 }
             } catch (err) {
                 tbody.innerHTML = '<tr><td colspan="5" class="table-empty"><div class="empty-state"><span>网络请求错误</span></div></td></tr>';
@@ -2226,6 +2235,7 @@
                 const statusVal = document.getElementById('teacher-status-filter')?.value || '';
                 let url = `${API_BASE}?action=db_list&table=users&page=${page}&page_size=${teacherPerPage}&per_page=${teacherPerPage}&sort=${teacherSortField}&order=${teacherSortOrder}&sort_field=${teacherSortField}&sort_order=${teacherSortOrder}`;
                 if (teacherSearchQuery) url += `&search=${encodeURIComponent(teacherSearchQuery)}`;
+                if (statusVal !== '') url += `&status=${encodeURIComponent(statusVal)}`;
 
                 const res = await fetch(url);
                 const json = await res.json();
@@ -2236,12 +2246,11 @@
                 }
 
                 let records = json.data.records || [];
-                teacherCacheRecords = records;
-
                 if (statusVal !== '') {
                     const stInt = parseInt(statusVal, 10);
                     records = records.filter(r => (parseInt(r.status, 10) === stInt) || (stInt === 1 && r.status === undefined));
                 }
+                teacherCacheRecords = records;
 
                 const total = json.data.total || records.length;
                 const totalPages = json.data.pages || Math.max(1, Math.ceil(total / teacherPerPage));

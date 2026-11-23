@@ -38,13 +38,18 @@ func IsBlockedSSRFIP(ip net.IP) bool {
 // or a blocked internal/link-local IP address.
 func IsBlockedSSRFHost(host string) bool {
 	h := strings.ToLower(strings.TrimSpace(host))
+	h = strings.TrimRight(h, ".")
 	if h == "" {
 		return true
 	}
 	if h == "localhost" || strings.HasSuffix(h, ".localhost") || strings.HasSuffix(h, ".local") || strings.HasSuffix(h, ".internal") {
 		return true
 	}
-	if ip := net.ParseIP(h); ip != nil {
+	ipCandidate := h
+	if idx := strings.IndexByte(ipCandidate, '%'); idx >= 0 {
+		ipCandidate = ipCandidate[:idx]
+	}
+	if ip := net.ParseIP(ipCandidate); ip != nil {
 		return IsBlockedSSRFIP(ip)
 	}
 	return false

@@ -1259,7 +1259,7 @@ func (s *MySQLStore) AnchorUnanchoredRevisions(ctx context.Context, tsa TSAClien
 	defer func() { _ = conn.Close() }()
 
 	var lockOK sql.NullInt64
-	if err := conn.QueryRowContext(ctx, "SELECT GET_LOCK('qbank_attestation_anchor', 15)").Scan(&lockOK); err != nil {
+	if err := conn.QueryRowContext(ctx, "SELECT GET_LOCK('qbank_attestation_anchor', 5)").Scan(&lockOK); err != nil {
 		return nil, err
 	}
 	if !lockOK.Valid || lockOK.Int64 != 1 {

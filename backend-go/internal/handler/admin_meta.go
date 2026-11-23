@@ -142,6 +142,9 @@ func handleAdminSearchByToken(w http.ResponseWriter, r *http.Request, deps Admin
 	}
 	rawInput := strings.TrimSpace(r.URL.Query().Get("token"))
 	if rawInput == "" {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, maxAdminJSONBodyBytes)
+		}
 		httpx.ParseRequestForm(r)
 		if r.MultipartForm != nil {
 			defer func() { _ = r.MultipartForm.RemoveAll() }()

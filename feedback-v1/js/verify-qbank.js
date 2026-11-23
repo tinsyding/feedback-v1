@@ -1362,12 +1362,13 @@
         const entryHash = await verifyEntryHashLocally(receipt, canonicalObj);
         const consistency = checkReceiptCanonicalConsistency(receipt, canonicalObj);
 
+        const entryHashFailed = Boolean(entryHash && entryHash.checked && !entryHash.valid);
         const cryptoReport = { ed25519, entryHash, consistency };
         const bundle = {
             mode: 'offline',
             status: ed25519.supported === false
                 ? 'UNSUPPORTED'
-                : (ed25519.valid && consistency.ok ? 'VERIFIED' : 'FAILED'),
+                : (ed25519.valid && consistency.ok && !entryHashFailed ? 'VERIFIED' : 'FAILED'),
             crypto: cryptoReport,
             receipt
         };
@@ -1382,7 +1383,9 @@
         if (bundle.status === 'FAILED') {
             bannerCls = 'deleted';
             bannerTitle = '离线凭证验真未通过';
-            bannerDesc = ed25519.valid === false ? ed25519.reason : consistency.reason;
+            bannerDesc = ed25519.valid === false
+                ? ed25519.reason
+                : (entryHashFailed ? (entryHash.reason || 'entry_hash 本地 SHA-256 校验未通过') : consistency.reason);
             bannerPill = 'FAILED · 验真失败';
         } else if (bundle.status === 'UNSUPPORTED') {
             bannerCls = 'superseded';

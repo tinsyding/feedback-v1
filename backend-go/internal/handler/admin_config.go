@@ -206,9 +206,12 @@ func handleAdminConfig(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
 				}
 				if prevU, prevErr := url.Parse(prevBase); prevErr == nil && prevBase != "" {
 					hostChanged := !strings.EqualFold(newU.Scheme, prevU.Scheme) || !strings.EqualFold(newU.Host, prevU.Host)
-					if hostChanged && rt.VisionAPIKey() != "" && !hasNewKey && !clearKeyRequested {
-						httpx.SendResponse(w, false, nil, httpx.StrPtr("更换自定义 API 端点时必须重新填写或清空 API Key"), http.StatusBadRequest)
-						return
+					if hostChanged && rt.VisionAPIKey() != "" && !hasNewKey {
+						externalKeyActive := strings.TrimSpace(os.Getenv("DASHSCOPE_API_KEY")) != "" || strings.TrimSpace(rt.Secrets.DashscopeApiKey) != ""
+						if !clearKeyRequested || externalKeyActive {
+							httpx.SendResponse(w, false, nil, httpx.StrPtr("更换自定义 API 端点时必须重新填写新的 API Key（或先清空环境变量/本地密钥文件中的旧密钥）"), http.StatusBadRequest)
+							return
+						}
 					}
 				}
 			}

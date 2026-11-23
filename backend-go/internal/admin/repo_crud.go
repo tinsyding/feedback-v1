@@ -333,7 +333,7 @@ func (r *MySQLRepository) ListRecords(ctx context.Context, q ListQuery) (ListRes
 	switch table {
 	case "qbank_questions":
 		querySQL = fmt.Sprintf(
-			"SELECT id, qbank_id, bank_type, `year`, `season`, subject, grade, tier, `week`, question_num, topic, video_url, exercise_pdf, exercise_name, answer_pdf, answer_name, created_by, updated_by, created_at, updated_at FROM `%s` %s ORDER BY `%s` %s LIMIT %d, %d",
+			"SELECT id, qbank_id, bank_type, `year`, `season`, subject, grade, tier, `week`, question_num, parent_question_num, parent_question_nums, sub_num, topic, video_url, question_meta, exercise_pdf, exercise_name, answer_pdf, answer_name, created_by, updated_by, created_at, updated_at FROM `%s` %s ORDER BY `%s` %s LIMIT %d, %d",
 			table, whereSQL, sortCol, order, offset, pageSize,
 		)
 	case "admin_users":
@@ -543,6 +543,8 @@ func (r *MySQLRepository) enrichTeacherNames(ctx context.Context, rows []map[str
 
 func (r *MySQLRepository) enrichWeakPoints(ctx context.Context, rows []map[string]any) {
 	type qKey struct {
+		year                 int
+		season               string
 		subject, grade, tier string
 		week                 int
 	}
@@ -558,21 +560,32 @@ func (r *MySQLRepository) enrichWeakPoints(ctx context.Context, rows []map[strin
 		}
 		return ""
 	}
+	getDimInt := func(row map[string]any, field string) int {
+		if v := config.AsPHPInt(row[field]); v > 0 {
+			return v
+		}
+		if b, ok := row["_batch"].(map[string]any); ok && b != nil {
+			return config.AsPHPInt(b[field])
+		}
+		return 0
+	}
 
 	for _, row := range rows {
+		sYear := getDimInt(row, "year")
+		sSeason := getDim(row, "season")
 		sSub := getDim(row, "subject")
 		sGrd := getDim(row, "grade")
 		sTier := getDim(row, "tier")
 		sWk := config.AsPHPInt(row["week_num"])
 		if len(DecodeJSONAnyList(row["error_questions"])) > 0 && sSub != "" && sGrd != "" {
-			hwQueries[qKey{sSub, sGrd, sTier, sWk}] = struct{}{}
+			hwQueries[qKey{sYear, sSeason, sSub, sGrd, sTier, sWk}] = struct{}{}
 		}
 		pWk := sWk
 		if row["preview_week_num"] != nil {
 			pWk = config.AsPHPInt(row["preview_week_num"])
 		}
 		if len(DecodeJSONAnyList(row["preview_error_questions"])) > 0 && sSub != "" && sGrd != "" && pWk > 0 {
-			pvQueries[qKey{sSub, sGrd, sTier, pWk}] = struct{}{}
+			pvQueries[qKey{sYear, sSeason, sSub, sGrd, sTier, pWk}] = struct{}{}
 		}
 	}
 
@@ -584,7 +597,7 @@ func (r *MySQLRepository) enrichWeakPoints(ctx context.Context, rows []map[strin
 			if len(gCands) == 0 || len(tCands) == 0 {
 				continue
 			}
-			args := make([]any, 0, 2+len(gCands)+len(tCands))
+			args := make([]any, 0, 5+len(gCands)+len(tCands))
 			args = append(args, bankType, qk.subject)
 			for _, g := range gCands {
 				args = append(args, g)
@@ -593,15 +606,26 @@ func (r *MySQLRepository) enrichWeakPoints(ctx context.Context, rows []map[strin
 				args = append(args, t)
 			}
 			args = append(args, qk.week)
+			extraWhere := ""
+			if qk.year > 0 {
+				extraWhere += " AND `year` = ?"
+				args = append(args, qk.year)
+			}
+			if sVars := normalize.SeasonVariants(qk.season); len(sVars) > 0 {
+				extraWhere += fmt.Sprintf(" AND `season` IN (%s)", placeholders(len(sVars)))
+				for _, sv := range sVars {
+					args = append(args, sv)
+				}
+			}
 			qSQL := fmt.Sprintf(
-				"SELECT `question_num`, `topic` FROM `qbank_questions` WHERE `bank_type` = ? AND `subject` = ? AND `grade` IN (%s) AND `tier` IN (%s) AND `week` = ?",
-				placeholders(len(gCands)), placeholders(len(tCands)),
+				"SELECT `question_num`, `topic` FROM `qbank_questions` WHERE `bank_type` = ? AND `subject` = ? AND `grade` IN (%s) AND `tier` IN (%s) AND `week` = ?%s ORDER BY `id` ASC",
+				placeholders(len(gCands)), placeholders(len(tCands)), extraWhere,
 			)
 			tRows, err := r.db.QueryContext(ctx, qSQL, args...)
 			if err != nil {
 				continue
 			}
-			subPrefix := fmt.Sprintf("%s___%s___%s___%d___", qk.subject, qk.grade, qk.tier, qk.week)
+			subPrefix := fmt.Sprintf("%d___%s___%s___%s___%s___%d___", qk.year, qk.season, qk.subject, qk.grade, qk.tier, qk.week)
 			for tRows.Next() {
 				var qNum int
 				var topic sql.NullString
@@ -644,6 +668,8 @@ func (r *MySQLRepository) enrichWeakPoints(ctx context.Context, rows []map[strin
 
 	for _, row := range rows {
 		row["source_files_list"] = DecodeSourceFiles(row["source_files"])
+		sYear := getDimInt(row, "year")
+		sSeason := getDim(row, "season")
 		sSub := getDim(row, "subject")
 		sGrd := getDim(row, "grade")
 		sTier := getDim(row, "tier")
@@ -651,7 +677,7 @@ func (r *MySQLRepository) enrichWeakPoints(ctx context.Context, rows []map[strin
 
 		errs := DecodeJSONAnyList(row["error_questions"])
 		if len(errs) > 0 && sSub != "" && sGrd != "" {
-			subKey := fmt.Sprintf("%s___%s___%s___%d___", sSub, sGrd, sTier, sWk)
+			subKey := fmt.Sprintf("%d___%s___%s___%s___%s___%d___", sYear, sSeason, sSub, sGrd, sTier, sWk)
 			d, w, wt := buildWeak(errs, subKey, hwTopicMap)
 			row["error_details"] = d
 			row["weak_points"] = w
@@ -668,7 +694,7 @@ func (r *MySQLRepository) enrichWeakPoints(ctx context.Context, rows []map[strin
 			pWk = config.AsPHPInt(row["preview_week_num"])
 		}
 		if len(pErrs) > 0 && sSub != "" && sGrd != "" && pWk > 0 {
-			pSubKey := fmt.Sprintf("%s___%s___%s___%d___", sSub, sGrd, sTier, pWk)
+			pSubKey := fmt.Sprintf("%d___%s___%s___%s___%s___%d___", sYear, sSeason, sSub, sGrd, sTier, pWk)
 			d, w, wt := buildWeak(pErrs, pSubKey, pvTopicMap)
 			row["preview_error_details"] = d
 			row["preview_weak_points"] = w
@@ -1021,18 +1047,13 @@ func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, in
 	}
 
 	if validTbl == "admin_users" || validTbl == "users" {
-		rawPwd := strings.TrimSpace(config.AsPHPString(data["password"]))
-		if rawPwd == "" {
-			rawPwd = strings.TrimSpace(config.AsPHPString(data["password_hash"]))
-		}
-		if rawPwd == "" || rawPwd == "●●●●●●●●" || strings.HasPrefix(rawPwd, "●") {
-			delete(data, "password_hash")
-			delete(data, "password")
-		} else if !strings.HasPrefix(rawPwd, "$2y$") && !strings.HasPrefix(rawPwd, "$2a$") && !strings.HasPrefix(rawPwd, "$2b$") {
-			if len(rawPwd) < 6 {
+		rawPwdField := strings.TrimSpace(config.AsPHPString(data["password"]))
+		rawHashField := strings.TrimSpace(config.AsPHPString(data["password_hash"]))
+		if rawPwdField != "" && rawPwdField != "●●●●●●●●" && !strings.HasPrefix(rawPwdField, "●") {
+			if len(rawPwdField) < 6 {
 				return 0, nil, NewHTTPError(400, "登录密码长度不能少于 6 位", nil)
 			}
-			hash, err := bcrypt.GenerateFromPassword([]byte(rawPwd), bcrypt.DefaultCost)
+			hash, err := bcrypt.GenerateFromPassword([]byte(rawPwdField), bcrypt.DefaultCost)
 			if err != nil {
 				if errors.Is(err, bcrypt.ErrPasswordTooLong) {
 					return 0, nil, NewHTTPError(400, "登录密码长度不能超过 72 字节", nil)
@@ -1044,6 +1065,30 @@ func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, in
 				data["initial_password"] = ""
 			}
 			delete(data, "password")
+		} else {
+			delete(data, "password")
+			if rawHashField == "" || rawHashField == "●●●●●●●●" || strings.HasPrefix(rawHashField, "●") {
+				delete(data, "password_hash")
+			} else if strings.HasPrefix(rawHashField, "$2y$") || strings.HasPrefix(rawHashField, "$2a$") || strings.HasPrefix(rawHashField, "$2b$") {
+				if len(rawHashField) != 60 {
+					return 0, nil, NewHTTPError(400, "密码哈希格式无效", nil)
+				}
+			} else {
+				if len(rawHashField) < 6 {
+					return 0, nil, NewHTTPError(400, "登录密码长度不能少于 6 位", nil)
+				}
+				hash, err := bcrypt.GenerateFromPassword([]byte(rawHashField), bcrypt.DefaultCost)
+				if err != nil {
+					if errors.Is(err, bcrypt.ErrPasswordTooLong) {
+						return 0, nil, NewHTTPError(400, "登录密码长度不能超过 72 字节", nil)
+					}
+					return 0, nil, err
+				}
+				data["password_hash"] = string(hash)
+				if validTbl == "users" {
+					data["initial_password"] = ""
+				}
+			}
 		}
 	}
 
@@ -1115,23 +1160,29 @@ func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, in
 
 	var setParts []string
 	var values []any
+	hasExplicitField := false
+	hasAutoUpdatedAt := false
 	for _, col := range cols {
 		if col.Key == "PRI" || col.Name == "created_at" {
 			continue
 		}
 		if col.Name == "updated_at" {
 			if v, exists := data["updated_at"]; !exists || v == nil {
-				setParts = append(setParts, "`updated_at` = NOW()")
+				hasAutoUpdatedAt = true
 				continue
 			}
 		}
 		if v, exists := data[col.Name]; exists {
+			hasExplicitField = true
 			setParts = append(setParts, fmt.Sprintf("`%s` = ?", col.Name))
 			values = append(values, marshalIfComposite(v))
 		}
 	}
-	if len(setParts) == 0 {
+	if !hasExplicitField {
 		return 0, nil, NewHTTPError(400, "未提供任何修改字段", nil)
+	}
+	if hasAutoUpdatedAt {
+		setParts = append(setParts, "`updated_at` = NOW()")
 	}
 
 	values = append(values, id)
@@ -1146,7 +1197,9 @@ func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, in
 			return 0, nil, NewHTTPError(500, "更新失败: "+txErr.Error(), nil)
 		}
 		defer func() { _ = tx.Rollback() }()
-		archiveStudentRecordForAdminEditTx(ctx, tx, id, adminOp)
+		if err := archiveStudentRecordForAdminEditTx(ctx, tx, id, adminOp); err != nil {
+			return 0, nil, NewHTTPError(500, "归档历史记录失败: "+err.Error(), nil)
+		}
 		res, err := tx.ExecContext(ctx, updateSQL, values...)
 		if err != nil {
 			return 0, nil, NewHTTPError(500, "更新失败: "+err.Error(), nil)
@@ -1192,7 +1245,7 @@ func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, in
 		if err := tx.Commit(); err != nil {
 			return 0, nil, NewHTTPError(500, "更新失败: "+err.Error(), nil)
 		}
-	case attest != nil && validTbl == "qbank_questions":
+	case validTbl == "qbank_questions":
 		tx, txErr := r.db.BeginTx(ctx, nil)
 		if txErr != nil {
 			return 0, nil, NewHTTPError(500, "更新失败: "+txErr.Error(), nil)
@@ -1210,8 +1263,10 @@ func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, in
 				"UPDATE `qbank_weeks` SET `question_count` = (SELECT COUNT(*) FROM `qbank_questions` WHERE `qbank_id` = ?), `updated_at` = NOW() WHERE `id` = ?",
 				oldQID, oldQID,
 			)
-			if err := recordQBankQuestionAdminEditTx(ctx, tx, attest, oldQID, oldScope, adminOp); err != nil {
-				return 0, nil, NewHTTPError(500, "写入原专题存证失败: "+err.Error(), nil)
+			if attest != nil {
+				if err := recordQBankQuestionAdminEditTx(ctx, tx, attest, oldQID, oldScope, adminOp); err != nil {
+					return 0, nil, NewHTTPError(500, "写入原专题存证失败: "+err.Error(), nil)
+				}
 			}
 		}
 		if newQID > 0 {
@@ -1220,7 +1275,7 @@ func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, in
 				newQID, newQID,
 			)
 		}
-		if hasNewRow {
+		if attest != nil && hasNewRow {
 			if err := recordQBankQuestionAdminEditTx(ctx, tx, attest, newQID, newScope, adminOp); err != nil {
 				return 0, nil, NewHTTPError(500, "写入题库存证失败: "+err.Error(), nil)
 			}
@@ -1264,26 +1319,39 @@ func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, in
 	return affected, fields, nil
 }
 
-func archiveStudentRecordForAdminEditTx(ctx context.Context, tx *sql.Tx, id, adminOp string) {
+func archiveStudentRecordForAdminEditTx(ctx context.Context, tx *sql.Tx, id, adminOp string) error {
 	qRows, err := tx.QueryContext(ctx, "SELECT * FROM `student_records` WHERE `id` = ? LIMIT 1", id)
 	if err != nil {
-		return
+		return err
 	}
 	list, err := scanDynamicRows(qRows)
 	_ = qRows.Close()
-	if err != nil || len(list) == 0 {
-		return
+	if err != nil {
+		return err
+	}
+	if len(list) == 0 {
+		return nil
 	}
 	oldRec := list[0]
-	var bCode, bCreatedBy sql.NullString
-	_ = tx.QueryRowContext(ctx,
-		"SELECT batch_code, created_by FROM `generation_batches` WHERE `class_id` = ? AND `week_num` = ? ORDER BY id DESC LIMIT 1",
-		oldRec["batch_id"], oldRec["week_num"],
-	).Scan(&bCode, &bCreatedBy)
+	bCode := strings.TrimSpace(config.AsPHPString(oldRec["batch_code"]))
+	bCreatedBy := strings.TrimSpace(config.AsPHPString(oldRec["created_by"]))
+	if bCode == "" || bCreatedBy == "" {
+		var gbCode, gbBy sql.NullString
+		_ = tx.QueryRowContext(ctx,
+			"SELECT batch_code, created_by FROM `generation_batches` WHERE `class_id` = ? AND `week_num` = ? ORDER BY id DESC LIMIT 1",
+			oldRec["batch_id"], oldRec["week_num"],
+		).Scan(&gbCode, &gbBy)
+		if bCode == "" {
+			bCode = gbCode.String
+		}
+		if bCreatedBy == "" {
+			bCreatedBy = gbBy.String
+		}
+	}
 	if adminOp == "" {
 		adminOp = "admin"
 	}
-	_, _ = tx.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO student_record_history (
 			record_id, batch_id, batch_code, student_id, student_name, student_key,
 			week_num, preview_week_num, homework_score, preview_score, total_score, error_count,
@@ -1297,7 +1365,7 @@ func archiveStudentRecordForAdminEditTx(ctx context.Context, tx *sql.Tx, id, adm
 		)`,
 		oldRec["id"],
 		oldRec["batch_id"],
-		bCode.String,
+		bCode,
 		config.AsPHPString(oldRec["student_id"]),
 		oldRec["student_name"],
 		config.AsPHPString(oldRec["student_key"]),
@@ -1313,11 +1381,12 @@ func archiveStudentRecordForAdminEditTx(ctx context.Context, tx *sql.Tx, id, adm
 		oldRec["preview_comment"],
 		oldRec["source_files"],
 		oldRec["retest_token"],
-		bCreatedBy.String,
+		bCreatedBy,
 		adminOp,
 		oldRec["created_at"],
 		oldRec["updated_at"],
 	)
+	return err
 }
 
 // DeleteRecords mirrors PHP actions_crud.php action=db_delete.
@@ -1344,27 +1413,57 @@ func (r *MySQLRepository) DeleteRecords(ctx context.Context, table string, ids [
 	inPH := placeholders(len(ids))
 
 	if validTbl == "admin_users" {
+		tx, txErr := r.db.BeginTx(ctx, nil)
+		if txErr != nil {
+			return 0, NewHTTPError(500, "删除失败: "+txErr.Error(), nil)
+		}
+		defer func() { _ = tx.Rollback() }()
+
 		var adminCount int
-		_ = r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM `admin_users`").Scan(&adminCount)
-		if adminCount <= len(ids) {
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM `admin_users` FOR UPDATE").Scan(&adminCount); err != nil {
+			return 0, NewHTTPError(500, "校验管理员数量失败: "+err.Error(), nil)
+		}
+		qRows, err := tx.QueryContext(ctx, fmt.Sprintf("SELECT username FROM `admin_users` WHERE `id` IN (%s) FOR UPDATE", inPH), args...)
+		if err != nil {
+			return 0, NewHTTPError(500, "校验待删除管理员失败: "+err.Error(), nil)
+		}
+		matchedCount := 0
+		for qRows.Next() {
+			var u string
+			if err := qRows.Scan(&u); err != nil {
+				_ = qRows.Close()
+				return 0, NewHTTPError(500, "校验待删除管理员失败: "+err.Error(), nil)
+			}
+			matchedCount++
+			if u == currentAdmin {
+				_ = qRows.Close()
+				return 0, NewHTTPError(400, "无法删除当前正在登录的管理员账号", nil)
+			}
+		}
+		if err := qRows.Err(); err != nil {
+			_ = qRows.Close()
+			return 0, NewHTTPError(500, "校验待删除管理员失败: "+err.Error(), nil)
+		}
+		_ = qRows.Close()
+		if matchedCount > 0 && adminCount-matchedCount < 1 {
 			return 0, NewHTTPError(400, "系统必须保留至少一个管理员账号，无法全部删除", nil)
 		}
-		qRows, err := r.db.QueryContext(ctx, fmt.Sprintf("SELECT username FROM `admin_users` WHERE `id` IN (%s)", inPH), args...)
-		if err == nil {
-			for qRows.Next() {
-				var u string
-				if err := qRows.Scan(&u); err == nil && u == currentAdmin {
-					_ = qRows.Close()
-					return 0, NewHTTPError(400, "无法删除当前正在登录的管理员账号", nil)
-				}
-			}
-			_ = qRows.Close()
+		res, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM `admin_users` WHERE `%s` IN (%s)", pk, inPH), args...)
+		if err != nil {
+			return 0, NewHTTPError(500, "删除失败: "+err.Error(), nil)
 		}
+		if err := tx.Commit(); err != nil {
+			return 0, NewHTTPError(500, "删除失败: "+err.Error(), nil)
+		}
+		affected, _ := res.RowsAffected()
+		return affected, nil
 	}
 
 	if validTbl == "users" {
 		var hasTestAcc int
-		_ = r.db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM `users` WHERE `id` IN (%s) AND `username` = '0'", inPH), args...).Scan(&hasTestAcc)
+		if err := r.db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM `users` WHERE `id` IN (%s) AND `username` = '0'", inPH), args...).Scan(&hasTestAcc); err != nil {
+			return 0, NewHTTPError(500, "校验教师账号失败: "+err.Error(), nil)
+		}
 		if hasTestAcc > 0 {
 			return 0, NewHTTPError(403, "测试账号(0)为系统公共过渡账号，禁止删除", nil)
 		}
@@ -1372,7 +1471,9 @@ func (r *MySQLRepository) DeleteRecords(ctx context.Context, table string, ids [
 
 	if validTbl == "class_batches" {
 		var relatedCount int
-		_ = r.db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM `student_records` WHERE `batch_id` IN (%s)", inPH), args...).Scan(&relatedCount)
+		if err := r.db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM `student_records` WHERE `batch_id` IN (%s)", inPH), args...).Scan(&relatedCount); err != nil {
+			return 0, NewHTTPError(500, "校验关联学情记录失败: "+err.Error(), nil)
+		}
 		if relatedCount > 0 && !forceCascade {
 			return 0, NewHTTPError(
 				409,

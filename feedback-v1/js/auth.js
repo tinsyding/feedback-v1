@@ -41,6 +41,16 @@
                             </div>
                         </div>
 
+                        <div id="front-auth-captcha-field" class="front-auth-field" style="display:none;">
+                            <label class="front-auth-label" for="front-auth-captcha">图形验证码</label>
+                            <div style="display:flex; gap:8px; align-items:center;">
+                                <div class="front-auth-input-wrapper" style="flex:1;">
+                                    <input type="text" id="front-auth-captcha" class="front-auth-input" style="padding-left:12px;" placeholder="请输入右侧验证码" autocomplete="off" maxlength="8">
+                                </div>
+                                <img id="front-auth-captcha-img" alt="验证码" title="点击刷新验证码" onclick="window.refreshFrontAuthCaptcha('login')" style="height:40px; border-radius:8px; cursor:pointer; border:1px solid var(--border-color, #e2e8f0); flex-shrink:0;" />
+                            </div>
+                        </div>
+
                         <div id="front-auth-error" class="front-auth-error"></div>
 
                         <button type="submit" id="front-auth-submit-btn" class="front-auth-submit">
@@ -98,6 +108,16 @@
                                     <path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
                                 </svg>
                                 <input type="password" id="front-reset-confirm-password" class="front-auth-input" placeholder="请再次输入新密码" autocomplete="new-password" required>
+                            </div>
+                        </div>
+
+                        <div id="front-reset-captcha-field" class="front-auth-field" style="display:none;">
+                            <label class="front-auth-label" for="front-reset-captcha">图形验证码</label>
+                            <div style="display:flex; gap:8px; align-items:center;">
+                                <div class="front-auth-input-wrapper" style="flex:1;">
+                                    <input type="text" id="front-reset-captcha" class="front-auth-input" style="padding-left:12px;" placeholder="请输入右侧验证码" autocomplete="off" maxlength="8">
+                                </div>
+                                <img id="front-reset-captcha-img" alt="验证码" title="点击刷新验证码" onclick="window.refreshFrontAuthCaptcha('reset')" style="height:40px; border-radius:8px; cursor:pointer; border:1px solid var(--border-color, #e2e8f0); flex-shrink:0;" />
                             </div>
                         </div>
 
@@ -929,20 +949,54 @@
         }
     }
 
+    window.refreshFrontAuthCaptcha = function (mode) {
+        const prefix = mode === 'reset' ? 'front-reset' : 'front-auth';
+        const img = document.getElementById(`${prefix}-captcha-img`);
+        const input = document.getElementById(`${prefix}-captcha`);
+        if (img) img.src = `${AUTH_API}?action=captcha&t=${Date.now()}`;
+        if (input) input.value = '';
+    };
+
+    function showFrontAuthCaptcha(mode) {
+        const prefix = mode === 'reset' ? 'front-reset' : 'front-auth';
+        const field = document.getElementById(`${prefix}-captcha-field`);
+        if (field) field.style.display = 'block';
+        window.refreshFrontAuthCaptcha(mode);
+    }
+
+    function hideFrontAuthCaptcha(mode) {
+        const prefix = mode === 'reset' ? 'front-reset' : 'front-auth';
+        const field = document.getElementById(`${prefix}-captcha-field`);
+        const input = document.getElementById(`${prefix}-captcha`);
+        if (field) field.style.display = 'none';
+        if (input) input.value = '';
+    }
+
     // 处理登录表单提交
     window.handleFrontLogin = async function (e) {
         if (e) e.preventDefault();
         const usernameInput = document.getElementById('front-auth-username');
         const passwordInput = document.getElementById('front-auth-password');
+        const captchaField = document.getElementById('front-auth-captcha-field');
+        const captchaInput = document.getElementById('front-auth-captcha');
         const errorEl = document.getElementById('front-auth-error');
         const submitBtn = document.getElementById('front-auth-submit-btn');
 
         const username = usernameInput ? usernameInput.value.trim() : '';
         const password = passwordInput ? passwordInput.value.trim() : '';
+        const captchaVisible = captchaField && captchaField.style.display !== 'none';
+        const captcha = captchaInput ? captchaInput.value.trim() : '';
 
         if (!username || !password) {
             if (errorEl) {
                 errorEl.textContent = '请输入账号和密码';
+                errorEl.style.display = 'flex';
+            }
+            return;
+        }
+        if (captchaVisible && !captcha) {
+            if (errorEl) {
+                errorEl.textContent = '请输入图形验证码';
                 errorEl.style.display = 'flex';
             }
             return;
@@ -956,14 +1010,17 @@
 
         try {
             const reqFn = typeof requestWithTimeout === 'function' ? requestWithTimeout : fetch;
+            const payload = { username, password };
+            if (captcha) payload.captcha = captcha;
             const res = await reqFn(`${AUTH_API}?action=login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
+                body: JSON.stringify(payload)
             }, 8000);
             const json = await res.json();
 
             if (json.success && json.data) {
+                hideFrontAuthCaptcha('login');
                 currentUser = json.data;
                 window.currentUser = currentUser;
                 hideAuthModal();
@@ -973,6 +1030,9 @@
                     showToast(`已登录，${currentUser.real_name || currentUser.username}`, 'success');
                 }
             } else {
+                if (json.data?.require_captcha || captchaVisible) {
+                    showFrontAuthCaptcha('login');
+                }
                 if (errorEl) {
                     errorEl.textContent = json.error || '账号或密码错误，请重试';
                     errorEl.style.display = 'flex';
@@ -1006,6 +1066,8 @@
         const oldPasswordInput = document.getElementById('front-reset-old-password');
         const newPasswordInput = document.getElementById('front-reset-new-password');
         const confirmPasswordInput = document.getElementById('front-reset-confirm-password');
+        const captchaField = document.getElementById('front-reset-captcha-field');
+        const captchaInput = document.getElementById('front-reset-captcha');
         const errorEl = document.getElementById('front-reset-error');
         const submitBtn = document.getElementById('front-reset-submit-btn');
 
@@ -1013,6 +1075,8 @@
         const old_password = oldPasswordInput ? oldPasswordInput.value.trim() : '';
         const new_password = newPasswordInput ? newPasswordInput.value.trim() : '';
         const confirm_password = confirmPasswordInput ? confirmPasswordInput.value.trim() : '';
+        const captchaVisible = captchaField && captchaField.style.display !== 'none';
+        const captcha = captchaInput ? captchaInput.value.trim() : '';
 
         // 再次严格校验测试账号
         if (username === '0') {
@@ -1047,6 +1111,14 @@
             return;
         }
 
+        if (captchaVisible && !captcha) {
+            if (errorEl) {
+                errorEl.textContent = '请输入图形验证码';
+                errorEl.style.display = 'flex';
+            }
+            return;
+        }
+
         if (errorEl) errorEl.style.display = 'none';
         if (submitBtn) {
             submitBtn.disabled = true;
@@ -1055,14 +1127,17 @@
 
         try {
             const reqFn = typeof requestWithTimeout === 'function' ? requestWithTimeout : fetch;
+            const payload = { username, old_password, new_password, confirm_password };
+            if (captcha) payload.captcha = captcha;
             const res = await reqFn(`${AUTH_API}?action=reset_password`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, old_password, new_password, confirm_password })
+                body: JSON.stringify(payload)
             }, 8000);
             const json = await res.json();
 
             if (json.success) {
+                hideFrontAuthCaptcha('reset');
                 if (oldPasswordInput) oldPasswordInput.value = '';
                 if (newPasswordInput) newPasswordInput.value = '';
                 if (confirmPasswordInput) confirmPasswordInput.value = '';
@@ -1087,6 +1162,9 @@
                     }
                 }
             } else {
+                if (json.data?.require_captcha || captchaVisible) {
+                    showFrontAuthCaptcha('reset');
+                }
                 if (errorEl) {
                     errorEl.textContent = json.error || '重置失败，请检查原密码是否正确';
                     errorEl.style.display = 'flex';

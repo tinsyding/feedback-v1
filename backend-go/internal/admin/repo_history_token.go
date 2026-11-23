@@ -68,7 +68,17 @@ func (r *MySQLRepository) RollbackRecord(ctx context.Context, historyID int, adm
 	if err := r.requireDB(); err != nil {
 		return RollbackResult{}, err
 	}
-	hRows, err := r.db.QueryContext(ctx, "SELECT * FROM `student_record_history` WHERE id = ? LIMIT 1", historyID)
+	if adminOp == "" {
+		adminOp = "admin"
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return RollbackResult{}, NewHTTPError(500, "学情记录回溯失败，数据库操作已回滚", nil)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	hRows, err := tx.QueryContext(ctx, "SELECT * FROM `student_record_history` WHERE id = ? LIMIT 1", historyID)
 	if err != nil {
 		return RollbackResult{}, err
 	}
@@ -91,49 +101,59 @@ func (r *MySQLRepository) RollbackRecord(ctx context.Context, historyID int, adm
 	if hStudentKey == "" || (hStudentID != "" && hStudentKey == retestkeys.LegacyStudentKey(hStudentID, hStudentName)) {
 		var grade, subject sql.NullString
 		if hBatchID > 0 {
-			_ = r.db.QueryRowContext(ctx, "SELECT grade, subject FROM class_batches WHERE id = ? LIMIT 1", hBatchID).Scan(&grade, &subject)
+			_ = tx.QueryRowContext(ctx, "SELECT grade, subject FROM class_batches WHERE id = ? LIMIT 1", hBatchID).Scan(&grade, &subject)
 		}
 		hStudentKey = retestkeys.BuildStudentKey(hStudentID, hStudentName, grade.String, subject.String)
 	}
 
 	var currentRec map[string]any
 	if recID := config.AsPHPInt(h["record_id"]); recID > 0 {
-		if qRows, err := r.db.QueryContext(ctx, "SELECT * FROM `student_records` WHERE id = ? LIMIT 1", recID); err == nil {
+		if qRows, err := tx.QueryContext(ctx, "SELECT * FROM `student_records` WHERE id = ? LIMIT 1 FOR UPDATE", recID); err == nil {
 			if recs, err := scanDynamicRows(qRows); err == nil && len(recs) > 0 {
 				currentRec = recs[0]
 			}
 			_ = qRows.Close()
 		}
 	}
-	if currentRec == nil && hBatchID > 0 && hStudentName != "" {
-		if qRows, err := r.db.QueryContext(ctx,
-			"SELECT * FROM `student_records` WHERE batch_id = ? AND (student_key = ? OR student_name = ?) AND week_num = ? LIMIT 1",
-			hBatchID, hStudentKey, hStudentName, hWeekNum,
-		); err == nil {
+	if currentRec == nil && hBatchID > 0 && (hStudentKey != "" || hStudentName != "") {
+		var qRows *sql.Rows
+		var qErr error
+		if hStudentKey != "" {
+			qRows, qErr = tx.QueryContext(ctx,
+				"SELECT * FROM `student_records` WHERE batch_id = ? AND student_key = ? AND week_num = ? LIMIT 1 FOR UPDATE",
+				hBatchID, hStudentKey, hWeekNum,
+			)
+		} else {
+			qRows, qErr = tx.QueryContext(ctx,
+				"SELECT * FROM `student_records` WHERE batch_id = ? AND student_name = ? AND week_num = ? LIMIT 1 FOR UPDATE",
+				hBatchID, hStudentName, hWeekNum,
+			)
+		}
+		if qErr == nil {
 			if recs, err := scanDynamicRows(qRows); err == nil && len(recs) > 0 {
 				currentRec = recs[0]
 			}
 			_ = qRows.Close()
 		}
 	}
-
-	if adminOp == "" {
-		adminOp = "admin"
-	}
-
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return RollbackResult{}, NewHTTPError(500, "学情记录回溯失败，数据库操作已回滚", nil)
-	}
-	defer func() { _ = tx.Rollback() }()
 
 	var targetID int
 	if currentRec != nil {
-		var curBatchCode, curCreatedBy sql.NullString
-		_ = tx.QueryRowContext(ctx,
-			"SELECT batch_code, created_by FROM `generation_batches` WHERE class_id = ? AND week_num = ? ORDER BY id DESC LIMIT 1",
-			currentRec["batch_id"], currentRec["week_num"],
-		).Scan(&curBatchCode, &curCreatedBy)
+		curBatchCode := strings.TrimSpace(config.AsPHPString(currentRec["batch_code"]))
+		curCreatedBy := strings.TrimSpace(config.AsPHPString(currentRec["created_by"]))
+		if curBatchCode == "" || curCreatedBy == "" {
+			var gbCode, gbBy sql.NullString
+			_ = tx.QueryRowContext(ctx,
+				"SELECT batch_code, created_by FROM `generation_batches` WHERE class_id = ? AND week_num = ? ORDER BY id DESC LIMIT 1",
+				currentRec["batch_id"], currentRec["week_num"],
+			).Scan(&gbCode, &gbBy)
+			if curBatchCode == "" {
+				curBatchCode = gbCode.String
+			}
+			if curCreatedBy == "" {
+				curCreatedBy = gbBy.String
+			}
+		}
 
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO student_record_history (
@@ -149,7 +169,7 @@ func (r *MySQLRepository) RollbackRecord(ctx context.Context, historyID int, adm
 			)`,
 			currentRec["id"],
 			currentRec["batch_id"],
-			curBatchCode.String,
+			curBatchCode,
 			config.AsPHPString(currentRec["student_id"]),
 			currentRec["student_name"],
 			config.AsPHPString(currentRec["student_key"]),
@@ -165,7 +185,7 @@ func (r *MySQLRepository) RollbackRecord(ctx context.Context, historyID int, adm
 			currentRec["preview_comment"],
 			currentRec["source_files"],
 			currentRec["retest_token"],
-			curCreatedBy.String,
+			curCreatedBy,
 			adminOp,
 			currentRec["created_at"],
 			currentRec["updated_at"],
@@ -213,19 +233,22 @@ func (r *MySQLRepository) RollbackRecord(ctx context.Context, historyID int, adm
 		if eqVal == nil || strings.TrimSpace(config.AsPHPString(eqVal)) == "" {
 			eqVal = "[]"
 		}
+		hBatchCode := strings.TrimSpace(config.AsPHPString(h["batch_code"]))
+		hCreatedBy := strings.TrimSpace(config.AsPHPString(h["created_by"]))
 		res, err := tx.ExecContext(ctx, `
 			INSERT INTO student_records (
-				batch_id, student_id, student_name, student_key, week_num, preview_week_num,
+				batch_id, batch_code, student_id, student_name, student_key, week_num, preview_week_num,
 				homework_score, preview_score, total_score, error_count,
 				error_questions, preview_error_questions, teacher_comment, preview_comment, source_files, retest_token,
-				created_at, updated_at
+				created_by, created_at, updated_at
 			) VALUES (
-				?, ?, ?, ?, ?, ?,
+				?, ?, ?, ?, ?, ?, ?,
 				?, ?, ?, ?,
 				?, ?, ?, ?, ?, ?,
-				?, NOW()
+				?, ?, NOW()
 			)`,
 			h["batch_id"],
+			hBatchCode,
 			hStudentID,
 			hStudentName,
 			hStudentKey,
@@ -241,6 +264,7 @@ func (r *MySQLRepository) RollbackRecord(ctx context.Context, historyID int, adm
 			h["preview_comment"],
 			h["source_files"],
 			h["retest_token"],
+			hCreatedBy,
 			recCreatedAt,
 		)
 		if err != nil {

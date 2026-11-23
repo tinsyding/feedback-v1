@@ -91,6 +91,7 @@
                 const statusVal = document.getElementById('teacher-status-filter')?.value || '';
                 let url = `${API_BASE}?action=db_list&table=users&page=${page}&page_size=${teacherPerPage}&per_page=${teacherPerPage}&sort=${teacherSortField}&order=${teacherSortOrder}&sort_field=${teacherSortField}&sort_order=${teacherSortOrder}`;
                 if (teacherSearchQuery) url += `&search=${encodeURIComponent(teacherSearchQuery)}`;
+                if (statusVal !== '') url += `&status=${encodeURIComponent(statusVal)}`;
 
                 const res = await fetch(url);
                 const json = await res.json();
@@ -101,12 +102,11 @@
                 }
 
                 let records = json.data.records || [];
-                teacherCacheRecords = records;
-
                 if (statusVal !== '') {
                     const stInt = parseInt(statusVal, 10);
                     records = records.filter(r => (parseInt(r.status, 10) === stInt) || (stInt === 1 && r.status === undefined));
                 }
+                teacherCacheRecords = records;
 
                 const total = json.data.total || records.length;
                 const totalPages = json.data.pages || Math.max(1, Math.ceil(total / teacherPerPage));

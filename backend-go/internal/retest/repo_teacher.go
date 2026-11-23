@@ -863,6 +863,9 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 
 		shortToken := normalize.DeriveRetestToken(in.Subject, in.Grade, studentKey, in.SecretKey)
 
+		if errs == nil {
+			errs = []int{}
+		}
 		errJSONBytes, _ := json.Marshal(errs)
 		errJSON := string(errJSONBytes)
 
@@ -870,6 +873,9 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 		var pvWeekForDB any
 		var pvCommentForDB any
 		if studentHasPreview {
+			if pvErrs == nil {
+				pvErrs = []int{}
+			}
 			b, _ := json.Marshal(pvErrs)
 			pvErrJSON = string(b)
 			pvWeekForDB = pvWeekVal

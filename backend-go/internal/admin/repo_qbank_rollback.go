@@ -15,6 +15,9 @@ import (
 // of receiptCode to the exact question set recorded in snapshot_json, within a
 // single database transaction, and appends an admin_rollback receipt.
 func (r *MySQLRepository) RollbackQBankRevision(ctx context.Context, receiptCode, adminOp, adminName, clientIP string) (QBankRollbackResult, error) {
+	if err := r.requireDB(); err != nil {
+		return QBankRollbackResult{}, err
+	}
 	attest := r.getAttestStore()
 	if attest == nil {
 		return QBankRollbackResult{}, NewHTTPError(503, "存证服务未初始化，无法执行历史快照回滚", nil)
@@ -51,12 +54,28 @@ func (r *MySQLRepository) RollbackQBankRevision(ctx context.Context, receiptCode
 
 	var qbankID int64
 	if len(questions) == 0 {
-		if _, err := tx.ExecContext(
+		var existingQBankID int64
+		_ = tx.QueryRowContext(
 			ctx,
-			"DELETE FROM `qbank_questions` WHERE `bank_type` = ? AND `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ?",
+			"SELECT `id` FROM `qbank_weeks` WHERE `bank_type` = ? AND `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? LIMIT 1",
 			scope.BankType, scope.Year, scope.Season, scope.Subject, scope.Grade, scope.Tier, scope.Week,
-		); err != nil {
-			return QBankRollbackResult{}, NewHTTPError(500, "清空当前题库题目失败，操作已回滚", err)
+		).Scan(&existingQBankID)
+		if existingQBankID > 0 {
+			if _, err := tx.ExecContext(
+				ctx,
+				"DELETE FROM `qbank_questions` WHERE `qbank_id` = ? OR (`bank_type` = ? AND `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ?)",
+				existingQBankID, scope.BankType, scope.Year, scope.Season, scope.Subject, scope.Grade, scope.Tier, scope.Week,
+			); err != nil {
+				return QBankRollbackResult{}, NewHTTPError(500, "清空当前题库题目失败，操作已回滚", err)
+			}
+		} else {
+			if _, err := tx.ExecContext(
+				ctx,
+				"DELETE FROM `qbank_questions` WHERE `bank_type` = ? AND `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ?",
+				scope.BankType, scope.Year, scope.Season, scope.Subject, scope.Grade, scope.Tier, scope.Week,
+			); err != nil {
+				return QBankRollbackResult{}, NewHTTPError(500, "清空当前题库题目失败，操作已回滚", err)
+			}
 		}
 		if _, err := tx.ExecContext(
 			ctx,
@@ -91,8 +110,8 @@ func (r *MySQLRepository) RollbackQBankRevision(ctx context.Context, receiptCode
 
 		if _, err := tx.ExecContext(
 			ctx,
-			"DELETE FROM `qbank_questions` WHERE `bank_type` = ? AND `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ?",
-			scope.BankType, scope.Year, scope.Season, scope.Subject, scope.Grade, scope.Tier, scope.Week,
+			"DELETE FROM `qbank_questions` WHERE `qbank_id` = ? OR (`bank_type` = ? AND `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ?)",
+			qbankID, scope.BankType, scope.Year, scope.Season, scope.Subject, scope.Grade, scope.Tier, scope.Week,
 		); err != nil {
 			return QBankRollbackResult{}, NewHTTPError(500, "清理现有题目失败，操作已回滚", err)
 		}

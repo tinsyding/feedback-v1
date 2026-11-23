@@ -16,15 +16,24 @@
                 if (result.success) {
                     const moduleSelect = document.getElementById('log-module-filter');
                     if (moduleSelect) {
-                        moduleSelect.innerHTML = '<option value="">全部模块</option>' + (result.data.modules || []).map(m => `<option value="${m}">${m}</option>`).join('');
+                        moduleSelect.innerHTML = '<option value="">全部模块</option>' + (result.data.modules || []).map(m => {
+                            const safe = escapeHtml(m);
+                            return `<option value="${safe}">${safe}</option>`;
+                        }).join('');
                     }
                     const eventSelect = document.getElementById('log-event-filter');
                     if (eventSelect) {
-                        eventSelect.innerHTML = '<option value="">全部事件</option>' + (result.data.events || []).map(e => `<option value="${e}">${e}</option>`).join('');
+                        eventSelect.innerHTML = '<option value="">全部事件</option>' + (result.data.events || []).map(e => {
+                            const safe = escapeHtml(e);
+                            return `<option value="${safe}">${safe}</option>`;
+                        }).join('');
                     }
                     const dateSelect = document.getElementById('log-date-filter');
                     if (dateSelect) {
-                        dateSelect.innerHTML = '<option value="">近7天</option>' + (result.data.dates || []).map(d => `<option value="${d}">${d}</option>`).join('');
+                        dateSelect.innerHTML = '<option value="">近7天</option>' + (result.data.dates || []).map(d => {
+                            const safe = escapeHtml(d);
+                            return `<option value="${safe}">${safe}</option>`;
+                        }).join('');
                     }
                 }
             } catch (err) {
@@ -83,7 +92,7 @@
                     renderLogs(globalLogsCache);
                     renderPagination(result.data.pagination);
                 } else {
-                    tbody.innerHTML = `<tr><td colspan="5" class="table-empty"><div class="empty-state"><span>${result.error || '加载失败'}</span></div></td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="5" class="table-empty"><div class="empty-state"><span>${escapeHtml(result.error || '加载失败')}</span></div></td></tr>`;
                 }
             } catch (err) {
                 tbody.innerHTML = '<tr><td colspan="5" class="table-empty"><div class="empty-state"><span>网络请求错误</span></div></td></tr>';
