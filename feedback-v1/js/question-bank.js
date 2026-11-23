@@ -7560,7 +7560,7 @@ async function fetchAndRenderRevisions(scopeMeta) {
         }
         const rawList = Array.isArray(res.data) ? res.data : [];
         if (rawList.length === 0) {
-            bodyEl.innerHTML = `<div class="qb-rev-empty"><p>暂无存证版本记录</p><span style="font-size:0.78rem; color:var(--text-muted);">该专题可能是在存证体系上线前保存的，重新保存一次即可签发首条存证回执。</span></div>`;
+            bodyEl.innerHTML = `<div class="qb-rev-empty"><p>暂无存证版本记录</p></div>`;
             return;
         }
 
