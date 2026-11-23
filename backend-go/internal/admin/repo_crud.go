@@ -780,7 +780,7 @@ func (r *MySQLRepository) GetRecord(ctx context.Context, table, id string) (map[
 }
 
 // CreateRecord mirrors PHP actions_crud.php action=db_create.
-func (r *MySQLRepository) CreateRecord(ctx context.Context, table string, input map[string]any, retestSecret string) (int64, error) {
+func (r *MySQLRepository) CreateRecord(ctx context.Context, table string, input map[string]any, retestSecret, adminOp string) (int64, error) {
 	if isImmutableAttestationTable(table) {
 		return 0, NewHTTPError(403, immutableAttestationErrMsg, nil)
 	}
@@ -960,11 +960,11 @@ func (r *MySQLRepository) CreateRecord(ctx context.Context, table string, input 
 			}
 		}
 		fallbackScope := scopeFromDataMap(data)
-		adminOp := strings.TrimSpace(config.AsPHPString(data["updated_by"]))
-		if adminOp == "" {
-			adminOp = strings.TrimSpace(config.AsPHPString(data["created_by"]))
+		op := strings.TrimSpace(adminOp)
+		if op == "" {
+			op = "admin"
 		}
-		if err := recordQBankQuestionAdminEditTx(ctx, tx, attest, qid, fallbackScope, adminOp); err != nil {
+		if err := recordQBankQuestionAdminEditTx(ctx, tx, attest, qid, fallbackScope, op); err != nil {
 			return 0, NewHTTPError(500, "写入题库存证失败: "+err.Error(), nil)
 		}
 		if err := tx.Commit(); err != nil {

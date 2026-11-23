@@ -202,11 +202,14 @@ type memEntry struct {
 	lockUntil int64
 }
 
+const defaultMaxMemBuckets = 4096
+
 // MemoryStore is an in-memory Store for unit tests and offline fallback.
 type MemoryStore struct {
-	mu      sync.Mutex
-	buckets map[string]memEntry
-	nowFunc func() time.Time
+	mu        sync.Mutex
+	buckets   map[string]memEntry
+	lastPrune int64
+	nowFunc   func() time.Time
 }
 
 // NewMemoryStore initializes an empty MemoryStore.
@@ -222,6 +225,26 @@ func (m *MemoryStore) nowUnix() int64 {
 		return m.nowFunc().Unix()
 	}
 	return time.Now().Unix()
+}
+
+func (m *MemoryStore) pruneLocked(now int64, windowSeconds int) {
+	maxAge := int64(windowSeconds)
+	if maxAge < 3600 {
+		maxAge = 3600
+	}
+	for k, e := range m.buckets {
+		if e.lockUntil > now {
+			continue
+		}
+		ref := e.updatedAt
+		if ref == 0 {
+			ref = e.firstAt
+		}
+		if now-ref > maxAge {
+			delete(m.buckets, k)
+		}
+	}
+	m.lastPrune = now
 }
 
 // Status returns the current rate-limit state from memory.
@@ -243,6 +266,7 @@ func (m *MemoryStore) Status(_ context.Context, scope, identifier string, window
 		firstAt = e.updatedAt
 	}
 	if windowSeconds > 0 && (now-firstAt) > int64(windowSeconds) {
+		delete(m.buckets, key)
 		return Status{}, nil
 	}
 	return Status{Count: e.count}, nil
@@ -255,7 +279,24 @@ func (m *MemoryStore) RecordFailure(_ context.Context, scope, identifier string,
 
 	key := NormalizeKey(scope, identifier)
 	now := m.nowUnix()
+	if now-m.lastPrune >= 60 || len(m.buckets) >= defaultMaxMemBuckets {
+		m.pruneLocked(now, windowSeconds)
+	}
 	e, ok := m.buckets[key]
+	if !ok && len(m.buckets) >= defaultMaxMemBuckets {
+		var oldestKey string
+		var oldestTS int64
+		for k, v := range m.buckets {
+			ts := v.updatedAt
+			if oldestKey == "" || ts < oldestTS {
+				oldestKey = k
+				oldestTS = ts
+			}
+		}
+		if oldestKey != "" {
+			delete(m.buckets, oldestKey)
+		}
+	}
 	if !ok || (e.lockUntil <= now && windowSeconds > 0 && (now-e.firstAt) > int64(windowSeconds)) {
 		e = memEntry{firstAt: now}
 	}

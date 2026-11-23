@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -264,10 +265,13 @@ func handleRetestEncryptBatch(w http.ResponseWriter, r *http.Request, deps Retes
 		}
 		switch x := v.(type) {
 		case float64:
+			if math.IsNaN(x) || math.IsInf(x, 0) {
+				return nil
+			}
 			return &x
 		case json.Number:
 			f, err := x.Float64()
-			if err != nil {
+			if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
 				return nil
 			}
 			return &f
@@ -280,7 +284,7 @@ func handleRetestEncryptBatch(w http.ResponseWriter, r *http.Request, deps Retes
 				return nil
 			}
 			f, err := strconv.ParseFloat(s, 64)
-			if err != nil {
+			if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
 				return nil
 			}
 			return &f

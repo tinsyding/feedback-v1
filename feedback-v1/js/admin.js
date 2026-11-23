@@ -1,7 +1,7 @@
 /**
  * ============================================================================
  * 极方管理后台 (Admin Console) 前端运行脚本 - 生产环境合并包
- * 自动生成时间: 2026-11-23 17:12:02
+ * 自动生成时间: 2026-11-23 09:28:48
  * 源码模块目录: js/admin/
  * 请勿直接手动修改此文件，开发时请修改 js/admin/ 中的子模块并执行本打包脚本。
  * ============================================================================
@@ -8165,7 +8165,7 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
                 const res = await fetch('api/admin.php?action=qbank_anchor_now', { method: 'POST' });
                 const json = await res.json();
                 if (!res.ok || !json.success) {
-                    if (typeof showToast === 'function') showToast(json.message || '执行锚定失败', 'error');
+                    if (typeof showToast === 'function') showToast(json.error || json.message || '执行锚定失败', 'error');
                     return;
                 }
                 if (json.data?.anchored) {
@@ -8203,7 +8203,7 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
                 });
                 const json = await res.json();
                 if (!res.ok || !json.success) {
-                    if (typeof showToast === 'function') showToast(json.message || '回滚失败', 'error');
+                    if (typeof showToast === 'function') showToast(json.error || json.message || '回滚失败', 'error');
                     return;
                 }
                 const d = json.data || {};
@@ -8569,7 +8569,12 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
 
         function clearQbankLinkedScope() {
             qbaTlLinkedScope = null;
-            ['qba-tl-year', 'qba-tl-season', 'qba-tl-bank-type', 'qba-tl-subject', 'qba-tl-grade', 'qba-tl-tier', 'qba-tl-week'].forEach((id) => {
+            const curSem = getQbaCurrentSemester();
+            const yearEl = document.getElementById('qba-tl-year');
+            const seasonEl = document.getElementById('qba-tl-season');
+            if (yearEl) yearEl.value = curSem.year;
+            if (seasonEl) seasonEl.value = curSem.season;
+            ['qba-tl-bank-type', 'qba-tl-subject', 'qba-tl-grade', 'qba-tl-tier', 'qba-tl-week'].forEach((id) => {
                 const el = document.getElementById(id);
                 if (el) el.value = '';
             });

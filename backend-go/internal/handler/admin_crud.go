@@ -132,7 +132,7 @@ func handleAdminDBCreate(w http.ResponseWriter, r *http.Request, deps AdminDeps)
 	if sub, ok := rawInput["data"].(map[string]any); ok && sub != nil {
 		input = sub
 	}
-	newID, err := deps.Repo.CreateRecord(r.Context(), table, input, resolveRetestSecret(deps))
+	newID, err := deps.Repo.CreateRecord(r.Context(), table, input, resolveRetestSecret(deps), sess.AdminUsername())
 	if err != nil {
 		writeAdminRepoError(w, err)
 		return

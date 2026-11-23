@@ -193,7 +193,7 @@ type Repository interface {
 	// Generic CRUD
 	ListRecords(ctx context.Context, q ListQuery) (ListResult, error)
 	GetRecord(ctx context.Context, table, id string) (map[string]any, error)
-	CreateRecord(ctx context.Context, table string, input map[string]any, retestSecret string) (int64, error)
+	CreateRecord(ctx context.Context, table string, input map[string]any, retestSecret, adminOp string) (int64, error)
 	UpdateRecord(ctx context.Context, table, id string, input map[string]any, adminOp string) (int64, []string, error)
 	DeleteRecords(ctx context.Context, table string, ids []string, currentAdmin string, forceCascade bool) (int64, error)
 	ResetTeacherPassword(ctx context.Context, userID int, username, newPassword string) (ResetTeacherResult, error)

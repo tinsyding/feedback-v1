@@ -807,7 +807,7 @@ func (c *mockAttestConn) QueryContext(_ context.Context, query string, args []dr
 		}
 		return revisionRows(nil), nil
 
-	case strings.Contains(query, "FROM `qbank_revisions`") && strings.Contains(query, "ORDER BY `revision_no` DESC, `id` DESC LIMIT ?"):
+	case strings.Contains(query, "FROM `qbank_revisions`") && strings.Contains(query, "ORDER BY `id` DESC LIMIT ?"):
 		revCopy := make([]*revisionRecord, 0, len(c.state.revisions))
 		for i := len(c.state.revisions) - 1; i >= 0; i-- {
 			revCopy = append(revCopy, c.state.revisions[i])

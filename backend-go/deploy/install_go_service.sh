@@ -203,11 +203,18 @@ chmod 755 "$BIN_PATH"
 install -d -m 750 -o root -g "$SERVICE_GROUP" "$ENV_DIR"
 echo "已就绪配置目录：$ENV_DIR (0750 root:$SERVICE_GROUP)"
 
-# 确保运行时写入目录存在且对服务用户可写
+# 确保站点根目录与 config.json 对服务用户可写（后台保存 config.json 需原子写入临时文件并重命名）
+chown "$SERVICE_USER:$SERVICE_GROUP" "$FEEDBACK_ROOT"
+if [ -f "$FEEDBACK_ROOT/config.json" ]; then
+    chown "$SERVICE_USER:$SERVICE_GROUP" "$FEEDBACK_ROOT/config.json"
+fi
+
+# 确保运行时写入目录及其既有内容对服务用户可写
 for rel_dir in \
     data \
     data/identify_archive \
     data/pdfs \
+    data/pdfs/thumbs \
     data/uploads \
     data/temp \
     data/logs \
@@ -219,9 +226,12 @@ for rel_dir in \
         install -d -m 755 -o "$SERVICE_USER" -g "$SERVICE_GROUP" "$target_dir"
         echo "已创建运行目录：$target_dir"
     else
-        chown "$SERVICE_USER:$SERVICE_GROUP" "$target_dir"
+        chown -R "$SERVICE_USER:$SERVICE_GROUP" "$target_dir"
     fi
 done
+if [ -f "$FEEDBACK_ROOT/data/.ai_secrets.json" ]; then
+    chmod 600 "$FEEDBACK_ROOT/data/.ai_secrets.json"
+fi
 
 tmp_unit=""
 tmp_resp=""

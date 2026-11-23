@@ -458,17 +458,19 @@ func (m *Manager) ReadSnapshotImage(dateStr, clientSlug, rawPrefix, imgParam str
 	return os.ReadFile(imgPath)
 }
 
-// StreamLogFile opens a log file under m.mu.RLock() and invokes fn with the open file and its size.
+// StreamLogFile opens a log file under m.mu.RLock(), releases the lock before network I/O,
+// and invokes fn with the open file and its size.
 func (m *Manager) StreamLogFile(dateStr, clientSlug, logType string, fn func(f *os.File, size int64) error) (string, string, string, error) {
 	filePath, d, slug, filename := m.LogFilePath(dateStr, clientSlug, logType)
 	m.mu.RLock()
-	defer m.mu.RUnlock()
 	f, err := os.Open(filePath)
 	if err != nil {
+		m.mu.RUnlock()
 		return d, slug, filename, err
 	}
-	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
+	m.mu.RUnlock()
+	defer func() { _ = f.Close() }()
 	if err != nil {
 		return d, slug, filename, err
 	}

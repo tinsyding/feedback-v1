@@ -558,7 +558,7 @@ func TestMySQLRepositoryListGetCreateUpdateDeleteAndReset(t *testing.T) {
 		"student_name": "张三",
 		"week_num":     json.Number("3"),
 		"retest_token": "auto",
-	}, "")
+	}, "", "admin")
 	if he, ok := err.(*HTTPError); !ok || he.Status != 500 {
 		t.Fatalf("expected HTTP 500 when retestSecret is empty, got %v", err)
 	}
@@ -572,7 +572,7 @@ func TestMySQLRepositoryListGetCreateUpdateDeleteAndReset(t *testing.T) {
 		"week_num":        json.Number("3"),
 		"error_questions": nil,
 		"retest_token":    "auto",
-	}, "secret_2026")
+	}, "secret_2026", "admin")
 	if err != nil || newID != 505 {
 		t.Fatalf("CreateRecord(student_records): id=%d err=%v", newID, err)
 	}
@@ -598,7 +598,7 @@ func TestMySQLRepositoryListGetCreateUpdateDeleteAndReset(t *testing.T) {
 	_, err = repo.CreateRecord(ctx, "users", map[string]any{
 		"username": "t202",
 		"password": strings.Repeat("a", 73),
-	}, "")
+	}, "", "admin")
 	if he, ok := err.(*HTTPError); !ok || he.Status != 400 {
 		t.Fatalf("expected HTTP 400 for >72 byte password on CreateRecord, got %v", err)
 	}
@@ -728,7 +728,7 @@ func TestMySQLRepositoryAttestationGuardsAndAdminAudit(t *testing.T) {
 
 	// 2. qbank_revisions & qbank_attempt_logs forbid Create/Update/Delete with HTTP 403
 	for _, tbl := range []string{"qbank_revisions", "qbank_attempt_logs"} {
-		if _, err := repo.CreateRecord(ctx, tbl, map[string]any{"action": "fake"}, ""); err == nil {
+		if _, err := repo.CreateRecord(ctx, tbl, map[string]any{"action": "fake"}, "", "admin"); err == nil {
 			t.Fatalf("expected 403 CreateRecord on %s", tbl)
 		} else if he, ok := err.(*HTTPError); !ok || he.Status != 403 || he.Message != immutableAttestationErrMsg {
 			t.Fatalf("CreateRecord(%s) unexpected error: %v", tbl, err)

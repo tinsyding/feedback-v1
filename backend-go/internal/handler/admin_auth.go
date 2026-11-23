@@ -157,31 +157,37 @@ func handleAdminLogout(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
 		return
 	}
 	sess, isNew := loadAuthSession(r, deps.Sessions)
-	if sess != nil && sess.IsAdminLoggedIn() {
-		adminUser := sess.AdminUsername()
-		if adminUser == "" {
-			adminUser = "admin"
-		}
-		adminAuditLog(r, deps, sess, "info", "admin_logout", map[string]any{
-			"username": adminUser,
-			"message":  "管理员安全退出登录",
+	if !isNew && sess != nil && deps.Sessions != nil {
+		var loggedOutAdmin string
+		var auditSess *session.Session
+		_, _ = session.Update(r.Context(), deps.Sessions, sess.ID, func(data map[string]any) (bool, error) {
+			if config.AsPHPBool(data["admin_logged_in"]) {
+				loggedOutAdmin = strings.TrimSpace(config.AsPHPString(data["admin_username"]))
+				if loggedOutAdmin == "" {
+					loggedOutAdmin = "admin"
+				}
+				auditSess = &session.Session{
+					ID:   sess.ID,
+					Data: map[string]any{"admin_logged_in": true, "admin_username": loggedOutAdmin},
+				}
+			}
+			delete(data, "admin_logged_in")
+			delete(data, "admin_username")
+			delete(data, "admin_realname")
+			delete(data, "admin_role")
+			delete(data, "login_time")
+			if !config.AsPHPBool(data["user_logged_in"]) {
+				for k := range data {
+					delete(data, k)
+				}
+			}
+			return true, nil
 		})
-	}
-
-	if !isNew && sess != nil && sess.Data != nil {
-		delete(sess.Data, "admin_logged_in")
-		delete(sess.Data, "admin_username")
-		delete(sess.Data, "admin_realname")
-		delete(sess.Data, "admin_role")
-		delete(sess.Data, "login_time")
-		if sess.IsUserLoggedIn() {
-			if deps.Sessions != nil {
-				_ = deps.Sessions.Save(r.Context(), sess)
-			}
-		} else {
-			if deps.Sessions != nil && sess.ID != "" {
-				_ = deps.Sessions.Destroy(r.Context(), sess.ID)
-			}
+		if loggedOutAdmin != "" {
+			adminAuditLog(r, deps, auditSess, "info", "admin_logout", map[string]any{
+				"username": loggedOutAdmin,
+				"message":  "管理员安全退出登录",
+			})
 		}
 	}
 	httpx.SendResponse(w, true, map[string]any{"message": "已登出"}, nil, http.StatusOK)

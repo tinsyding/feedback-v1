@@ -61,12 +61,12 @@ func (d RetestDeps) resolveSecretKey() string {
 // Retest handles all 10 actions of /api/retest.php.
 func Retest(deps RetestDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Ensure data/temp exists and probabilistically clean files older than 30 min (25% chance)
+		// Ensure data/temp exists and probabilistically clean files older than 2 hours (25% chance)
 		if deps.FeedbackRoot != "" {
 			tempDir := deps.tempDir()
 			_ = os.MkdirAll(tempDir, 0o755)
 			if n, err := rand.Int(rand.Reader, big.NewInt(4)); err == nil && n.Int64() == 0 {
-				cleanupExpiredTempFiles(tempDir, deps.now(), 30*time.Minute)
+				cleanupExpiredTempFiles(tempDir, deps.now(), 2*time.Hour)
 			}
 		}
 

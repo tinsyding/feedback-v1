@@ -15,6 +15,7 @@ import (
 
 type rbMockState struct {
 	queries      []string
+	execArgs     [][]driver.NamedValue
 	failOnDelete bool
 	committed    bool
 	rolledBack   bool
@@ -34,8 +35,9 @@ func (c *rbMockConn) Begin() (driver.Tx, error)             { return &rbMockTx{s
 func (c *rbMockConn) BeginTx(_ context.Context, _ driver.TxOptions) (driver.Tx, error) {
 	return &rbMockTx{state: c.state}, nil
 }
-func (c *rbMockConn) ExecContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Result, error) {
+func (c *rbMockConn) ExecContext(_ context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	c.state.queries = append(c.state.queries, query)
+	c.state.execArgs = append(c.state.execArgs, args)
 	if c.state.failOnDelete && strings.Contains(query, "DELETE FROM `qbank_questions`") {
 		return nil, errors.New("simulated delete error")
 	}
@@ -102,7 +104,7 @@ func TestRollbackQBankRevisionAndAnchorsProtection(t *testing.T) {
 		Operator: "teacher1",
 		Questions: []qbankattest.SnapshotQuestion{
 			{QuestionNum: 1, Topic: "受力分析"},
-			{QuestionNum: 2, Topic: "牛顿第二定律"},
+			{QuestionNum: 2, Topic: "牛顿第二定律", ParentQuestionNums: []int{2, 5}},
 		},
 	})
 	if err != nil {
@@ -117,7 +119,7 @@ func TestRollbackQBankRevisionAndAnchorsProtection(t *testing.T) {
 
 	// Verify qbank_attestation_anchors is protected against admin CRUD mutations.
 	for _, op := range []func() error{
-		func() error { _, e := repo.CreateRecord(ctx, "qbank_attestation_anchors", map[string]any{}, ""); return e },
+		func() error { _, e := repo.CreateRecord(ctx, "qbank_attestation_anchors", map[string]any{}, "", "admin"); return e },
 		func() error { _, _, e := repo.UpdateRecord(ctx, "qbank_attestation_anchors", "1", map[string]any{}, "boss"); return e },
 		func() error { _, e := repo.DeleteRecords(ctx, "qbank_attestation_anchors", []string{"1"}, "boss", false); return e },
 	} {
@@ -136,6 +138,22 @@ func TestRollbackQBankRevisionAndAnchorsProtection(t *testing.T) {
 	}
 	if res.TargetReceiptCode != rev1.ReceiptCode || res.RestoredCount != 2 || res.NewRevisionNo != 2 {
 		t.Fatalf("unexpected rollback result: %+v", res)
+	}
+	foundCSVParentNums := false
+	for _, args := range st.execArgs {
+		for _, a := range args {
+			if s, ok := a.Value.(string); ok {
+				if s == "[2,5]" {
+					t.Fatalf("parent_question_nums must be CSV, not JSON array: %q", s)
+				}
+				if s == "2,5" {
+					foundCSVParentNums = true
+				}
+			}
+		}
+	}
+	if !foundCSVParentNums {
+		t.Fatalf("expected CSV parent_question_nums '2,5' in rollback INSERT args, got %+v", st.execArgs)
 	}
 
 	// Verify a new admin_rollback revision was appended in attest store.

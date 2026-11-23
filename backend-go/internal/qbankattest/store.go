@@ -775,6 +775,7 @@ type MySQLStore struct {
 	signer       *Signer
 	feedbackRoot string
 	cfg          storeConfig
+	anchorMu     sync.Mutex
 }
 
 // NewMySQLStore creates a MySQLStore.
@@ -1248,13 +1249,35 @@ func (s *MySQLStore) AnchorUnanchoredRevisions(ctx context.Context, tsa TSAClien
 		return nil, err
 	}
 
+	s.anchorMu.Lock()
+	defer s.anchorMu.Unlock()
+
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = conn.Close() }()
+
+	var lockOK sql.NullInt64
+	if err := conn.QueryRowContext(ctx, "SELECT GET_LOCK('qbank_attestation_anchor', 15)").Scan(&lockOK); err != nil {
+		return nil, err
+	}
+	if !lockOK.Valid || lockOK.Int64 != 1 {
+		return nil, errors.New("another qbank attestation anchor batch is already in progress")
+	}
+	defer func() {
+		relCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_, _ = conn.ExecContext(relCtx, "SELECT RELEASE_LOCK('qbank_attestation_anchor')")
+	}()
+
 	var lastSeq int64
 	var prevRoot sql.NullString
-	if err := db.QueryRowContext(ctx, "SELECT COALESCE(MAX(`seq_to`), 0), COALESCE((SELECT `merkle_root` FROM `qbank_attestation_anchors` ORDER BY `id` DESC LIMIT 1), '') FROM `qbank_attestation_anchors`").Scan(&lastSeq, &prevRoot); err != nil {
+	if err := conn.QueryRowContext(ctx, "SELECT COALESCE(MAX(`seq_to`), 0), COALESCE((SELECT `merkle_root` FROM `qbank_attestation_anchors` ORDER BY `id` DESC LIMIT 1), '') FROM `qbank_attestation_anchors`").Scan(&lastSeq, &prevRoot); err != nil {
 		return nil, err
 	}
 
-	rows, err := db.QueryContext(
+	rows, err := conn.QueryContext(
 		ctx,
 		"SELECT `id`, `entry_hash` FROM `qbank_revisions` WHERE `id` > ? ORDER BY `id` ASC LIMIT 10000",
 		lastSeq,
@@ -1318,7 +1341,7 @@ func (s *MySQLStore) AnchorUnanchoredRevisions(ctx context.Context, tsa TSAClien
 	if anc.TSAStatus == TSAStatusAnchored {
 		anchorType = "rfc3161_tsa"
 	}
-	res, err := db.ExecContext(
+	res, err := conn.ExecContext(
 		ctx,
 		"INSERT INTO `qbank_attestation_anchors` (`anchor_code`, `anchor_type`, `seq_from`, `seq_to`, `leaf_count`, `merkle_root`, `prev_anchor_hash`, `tsa_url`, `tsa_status`, `tsa_token_b64`, `tsa_gen_time`, `created_at`) "+
 			"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -1469,7 +1492,7 @@ func (s *MySQLStore) ListRevisions(ctx context.Context, filter RevisionFilter) (
 	}
 	params = append(params, limit)
 
-	query := "SELECT " + revisionSelectCols + " FROM `qbank_revisions` " + whereClause + " ORDER BY `revision_no` DESC, `id` DESC LIMIT ?"
+	query := "SELECT " + revisionSelectCols + " FROM `qbank_revisions` " + whereClause + " ORDER BY `id` DESC LIMIT ?"
 	rows, err := db.QueryContext(ctx, query, params...)
 	if err != nil {
 		return nil, err

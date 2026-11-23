@@ -166,7 +166,7 @@ func (f *fakeAdminRepo) ListRecords(_ context.Context, q admin.ListQuery) (admin
 func (f *fakeAdminRepo) GetRecord(_ context.Context, _, _ string) (map[string]any, error) {
 	return f.getRow, nil
 }
-func (f *fakeAdminRepo) CreateRecord(_ context.Context, table string, input map[string]any, _ string) (int64, error) {
+func (f *fakeAdminRepo) CreateRecord(_ context.Context, table string, input map[string]any, _, _ string) (int64, error) {
 	f.lastCreateTable = table
 	f.lastCreateInput = input
 	return f.createdID, nil

@@ -53,8 +53,8 @@ func (l *IngestLimiter) Allow(bucketKey string, maxPerMin int) bool {
 	now := l.nowUnix()
 	cutoff := now - 60
 
-	// Periodic or high-water prune of expired buckets
-	if now-l.lastPrune >= 60 || len(l.buckets) > 1000 {
+	// Periodic or high-water prune of expired buckets (throttled to avoid per-request full scans)
+	if now-l.lastPrune >= 60 || (len(l.buckets) > 1000 && now-l.lastPrune >= 5) {
 		for k, tsList := range l.buckets {
 			if len(tsList) == 0 || tsList[len(tsList)-1] <= cutoff {
 				delete(l.buckets, k)

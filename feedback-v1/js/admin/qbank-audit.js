@@ -210,7 +210,7 @@
                 const res = await fetch('api/admin.php?action=qbank_anchor_now', { method: 'POST' });
                 const json = await res.json();
                 if (!res.ok || !json.success) {
-                    if (typeof showToast === 'function') showToast(json.message || '执行锚定失败', 'error');
+                    if (typeof showToast === 'function') showToast(json.error || json.message || '执行锚定失败', 'error');
                     return;
                 }
                 if (json.data?.anchored) {
@@ -248,7 +248,7 @@
                 });
                 const json = await res.json();
                 if (!res.ok || !json.success) {
-                    if (typeof showToast === 'function') showToast(json.message || '回滚失败', 'error');
+                    if (typeof showToast === 'function') showToast(json.error || json.message || '回滚失败', 'error');
                     return;
                 }
                 const d = json.data || {};
@@ -614,7 +614,12 @@
 
         function clearQbankLinkedScope() {
             qbaTlLinkedScope = null;
-            ['qba-tl-year', 'qba-tl-season', 'qba-tl-bank-type', 'qba-tl-subject', 'qba-tl-grade', 'qba-tl-tier', 'qba-tl-week'].forEach((id) => {
+            const curSem = getQbaCurrentSemester();
+            const yearEl = document.getElementById('qba-tl-year');
+            const seasonEl = document.getElementById('qba-tl-season');
+            if (yearEl) yearEl.value = curSem.year;
+            if (seasonEl) seasonEl.value = curSem.season;
+            ['qba-tl-bank-type', 'qba-tl-subject', 'qba-tl-grade', 'qba-tl-tier', 'qba-tl-week'].forEach((id) => {
                 const el = document.getElementById(id);
                 if (el) el.value = '';
             });

@@ -125,7 +125,22 @@ func TestBuildAndParseTimeStampResp(t *testing.T) {
 	if _, err := ParseTimeStampResp(respDER, digest[:], big.NewInt(999)); err == nil {
 		t.Fatal("expected mismatch error for wrong nonce")
 	}
-	_ = pkix.AlgorithmIdentifier{}
+	// Response omitting Nonce must be rejected when expectedNonce != nil (RFC 3161 §2.4.2).
+	noNonceReq, err := asn1.Marshal(timeStampReq{
+		Version: 1,
+		MessageImprint: messageImprint{
+			HashAlgorithm: pkix.AlgorithmIdentifier{Algorithm: oidSHA256, Parameters: asn1.NullRawValue},
+			HashedMessage: digest[:],
+		},
+		CertReq: true,
+	})
+	if err != nil {
+		t.Fatalf("marshal no-nonce req: %v", err)
+	}
+	noNonceResp := buildMockTSARespDER(t, noNonceReq, now)
+	if _, err := ParseTimeStampResp(noNonceResp, digest[:], nonce); err == nil {
+		t.Fatal("expected error when TSA response omits requested nonce")
+	}
 }
 
 func TestMemoryStoreAnchorAndVerifyReceipt(t *testing.T) {

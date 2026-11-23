@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 
+	"feedback-api/internal/qbank"
 	"feedback-api/internal/qbankattest"
 )
 
@@ -102,10 +103,8 @@ func (r *MySQLRepository) RollbackQBankRevision(ctx context.Context, receiptCode
 				parentNum = sql.NullInt64{Int64: int64(*q.ParentQuestionNum), Valid: true}
 			}
 			var parentNums sql.NullString
-			if len(q.ParentQuestionNums) > 0 {
-				if raw, mErr := json.Marshal(q.ParentQuestionNums); mErr == nil {
-					parentNums = sql.NullString{String: string(raw), Valid: true}
-				}
+			if joined := qbank.JoinParentNums(q.ParentQuestionNums); joined != nil && *joined != "" {
+				parentNums = sql.NullString{String: *joined, Valid: true}
 			}
 			var qMeta sql.NullString
 			if len(q.QuestionMeta) > 0 {

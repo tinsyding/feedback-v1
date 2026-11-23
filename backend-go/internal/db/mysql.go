@@ -32,6 +32,9 @@ func Open(cfg config.DBConfig) (*sql.DB, error) {
 	mc.Collation = collation
 	mc.ParseTime = true
 	mc.Loc = loc
+	mc.Params = map[string]string{
+		"time_zone": "'+08:00'",
+	}
 	mc.Timeout = 5 * time.Second
 	mc.ReadTimeout = 10 * time.Second
 	mc.WriteTimeout = 10 * time.Second

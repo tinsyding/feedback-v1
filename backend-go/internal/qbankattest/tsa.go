@@ -272,8 +272,10 @@ func ParseTimeStampResp(respBytes []byte, expectedDigest []byte, expectedNonce *
 	if len(expectedDigest) > 0 && !bytes.Equal(info.MessageImprint.HashedMessage, expectedDigest) {
 		return nil, fmt.Errorf("tsa messageImprint mismatch: got %s", hex.EncodeToString(info.MessageImprint.HashedMessage))
 	}
-	if expectedNonce != nil && info.Nonce != nil && info.Nonce.Cmp(expectedNonce) != 0 {
-		return nil, errors.New("tsa nonce mismatch")
+	if expectedNonce != nil {
+		if info.Nonce == nil || info.Nonce.Cmp(expectedNonce) != 0 {
+			return nil, errors.New("tsa nonce mismatch")
+		}
 	}
 
 	genTime := ""

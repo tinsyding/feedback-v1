@@ -326,7 +326,13 @@ func handleRetestDownloadFile(w http.ResponseWriter, r *http.Request, deps Retes
 }
 
 func handleRetestLogDownload(w http.ResponseWriter, r *http.Request, deps RetestDeps) {
+	if r.Body != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	}
 	httpx.ParseRequestForm(r)
+	if r.MultipartForm != nil {
+		defer func() { _ = r.MultipartForm.RemoveAll() }()
+	}
 	q := r.URL.Query()
 	getVal := func(key string) string {
 		if v := strings.TrimSpace(r.PostFormValue(key)); v != "" {

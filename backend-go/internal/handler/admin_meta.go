@@ -102,10 +102,14 @@ func resolveRetestSecret(deps AdminDeps) string {
 		return ""
 	}
 	rt := deps.ConfigLoader.Load()
-	if s := strings.TrimSpace(rt.Secrets.RetestSecret); s != "" {
-		return s
+	s := strings.TrimSpace(rt.Secrets.RetestSecret)
+	if s == "" {
+		s = strings.TrimSpace(rt.RawString("retestSecret"))
 	}
-	return strings.TrimSpace(rt.RawString("retestSecret"))
+	if s == "" || s == "default_fallback_secret_please_change" || s == "your-secret-key-template-placeholder" {
+		return ""
+	}
+	return s
 }
 
 func handleAdminGetRetestURL(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
@@ -165,12 +169,18 @@ func handleAdminSearchByToken(w http.ResponseWriter, r *http.Request, deps Admin
 		return
 	}
 
+	secret := resolveRetestSecret(deps)
+	if secret == "" {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("服务端密钥未配置，无法签发免密链接"), http.StatusInternalServerError)
+		return
+	}
+
 	res := admin.TokenSearchResult{
 		Matches:    []map[string]any{},
 		AccessLogs: []map[string]any{},
 	}
 	if deps.Repo != nil {
-		if found, err := deps.Repo.SearchByToken(r.Context(), token, resolveRetestSecret(deps)); err == nil {
+		if found, err := deps.Repo.SearchByToken(r.Context(), token, secret); err == nil {
 			res = found
 		}
 	}

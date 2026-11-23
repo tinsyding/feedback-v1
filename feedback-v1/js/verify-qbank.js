@@ -1080,10 +1080,6 @@
         return out;
     }
 
-    function bytesToHex(bytes) {
-        return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-    }
-
     async function sha256Concat(prefixByte, a, b) {
         const len = 1 + a.length + (b ? b.length : 0);
         const buf = new Uint8Array(len);
