@@ -1162,20 +1162,19 @@ func (s *MySQLStore) VerifyReceipt(ctx context.Context, receiptCode string) (*Ve
 
 func (s *MySQLStore) findAnchorProofForRevision(ctx context.Context, db *sql.DB, revID int64) (*AnchorProof, error) {
 	var anc AnchorRecord
-	var tsaToken, tsaGenTime sql.NullString
-	var anchoredAt time.Time
+	var tsaToken sql.NullString
+	var createdAt time.Time
 	err := db.QueryRowContext(
 		ctx,
-		"SELECT `id`, `anchor_code`, `seq_from`, `seq_to`, `revision_count`, `merkle_root`, `tsa_url`, `tsa_status`, `tsa_token_b64`, `tsa_gen_time`, `anchored_at` "+
+		"SELECT `id`, `anchor_code`, `seq_from`, `seq_to`, `leaf_count`, `merkle_root`, `tsa_url`, `tsa_status`, `tsa_token_b64`, `tsa_gen_time`, `created_at` "+
 			"FROM `qbank_attestation_anchors` WHERE `seq_from` <= ? AND `seq_to` >= ? ORDER BY `id` DESC LIMIT 1",
 		revID, revID,
-	).Scan(&anc.ID, &anc.AnchorCode, &anc.SeqFrom, &anc.SeqTo, &anc.RevisionCount, &anc.MerkleRoot, &anc.TSAURL, &anc.TSAStatus, &tsaToken, &tsaGenTime, &anchoredAt)
+	).Scan(&anc.ID, &anc.AnchorCode, &anc.SeqFrom, &anc.SeqTo, &anc.RevisionCount, &anc.MerkleRoot, &anc.TSAURL, &anc.TSAStatus, &tsaToken, &anc.TSAGenTime, &createdAt)
 	if err != nil {
 		return nil, err
 	}
 	anc.TSATokenB64 = tsaToken.String
-	anc.TSAGenTime = tsaGenTime.String
-	anc.AnchoredAt = formatReceiptTimestamp(anchoredAt)
+	anc.AnchoredAt = formatReceiptTimestamp(createdAt)
 
 	rows, err := db.QueryContext(
 		ctx,
@@ -1250,7 +1249,8 @@ func (s *MySQLStore) AnchorUnanchoredRevisions(ctx context.Context, tsa TSAClien
 	}
 
 	var lastSeq int64
-	if err := db.QueryRowContext(ctx, "SELECT COALESCE(MAX(`seq_to`), 0) FROM `qbank_attestation_anchors`").Scan(&lastSeq); err != nil {
+	var prevRoot sql.NullString
+	if err := db.QueryRowContext(ctx, "SELECT COALESCE(MAX(`seq_to`), 0), COALESCE((SELECT `merkle_root` FROM `qbank_attestation_anchors` ORDER BY `id` DESC LIMIT 1), '') FROM `qbank_attestation_anchors`").Scan(&lastSeq, &prevRoot); err != nil {
 		return nil, err
 	}
 
@@ -1310,18 +1310,19 @@ func (s *MySQLStore) AnchorUnanchoredRevisions(ctx context.Context, tsa TSAClien
 		}
 	}
 
-	var tokenNull, genTimeNull sql.NullString
+	var tokenNull sql.NullString
 	if anc.TSATokenB64 != "" {
 		tokenNull = sql.NullString{String: anc.TSATokenB64, Valid: true}
 	}
-	if anc.TSAGenTime != "" {
-		genTimeNull = sql.NullString{String: anc.TSAGenTime, Valid: true}
+	anchorType := "local_merkle"
+	if anc.TSAStatus == TSAStatusAnchored {
+		anchorType = "rfc3161_tsa"
 	}
 	res, err := db.ExecContext(
 		ctx,
-		"INSERT INTO `qbank_attestation_anchors` (`anchor_code`, `seq_from`, `seq_to`, `revision_count`, `merkle_root`, `tsa_url`, `tsa_status`, `tsa_token_b64`, `tsa_gen_time`, `anchored_at`) "+
-			"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		anc.AnchorCode, anc.SeqFrom, anc.SeqTo, anc.RevisionCount, anc.MerkleRoot, anc.TSAURL, anc.TSAStatus, tokenNull, genTimeNull, tz.In(now),
+		"INSERT INTO `qbank_attestation_anchors` (`anchor_code`, `anchor_type`, `seq_from`, `seq_to`, `leaf_count`, `merkle_root`, `prev_anchor_hash`, `tsa_url`, `tsa_status`, `tsa_token_b64`, `tsa_gen_time`, `created_at`) "+
+			"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		anc.AnchorCode, anchorType, anc.SeqFrom, anc.SeqTo, anc.RevisionCount, anc.MerkleRoot, prevRoot.String, anc.TSAURL, anc.TSAStatus, tokenNull, anc.TSAGenTime, tz.In(now),
 	)
 	if err != nil {
 		return nil, err
@@ -1346,7 +1347,7 @@ func (s *MySQLStore) ListAnchors(ctx context.Context, limit int) ([]AnchorRecord
 	}
 	rows, err := db.QueryContext(
 		ctx,
-		"SELECT `id`, `anchor_code`, `seq_from`, `seq_to`, `revision_count`, `merkle_root`, `tsa_url`, `tsa_status`, `tsa_token_b64`, `tsa_gen_time`, `anchored_at` "+
+		"SELECT `id`, `anchor_code`, `seq_from`, `seq_to`, `leaf_count`, `merkle_root`, `tsa_url`, `tsa_status`, `tsa_token_b64`, `tsa_gen_time`, `created_at` "+
 			"FROM `qbank_attestation_anchors` ORDER BY `id` DESC LIMIT ?",
 		limit,
 	)
@@ -1358,14 +1359,13 @@ func (s *MySQLStore) ListAnchors(ctx context.Context, limit int) ([]AnchorRecord
 	out := make([]AnchorRecord, 0)
 	for rows.Next() {
 		var anc AnchorRecord
-		var tsaToken, tsaGenTime sql.NullString
-		var anchoredAt time.Time
-		if err := rows.Scan(&anc.ID, &anc.AnchorCode, &anc.SeqFrom, &anc.SeqTo, &anc.RevisionCount, &anc.MerkleRoot, &anc.TSAURL, &anc.TSAStatus, &tsaToken, &tsaGenTime, &anchoredAt); err != nil {
+		var tsaToken sql.NullString
+		var createdAt time.Time
+		if err := rows.Scan(&anc.ID, &anc.AnchorCode, &anc.SeqFrom, &anc.SeqTo, &anc.RevisionCount, &anc.MerkleRoot, &anc.TSAURL, &anc.TSAStatus, &tsaToken, &anc.TSAGenTime, &createdAt); err != nil {
 			return nil, err
 		}
 		anc.TSATokenB64 = tsaToken.String
-		anc.TSAGenTime = tsaGenTime.String
-		anc.AnchoredAt = formatReceiptTimestamp(anchoredAt)
+		anc.AnchoredAt = formatReceiptTimestamp(createdAt)
 		out = append(out, anc)
 	}
 	return out, rows.Err()
