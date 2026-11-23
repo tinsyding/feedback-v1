@@ -202,7 +202,8 @@
             'qba-tl-clear-scope': () => clearQbankLinkedScope(),
             'qba-tl-reset': () => resetQbankTimelineFilters(),
             'qba-tl-reload': () => loadQbankTimeline(1),
-            'qba-close-revisions': () => closeQbankRevisionsModal()
+            'qba-close-revisions': () => closeQbankRevisionsModal(),
+            'qba-anchor-now': () => triggerQbankAnchorNow()
         };
 
         const ADMIN_CHANGE_ACTIONS = {

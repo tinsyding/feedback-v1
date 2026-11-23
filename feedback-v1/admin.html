@@ -899,6 +899,17 @@
                         </div>
                     </div>
 
+                    <!-- External Trusted Anchor Status Bar -->
+                    <div class="table-card" id="qba-anchor-bar" style="padding: 12px 16px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                            <span class="action-tag info" style="font-weight: 600;">外部可信时间锚定</span>
+                            <span id="qba-anchor-summary" style="font-size: 0.84rem; color: var(--text-secondary);">正在加载 Merkle + RFC 3161 TSA 锚定状态...</span>
+                        </div>
+                        <button type="button" class="btn secondary" id="qba-anchor-now-btn" data-action="qba-anchor-now" style="padding: 6px 12px; font-size: 0.82rem;">
+                            <span>立即锚定 Merkle + TSA</span>
+                        </button>
+                    </div>
+
                     <!-- Section 1: 配置回执总览 (qbank_matrix) -->
                     <section id="qba-matrix-section" style="margin-bottom: 22px;">
                         <div class="pro-toolbar">

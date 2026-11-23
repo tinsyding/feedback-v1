@@ -140,6 +140,22 @@ type RollbackResult struct {
 	WeekNum        int
 }
 
+// QBankRollbackResult holds the summary returned after rolling back a qbank scope to a historical revision.
+type QBankRollbackResult struct {
+	TargetReceiptCode string `json:"target_receipt_code"`
+	TargetRevisionNo  int    `json:"target_revision_no"`
+	NewReceiptCode    string `json:"new_receipt_code"`
+	NewRevisionNo     int    `json:"new_revision_no"`
+	RestoredCount     int    `json:"restored_count"`
+	Year              int    `json:"year"`
+	Season            string `json:"season"`
+	BankType          string `json:"bank_type"`
+	Subject           string `json:"subject"`
+	Grade             string `json:"grade"`
+	Tier              string `json:"tier"`
+	Week              int    `json:"week"`
+}
+
 // ResetTeacherResult holds the summary returned after resetting a teacher password.
 type ResetTeacherResult struct {
 	Username string
@@ -185,6 +201,7 @@ type Repository interface {
 	// History & Token & Source File
 	ListRecordHistory(ctx context.Context, recordID int, studentName string, batchID int, weekNum *int) ([]map[string]any, error)
 	RollbackRecord(ctx context.Context, historyID int, adminOp string) (RollbackResult, error)
+	RollbackQBankRevision(ctx context.Context, receiptCode, adminOp, adminName, clientIP string) (QBankRollbackResult, error)
 	SearchByToken(ctx context.Context, token, retestSecret string) (TokenSearchResult, error)
 	LookupSourceFileMeta(ctx context.Context, recordID, historyID int, batchCode string) (SourceFileMeta, error)
 }

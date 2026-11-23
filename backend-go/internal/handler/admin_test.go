@@ -201,6 +201,22 @@ func (f *fakeAdminRepo) ListRecordHistory(_ context.Context, _ int, _ string, _ 
 func (f *fakeAdminRepo) RollbackRecord(_ context.Context, _ int, _ string) (admin.RollbackResult, error) {
 	return f.rollbackRes, nil
 }
+func (f *fakeAdminRepo) RollbackQBankRevision(_ context.Context, code, _, _, _ string) (admin.QBankRollbackResult, error) {
+	return admin.QBankRollbackResult{
+		TargetReceiptCode: code,
+		TargetRevisionNo:  1,
+		NewReceiptCode:    "QB-2026-MOCK-ROLLBACK",
+		NewRevisionNo:     2,
+		RestoredCount:     3,
+		Year:              2026,
+		Season:            "spring",
+		BankType:          "weekly",
+		Subject:           "物理",
+		Grade:             "高一",
+		Tier:              "实验班",
+		Week:              1,
+	}, nil
+}
 func (f *fakeAdminRepo) SearchByToken(_ context.Context, _, _ string) (admin.TokenSearchResult, error) {
 	return f.tokenRes, nil
 }

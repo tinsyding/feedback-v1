@@ -20,7 +20,8 @@
         tier_sync: '班层批量同步',
         delete: '教师删除',
         admin_edit: '后台编辑',
-        admin_delete: '后台删除'
+        admin_delete: '后台删除',
+        admin_rollback: '后台回滚'
     };
 
     const STATUS_META = {
@@ -896,6 +897,15 @@
             const consistency = checkReceiptCanonicalConsistency(receipt, canonicalObj);
 
             const cryptoReport = { ed25519, entryHash, consistency };
+            let merkleCheck = null;
+            if (data.anchor && receipt?.entry_hash) {
+                merkleCheck = await verifyMerkleProofInBrowser(
+                    receipt.entry_hash,
+                    data.anchor.merkle_root,
+                    data.anchor.proof
+                );
+            }
+
             const bundle = {
                 mode: 'online',
                 status,
@@ -903,6 +913,8 @@
                 serverChainValid: Boolean(data.chain_valid),
                 crypto: cryptoReport,
                 receipt,
+                anchor: data.anchor || null,
+                merkleCheck,
                 superseded_by: data.superseded_by || null,
                 deleted_info: data.deleted_info || null,
                 latest_receipt_code: data.latest_receipt_code || null
@@ -1053,8 +1065,137 @@
                 serverSignatureValid: bundle.serverSignatureValid,
                 serverChainValid: bundle.serverChainValid
             })}
+            ${renderAnchorCard(bundle.anchor, bundle.merkleCheck, r.receipt_code)}
         `;
         setOnlineUiState('result');
+    }
+
+    function hexToBytes(hex) {
+        const clean = String(hex || '').trim();
+        if (!clean || clean.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(clean)) return null;
+        const out = new Uint8Array(clean.length / 2);
+        for (let i = 0; i < out.length; i += 1) {
+            out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+        }
+        return out;
+    }
+
+    function bytesToHex(bytes) {
+        return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    async function sha256Concat(prefixByte, a, b) {
+        const len = 1 + a.length + (b ? b.length : 0);
+        const buf = new Uint8Array(len);
+        buf[0] = prefixByte;
+        buf.set(a, 1);
+        if (b) buf.set(b, 1 + a.length);
+        const digest = await window.crypto.subtle.digest('SHA-256', buf);
+        return new Uint8Array(digest);
+    }
+
+    async function verifyMerkleProofInBrowser(entryHashHex, merkleRootHex, proof) {
+        if (!window.crypto?.subtle) {
+            return { supported: false, valid: false, reason: '当前浏览器不支持 WebCrypto SHA-256' };
+        }
+        const entryBytes = hexToBytes(entryHashHex);
+        const rootBytes = hexToBytes(merkleRootHex);
+        if (!entryBytes || entryBytes.length !== 32 || !rootBytes || rootBytes.length !== 32) {
+            return { supported: true, valid: false, reason: 'entry_hash 或 merkle_root 格式无效' };
+        }
+        const steps = Array.isArray(proof) ? proof : [];
+        let cur = await sha256Concat(0x00, entryBytes, null);
+        for (const step of steps) {
+            const sib = hexToBytes(step?.hash);
+            if (!sib || sib.length !== 32) {
+                return { supported: true, valid: false, reason: 'Merkle 审计路径节点哈希无效' };
+            }
+            if (step.position === 'left') {
+                cur = await sha256Concat(0x01, sib, cur);
+            } else if (step.position === 'right') {
+                cur = await sha256Concat(0x01, cur, sib);
+            } else {
+                return { supported: true, valid: false, reason: '未知 Merkle 节点位置' };
+            }
+        }
+        const computed = bytesToHex(cur);
+        const expected = bytesToHex(rootBytes);
+        return {
+            supported: true,
+            valid: computed === expected,
+            computedRoot: computed,
+            reason: computed === expected
+                ? `已通过 RFC 6962 SHA-256 路径复算（${steps.length} 层节点）`
+                : '浏览器重算的 Merkle Root 与锚定根不一致'
+        };
+    }
+
+    function renderAnchorCard(anchor, merkleCheck, receiptCode) {
+        if (!anchor) {
+            return `
+                <div class="vq-card">
+                    <h2 class="vq-card-heading">
+                        <span>外部可信时间锚定 (Merkle + RFC 3161 TSA)</span>
+                        <span class="vq-code-chip">等待批次封装</span>
+                    </h2>
+                    <p style="margin:0; font-size:0.86rem; color:var(--text-secondary);">
+                        该存证记录已写入不可变台账链，将在下次定时批次或管理员手动触发时纳入 SHA-256 Merkle Tree 并向外部 RFC 3161 TSA 机构锚定时间戳。
+                    </p>
+                </div>
+            `;
+        }
+        const isAnchored = anchor.tsa_status === 'anchored';
+        const badgeCls = isAnchored ? 'pass' : 'warn';
+        const badgeText = isAnchored ? '外部 TSA 时间戳已锚定' : '本地 Merkle 已封装（待外部 TSA）';
+        const merkleOk = merkleCheck && merkleCheck.valid;
+        const merkleCls = merkleCheck?.supported === false ? 'warn' : (merkleOk ? 'pass' : 'fail');
+        const merkleState = merkleCheck?.supported === false ? '浏览器不支持' : (merkleOk ? '浏览器 Merkle Proof 验真通过' : 'Merkle Proof 校验失败');
+        const stepsCount = Array.isArray(anchor.proof) ? anchor.proof.length : 0;
+
+        return `
+            <div class="vq-card">
+                <h2 class="vq-card-heading">
+                    <span>外部可信时间锚定 (Merkle + RFC 3161 TSA)</span>
+                    <span class="vq-code-chip">${escapeHtml(anchor.anchor_code || '-')}</span>
+                </h2>
+                <div class="vq-checks-grid">
+                    <div class="vq-check-item ${merkleCls}">
+                        <div class="vq-check-title">浏览器 SHA-256 Merkle Proof 重算</div>
+                        <div class="vq-check-state">${escapeHtml(merkleState)}</div>
+                        <div class="vq-check-detail">${escapeHtml(merkleCheck?.reason || '')}</div>
+                    </div>
+                    <div class="vq-check-item ${badgeCls}">
+                        <div class="vq-check-title">外部 RFC 3161 TSA 可信时间源</div>
+                        <div class="vq-check-state">${escapeHtml(badgeText)}</div>
+                        <div class="vq-check-detail">${escapeHtml(isAnchored ? `TSA 签发时间：${anchor.tsa_gen_time || anchor.anchored_at || '-'}` : '当前批次仅完成本地 Merkle 封装')}</div>
+                    </div>
+                </div>
+                <div class="vq-kv-grid" style="margin-top:12px;">
+                    <div class="vq-kv-box">
+                        <div class="vq-kv-label">涵盖台账序号</div>
+                        <div class="vq-kv-value vq-mono">#${escapeHtml(anchor.seq_from)} ~ #${escapeHtml(anchor.seq_to)}（共 ${escapeHtml(anchor.revision_count)} 条 · ${stepsCount} 层路径）</div>
+                    </div>
+                    <div class="vq-kv-box">
+                        <div class="vq-kv-label">TSA 服务地址</div>
+                        <div class="vq-kv-value vq-mono">${escapeHtml(anchor.tsa_url || '（未启用外部 TSA）')}</div>
+                    </div>
+                </div>
+                <div class="vq-hash-list" style="margin-top:10px;">
+                    <div class="vq-hash-row">
+                        <div class="vq-hash-row-meta">
+                            <div class="vq-hash-row-label">批次 Merkle Root (SHA-256)</div>
+                            <div class="vq-hash-row-val">${escapeHtml(anchor.merkle_root || '-')}</div>
+                        </div>
+                        ${anchor.merkle_root ? `<button type="button" class="vq-btn sm secondary" data-copy-value="${escapeHtml(anchor.merkle_root)}" data-copy-msg="已复制 Merkle Root">复制</button>` : ''}
+                    </div>
+                </div>
+                ${anchor.tsa_token_b64 ? `
+                    <div class="vq-actions-bar" style="margin-top:12px;">
+                        <button type="button" class="vq-btn sm secondary" data-download-tsr="online">下载 RFC 3161 时间戳令牌 (.tsr)</button>
+                    </div>
+                ` : ''}
+            </div>
+        `;
     }
 
     /* ======================================================================
@@ -1575,6 +1716,28 @@
                     const code = bundle.receipt.receipt_code || 'qbank-receipt';
                     downloadJsonFile(`${code}.credential.json`, buildStandardCredential(bundle.receipt));
                     showToast('已导出离线存证凭证 (.json)', 'success');
+                }
+                return;
+            }
+            if (target.hasAttribute('data-download-tsr')) {
+                const tokenB64 = state.lastOnlineBundle?.anchor?.tsa_token_b64;
+                if (tokenB64) {
+                    const binStr = atob(tokenB64);
+                    const bytes = new Uint8Array(binStr.length);
+                    for (let i = 0; i < binStr.length; i += 1) {
+                        bytes[i] = binStr.charCodeAt(i);
+                    }
+                    const blob = new Blob([bytes], { type: 'application/timestamp-reply' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    const ancCode = state.lastOnlineBundle?.anchor?.anchor_code || 'qbank-anchor';
+                    a.href = url;
+                    a.download = `${ancCode}.tsr`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    setTimeout(() => URL.revokeObjectURL(url), 1000);
+                    showToast('已下载 RFC 3161 时间戳令牌 (.tsr)', 'success');
                 }
                 return;
             }

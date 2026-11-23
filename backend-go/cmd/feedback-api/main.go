@@ -161,6 +161,36 @@ func main() {
 		Attest:  attestStore,
 		Limiter: verifyLimiter,
 	}))
+	mux.HandleFunc("/api/v1/qbank/anchors", handler.QBankAnchors(handler.QBankVerifyDeps{
+		Attest:  attestStore,
+		Limiter: verifyLimiter,
+	}))
+
+	// Optional periodic Merkle + RFC 3161 TSA anchoring loop (default 24h; set ATTESTATION_ANCHOR_INTERVAL=off to disable).
+	if rawInterval := strings.TrimSpace(os.Getenv("ATTESTATION_ANCHOR_INTERVAL")); !strings.EqualFold(rawInterval, "off") && !strings.EqualFold(rawInterval, "0") {
+		interval := 24 * time.Hour
+		if rawInterval != "" {
+			if parsed, pErr := time.ParseDuration(rawInterval); pErr == nil && parsed > 0 {
+				interval = parsed
+			}
+		}
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					ancCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+					if _, aErr := attestStore.AnchorUnanchoredRevisions(ancCtx, qbankattest.NewTSAClientFromEnv()); aErr != nil && !errors.Is(aErr, context.Canceled) {
+						log.Printf("warning: periodic qbank merkle anchor failed: %v", aErr)
+					}
+					cancel()
+				}
+			}
+		}()
+	}
 	mux.HandleFunc("/api/public_config.php", handler.PublicConfig(loader))
 	mux.HandleFunc("/api/calibrate_roi.php", handler.CalibrateROI(loader, vc))
 	mux.HandleFunc("/api/identify.php", handler.Identify(loader, vc))

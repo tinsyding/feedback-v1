@@ -27,7 +27,7 @@ const immutableAttestationErrMsg = "存证台账与过程取证日志为只增�
 
 func isImmutableAttestationTable(table string) bool {
 	switch strings.ToLower(strings.TrimSpace(table)) {
-	case "qbank_revisions", "qbank_attempt_logs":
+	case "qbank_revisions", "qbank_attempt_logs", "qbank_attestation_anchors":
 		return true
 	default:
 		return false

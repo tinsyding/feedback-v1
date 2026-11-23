@@ -173,3 +173,121 @@ func handleAdminQBankRevisions(w http.ResponseWriter, r *http.Request, deps Admi
 		"total": len(items),
 	}, nil, http.StatusOK)
 }
+
+func handleAdminQBankRollback(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
+	if r.Method != http.MethodPost {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("只支持 POST 请求"), http.StatusMethodNotAllowed)
+		return
+	}
+	adminSess, ok := session.RequireAdmin(w, r, deps.Sessions)
+	if !ok {
+		return
+	}
+	if deps.Repo == nil {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("后台服务未初始化"), http.StatusInternalServerError)
+		return
+	}
+
+	receiptCode := strings.TrimSpace(r.URL.Query().Get("receipt_code"))
+	if receiptCode == "" {
+		if body, err := decodeAdminJSONBody(r); err == nil {
+			if raw, exists := body["receipt_code"]; exists && raw != nil {
+				if s, isStr := raw.(string); isStr {
+					receiptCode = strings.TrimSpace(s)
+				}
+			}
+		}
+	}
+	if receiptCode == "" {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("请提供目标存证回执编号 (receipt_code)"), http.StatusBadRequest)
+		return
+	}
+
+	adminUser := adminSess.AdminUsername()
+	if adminUser == "" {
+		adminUser = "admin"
+	}
+	res, err := deps.Repo.RollbackQBankRevision(r.Context(), receiptCode, adminUser, adminUser, httpx.GetClientIP(r))
+	if err != nil {
+		writeAdminRepoError(w, err)
+		return
+	}
+
+	adminAuditLog(r, deps, adminSess, "action", "qbank_rollback", map[string]any{
+		"target_receipt_code": res.TargetReceiptCode,
+		"target_revision_no":  res.TargetRevisionNo,
+		"new_receipt_code":    res.NewReceiptCode,
+		"new_revision_no":     res.NewRevisionNo,
+		"restored_count":      res.RestoredCount,
+	})
+	httpx.SendResponse(w, true, res, nil, http.StatusOK)
+}
+
+func handleAdminQBankAnchors(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
+	if r.Method != http.MethodGet {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("只支持 GET 请求"), http.StatusMethodNotAllowed)
+		return
+	}
+	if _, ok := session.RequireAdmin(w, r, deps.Sessions); !ok {
+		return
+	}
+	if deps.Attest == nil {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("题库存证服务未配置"), http.StatusInternalServerError)
+		return
+	}
+
+	limit := config.AsPHPInt(r.URL.Query().Get("limit"))
+	items, err := deps.Attest.ListAnchors(r.Context(), limit)
+	if err != nil {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("查询外部时间锚定记录失败"), http.StatusInternalServerError)
+		return
+	}
+	if items == nil {
+		items = []qbankattest.AnchorRecord{}
+	}
+	httpx.SendResponse(w, true, map[string]any{
+		"items": items,
+		"total": len(items),
+	}, nil, http.StatusOK)
+}
+
+func handleAdminQBankAnchorNow(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
+	if r.Method != http.MethodPost {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("只支持 POST 请求"), http.StatusMethodNotAllowed)
+		return
+	}
+	adminSess, ok := session.RequireAdmin(w, r, deps.Sessions)
+	if !ok {
+		return
+	}
+	if deps.Attest == nil {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("题库存证服务未配置"), http.StatusInternalServerError)
+		return
+	}
+
+	anc, err := deps.Attest.AnchorUnanchoredRevisions(r.Context(), qbankattest.NewTSAClientFromEnv())
+	if err != nil {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("执行外部可信时间锚定失败"), http.StatusInternalServerError)
+		return
+	}
+	if anc == nil {
+		httpx.SendResponse(w, true, map[string]any{
+			"anchored": false,
+			"message":  "当前没有新增未锚定的存证版本",
+		}, nil, http.StatusOK)
+		return
+	}
+
+	adminAuditLog(r, deps, adminSess, "action", "qbank_anchor_now", map[string]any{
+		"anchor_code":    anc.AnchorCode,
+		"seq_from":       anc.SeqFrom,
+		"seq_to":         anc.SeqTo,
+		"revision_count": anc.RevisionCount,
+		"merkle_root":    anc.MerkleRoot,
+		"tsa_status":     anc.TSAStatus,
+	})
+	httpx.SendResponse(w, true, map[string]any{
+		"anchored": true,
+		"anchor":   anc,
+	}, nil, http.StatusOK)
+}

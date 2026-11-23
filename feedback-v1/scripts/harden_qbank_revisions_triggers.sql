@@ -28,3 +28,15 @@ CREATE TRIGGER `trg_qbank_attestation_keys_no_delete`
 BEFORE DELETE ON `qbank_attestation_keys`
 FOR EACH ROW
 SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'qbank_attestation_keys is append-only: DELETE is forbidden';
+
+DROP TRIGGER IF EXISTS `trg_qbank_attestation_anchors_no_update`;
+CREATE TRIGGER `trg_qbank_attestation_anchors_no_update`
+BEFORE UPDATE ON `qbank_attestation_anchors`
+FOR EACH ROW
+SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'qbank_attestation_anchors is append-only: UPDATE is forbidden';
+
+DROP TRIGGER IF EXISTS `trg_qbank_attestation_anchors_no_delete`;
+CREATE TRIGGER `trg_qbank_attestation_anchors_no_delete`
+BEFORE DELETE ON `qbank_attestation_anchors`
+FOR EACH ROW
+SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'qbank_attestation_anchors is append-only: DELETE is forbidden';

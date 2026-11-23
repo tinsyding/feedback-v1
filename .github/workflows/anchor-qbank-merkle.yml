@@ -1,0 +1,41 @@
+name: Archive QBank Merkle Anchors
+
+on:
+  schedule:
+    # Daily at 03:30 CST (19:30 UTC)
+    - cron: '30 19 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-and-verify-anchors:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch public JWKS and Merkle anchors manifest
+        run: |
+          set -euo pipefail
+          mkdir -p anchor-artifacts
+          curl -fsSL https://feedback.wxjifang.cn/.well-known/jwks.json -o anchor-artifacts/jwks.json
+          curl -fsSL https://feedback.wxjifang.cn/api/v1/qbank/anchors -o anchor-artifacts/anchors.json
+          python3 - <<'PY'
+          import json, sys
+          with open('anchor-artifacts/anchors.json', 'r', encoding='utf-8') as f:
+              payload = json.load(f)
+          if not payload.get('success'):
+              print('Anchor endpoint returned error:', payload, file=sys.stderr)
+              sys.exit(1)
+          items = payload.get('data', {}).get('items', [])
+          print(f'Fetched {len(items)} Merkle anchor batch(es).')
+          if items:
+              latest = items[0]
+              print('Latest anchor:', latest.get('anchor_code'), 'seq:', latest.get('seq_from'), '..', latest.get('seq_to'), 'root:', latest.get('merkle_root'), 'tsa_status:', latest.get('tsa_status'))
+          PY
+
+      - name: Upload immutable anchor manifest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qbank-merkle-anchors-${{ github.run_id }}
+          path: anchor-artifacts/
+          retention-days: 90

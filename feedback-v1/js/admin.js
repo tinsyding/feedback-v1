@@ -1,7 +1,7 @@
 /**
  * ============================================================================
  * 极方管理后台 (Admin Console) 前端运行脚本 - 生产环境合并包
- * 自动生成时间: 2026-11-23 13:29:43
+ * 自动生成时间: 2026-11-23 16:56:31
  * 源码模块目录: js/admin/
  * 请勿直接手动修改此文件，开发时请修改 js/admin/ 中的子模块并执行本打包脚本。
  * ============================================================================
@@ -7986,6 +7986,7 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
             delete: { label: '教师删除', cls: 'error', color: 'var(--error)' },
             admin_edit: { label: '后台编辑', cls: 'warn', color: 'var(--warning)' },
             admin_delete: { label: '后台删除', cls: 'error', color: 'var(--error)' },
+            admin_rollback: { label: '后台回滚', cls: 'warn', color: 'var(--warning)' },
             upload_pdf: { label: '上传切片', cls: 'info', color: 'var(--info)' },
             client_blocked: { label: '前端拦截', cls: 'warn', color: 'var(--warning)' },
             save_rejected: { label: '服务端驳回', cls: 'error', color: 'var(--error)' },
@@ -8104,6 +8105,13 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
                     const copyBtn = e.target.closest('[data-qba-copy]');
                     if (copyBtn) {
                         qbaCopyText(copyBtn.getAttribute('data-qba-copy'), '已复制回执编号');
+                        return;
+                    }
+                    const rbBtn = e.target.closest('[data-qba-rollback-code]');
+                    if (rbBtn) {
+                        const code = rbBtn.getAttribute('data-qba-rollback-code');
+                        const revNo = rbBtn.getAttribute('data-qba-rollback-rev') || '-';
+                        confirmQbankRollback(code, revNo);
                     }
                 });
             }
@@ -8119,8 +8127,94 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
             qbaInitialized = true;
             await Promise.all([
                 loadQbankMatrix(),
-                loadQbankTimeline(1)
+                loadQbankTimeline(1),
+                loadQbankAnchors()
             ]);
+        }
+
+        async function loadQbankAnchors() {
+            const summaryEl = document.getElementById('qba-anchor-summary');
+            if (!summaryEl) return;
+            try {
+                const res = await fetch('api/admin.php?action=qbank_anchors&limit=5');
+                const json = await res.json();
+                if (!res.ok || !json.success) {
+                    summaryEl.textContent = '锚定状态查询失败';
+                    return;
+                }
+                const items = json.data?.items || [];
+                if (items.length === 0) {
+                    summaryEl.textContent = '尚未生成外部锚定批次（可点击右侧按钮立即封装 Merkle 并向 TSA 锚定）';
+                    return;
+                }
+                const latest = items[0];
+                const tsaBadge = latest.tsa_status === 'anchored' ? 'TSA 已锚定' : '仅本地 Merkle';
+                summaryEl.innerHTML = `最新批次 <span class="cell-mono" style="font-weight:600;">${escapeHtml(latest.anchor_code)}</span> · 覆盖序号 <span class="cell-mono">#${escapeHtml(latest.seq_from)}~#${escapeHtml(latest.seq_to)}</span>（${escapeHtml(latest.revision_count)} 条） · <b>${escapeHtml(tsaBadge)}</b> · ${escapeHtml(latest.tsa_gen_time || latest.anchored_at || '-')}`;
+            } catch (_e) {
+                summaryEl.textContent = '锚定状态暂不可用';
+            }
+        }
+
+        async function triggerQbankAnchorNow() {
+            const btn = document.getElementById('qba-anchor-now-btn');
+            if (btn) btn.disabled = true;
+            try {
+                const res = await fetch('api/admin.php?action=qbank_anchor_now', { method: 'POST' });
+                const json = await res.json();
+                if (!res.ok || !json.success) {
+                    if (typeof showToast === 'function') showToast(json.message || '执行锚定失败', 'error');
+                    return;
+                }
+                if (json.data?.anchored) {
+                    const anc = json.data.anchor;
+                    if (typeof showToast === 'function') showToast(`已完成锚定 ${anc.anchor_code}（${anc.tsa_status === 'anchored' ? 'TSA 已签发' : '本地 Merkle'}）`, 'success');
+                } else {
+                    if (typeof showToast === 'function') showToast(json.data?.message || '暂无新增未锚定记录', 'info');
+                }
+                await loadQbankAnchors();
+            } catch (err) {
+                if (typeof showToast === 'function') showToast(err?.message || '锚定请求异常', 'error');
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        let qbaRevModalScope = null;
+
+        async function confirmQbankRollback(receiptCode, revNo) {
+            if (!receiptCode) return;
+            const msg = `确定要将该题库专题一键回滚到历史版本 v${revNo}（回执 ${receiptCode}）吗？\n\n系统将在单个事务内恢复题目与 PDF 配置，并自动签发一条新的“后台回滚”存证回执，不会篡改任何历史存证记录。`;
+            let confirmed = false;
+            if (window.DialogHelper && typeof window.DialogHelper.confirm === 'function') {
+                confirmed = await window.DialogHelper.confirm({ title: '确认回滚历史题库快照', message: msg, danger: true });
+            } else {
+                confirmed = window.confirm(msg);
+            }
+            if (!confirmed) return;
+
+            try {
+                const res = await fetch('api/admin.php?action=qbank_rollback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ receipt_code: receiptCode })
+                });
+                const json = await res.json();
+                if (!res.ok || !json.success) {
+                    if (typeof showToast === 'function') showToast(json.message || '回滚失败', 'error');
+                    return;
+                }
+                const d = json.data || {};
+                if (typeof showToast === 'function') {
+                    showToast(`已回滚至 v${d.target_revision_no}（恢复 ${d.restored_count ?? 0} 题），新存证回执：${d.new_receipt_code || '-'}`, 'success');
+                }
+                await Promise.all([
+                    loadQbankMatrix(),
+                    loadQbankTimeline(1),
+                    qbaRevModalScope ? openQbankRevisionsModal(qbaRevModalScope) : Promise.resolve()
+                ]);
+            } catch (err) {
+                if (typeof showToast === 'function') showToast(err?.message || '回滚请求失败', 'error');
+            }
         }
 
         function populateQbankAuditSelects() {
@@ -8480,6 +8574,7 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
            3. Revisions History Modal (qbank_revisions)
            ======================================================== */
         async function openQbankRevisionsModal(scope) {
+            qbaRevModalScope = scope;
             const modal = document.getElementById('qba-revisions-modal');
             const titleEl = document.getElementById('qba-rev-modal-title');
             const bodyEl = document.getElementById('qba-rev-modal-body');
@@ -8554,7 +8649,12 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
                                             <td class="cell-mono" style="white-space:nowrap; font-size:0.78rem;">${escapeHtml(rev.issued_at_cst || formatTimestamp(rev.created_at))}</td>
                                             <td class="cell-mono" style="font-size:0.76rem;" title="${escapeHtml(rev.content_sha256 || '')}">${escapeHtml(shaShort)}</td>
                                             <td style="text-align:right; white-space:nowrap;">
-                                                ${code ? `<a href="verify-qbank.html?code=${encodeURIComponent(code)}" target="_blank" rel="noopener noreferrer" class="btn-action detail">核验 ↗</a>` : '-'}
+                                                ${code ? `
+                                                    <div style="display:inline-flex; gap:6px; align-items:center;">
+                                                        <button type="button" class="btn-action edit" data-qba-rollback-code="${escapeHtml(code)}" data-qba-rollback-rev="${escapeHtml(rev.revision_no ?? '-')}">回滚到此版本</button>
+                                                        <a href="verify-qbank.html?code=${encodeURIComponent(code)}" target="_blank" rel="noopener noreferrer" class="btn-action detail">核验 ↗</a>
+                                                    </div>
+                                                ` : '-'}
                                             </td>
                                         </tr>
                                     `;
@@ -9030,7 +9130,8 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
             'qba-tl-clear-scope': () => clearQbankLinkedScope(),
             'qba-tl-reset': () => resetQbankTimelineFilters(),
             'qba-tl-reload': () => loadQbankTimeline(1),
-            'qba-close-revisions': () => closeQbankRevisionsModal()
+            'qba-close-revisions': () => closeQbankRevisionsModal(),
+            'qba-anchor-now': () => triggerQbankAnchorNow()
         };
 
         const ADMIN_CHANGE_ACTIONS = {

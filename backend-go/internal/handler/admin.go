@@ -124,6 +124,12 @@ func Admin(deps AdminDeps) http.HandlerFunc {
 			handleAdminQBankMatrix(w, r, deps)
 		case "qbank_revisions":
 			handleAdminQBankRevisions(w, r, deps)
+		case "qbank_rollback":
+			handleAdminQBankRollback(w, r, deps)
+		case "qbank_anchors":
+			handleAdminQBankAnchors(w, r, deps)
+		case "qbank_anchor_now":
+			handleAdminQBankAnchorNow(w, r, deps)
 
 		default:
 			httpx.SendResponse(w, false, nil, httpx.StrPtr("未知操作: "+html.EscapeString(action)), http.StatusBadRequest)

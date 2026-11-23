@@ -28,12 +28,13 @@ const (
 	DefaultIssuer = "https://feedback.wxjifang.cn"
 
 	// Revision action constants stored in qbank_revisions.action.
-	ActionCreate      = "create"
-	ActionUpdate      = "update"
-	ActionTierSync    = "tier_sync"
-	ActionDelete      = "delete"
-	ActionAdminEdit   = "admin_edit"
-	ActionAdminDelete = "admin_delete"
+	ActionCreate        = "create"
+	ActionUpdate        = "update"
+	ActionTierSync      = "tier_sync"
+	ActionDelete        = "delete"
+	ActionAdminEdit     = "admin_edit"
+	ActionAdminDelete   = "admin_delete"
+	ActionAdminRollback = "admin_rollback"
 
 	// Attempt event_type constants stored in qbank_attempt_logs.event_type.
 	EventUploadPDF     = "upload_pdf"

@@ -31,8 +31,9 @@ var FriendlyTableNames = map[string]string{
 	"retest_revoked_tokens":  "错题本吊销黑名单",
 	"qbank_weeks":            "题库专题期次",
 	"qbank_questions":        "题库题目与考点",
-	"qbank_revisions":        "题库存证版本台账",
-	"qbank_attempt_logs":     "题库过程取证日志",
+	"qbank_revisions":           "题库存证版本台账",
+	"qbank_attempt_logs":        "题库过程取证日志",
+	"qbank_attestation_anchors": "存证外部时间锚定",
 	"admin_users":            "系统管理员表",
 	"system_logs":            "系统运行日志",
 }

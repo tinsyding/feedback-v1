@@ -84,3 +84,43 @@ func QBankVerify(deps QBankVerifyDeps) http.HandlerFunc {
 		httpx.SendResponse(w, true, res, nil, http.StatusOK)
 	}
 }
+
+// QBankAnchors handles public unauthenticated GET /api/v1/qbank/anchors requests.
+func QBankAnchors(deps QBankVerifyDeps) http.HandlerFunc {
+	limiter := deps.Limiter
+	if limiter == nil {
+		limiter = syslogs.NewIngestLimiter()
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=60")
+		if r.Method != http.MethodGet {
+			httpx.SendResponse(w, false, nil, httpx.StrPtr("不支持的请求方法"), http.StatusMethodNotAllowed)
+			return
+		}
+
+		ip := httpx.GetClientIP(r)
+		if !limiter.Allow("qbank_anchors:"+ip, qbankVerifyPerIPPerMin) {
+			httpx.SendResponse(w, false, nil, httpx.StrPtr("请求过于频繁，请稍后再试"), http.StatusTooManyRequests)
+			return
+		}
+
+		if deps.Attest == nil {
+			httpx.SendResponse(w, false, nil, httpx.StrPtr("存证核验服务未配置"), http.StatusInternalServerError)
+			return
+		}
+
+		items, err := deps.Attest.ListAnchors(r.Context(), 50)
+		if err != nil {
+			httpx.SendResponse(w, false, nil, httpx.StrPtr("查询外部时间锚定清单失败"), http.StatusInternalServerError)
+			return
+		}
+		if items == nil {
+			items = []qbankattest.AnchorRecord{}
+		}
+		httpx.SendResponse(w, true, map[string]any{
+			"items": items,
+			"total": len(items),
+		}, nil, http.StatusOK)
+	}
+}

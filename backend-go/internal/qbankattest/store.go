@@ -2,7 +2,9 @@ package qbankattest
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -73,6 +75,21 @@ type VerifyResult struct {
 	SupersededBy      *SupersededByInfo `json:"superseded_by"`
 	DeletedInfo       *DeletedInfo      `json:"deleted_info"`
 	LatestReceiptCode string            `json:"latest_receipt_code"`
+	Anchor            *AnchorProof      `json:"anchor,omitempty"`
+}
+
+// ErrRevisionNotFound is returned when a requested receipt_code does not exist.
+var ErrRevisionNotFound = errors.New("revision not found")
+
+// RevisionSnapshot holds a revision's metadata and parsed snapshot for admin rollback.
+type RevisionSnapshot struct {
+	ID          int64    `json:"id"`
+	ReceiptCode string   `json:"receipt_code"`
+	RevisionNo  int      `json:"revision_no"`
+	Action      string   `json:"action"`
+	Scope       Scope    `json:"scope"`
+	Snapshot    Snapshot `json:"snapshot"`
+	CreatedAt   string   `json:"created_at"`
 }
 
 // RevisionFilter filters rows returned by ListRevisions.
@@ -219,6 +236,9 @@ type Store interface {
 	ListMatrix(ctx context.Context, filter MatrixFilter) ([]MatrixItem, error)
 	ListPublicKeys(ctx context.Context) ([]JWKKey, error)
 	HasRecentPDFReference(ctx context.Context, relURL string, maxAge time.Duration) (bool, error)
+	GetRevisionSnapshot(ctx context.Context, receiptCode string) (*RevisionSnapshot, error)
+	AnchorUnanchoredRevisions(ctx context.Context, tsa TSAClient) (*AnchorRecord, error)
+	ListAnchors(ctx context.Context, limit int) ([]AnchorRecord, error)
 }
 
 // StoreOption configures optional store behavior.
@@ -320,7 +340,7 @@ func normalizeAction(raw string, prevScopeRev *revisionRecord) (string, error) {
 			return ActionCreate, nil
 		}
 		return ActionUpdate, nil
-	case ActionCreate, ActionUpdate, ActionTierSync, ActionDelete, ActionAdminEdit, ActionAdminDelete:
+	case ActionCreate, ActionUpdate, ActionTierSync, ActionDelete, ActionAdminEdit, ActionAdminDelete, ActionAdminRollback:
 		return a, nil
 	default:
 		return "", fmt.Errorf("unsupported attestation action %q", raw)
@@ -669,7 +689,7 @@ func parseTimelineEventFilter(raw string) timelineEventFilterSpec {
 		case "blocked":
 			spec.wantAttempts = true
 			spec.attemptEvents = append(spec.attemptEvents, EventClientBlocked, EventSaveRejected)
-		case ActionCreate, ActionUpdate, ActionTierSync, ActionDelete, ActionAdminEdit, ActionAdminDelete:
+		case ActionCreate, ActionUpdate, ActionTierSync, ActionDelete, ActionAdminEdit, ActionAdminDelete, ActionAdminRollback:
 			spec.wantRevisions = true
 			spec.revisionActions = append(spec.revisionActions, token)
 		case EventUploadPDF, EventSaveRejected, EventSaveError, EventSaveCancelled, EventClientBlocked:
@@ -949,7 +969,7 @@ func prevChainEntryHash(ns sql.NullString) string {
 
 func (s *MySQLStore) lookupOperatorName(ctx context.Context, runner sqlQueryRower, username, action string) string {
 	var name sql.NullString
-	if action == ActionAdminEdit || action == ActionAdminDelete {
+	if action == ActionAdminEdit || action == ActionAdminDelete || action == ActionAdminRollback {
 		if err := runner.QueryRowContext(ctx, "SELECT `real_name` FROM `admin_users` WHERE `username` = ? LIMIT 1", username).Scan(&name); err == nil && name.String != "" {
 			return name.String
 		}
@@ -1133,7 +1153,265 @@ func (s *MySQLStore) VerifyReceipt(ctx context.Context, receiptCode string) (*Ve
 		return nil, err
 	}
 
-	return evaluateVerification(rec, nextRev, latestRev, dbKey, prevRowEntryHash, hasPrevRow, s.signer, s.cfg.resolveIssuer()), nil
+	res := evaluateVerification(rec, nextRev, latestRev, dbKey, prevRowEntryHash, hasPrevRow, s.signer, s.cfg.resolveIssuer())
+	if anchor, err := s.findAnchorProofForRevision(ctx, db, rec.id); err == nil && anchor != nil {
+		res.Anchor = anchor
+	}
+	return res, nil
+}
+
+func (s *MySQLStore) findAnchorProofForRevision(ctx context.Context, db *sql.DB, revID int64) (*AnchorProof, error) {
+	var anc AnchorRecord
+	var tsaToken, tsaGenTime sql.NullString
+	var anchoredAt time.Time
+	err := db.QueryRowContext(
+		ctx,
+		"SELECT `id`, `anchor_code`, `seq_from`, `seq_to`, `revision_count`, `merkle_root`, `tsa_url`, `tsa_status`, `tsa_token_b64`, `tsa_gen_time`, `anchored_at` "+
+			"FROM `qbank_attestation_anchors` WHERE `seq_from` <= ? AND `seq_to` >= ? ORDER BY `id` DESC LIMIT 1",
+		revID, revID,
+	).Scan(&anc.ID, &anc.AnchorCode, &anc.SeqFrom, &anc.SeqTo, &anc.RevisionCount, &anc.MerkleRoot, &anc.TSAURL, &anc.TSAStatus, &tsaToken, &tsaGenTime, &anchoredAt)
+	if err != nil {
+		return nil, err
+	}
+	anc.TSATokenB64 = tsaToken.String
+	anc.TSAGenTime = tsaGenTime.String
+	anc.AnchoredAt = formatReceiptTimestamp(anchoredAt)
+
+	rows, err := db.QueryContext(
+		ctx,
+		"SELECT `id`, `entry_hash` FROM `qbank_revisions` WHERE `id` BETWEEN ? AND ? ORDER BY `id` ASC",
+		anc.SeqFrom, anc.SeqTo,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []int64
+	var hashes []string
+	for rows.Next() {
+		var id int64
+		var eh string
+		if err := rows.Scan(&id, &eh); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+		hashes = append(hashes, eh)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return buildAnchorProofFromHashes(anc, ids, hashes, revID), nil
+}
+
+// GetRevisionSnapshot retrieves a historical revision and decodes its snapshot_json for admin rollback.
+func (s *MySQLStore) GetRevisionSnapshot(ctx context.Context, receiptCode string) (*RevisionSnapshot, error) {
+	db, err := s.requireDB()
+	if err != nil {
+		return nil, err
+	}
+	code := strings.TrimSpace(receiptCode)
+	if code == "" {
+		return nil, ErrRevisionNotFound
+	}
+	rec, err := scanRevisionRecord(db.QueryRowContext(
+		ctx,
+		"SELECT "+revisionSelectCols+" FROM `qbank_revisions` WHERE `receipt_code` = ? LIMIT 1",
+		code,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrRevisionNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	var snap Snapshot
+	if err := json.Unmarshal([]byte(rec.snapshotJSON), &snap); err != nil {
+		return nil, fmt.Errorf("decode snapshot_json: %w", err)
+	}
+	return &RevisionSnapshot{
+		ID:          rec.id,
+		ReceiptCode: rec.receiptCode,
+		RevisionNo:  rec.revisionNo,
+		Action:      rec.action,
+		Scope:       rec.scope,
+		Snapshot:    snap,
+		CreatedAt:   formatReceiptTimestamp(rec.createdAt),
+	}, nil
+}
+
+// AnchorUnanchoredRevisions batches all qbank_revisions after the latest anchored seq_to
+// into an RFC 6962 SHA-256 Merkle tree, optionally requests an RFC 3161 TSA timestamp,
+// and appends an immutable record to qbank_attestation_anchors.
+func (s *MySQLStore) AnchorUnanchoredRevisions(ctx context.Context, tsa TSAClient) (*AnchorRecord, error) {
+	db, err := s.requireDB()
+	if err != nil {
+		return nil, err
+	}
+
+	var lastSeq int64
+	if err := db.QueryRowContext(ctx, "SELECT COALESCE(MAX(`seq_to`), 0) FROM `qbank_attestation_anchors`").Scan(&lastSeq); err != nil {
+		return nil, err
+	}
+
+	rows, err := db.QueryContext(
+		ctx,
+		"SELECT `id`, `entry_hash` FROM `qbank_revisions` WHERE `id` > ? ORDER BY `id` ASC LIMIT 10000",
+		lastSeq,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []int64
+	var hashes []string
+	for rows.Next() {
+		var id int64
+		var eh string
+		if err := rows.Scan(&id, &eh); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+		hashes = append(hashes, eh)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	merkleRoot, _, err := ComputeMerkleTree(hashes)
+	if err != nil {
+		return nil, err
+	}
+	rootBytes, err := hex.DecodeString(merkleRoot)
+	if err != nil {
+		return nil, err
+	}
+
+	now := s.cfg.now().UTC()
+	anc := AnchorRecord{
+		AnchorCode:    generateAnchorCode(now),
+		SeqFrom:       ids[0],
+		SeqTo:         ids[len(ids)-1],
+		RevisionCount: len(ids),
+		MerkleRoot:    merkleRoot,
+		TSAStatus:     TSAStatusLocalOnly,
+		AnchoredAt:    formatReceiptTimestamp(now),
+	}
+	if tsa != nil && strings.TrimSpace(tsa.Endpoint()) != "" {
+		anc.TSAURL = strings.TrimSpace(tsa.Endpoint())
+		if resp, tsaErr := tsa.Timestamp(ctx, rootBytes); tsaErr == nil && resp != nil {
+			anc.TSAStatus = TSAStatusAnchored
+			anc.TSATokenB64 = resp.TokenB64
+			anc.TSAGenTime = resp.GenTime
+		}
+	}
+
+	var tokenNull, genTimeNull sql.NullString
+	if anc.TSATokenB64 != "" {
+		tokenNull = sql.NullString{String: anc.TSATokenB64, Valid: true}
+	}
+	if anc.TSAGenTime != "" {
+		genTimeNull = sql.NullString{String: anc.TSAGenTime, Valid: true}
+	}
+	res, err := db.ExecContext(
+		ctx,
+		"INSERT INTO `qbank_attestation_anchors` (`anchor_code`, `seq_from`, `seq_to`, `revision_count`, `merkle_root`, `tsa_url`, `tsa_status`, `tsa_token_b64`, `tsa_gen_time`, `anchored_at`) "+
+			"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		anc.AnchorCode, anc.SeqFrom, anc.SeqTo, anc.RevisionCount, anc.MerkleRoot, anc.TSAURL, anc.TSAStatus, tokenNull, genTimeNull, tz.In(now),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if id, err := res.LastInsertId(); err == nil {
+		anc.ID = id
+	}
+	return &anc, nil
+}
+
+// ListAnchors returns recent Merkle anchor batches ordered newest-first.
+func (s *MySQLStore) ListAnchors(ctx context.Context, limit int) ([]AnchorRecord, error) {
+	db, err := s.requireDB()
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	rows, err := db.QueryContext(
+		ctx,
+		"SELECT `id`, `anchor_code`, `seq_from`, `seq_to`, `revision_count`, `merkle_root`, `tsa_url`, `tsa_status`, `tsa_token_b64`, `tsa_gen_time`, `anchored_at` "+
+			"FROM `qbank_attestation_anchors` ORDER BY `id` DESC LIMIT ?",
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]AnchorRecord, 0)
+	for rows.Next() {
+		var anc AnchorRecord
+		var tsaToken, tsaGenTime sql.NullString
+		var anchoredAt time.Time
+		if err := rows.Scan(&anc.ID, &anc.AnchorCode, &anc.SeqFrom, &anc.SeqTo, &anc.RevisionCount, &anc.MerkleRoot, &anc.TSAURL, &anc.TSAStatus, &tsaToken, &tsaGenTime, &anchoredAt); err != nil {
+			return nil, err
+		}
+		anc.TSATokenB64 = tsaToken.String
+		anc.TSAGenTime = tsaGenTime.String
+		anc.AnchoredAt = formatReceiptTimestamp(anchoredAt)
+		out = append(out, anc)
+	}
+	return out, rows.Err()
+}
+
+func formatReceiptTimestamp(t time.Time) string {
+	return tz.In(t).Format("2006-01-02 15:04:05")
+}
+
+func generateAnchorCode(now time.Time) string {
+	var b [2]byte
+	_, _ = rand.Read(b[:])
+	return fmt.Sprintf("ANC-%s-%04X", tz.In(now).Format("20060102-150405"), b)
+}
+
+func buildAnchorProofFromHashes(anc AnchorRecord, ids []int64, hashes []string, targetID int64) *AnchorProof {
+	if len(ids) == 0 || len(ids) != len(hashes) {
+		return nil
+	}
+	targetIdx := -1
+	for i, id := range ids {
+		if id == targetID {
+			targetIdx = i
+			break
+		}
+	}
+	if targetIdx < 0 {
+		return nil
+	}
+	root, proofs, err := ComputeMerkleTree(hashes)
+	if err != nil || root != anc.MerkleRoot {
+		return nil
+	}
+	return &AnchorProof{
+		AnchorCode:    anc.AnchorCode,
+		SeqFrom:       anc.SeqFrom,
+		SeqTo:         anc.SeqTo,
+		RevisionCount: anc.RevisionCount,
+		MerkleRoot:    anc.MerkleRoot,
+		Proof:         proofs[targetIdx],
+		TSAURL:        anc.TSAURL,
+		TSAStatus:     anc.TSAStatus,
+		TSATokenB64:   anc.TSATokenB64,
+		TSAGenTime:    anc.TSAGenTime,
+		AnchoredAt:    anc.AnchoredAt,
+	}
 }
 
 // ListRevisions returns historical revisions matching filter ordered newest-first.
@@ -1668,8 +1946,10 @@ type MemoryStore struct {
 	keys         map[string]*keyRecord
 	revisions    []*revisionRecord
 	attempts     []*attemptRecord
+	anchors      []*AnchorRecord
 	nextRevID    int64
 	nextAttID    int64
+	nextAncID    int64
 }
 
 // NewMemoryStore creates a concurrency-safe MemoryStore and pre-registers signer's public key if non-nil.
@@ -1687,6 +1967,7 @@ func NewMemoryStore(signer *Signer, feedbackRoot string, opts ...StoreOption) *M
 		keys:         make(map[string]*keyRecord),
 		nextRevID:    1,
 		nextAttID:    1,
+		nextAncID:    1,
 	}
 	if signer != nil {
 		ms.keys[signer.Kid()] = &keyRecord{
@@ -1866,7 +2147,23 @@ func (m *MemoryStore) VerifyReceipt(_ context.Context, receiptCode string) (*Ver
 	}
 
 	dbKey := m.keys[rec.kid]
-	return evaluateVerification(rec, nextRev, latestRev, dbKey, prevRowEntryHash, hasPrevRow, m.signer, m.cfg.resolveIssuer()), nil
+	res := evaluateVerification(rec, nextRev, latestRev, dbKey, prevRowEntryHash, hasPrevRow, m.signer, m.cfg.resolveIssuer())
+	for i := len(m.anchors) - 1; i >= 0; i-- {
+		anc := m.anchors[i]
+		if rec.id >= anc.SeqFrom && rec.id <= anc.SeqTo {
+			var ids []int64
+			var hashes []string
+			for _, r := range m.revisions {
+				if r.id >= anc.SeqFrom && r.id <= anc.SeqTo {
+					ids = append(ids, r.id)
+					hashes = append(hashes, r.entryHash)
+				}
+			}
+			res.Anchor = buildAnchorProofFromHashes(*anc, ids, hashes, rec.id)
+			break
+		}
+	}
+	return res, nil
 }
 
 // ListRevisions returns matching in-memory revisions ordered newest-first.
@@ -2226,6 +2523,106 @@ func (m *MemoryStore) HasRecentPDFReference(_ context.Context, relURL string, ma
 		}
 	}
 	return false, nil
+}
+
+// GetRevisionSnapshot retrieves a historical revision's decoded snapshot from memory.
+func (m *MemoryStore) GetRevisionSnapshot(_ context.Context, receiptCode string) (*RevisionSnapshot, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	code := strings.TrimSpace(receiptCode)
+	for _, r := range m.revisions {
+		if r.receiptCode == code {
+			var snap Snapshot
+			if err := json.Unmarshal([]byte(r.snapshotJSON), &snap); err != nil {
+				return nil, fmt.Errorf("decode snapshot_json: %w", err)
+			}
+			return &RevisionSnapshot{
+				ID:          r.id,
+				ReceiptCode: r.receiptCode,
+				RevisionNo:  r.revisionNo,
+				Action:      r.action,
+				Scope:       r.scope,
+				Snapshot:    snap,
+				CreatedAt:   formatReceiptTimestamp(r.createdAt),
+			}, nil
+		}
+	}
+	return nil, ErrRevisionNotFound
+}
+
+// AnchorUnanchoredRevisions batches unanchored in-memory revisions into a Merkle anchor.
+func (m *MemoryStore) AnchorUnanchoredRevisions(ctx context.Context, tsa TSAClient) (*AnchorRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var lastSeq int64
+	if len(m.anchors) > 0 {
+		lastSeq = m.anchors[len(m.anchors)-1].SeqTo
+	}
+
+	var ids []int64
+	var hashes []string
+	for _, r := range m.revisions {
+		if r.id > lastSeq {
+			ids = append(ids, r.id)
+			hashes = append(hashes, r.entryHash)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	merkleRoot, _, err := ComputeMerkleTree(hashes)
+	if err != nil {
+		return nil, err
+	}
+	rootBytes, err := hex.DecodeString(merkleRoot)
+	if err != nil {
+		return nil, err
+	}
+
+	now := m.cfg.now().UTC()
+	anc := &AnchorRecord{
+		ID:            m.nextAncID,
+		AnchorCode:    generateAnchorCode(now),
+		SeqFrom:       ids[0],
+		SeqTo:         ids[len(ids)-1],
+		RevisionCount: len(ids),
+		MerkleRoot:    merkleRoot,
+		TSAStatus:     TSAStatusLocalOnly,
+		AnchoredAt:    formatReceiptTimestamp(now),
+	}
+	m.nextAncID++
+	if tsa != nil && strings.TrimSpace(tsa.Endpoint()) != "" {
+		anc.TSAURL = strings.TrimSpace(tsa.Endpoint())
+		if resp, tsaErr := tsa.Timestamp(ctx, rootBytes); tsaErr == nil && resp != nil {
+			anc.TSAStatus = TSAStatusAnchored
+			anc.TSATokenB64 = resp.TokenB64
+			anc.TSAGenTime = resp.GenTime
+		}
+	}
+	m.anchors = append(m.anchors, anc)
+	copyAnc := *anc
+	return &copyAnc, nil
+}
+
+// ListAnchors returns recent in-memory anchors ordered newest-first.
+func (m *MemoryStore) ListAnchors(_ context.Context, limit int) ([]AnchorRecord, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	out := make([]AnchorRecord, 0, len(m.anchors))
+	for i := len(m.anchors) - 1; i >= 0 && len(out) < limit; i-- {
+		out = append(out, *m.anchors[i])
+	}
+	return out, nil
 }
 
 // TamperRevisionForTest allows tests using MemoryStore to mutate a stored revision or key record.
