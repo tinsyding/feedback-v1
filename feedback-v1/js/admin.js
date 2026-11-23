@@ -1,7 +1,7 @@
 /**
  * ============================================================================
  * 极方管理后台 (Admin Console) 前端运行脚本 - 生产环境合并包
- * 自动生成时间: 2026-11-23 16:56:31
+ * 自动生成时间: 2026-11-23 17:12:02
  * 源码模块目录: js/admin/
  * 请勿直接手动修改此文件，开发时请修改 js/admin/ 中的子模块并执行本打包脚本。
  * ============================================================================
@@ -8120,6 +8120,9 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
         async function initQbankAuditTab() {
             bindQbankAuditEvents();
             applyQbankAuditViewMode();
+            if ((!currentConfig || !currentConfig.semesterYear) && typeof loadConfig === 'function') {
+                await loadConfig();
+            }
             if (!qbaInitialized && typeof loadDbBatchOptions === 'function') {
                 await loadDbBatchOptions();
             }
@@ -8217,10 +8220,19 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
             }
         }
 
-        function populateQbankAuditSelects() {
+        function getQbaCurrentSemester() {
             const curYear = String((typeof currentConfig !== 'undefined' && currentConfig?.semesterYear) || new Date().getFullYear());
-            const yearSet = new Set(['2027', '2026', '2025', '2024', curYear]);
-            const years = [...yearSet].filter(Boolean).sort((a, b) => Number(b) - Number(a));
+            const rawSeason = (typeof normalizeSeason === 'function' && typeof currentConfig !== 'undefined')
+                ? normalizeSeason(currentConfig?.defaultSeason ?? 'autumn')
+                : String((typeof currentConfig !== 'undefined' && currentConfig?.defaultSeason) || 'autumn');
+            const seasonZhMap = { spring: '春', summer: '暑', autumn: '秋', winter: '寒', '春': '春', '暑': '暑', '秋': '秋', '寒': '寒' };
+            const seasonLabelMap = { '春': '春季', '暑': '暑假', '秋': '秋季', '寒': '寒假' };
+            const season = seasonZhMap[rawSeason] || '秋';
+            return { year: curYear, season, seasonLabel: seasonLabelMap[season] || season };
+        }
+
+        function populateQbankAuditSelects() {
+            const curSem = getQbaCurrentSemester();
 
             const defaultSubjects = ['数学', '英语', '物理', '化学', '语文', '生物'];
             const dimSubjects = (typeof dbFilterOptions !== 'undefined' && Array.isArray(dbFilterOptions.subjects)) ? dbFilterOptions.subjects : [];
@@ -8250,8 +8262,17 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
                 }
             };
 
-            fillSelect('qba-mat-year', '全部学年', years, (y) => `${y} 年`);
-            fillSelect('qba-tl-year', '全部学年', years, (y) => `${y} 年`);
+            const setLockedSelect = (id, val, label) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.innerHTML = `<option value="${escapeHtml(val)}">${escapeHtml(label)}</option>`;
+                el.value = val;
+            };
+
+            setLockedSelect('qba-mat-year', curSem.year, `${curSem.year} 年`);
+            setLockedSelect('qba-tl-year', curSem.year, `${curSem.year} 年`);
+            setLockedSelect('qba-mat-season', curSem.season, curSem.seasonLabel);
+            setLockedSelect('qba-tl-season', curSem.season, curSem.seasonLabel);
             fillSelect('qba-mat-subject', '全部学科', subjects);
             fillSelect('qba-tl-subject', '全部学科', subjects);
             fillSelect('qba-mat-grade', '全部年级', grades);
@@ -8287,13 +8308,10 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
                     el.appendChild(opt);
                 });
             };
-            const years = [...new Set(items.map((i) => i.year).filter(Boolean))];
             const subjects = [...new Set(items.map((i) => i.subject).filter(Boolean))];
             const grades = [...new Set(items.map((i) => i.grade).filter(Boolean))];
             const tiers = [...new Set(items.map((i) => i.tier).filter(Boolean))];
 
-            appendUnique('qba-mat-year', years, (y) => `${y} 年`);
-            appendUnique('qba-tl-year', years, (y) => `${y} 年`);
             appendUnique('qba-mat-subject', subjects);
             appendUnique('qba-tl-subject', subjects);
             appendUnique('qba-mat-grade', grades);
@@ -8336,7 +8354,12 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
         }
 
         function resetQbankMatrixFilters() {
-            ['qba-mat-year', 'qba-mat-season', 'qba-mat-bank-type', 'qba-mat-subject', 'qba-mat-grade', 'qba-mat-search'].forEach((id) => {
+            const curSem = getQbaCurrentSemester();
+            const yearEl = document.getElementById('qba-mat-year');
+            const seasonEl = document.getElementById('qba-mat-season');
+            if (yearEl) yearEl.value = curSem.year;
+            if (seasonEl) seasonEl.value = curSem.season;
+            ['qba-mat-bank-type', 'qba-mat-subject', 'qba-mat-grade', 'qba-mat-search'].forEach((id) => {
                 const el = document.getElementById(id);
                 if (el) el.value = '';
             });
@@ -8345,8 +8368,6 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
 
         function updateQbankMatrixResetBtn() {
             const hasFilter = Boolean(
-                document.getElementById('qba-mat-year')?.value ||
-                document.getElementById('qba-mat-season')?.value ||
                 document.getElementById('qba-mat-bank-type')?.value ||
                 document.getElementById('qba-mat-subject')?.value ||
                 document.getElementById('qba-mat-grade')?.value ||
@@ -8707,9 +8728,14 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
 
         function resetQbankTimelineFilters() {
             qbaTlLinkedScope = null;
+            const curSem = getQbaCurrentSemester();
+            const yearEl = document.getElementById('qba-tl-year');
+            const seasonEl = document.getElementById('qba-tl-season');
+            if (yearEl) yearEl.value = curSem.year;
+            if (seasonEl) seasonEl.value = curSem.season;
             [
                 'qba-tl-teacher-select', 'qba-tl-operator', 'qba-tl-event-type',
-                'qba-tl-year', 'qba-tl-season', 'qba-tl-bank-type',
+                'qba-tl-bank-type',
                 'qba-tl-subject', 'qba-tl-grade', 'qba-tl-tier', 'qba-tl-week',
                 'qba-tl-date-from', 'qba-tl-date-to'
             ].forEach((id) => {
