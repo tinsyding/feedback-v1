@@ -3681,7 +3681,8 @@ async function doBatchSyncTiers(data, targetTiers, currentTier, isAutoPrompt = f
         } else {
             showToast(`同步失败: ${errors.join('; ')}`, 'warn');
         }
-        openTierSyncSummaryModal(data, currentTier, syncResults);
+        // 用户端暂不展示班层同步存证汇总弹窗
+        // openTierSyncSummaryModal(data, currentTier, syncResults);
     } finally {
         isSyncingTiers = false;
         if (tierSyncBtn) {
@@ -5266,7 +5267,8 @@ function updateStatus() {
     const headerCodeEl = document.getElementById('qb-header-receipt-code');
     const savebarBadge = document.getElementById('qb-savebar-receipt-badge');
     const savebarCodeEl = document.getElementById('qb-savebar-receipt-code');
-    const showReceiptBadge = Boolean(hasAllSelectors && currentLoadedReceiptCode);
+    // 用户端暂不展示存证回执标识
+    const showReceiptBadge = false;
 
     if (headerBadge && headerCodeEl) {
         if (showReceiptBadge) {
@@ -5822,16 +5824,6 @@ function applySavedDataFilter() {
                     </span>
                     ${operatorDisplay ? `<span class="saved-card-operator" title="最后修改教师">修改人：${escapeHtml(operatorDisplay)}</span>` : ''}
                 </div>
-                ${latestReceiptCode ? `
-                <div class="saved-card-receipt-row">
-                    <button type="button" class="saved-receipt-badge" data-card-action="copy-receipt" title="最新存证回执号（点击复制）">
-                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-                            <polyline points="9 12 11 14 15 10"></polyline>
-                        </svg>
-                        <span>${escapeHtml(latestReceiptCode)}</span>
-                    </button>
-                </div>` : ''}
             </div>
             <div class="saved-card-actions">
                 <div class="saved-card-actions-left">
@@ -5841,13 +5833,6 @@ function applySavedDataFilter() {
                             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
                         </svg>
                         ${isAssistant ? '查看题目' : '查看 / 更改题目'}
-                    </button>
-                    <button type="button" class="saved-btn history-btn" data-card-action="history" title="查看存证回执与版本历史">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="10"></circle>
-                            <polyline points="12 6 12 12 16 14"></polyline>
-                        </svg>
-                        存证 / 历史
                     </button>
                 </div>
                 ${isAssistant ? '' : `
