@@ -313,7 +313,7 @@ jobs:
           check "https://feedback.wxjifang.cn/admin.html"
           check "https://feedback.wxjifang.cn/.well-known/jwks.json"
           check "https://feedback.wxjifang.cn/api/v1/qbank/anchors"
-          check_status "https://feedback.wxjifang.cn/api/v1/qbank/verify" "400"
+          check "https://feedback.wxjifang.cn/api/v1/qbank/verify"
           check "https://feedback.wxjifang.cn/api/auth.php?action=check"
           check "https://feedback.wxjifang.cn/api/public_config.php"
           check "https://feedback.wxjifang.cn/api/calibrate_roi.php"
