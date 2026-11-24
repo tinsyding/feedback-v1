@@ -427,6 +427,18 @@ function applyAssistantReadOnlyModeIfNeed(user) {
     if (saveBtn) {
         saveBtn.style.display = 'none';
     }
+    const previewSyncBtn = document.getElementById('qb-preview-tier-sync-btn');
+    if (previewSyncBtn) {
+        previewSyncBtn.style.display = 'none';
+    }
+    const previewSaveNowBtn = document.getElementById('qb-preview-save-now-btn');
+    if (previewSaveNowBtn) {
+        previewSaveNowBtn.style.display = 'none';
+    }
+    const previewBackEditBtn = document.getElementById('qb-preview-back-edit-btn');
+    if (previewBackEditBtn) {
+        previewBackEditBtn.textContent = '返回题目列表';
+    }
     let roBadge = document.getElementById('qb-assistant-save-badge');
     if (!roBadge) {
         roBadge = document.createElement('span');
@@ -805,6 +817,10 @@ function goToStep(n) {
         updateAutoDetectStatus();
     }
 
+    if (n !== 5 && typeof teardownPreviewObserver === 'function') {
+        teardownPreviewObserver();
+    }
+
     if (n === 4) {
         const step4BackBtn = document.getElementById('qb-step4-prev-btn');
         if (step4BackBtn) {
@@ -820,10 +836,20 @@ function goToStep(n) {
             if (typeof resizeAllTopicTextareas === 'function') resizeAllTopicTextareas();
         }, 250);
     }
+
+    if (n === 5) {
+        if (typeof renderQuestionBankPreview === 'function') {
+            renderQuestionBankPreview();
+        }
+    }
 }
 
 function goBack() {
     if (currentStep <= 1) return;
+    if (currentStep === 5) {
+        goToStep(4);
+        return;
+    }
     // Existing-data path (no upload/mapping): back from edit goes to selector
     if (currentStep === 4 && !batchImported) {
         goToConfigStep();
@@ -937,7 +963,7 @@ async function handleStepIndicatorClick(n) {
         } else {
             goToStep(3);
         }
-    } else if (n === 4) {
+    } else if (n === 4 || n === 5) {
         if (currentQuestions.length === 0 && subjectSelect?.value && gradeSelect?.value && tierSelect?.value && weekSelect?.value) {
             await loadCurrentData();
         }
@@ -945,7 +971,7 @@ async function handleStepIndicatorClick(n) {
             showToast('暂无题目，请点击下方已有题库卡片「查看 / 更改题目」或上传新题', 'info');
             return;
         }
-        goToStep(4);
+        goToStep(n);
     }
 }
 
@@ -3943,10 +3969,8 @@ async function executeSaveQuestions(data) {
                 });
             }
 
-            // 保存题库后暂不自动弹出存证回执卡（保留回执状态更新及手动查看入口）
-            // if (receiptObj && receiptObj.receipt_code) {
-            //     openReceiptModal(receiptObj, { allowTierSync: true, saveData: data });
-            // }
+            // 保存成功后自动进入 Step 5 题库预览核对页面
+            goToStep(5);
         } else {
             showToast('保存失败: ' + (result.error || '未知错误'), 'error');
         }
@@ -5697,6 +5721,8 @@ function ensureSavedGridDelegation(grid) {
             const act = actionEl.dataset.cardAction;
             if (act === 'edit') {
                 editSavedItem(meta.subject, meta.grade, meta.tier, meta.week, meta.year, meta.season, meta.bankType);
+            } else if (act === 'preview') {
+                previewSavedItem(meta.subject, meta.grade, meta.tier, meta.week, meta.year, meta.season, meta.bankType);
             } else if (act === 'history') {
                 openRevisionsModal(meta);
             } else if (act === 'delete') {
@@ -5834,6 +5860,13 @@ function applySavedDataFilter() {
                         </svg>
                         ${isAssistant ? '查看题目' : '查看 / 更改题目'}
                     </button>
+                    <button type="button" class="saved-btn preview-btn" data-card-action="preview" title="直接进入全景预览核对页面">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                        预览
+                    </button>
                 </div>
                 ${isAssistant ? '' : `
                 <button type="button" class="saved-btn delete-btn" data-card-action="delete" title="删除此专题数据">
@@ -5850,7 +5883,7 @@ function applySavedDataFilter() {
 }
 
 let isEnteringSavedItem = false;
-async function editSavedItem(subject, grade, tier, week, year, season, bankType) {
+async function editSavedItem(subject, grade, tier, week, year, season, bankType, targetStep = 4) {
     if (isEnteringSavedItem) return;
     isEnteringSavedItem = true;
     showToast('正在载入专题题目数据...', 'info');
@@ -5892,15 +5925,23 @@ async function editSavedItem(subject, grade, tier, week, year, season, bankType)
         batchImported = false; // Mark as direct edit mode so "返回学科选择" returns to Step 1
 
         await loadCurrentData();
-        goToStep(4);
+        goToStep(targetStep === 5 ? 5 : 4);
         const isAssistant = window.currentUser && window.currentUser.role === 'assistant';
         const typeLabel = getBankTypeLabel(bankType);
-        showToast(isAssistant 
-            ? `已载入「${typeLabel} · ${subject} · ${grade} · ${tier} · ${getTopicLabel(week)}」，当前为助教只读浏览模式`
-            : `已载入「${typeLabel} · ${subject} · ${grade} · ${tier} · ${getTopicLabel(week)}」，可直接修改`);
+        if (targetStep === 5) {
+            showToast(`已载入「${typeLabel} · ${subject} · ${grade} · ${tier} · ${getTopicLabel(week)}」预览核对`, 'info');
+        } else {
+            showToast(isAssistant
+                ? `已载入「${typeLabel} · ${subject} · ${grade} · ${tier} · ${getTopicLabel(week)}」，当前为助教只读浏览模式`
+                : `已载入「${typeLabel} · ${subject} · ${grade} · ${tier} · ${getTopicLabel(week)}」，可直接修改`);
+        }
     } finally {
         isEnteringSavedItem = false;
     }
+}
+
+function previewSavedItem(subject, grade, tier, week, year, season, bankType) {
+    return editSavedItem(subject, grade, tier, week, year, season, bankType, 5);
 }
 
 function loadSavedItem(subject, grade, tier, week, year, season, bankType) {
@@ -7630,6 +7671,644 @@ function refreshRevisionsModal() {
     }
 }
 
+// ========== Step 5: 题库预览核对页面 ==========
+let previewFilterMode = 'all';
+let previewLayoutMode = 'split';
+let previewObserver = null;
+let previewRenderSessionId = 0;
+const previewPdfDocCache = new Map();
+
+function teardownPreviewObserver() {
+    previewRenderSessionId += 1;
+    if (previewObserver) {
+        previewObserver.disconnect();
+        previewObserver = null;
+    }
+}
+
+async function getPreviewPdfDoc(url) {
+    if (!url) return null;
+    if (previewPdfDocCache.has(url)) {
+        return previewPdfDocCache.get(url);
+    }
+    const promise = (async () => {
+        const pdfjs = await ensurePdfJs();
+        if (!pdfjs) throw new Error('PDF.js 未加载');
+        const res = await fetch(url, { credentials: 'same-origin' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const bytes = await res.arrayBuffer();
+        return await pdfjs.getDocument({ data: bytes }).promise;
+    })().catch(err => {
+        previewPdfDocCache.delete(url);
+        throw err;
+    });
+    previewPdfDocCache.set(url, promise);
+    return promise;
+}
+
+function openPreviewStep() {
+    if (!Array.isArray(currentQuestions) || currentQuestions.length === 0) {
+        showToast('暂无题目可预览，请先录入或载入题库', 'info');
+        return;
+    }
+    previewFilterMode = 'all';
+    goToStep(5);
+}
+
+function setPreviewFilterMode(mode) {
+    const allowed = new Set(['all', 'issues', 'missing_exercise', 'missing_answer', 'missing_topic']);
+    previewFilterMode = allowed.has(mode) ? mode : 'all';
+    renderQuestionBankPreview({ preserveFilter: true });
+}
+
+function setPreviewLayoutMode(mode) {
+    const allowed = new Set(['split', 'exercise', 'answer']);
+    previewLayoutMode = allowed.has(mode) ? mode : 'split';
+    document.querySelectorAll('#qb-preview-layout-seg .qb-preview-layout-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.arg === previewLayoutMode);
+    });
+    const listEl = document.getElementById('qb-preview-list');
+    if (listEl) {
+        listEl.classList.toggle('layout-exercise-only', previewLayoutMode === 'exercise');
+        listEl.classList.toggle('layout-answer-only', previewLayoutMode === 'answer');
+    }
+}
+
+function buildPreviewEntries() {
+    const bankType = getBankType();
+    const isPreviewBank = bankType === 'preview';
+    const isVariationBank = bankType === 'variation';
+    const renderedBigGroups = new Set();
+    const entries = [];
+
+    currentQuestions.forEach((q, idx) => {
+        if (!q) return;
+        const groupKey = !isVariationBank ? getQuestionGroupKey(q) : null;
+        if (groupKey) {
+            if (renderedBigGroups.has(groupKey)) return;
+            renderedBigGroups.add(groupKey);
+
+            const memberIndices = getBigQuestionGroupMemberIndices(idx);
+            const firstIdx = memberIndices[0];
+            const firstQ = currentQuestions[firstIdx] || q;
+            const groupNums = (firstQ.questionMeta && Array.isArray(firstQ.questionMeta.groupNums))
+                ? firstQ.questionMeta.groupNums
+                : memberIndices.map(i => currentQuestions[i]?.id).filter(Boolean);
+            const startNum = groupNums[0] ?? firstQ.id;
+            const endNum = groupNums[groupNums.length - 1] ?? firstQ.id;
+
+            const memberTopics = memberIndices.map(i => ({
+                id: currentQuestions[i]?.id,
+                topic: String(currentQuestions[i]?.topic || '').trim()
+            }));
+            const nonEmptyTopics = memberTopics.filter(m => m.topic);
+            const missingExercise = !(firstQ.exercisePdf && firstQ.exercisePdf.url);
+            const missingAnswer = !(firstQ.answerPdf && firstQ.answerPdf.url);
+            const missingTopic = nonEmptyTopics.length === 0;
+            const hasIssue = missingExercise || missingAnswer || (!isPreviewBank && missingTopic);
+
+            entries.push({
+                kind: 'big_group',
+                originalIndex: firstIdx,
+                memberIndices,
+                question: firstQ,
+                title: `第 ${startNum} ~ ${endNum} 题`,
+                subBadge: `大题组 · 共 ${memberIndices.length} 问`,
+                memberTopics,
+                topicText: nonEmptyTopics.length > 0 ? nonEmptyTopics[0].topic : '',
+                hasDistinctSubTopics: memberTopics.some(m => m.topic !== memberTopics[0].topic),
+                videoUrl: isPreviewBank ? '' : String(firstQ.videoUrl || firstQ.video_url || '').trim(),
+                parentNums: [],
+                subNum: 0,
+                missingExercise,
+                missingAnswer,
+                missingTopic,
+                topicOptional: isPreviewBank,
+                hasIssue
+            });
+            return;
+        }
+
+        const parentNums = isVariationBank
+            ? (Array.isArray(q.parentQuestionNums) && q.parentQuestionNums.length > 0
+                ? q.parentQuestionNums
+                : [parseInt(q.parentQuestionNum || q.id, 10) || 1])
+            : [];
+        const subNum = isVariationBank ? (parseInt(q.subNum, 10) || 1) : 0;
+        let topicText = String(q.topic || '').trim();
+        if (isVariationBank && !topicText && Array.isArray(homeworkQuestionsForVariation) && homeworkQuestionsForVariation.length > 0) {
+            const matchedHw = homeworkQuestionsForVariation.find(item => Number(item.id) === Number(parentNums[0]));
+            if (matchedHw && matchedHw.topic) topicText = String(matchedHw.topic).trim();
+        }
+        const missingExercise = !(q.exercisePdf && q.exercisePdf.url);
+        const missingAnswer = !(q.answerPdf && q.answerPdf.url);
+        const missingTopic = !topicText;
+        const hasIssue = missingExercise || missingAnswer || (!isPreviewBank && missingTopic);
+
+        entries.push({
+            kind: isVariationBank ? 'variation' : 'single',
+            originalIndex: idx,
+            memberIndices: [idx],
+            question: q,
+            title: isVariationBank
+                ? `课后第 ${formatCompactNumList(parentNums)} 题`
+                : `第 ${q.id} 题`,
+            subBadge: isVariationBank ? `变式 ${subNum}` : '',
+            memberTopics: [{ id: q.id, topic: topicText }],
+            topicText,
+            hasDistinctSubTopics: false,
+            videoUrl: (isPreviewBank || isVariationBank) ? '' : String(q.videoUrl || q.video_url || '').trim(),
+            parentNums,
+            subNum,
+            missingExercise,
+            missingAnswer,
+            missingTopic,
+            topicOptional: isPreviewBank,
+            hasIssue
+        });
+    });
+
+    return entries;
+}
+
+function renderQuestionBankPreview(options = {}) {
+    if (!options.preserveFilter) {
+        previewFilterMode = 'all';
+    }
+    teardownPreviewObserver();
+    const sessionId = previewRenderSessionId;
+
+    const bankType = getBankType();
+    const isPreviewBank = bankType === 'preview';
+    const isVariationBank = bankType === 'variation';
+    const isAssistant = Boolean(window.currentUser && window.currentUser.role === 'assistant');
+
+    const curYear = yearSelect ? (parseInt(yearSelect.value, 10) || 2026) : 2026;
+    const curSeason = seasonSelect ? seasonSelect.value : '春';
+    const curSubject = subjectSelect ? subjectSelect.value : '';
+    const curGrade = gradeSelect ? gradeSelect.value : '';
+    const curTier = tierSelect ? tierSelect.value : '';
+    const curWeek = weekSelect ? weekSelect.value : '';
+
+    // 1. Scope tags
+    const scopeEl = document.getElementById('qb-preview-scope-tags');
+    if (scopeEl) {
+        const tags = [
+            getBankTypeLabel(bankType),
+            `${curYear}年${curSeason}季`,
+            curSubject,
+            curGrade,
+            curTier ? `${curTier}班` : '',
+            curWeek ? getTopicLabel(curWeek) : ''
+        ].filter(Boolean);
+        scopeEl.innerHTML = tags.map((t, i) =>
+            `<span class="qb-preview-scope-tag ${i === 0 ? 'primary' : ''}">${escapeHtml(t)}</span>`
+        ).join('');
+    }
+
+    // 2. Dirty banner
+    const dirtyBanner = document.getElementById('qb-preview-dirty-banner');
+    if (dirtyBanner) {
+        dirtyBanner.style.display = (isDirty && !isAssistant) ? 'flex' : 'none';
+    }
+
+    // 3. Build entries & stats
+    const entries = buildPreviewEntries();
+    const totalQuestions = currentQuestions.length;
+    const totalCards = entries.length;
+    const exReadyCount = entries.filter(e => !e.missingExercise).length;
+    const ansReadyCount = entries.filter(e => !e.missingAnswer).length;
+    const topicReadyCount = entries.filter(e => !e.missingTopic).length;
+    const videoReadyCount = entries.filter(e => Boolean(e.videoUrl)).length;
+
+    const issueCount = entries.filter(e => e.hasIssue).length;
+    const missingExCount = entries.filter(e => e.missingExercise).length;
+    const missingAnsCount = entries.filter(e => e.missingAnswer).length;
+    const missingTopicCount = entries.filter(e => e.missingTopic).length;
+
+    const statsEl = document.getElementById('qb-preview-stats-grid');
+    if (statsEl) {
+        const statCards = [
+            {
+                label: '题目总数',
+                value: `${totalQuestions} 题`,
+                sub: totalCards !== totalQuestions ? `合并为 ${totalCards} 张核对卡` : '按题号顺序排列',
+                tone: 'neutral'
+            },
+            {
+                label: '题干切片',
+                value: `${exReadyCount} / ${totalCards}`,
+                sub: missingExCount === 0 ? '已全部配置' : `缺 ${missingExCount} 项`,
+                tone: missingExCount === 0 ? 'ok' : 'warn'
+            },
+            {
+                label: '答案切片',
+                value: `${ansReadyCount} / ${totalCards}`,
+                sub: missingAnsCount === 0 ? '已全部配置' : `缺 ${missingAnsCount} 项`,
+                tone: missingAnsCount === 0 ? 'ok' : 'warn'
+            },
+            {
+                label: isPreviewBank ? '知识点（选填）' : '知识点',
+                value: `${topicReadyCount} / ${totalCards}`,
+                sub: missingTopicCount === 0 ? '已全部填写' : (isPreviewBank ? `${missingTopicCount} 项未填（可选）` : `缺 ${missingTopicCount} 项`),
+                tone: missingTopicCount === 0 ? 'ok' : (isPreviewBank ? 'neutral' : 'warn')
+            }
+        ];
+        if (!isPreviewBank && !isVariationBank) {
+            statCards.push({
+                label: '微课链接（选填）',
+                value: `${videoReadyCount} / ${totalCards}`,
+                sub: videoReadyCount > 0 ? '点击卡片链接可试看' : '未配置微课链接',
+                tone: 'neutral'
+            });
+        }
+        statsEl.innerHTML = statCards.map(s => `
+            <div class="qb-preview-stat-card tone-${s.tone}">
+                <div class="qb-preview-stat-label">${escapeHtml(s.label)}</div>
+                <div class="qb-preview-stat-value">${escapeHtml(s.value)}</div>
+                <div class="qb-preview-stat-sub">${escapeHtml(s.sub)}</div>
+            </div>
+        `).join('');
+    }
+
+    // 4. Filter pills
+    const filterEl = document.getElementById('qb-preview-filter-group');
+    if (filterEl) {
+        const filters = [
+            { key: 'all', label: '全部', count: totalCards, warn: false },
+            { key: 'issues', label: '存在缺失', count: issueCount, warn: issueCount > 0 },
+            { key: 'missing_exercise', label: '缺题干', count: missingExCount, warn: missingExCount > 0 },
+            { key: 'missing_answer', label: '缺答案', count: missingAnsCount, warn: missingAnsCount > 0 },
+            { key: 'missing_topic', label: isPreviewBank ? '未填知识点' : '缺知识点', count: missingTopicCount, warn: !isPreviewBank && missingTopicCount > 0 }
+        ];
+        filterEl.innerHTML = filters.map(f => `
+            <button type="button"
+                    class="qb-preview-filter-pill ${previewFilterMode === f.key ? 'active' : ''} ${f.warn ? 'has-warn' : ''}"
+                    data-action="preview-filter"
+                    data-arg="${f.key}">
+                <span>${escapeHtml(f.label)}</span>
+                <span class="qb-preview-filter-count">${f.count}</span>
+            </button>
+        `).join('');
+    }
+
+    // 5. Sync layout mode
+    setPreviewLayoutMode(previewLayoutMode);
+
+    // 6. Filter entries
+    const visibleEntries = entries.filter(e => {
+        if (previewFilterMode === 'issues') return e.hasIssue;
+        if (previewFilterMode === 'missing_exercise') return e.missingExercise;
+        if (previewFilterMode === 'missing_answer') return e.missingAnswer;
+        if (previewFilterMode === 'missing_topic') return e.missingTopic;
+        return true;
+    });
+
+    const listEl = document.getElementById('qb-preview-list');
+    if (!listEl) return;
+
+    if (visibleEntries.length === 0) {
+        listEl.innerHTML = `
+            <div class="qb-preview-empty glass-card">
+                <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                </svg>
+                <div class="qb-preview-empty-title">${totalCards === 0 ? '暂无题目可预览' : '当前筛选条件下无异常题目'}</div>
+                <div class="qb-preview-empty-sub">${totalCards === 0 ? '请返回编辑页添加或导入题目。' : '所有题目均符合当前检查项，点击「全部」可查看完整预览。'}</div>
+            </div>
+        `;
+        return;
+    }
+
+    const editLabel = isAssistant ? '去查看' : '去修改';
+
+    listEl.innerHTML = visibleEntries.map(entry => {
+        const q = entry.question;
+        const idx = entry.originalIndex;
+        const issueBadges = [];
+        if (entry.missingExercise) issueBadges.push('<span class="qb-preview-issue-tag danger">缺题干</span>');
+        if (entry.missingAnswer) issueBadges.push('<span class="qb-preview-issue-tag danger">缺答案</span>');
+        if (entry.missingTopic) {
+            issueBadges.push(entry.topicOptional
+                ? '<span class="qb-preview-issue-tag optional">未填知识点（选填）</span>'
+                : '<span class="qb-preview-issue-tag warn">缺知识点</span>');
+        }
+        if (issueBadges.length === 0) {
+            issueBadges.push('<span class="qb-preview-issue-tag ok">配置完整</span>');
+        }
+
+        // Topic HTML
+        let topicHtml = '';
+        if (entry.kind === 'big_group' && entry.hasDistinctSubTopics) {
+            topicHtml = `
+                <div class="qb-preview-subtopics">
+                    ${entry.memberTopics.map(m => `
+                        <div class="qb-preview-subtopic-item">
+                            <span class="qb-preview-subtopic-num">第 ${escapeHtml(String(m.id))} 题</span>
+                            <span class="qb-preview-subtopic-val">${m.topic ? escapeHtml(m.topic) : '<em class="qb-preview-muted">未填</em>'}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        } else {
+            topicHtml = entry.topicText
+                ? `<span class="qb-preview-meta-val">${escapeHtml(entry.topicText)}</span>`
+                : `<span class="qb-preview-muted">${entry.topicOptional ? '未填写（预习题库选填，错题本将按题号呈现）' : '尚未填写知识点'}</span>`;
+        }
+
+        // Variation parent preview buttons
+        const varParentHtml = (entry.kind === 'variation' && entry.parentNums.length > 0)
+            ? `<div class="qb-preview-meta-row">
+                    <span class="qb-preview-meta-label">关联原题</span>
+                    <div class="qb-preview-parent-btns">
+                        ${entry.parentNums.map(p => `
+                            <button type="button" class="var-hw-preview-btn compact" onclick="previewHomeworkQuestion(${p}, event)" title="查看课后巩固第 ${p} 题原题 PDF">
+                                原题 #${p}
+                            </button>
+                        `).join('')}
+                    </div>
+               </div>`
+            : '';
+
+        // Video row
+        const videoHtml = (!isPreviewBank && !isVariationBank && entry.videoUrl)
+            ? `<div class="qb-preview-meta-row">
+                    <span class="qb-preview-meta-label">微课讲解</span>
+                    <a class="qb-preview-video-link" href="${escapeHtml(entry.videoUrl)}" target="_blank" rel="noopener noreferrer">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                        </svg>
+                        <span>${escapeHtml(entry.videoUrl)}</span>
+                    </a>
+               </div>`
+            : '';
+
+        const renderSlotHtml = (kind) => {
+            const label = kind === 'answer' ? '答案解析' : '题目内容';
+            const pdfObj = kind === 'answer' ? q.answerPdf : q.exercisePdf;
+            const hasUrl = Boolean(pdfObj && pdfObj.url);
+            const isUploading = Boolean(pdfObj && pdfObj.status === 'uploading');
+            const isRegionCrop = Boolean(q.questionMeta && q.questionMeta.mode === 'region_crop');
+            const modeTag = isRegionCrop ? '<span class="qb-preview-slot-tag">整卷框选</span>' : '';
+
+            if (isUploading) {
+                return `
+                    <div class="qb-preview-pane qb-preview-pane-${kind}">
+                        <div class="qb-preview-pane-header">
+                            <span class="qb-preview-pane-title">${label}</span>
+                            ${modeTag}
+                        </div>
+                        <div class="qb-preview-slot-placeholder">
+                            <span>切片上传中，请稍候刷新预览...</span>
+                        </div>
+                    </div>
+                `;
+            }
+
+            if (!hasUrl) {
+                return `
+                    <div class="qb-preview-pane qb-preview-pane-${kind}">
+                        <div class="qb-preview-pane-header">
+                            <span class="qb-preview-pane-title">${label}</span>
+                        </div>
+                        <div class="qb-preview-slot-missing">
+                            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="12" y1="8" x2="12" y2="12"></line>
+                                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                            </svg>
+                            <span>暂未配置${label} PDF</span>
+                            ${isAssistant ? '' : `<button type="button" class="btn sm secondary" data-action="preview-jump-edit" data-arg="${idx}">去补充</button>`}
+                        </div>
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="qb-preview-pane qb-preview-pane-${kind}">
+                    <div class="qb-preview-pane-header">
+                        <span class="qb-preview-pane-title">${label}</span>
+                        <div class="qb-preview-pane-tools">
+                            ${modeTag}
+                            <button type="button" class="qb-preview-zoom-btn" data-action="preview-open-full-pdf" data-index="${idx}" data-kind="${kind}" title="弹窗放大查看完整 PDF">
+                                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="15 3 21 3 21 9"></polyline>
+                                    <polyline points="9 21 3 21 3 15"></polyline>
+                                    <line x1="21" y1="3" x2="14" y2="10"></line>
+                                    <line x1="3" y1="21" x2="10" y2="14"></line>
+                                </svg>
+                                放大查看
+                            </button>
+                        </div>
+                    </div>
+                    <div class="qb-preview-pdf-slot"
+                         data-index="${idx}"
+                         data-kind="${kind}"
+                         data-action="preview-open-full-pdf"
+                         title="点击放大查看${label}">
+                        <div class="qb-preview-slot-loading">
+                            <span class="qb-preview-spinner"></span>
+                            <span>正在渲染${label}切片...</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        };
+
+        return `
+            <article class="qb-preview-card glass-card ${entry.hasIssue ? 'has-issue' : ''}" data-preview-index="${idx}">
+                <div class="qb-preview-card-top">
+                    <div class="qb-preview-card-title-group">
+                        <span class="qb-preview-qnum">${escapeHtml(entry.title)}</span>
+                        ${entry.subBadge ? `<span class="qb-preview-subbadge">${escapeHtml(entry.subBadge)}</span>` : ''}
+                        <div class="qb-preview-issue-list">${issueBadges.join('')}</div>
+                    </div>
+                    <button type="button" class="btn sm secondary qb-preview-jump-btn" data-action="preview-jump-edit" data-arg="${idx}">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                        </svg>
+                        ${editLabel}
+                    </button>
+                </div>
+
+                <div class="qb-preview-meta-box">
+                    <div class="qb-preview-meta-row">
+                        <span class="qb-preview-meta-label">知识点</span>
+                        ${topicHtml}
+                    </div>
+                    ${varParentHtml}
+                    ${videoHtml}
+                </div>
+
+                <div class="qb-preview-media-grid">
+                    ${renderSlotHtml('exercise')}
+                    ${renderSlotHtml('answer')}
+                </div>
+            </article>
+        `;
+    }).join('');
+
+    // 7. Attach lazy IntersectionObserver for PDF canvas rendering
+    const slots = Array.from(listEl.querySelectorAll('.qb-preview-pdf-slot'));
+    if (slots.length === 0) return;
+
+    if ('IntersectionObserver' in window) {
+        previewObserver = new IntersectionObserver((entriesList) => {
+            entriesList.forEach(ioEntry => {
+                if (!ioEntry.isIntersecting) return;
+                const slot = ioEntry.target;
+                if (previewObserver) previewObserver.unobserve(slot);
+                renderPreviewPdfSlot(slot, sessionId);
+            });
+        }, { rootMargin: '320px 0px' });
+        slots.forEach(s => previewObserver.observe(s));
+    } else {
+        slots.forEach(s => renderPreviewPdfSlot(s, sessionId));
+    }
+}
+
+async function renderPreviewPdfSlot(slotEl, sessionId) {
+    if (!slotEl || slotEl.dataset.rendered === '1') return;
+    slotEl.dataset.rendered = '1';
+
+    const idx = parseInt(slotEl.dataset.index, 10);
+    const kind = slotEl.dataset.kind === 'answer' ? 'answer' : 'exercise';
+    const q = currentQuestions[idx];
+    if (!q) return;
+
+    const pdfObj = kind === 'answer' ? q.answerPdf : q.exercisePdf;
+    if (!pdfObj || !pdfObj.url) return;
+
+    try {
+        const pdf = await getPreviewPdfDoc(pdfObj.url);
+        if (sessionId !== previewRenderSessionId || !slotEl.isConnected) return;
+
+        const isRegionCrop = Boolean(q.questionMeta && q.questionMeta.mode === 'region_crop');
+        const regions = isRegionCrop
+            ? (kind === 'answer' ? q.questionMeta.answerRegions : q.questionMeta.regions)
+            : null;
+
+        const frag = document.createDocumentFragment();
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+        if (isRegionCrop && Array.isArray(regions) && regions.length > 0) {
+            const sorted = [...regions].sort((a, b) => (a.pageOffset || 0) - (b.pageOffset || 0) || (a.y || 0) - (b.y || 0));
+            for (const rg of sorted) {
+                if (sessionId !== previewRenderSessionId) return;
+                const pageNum = Math.min(pdf.numPages, Math.max(1, (parseInt(rg.pageOffset, 10) || 0) + 1));
+                const page = await pdf.getPage(pageNum);
+                const baseVp = page.getViewport({ scale: 1 });
+                const scale = Math.min(2.2, Math.max(1.35, 860 / Math.max(1, baseVp.width)));
+                const viewport = page.getViewport({ scale: scale * dpr });
+
+                const xFrac = Math.max(0, Math.min(1, Number(rg.x ?? 0)));
+                const yFrac = Math.max(0, Math.min(1, Number(rg.y ?? 0)));
+                const wFrac = Math.max(0.05, Math.min(1 - xFrac, Number(rg.w ?? 1)));
+                const hFrac = Math.max(0.02, Math.min(1 - yFrac, Number(rg.h ?? 1)));
+
+                const padPx = Math.round(4 * dpr);
+                const cropX = Math.max(0, Math.floor(xFrac * viewport.width));
+                const cropY = Math.max(0, Math.floor(yFrac * viewport.height) - padPx);
+                const cropW = Math.max(32, Math.min(viewport.width - cropX, Math.ceil(wFrac * viewport.width)));
+                const cropH = Math.max(24, Math.min(viewport.height - cropY, Math.ceil(hFrac * viewport.height) + padPx * 2));
+
+                const canvas = document.createElement('canvas');
+                canvas.width = cropW;
+                canvas.height = cropH;
+                canvas.className = 'qb-preview-canvas';
+                const ctx = canvas.getContext('2d', { alpha: false });
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, cropW, cropH);
+
+                await page.render({
+                    canvasContext: ctx,
+                    viewport,
+                    transform: [1, 0, 0, 1, -cropX, -cropY]
+                }).promise;
+
+                frag.appendChild(canvas);
+            }
+        } else {
+            for (let p = 1; p <= pdf.numPages; p++) {
+                if (sessionId !== previewRenderSessionId) return;
+                const page = await pdf.getPage(p);
+                const baseVp = page.getViewport({ scale: 1 });
+                const scale = Math.min(2.0, Math.max(1.25, 840 / Math.max(1, baseVp.width)));
+                const viewport = page.getViewport({ scale: scale * dpr });
+
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.ceil(viewport.width);
+                canvas.height = Math.ceil(viewport.height);
+                canvas.className = 'qb-preview-canvas';
+                const ctx = canvas.getContext('2d', { alpha: false });
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                await page.render({ canvasContext: ctx, viewport }).promise;
+                frag.appendChild(canvas);
+            }
+        }
+
+        if (sessionId !== previewRenderSessionId || !slotEl.isConnected) return;
+        slotEl.innerHTML = '';
+        slotEl.classList.add('is-ready');
+        slotEl.appendChild(frag);
+    } catch (err) {
+        console.warn('Preview PDF render failed:', err);
+        if (sessionId !== previewRenderSessionId || !slotEl.isConnected) return;
+        slotEl.innerHTML = `
+            <div class="qb-preview-slot-error">
+                <span>切片渲染失败，点击查看原 PDF</span>
+            </div>
+        `;
+    }
+}
+
+function jumpToEditQuestion(originalIndex) {
+    const idx = parseInt(originalIndex, 10);
+    if (Number.isNaN(idx)) {
+        goToStep(4);
+        return;
+    }
+
+    // 若 Step 4 存在搜索词，先清空确保目标题目可见
+    const searchEl = document.getElementById('qb-search-input');
+    if (questionSearchFilter) {
+        questionSearchFilter = '';
+        if (searchEl) searchEl.value = '';
+        renderQuestionList();
+    }
+
+    goToStep(4);
+
+    setTimeout(() => {
+        let targetEl = document.querySelector(`#question-items .question-item[data-index="${idx}"]`);
+        if (!targetEl) {
+            targetEl = Array.from(document.querySelectorAll('#question-items .big-question-group-card')).find(el => {
+                const indices = (el.dataset.groupIndices || '').split(',');
+                return indices.includes(String(idx));
+            });
+        }
+        if (targetEl) {
+            targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            targetEl.classList.remove('qb-jump-highlight');
+            void targetEl.offsetWidth;
+            targetEl.classList.add('qb-jump-highlight');
+            setTimeout(() => {
+                targetEl.classList.remove('qb-jump-highlight');
+            }, 1900);
+        }
+    }, 120);
+}
+
+window.openPreviewStep = openPreviewStep;
+window.renderQuestionBankPreview = renderQuestionBankPreview;
+window.jumpToEditQuestion = jumpToEditQuestion;
+window.previewSavedItem = previewSavedItem;
+
 window.triggerPdfUpload = triggerPdfUpload;
 window.openPdfManageDialog = openPdfManageDialog;
 window.removePdf = removePdf;
@@ -7674,6 +8353,16 @@ window.addEventListener('resize', () => {
         'merge-variations': () => mergeAllSameTopicVariations(),
         'add-question': () => addQuestion(),
         'clear-all-questions': () => clearAllQuestions(),
+        'open-preview-step': () => openPreviewStep(),
+        'preview-filter': (_el, arg) => setPreviewFilterMode(arg),
+        'preview-layout': (_el, arg) => setPreviewLayoutMode(arg),
+        'preview-jump-edit': (_el, arg) => jumpToEditQuestion(parseInt(arg, 10)),
+        'preview-open-full-pdf': (el) => {
+            const idx = parseInt(el.dataset.index, 10);
+            const kind = el.dataset.kind === 'answer' ? 'answer' : 'exercise';
+            if (!Number.isNaN(idx)) previewRegionCropQuestion(idx, kind);
+        },
+        'preview-save-now': () => saveQuestions(),
         'open-tier-sync': () => openTierSyncModal(),
         'open-current-receipt': () => openCurrentReceiptModal(),
         'close-receipt-modal': () => closeReceiptModal(),
