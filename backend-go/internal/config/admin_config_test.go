@@ -1,8 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -78,5 +80,59 @@ func TestLoadAdminFallback(t *testing.T) {
 	creds2 := loader.LoadAdminFallback()
 	if creds2.Username != "legacy" || len(creds2.PasswordHashes) != 2 || creds2.PasswordHashes[0] != "h1" || creds2.PasswordHashes[1] != "h2" {
 		t.Fatalf("unexpected array() creds: %+v", creds2)
+	}
+}
+
+func TestConfigFlockAndSnapshotRestore(t *testing.T) {
+	dir := t.TempDir()
+
+	// Concurrent writes across separate Loader instances pointing to the same root
+	var wg sync.WaitGroup
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			l := NewLoader(dir, "")
+			if err := l.SaveAISecrets(map[string]any{"dashscopeApiKey": fmt.Sprintf("sk-concurrent-%02d", idx)}); err != nil {
+				t.Errorf("concurrent SaveAISecrets(%d): %v", idx, err)
+			}
+			if err := l.SaveConfigJSON(map[string]any{"semesterYear": 2026 + idx}); err != nil {
+				t.Errorf("concurrent SaveConfigJSON(%d): %v", idx, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	loader := NewLoader(dir, "")
+	if _, err := os.Stat(loader.ConfigWriteLockPath()); err != nil {
+		t.Fatalf("expected .config_write.lock file to exist: %v", err)
+	}
+	loaded := loader.Load()
+	if loaded.VisionAPIKey() == "" || AsPHPInt(loaded.Raw["semesterYear"]) < 2026 {
+		t.Fatalf("unexpected corrupted state after concurrent writes: %+v", loaded)
+	}
+
+	// Snapshot restore: existing file restored, newly created file removed
+	rel, err := loader.AcquireConfigFlock()
+	if err != nil {
+		t.Fatalf("AcquireConfigFlock: %v", err)
+	}
+	origBytes := []byte(`{"dashscopeApiKey":"sk-original-1234"}`)
+	if err := loader.RestoreAISecretsSnapshotLocked(true, origBytes); err != nil {
+		rel()
+		t.Fatalf("RestoreAISecretsSnapshotLocked(true): %v", err)
+	}
+	got, _ := os.ReadFile(loader.AISecretsPath())
+	if string(got) != string(origBytes) {
+		rel()
+		t.Fatalf("restored bytes = %q, want %q", string(got), string(origBytes))
+	}
+	if err := loader.RestoreAISecretsSnapshotLocked(false, nil); err != nil {
+		rel()
+		t.Fatalf("RestoreAISecretsSnapshotLocked(false): %v", err)
+	}
+	rel()
+	if _, err := os.Stat(loader.AISecretsPath()); !os.IsNotExist(err) {
+		t.Fatalf("expected .ai_secrets.json to be removed when existed=false, err=%v", err)
 	}
 }

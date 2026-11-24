@@ -1,7 +1,7 @@
 /**
  * ============================================================================
  * 极方管理后台 (Admin Console) 前端运行脚本 - 生产环境合并包
- * 自动生成时间: 2026-11-24 01:40:43
+ * 自动生成时间: 2026-11-24 12:35:11
  * 源码模块目录: js/admin/
  * 请勿直接手动修改此文件，开发时请修改 js/admin/ 中的子模块并执行本打包脚本。
  * ============================================================================
@@ -5956,6 +5956,37 @@
         }
         window.promptResetTeacherPwd = promptResetTeacherPwd;
 
+        async function sendDbDeleteWithCascadeConfirm(table, ids) {
+            const postDelete = async (forceCascade) => {
+                const payload = { table, ids };
+                if (forceCascade) payload.force_cascade = true;
+                const res = await fetch(`${API_BASE}?action=db_delete`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                let json = {};
+                try {
+                    json = await res.json();
+                } catch (e) {
+                    json = {};
+                }
+                return { status: res.status, json };
+            };
+
+            let result = await postDelete(false);
+            if (!result.json.success && result.status === 409) {
+                const cascadeConfirmed = await showConfirm(
+                    '级联删除确认',
+                    `${result.json.error || '所选记录存在关联数据，继续删除将级联清空所有关联记录。'}\n\n确定要强制级联删除吗？此操作无法撤销。`,
+                    true
+                );
+                if (!cascadeConfirmed) return { cancelled: true, json: result.json };
+                result = await postDelete(true);
+            }
+            return { cancelled: false, json: result.json };
+        }
+
         async function deleteDbRecord(id) {
             const confirmed = await showConfirm(
                 '永久删除确认',
@@ -5965,20 +5996,19 @@
             if (!confirmed) return;
 
             try {
-                const res = await fetch(`${API_BASE}?action=db_delete`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        table: dbCurrentTable,
-                        ids: [id]
-                    })
-                });
-                const json = await res.json();
+                const { cancelled, json } = await sendDbDeleteWithCascadeConfirm(dbCurrentTable, [id]);
+                if (cancelled) return;
                 if (json.success) {
                     dbSelectedIds.delete(id);
                     updateDbBatchDeleteBtn();
                     showToast(`第 ${id} 号数据记录已成功删除`, 'success');
+                    if (dbCurrentTable === 'class_batches') {
+                        await loadDbBatchOptions();
+                    }
                     loadDbData(dbCurrentPage);
+                    if (typeof loadDbTables === 'function') {
+                        loadDbTables();
+                    }
                 } else {
                     showToast(json.error || '删除失败', 'error');
                 }
@@ -5999,20 +6029,19 @@
             if (!confirmed) return;
 
             try {
-                const res = await fetch(`${API_BASE}?action=db_delete`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        table: dbCurrentTable,
-                        ids: Array.from(dbSelectedIds)
-                    })
-                });
-                const json = await res.json();
+                const { cancelled, json } = await sendDbDeleteWithCascadeConfirm(dbCurrentTable, Array.from(dbSelectedIds));
+                if (cancelled) return;
                 if (json.success) {
                     dbSelectedIds.clear();
                     updateDbBatchDeleteBtn();
                     showToast(`已批量清理 ${count} 条记录`, 'success');
+                    if (dbCurrentTable === 'class_batches') {
+                        await loadDbBatchOptions();
+                    }
                     loadDbData(dbCurrentPage);
+                    if (typeof loadDbTables === 'function') {
+                        loadDbTables();
+                    }
                 } else {
                     showToast(json.error || '批量删除失败', 'error');
                 }

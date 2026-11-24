@@ -877,12 +877,11 @@ func (r *MySQLRepository) CreateRecord(ctx context.Context, table string, input 
 		if bid := config.AsPHPInt(data["batch_id"]); bid > 0 {
 			_ = r.db.QueryRowContext(ctx, "SELECT grade, subject FROM class_batches WHERE id = ? LIMIT 1", bid).Scan(&sGrade, &sSubject)
 		}
-		_, hasSID := data["student_id"]
-		_, hasSName := data["student_name"]
-		if hasSID && hasSName && strings.TrimSpace(config.AsPHPString(data["student_key"])) == "" {
+		sNameVal := strings.TrimSpace(config.AsPHPString(data["student_name"]))
+		if _, hasSName := data["student_name"]; hasSName && sNameVal != "" && strings.TrimSpace(config.AsPHPString(data["student_key"])) == "" {
 			data["student_key"] = retestkeys.BuildStudentKey(
 				config.AsPHPString(data["student_id"]),
-				config.AsPHPString(data["student_name"]),
+				sNameVal,
 				sGrade.String,
 				sSubject.String,
 			)
@@ -945,6 +944,9 @@ func (r *MySQLRepository) CreateRecord(ctx context.Context, table string, input 
 		}
 		if col.Name == "created_at" || col.Name == "updated_at" {
 			if v, ok := data[col.Name]; ok && v != nil {
+				if s, isStr := v.(string); isStr && strings.TrimSpace(s) == "" {
+					continue
+				}
 				fields = append(fields, fmt.Sprintf("`%s`", col.Name))
 				phs = append(phs, "?")
 				values = append(values, marshalIfComposite(v))
@@ -952,6 +954,15 @@ func (r *MySQLRepository) CreateRecord(ctx context.Context, table string, input 
 			continue
 		}
 		if v, exists := data[col.Name]; exists {
+			if s, isStr := v.(string); isStr && strings.TrimSpace(s) == "" && isNonTextStrictColumn(col.Type) {
+				if col.Null {
+					v = nil
+				} else if col.Default != nil {
+					continue
+				} else {
+					return 0, NewHTTPError(400, fmt.Sprintf("字段 %s 不能为空", col.Name), nil)
+				}
+			}
 			fields = append(fields, fmt.Sprintf("`%s`", col.Name))
 			phs = append(phs, "?")
 			values = append(values, marshalIfComposite(v))
@@ -964,7 +975,7 @@ func (r *MySQLRepository) CreateRecord(ctx context.Context, table string, input 
 	insertSQL := fmt.Sprintf("INSERT INTO `%s` (%s) VALUES (%s)", validTbl, strings.Join(fields, ", "), strings.Join(phs, ", "))
 
 	attest := r.getAttestStore()
-	if validTbl == "qbank_questions" && attest != nil {
+	if attest != nil && (validTbl == "qbank_questions" || validTbl == "qbank_weeks") {
 		tx, txErr := r.db.BeginTx(ctx, nil)
 		if txErr != nil {
 			return 0, NewHTTPError(500, "新增记录失败: "+txErr.Error(), nil)
@@ -976,13 +987,16 @@ func (r *MySQLRepository) CreateRecord(ctx context.Context, table string, input 
 			return 0, NewHTTPError(500, "新增记录失败: "+err.Error(), nil)
 		}
 		newID, _ := res.LastInsertId()
-		qid := int64(config.AsPHPInt(data["qbank_id"]))
-		if qid > 0 {
-			if _, err := tx.ExecContext(ctx,
-				"UPDATE `qbank_weeks` SET `question_count` = (SELECT COUNT(*) FROM `qbank_questions` WHERE `qbank_id` = ?), `updated_at` = NOW() WHERE `id` = ?",
-				qid, qid,
-			); err != nil {
-				return 0, NewHTTPError(500, "更新题数失败: "+err.Error(), nil)
+		qid := newID
+		if validTbl == "qbank_questions" {
+			qid = int64(config.AsPHPInt(data["qbank_id"]))
+			if qid > 0 {
+				if _, err := tx.ExecContext(ctx,
+					"UPDATE `qbank_weeks` SET `question_count` = (SELECT COUNT(*) FROM `qbank_questions` WHERE `qbank_id` = ?), `updated_at` = NOW() WHERE `id` = ?",
+					qid, qid,
+				); err != nil {
+					return 0, NewHTTPError(500, "更新题数失败: "+err.Error(), nil)
+				}
 			}
 		}
 		fallbackScope := scopeFromDataMap(data)
@@ -1175,12 +1189,24 @@ func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, in
 			continue
 		}
 		if col.Name == "updated_at" {
-			if v, exists := data["updated_at"]; !exists || v == nil {
+			v, exists := data["updated_at"]
+			if !exists || v == nil {
+				hasAutoUpdatedAt = true
+				continue
+			}
+			if s, isStr := v.(string); isStr && strings.TrimSpace(s) == "" {
 				hasAutoUpdatedAt = true
 				continue
 			}
 		}
 		if v, exists := data[col.Name]; exists {
+			if s, isStr := v.(string); isStr && strings.TrimSpace(s) == "" && isNonTextStrictColumn(col.Type) {
+				if col.Null {
+					v = nil
+				} else {
+					return 0, nil, NewHTTPError(400, fmt.Sprintf("字段 %s 不能为空", col.Name), nil)
+				}
+			}
 			hasExplicitField = true
 			setParts = append(setParts, fmt.Sprintf("`%s` = ?", col.Name))
 			values = append(values, marshalIfComposite(v))
@@ -1406,19 +1432,37 @@ func (r *MySQLRepository) DeleteRecords(ctx context.Context, table string, ids [
 	if err != nil {
 		return 0, err
 	}
-	_, _, pk, err := r.getTableColumns(ctx, validTbl)
+	_, colMap, pk, err := r.getTableColumns(ctx, validTbl)
 	if err != nil {
 		return 0, err
 	}
-	if len(ids) == 0 {
+	pkCol := colMap[pk]
+	isAutoIncPK := strings.Contains(strings.ToLower(pkCol.Extra), "auto_increment")
+	filteredIDs := make([]string, 0, len(ids))
+	seenID := make(map[string]struct{}, len(ids))
+	for _, rawID := range ids {
+		s := strings.TrimSpace(rawID)
+		if s == "" {
+			continue
+		}
+		if isAutoIncPK && s == "0" {
+			continue
+		}
+		if _, dup := seenID[s]; dup {
+			continue
+		}
+		seenID[s] = struct{}{}
+		filteredIDs = append(filteredIDs, s)
+	}
+	if len(filteredIDs) == 0 {
 		return 0, NewHTTPError(400, "请指定要删除的记录 ID", nil)
 	}
 
-	args := make([]any, len(ids))
-	for i, v := range ids {
+	args := make([]any, len(filteredIDs))
+	for i, v := range filteredIDs {
 		args[i] = v
 	}
-	inPH := placeholders(len(ids))
+	inPH := placeholders(len(filteredIDs))
 
 	if validTbl == "admin_users" {
 		tx, txErr := r.db.BeginTx(ctx, nil)
@@ -1478,17 +1522,57 @@ func (r *MySQLRepository) DeleteRecords(ctx context.Context, table string, ids [
 	}
 
 	if validTbl == "class_batches" {
-		var relatedCount int
-		if err := r.db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM `student_records` WHERE `batch_id` IN (%s)", inPH), args...).Scan(&relatedCount); err != nil {
+		tx, txErr := r.db.BeginTx(ctx, nil)
+		if txErr != nil {
+			return 0, NewHTTPError(500, "删除失败: "+txErr.Error(), nil)
+		}
+		defer func() { _ = tx.Rollback() }()
+
+		lockRows, lockErr := tx.QueryContext(ctx, fmt.Sprintf("SELECT `%s` FROM `class_batches` WHERE `%s` IN (%s) FOR UPDATE", pk, pk, inPH), args...)
+		if lockErr != nil {
+			return 0, NewHTTPError(500, "锁定班级期次失败: "+lockErr.Error(), nil)
+		}
+		_ = lockRows.Close()
+
+		var relatedRecords, relatedGenBatches, relatedHistory int
+		if err := tx.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM `student_records` WHERE `batch_id` IN (%s)", inPH), args...).Scan(&relatedRecords); err != nil {
 			return 0, NewHTTPError(500, "校验关联学情记录失败: "+err.Error(), nil)
 		}
-		if relatedCount > 0 && !forceCascade {
+		if err := tx.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM `generation_batches` WHERE `class_id` IN (%s)", inPH), args...).Scan(&relatedGenBatches); err != nil {
+			return 0, NewHTTPError(500, "校验关联生成批次失败: "+err.Error(), nil)
+		}
+		if err := tx.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM `student_record_history` WHERE `batch_id` IN (%s)", inPH), args...).Scan(&relatedHistory); err != nil {
+			return 0, NewHTTPError(500, "校验关联历史版本失败: "+err.Error(), nil)
+		}
+		if !forceCascade && (relatedRecords > 0 || relatedGenBatches > 0 || relatedHistory > 0) {
 			return 0, NewHTTPError(
 				409,
-				fmt.Sprintf("所选班级期次关联了 %d 条学生学情记录，直接删除将触发外键级联清空。请先清理关联学情，或显式传入 force_cascade=true 确认级联删除", relatedCount),
-				map[string]any{"related_student_records": relatedCount},
+				fmt.Sprintf("所选班级期次关联了 %d 条学生学情记录、%d 条生成批次、%d 条历史版本，直接删除将级联清空。请先清理关联数据，或显式传入 force_cascade=true 确认级联删除", relatedRecords, relatedGenBatches, relatedHistory),
+				map[string]any{
+					"related_student_records":        relatedRecords,
+					"related_generation_batches":     relatedGenBatches,
+					"related_student_record_history": relatedHistory,
+				},
 			)
 		}
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM `generation_batches` WHERE `class_id` IN (%s)", inPH), args...); err != nil {
+			return 0, NewHTTPError(500, "清理关联生成批次失败: "+err.Error(), nil)
+		}
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM `student_record_history` WHERE `batch_id` IN (%s)", inPH), args...); err != nil {
+			return 0, NewHTTPError(500, "清理关联历史版本失败: "+err.Error(), nil)
+		}
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM `student_records` WHERE `batch_id` IN (%s)", inPH), args...); err != nil {
+			return 0, NewHTTPError(500, "清理关联学情记录失败: "+err.Error(), nil)
+		}
+		res, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM `%s` WHERE `%s` IN (%s)", validTbl, pk, inPH), args...)
+		if err != nil {
+			return 0, NewHTTPError(500, "删除失败: "+err.Error(), nil)
+		}
+		deleted, _ := res.RowsAffected()
+		if err := tx.Commit(); err != nil {
+			return 0, NewHTTPError(500, "删除失败: "+err.Error(), nil)
+		}
+		return deleted, nil
 	}
 
 	attest := r.getAttestStore()
@@ -1500,9 +1584,9 @@ func (r *MySQLRepository) DeleteRecords(ctx context.Context, table string, ids [
 		}
 		defer func() { _ = tx.Rollback() }()
 
-		var targets []qbankWeekTarget
-		if attest != nil {
-			targets = loadQBankWeekTargetsTx(ctx, tx, inPH, args)
+		targets, lockErr := loadQBankWeekTargetsTx(ctx, tx, inPH, args)
+		if lockErr != nil {
+			return 0, NewHTTPError(500, "删除失败", nil)
 		}
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM `qbank_questions` WHERE `qbank_id` IN (%s)", inPH), args...); err != nil {
 			return 0, NewHTTPError(500, "删除失败", nil)
@@ -1626,6 +1710,28 @@ func (r *MySQLRepository) ResetTeacherPassword(ctx context.Context, userID int, 
 	}, nil
 }
 
+func columnBaseType(colType string) string {
+	t := strings.ToLower(strings.TrimSpace(colType))
+	if idx := strings.IndexByte(t, '('); idx >= 0 {
+		t = t[:idx]
+	}
+	if fields := strings.Fields(t); len(fields) > 0 {
+		return fields[0]
+	}
+	return t
+}
+
+func isNonTextStrictColumn(colType string) bool {
+	switch columnBaseType(colType) {
+	case "int", "integer", "bigint", "smallint", "tinyint", "mediumint",
+		"decimal", "numeric", "float", "double", "real",
+		"json", "date", "datetime", "timestamp", "year":
+		return true
+	default:
+		return false
+	}
+}
+
 func marshalIfComposite(v any) any {
 	switch x := v.(type) {
 	case json.Number:
@@ -1697,14 +1803,14 @@ func loadQBankWeekScopeTx(ctx context.Context, runner sqlTxRunner, qbankID int64
 	return sc, isValidQBankScope(sc)
 }
 
-func loadQBankWeekTargetsTx(ctx context.Context, runner sqlTxRunner, inPH string, args []any) []qbankWeekTarget {
+func loadQBankWeekTargetsTx(ctx context.Context, runner sqlTxRunner, inPH string, args []any) ([]qbankWeekTarget, error) {
 	rows, err := runner.QueryContext(
 		ctx,
-		fmt.Sprintf("SELECT `id`, `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` IN (%s)", inPH),
+		fmt.Sprintf("SELECT `id`, `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` IN (%s) FOR UPDATE", inPH),
 		args...,
 	)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -1728,7 +1834,7 @@ func loadQBankWeekTargetsTx(ctx context.Context, runner sqlTxRunner, inPH string
 			}
 		}
 	}
-	return out
+	return out, rows.Err()
 }
 
 func loadQBankQuestionScopeByRowIDTx(ctx context.Context, runner sqlTxRunner, rowID string) (int64, qbankattest.Scope, bool) {

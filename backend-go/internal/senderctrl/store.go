@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"feedback-api/internal/config"
@@ -145,6 +147,72 @@ func SanitizeSlug(slug string) string {
 		return clean[:64]
 	}
 	return clean
+}
+
+var (
+	senderCtrlLockMapMu sync.Mutex
+	senderCtrlLockMap   = make(map[string]*sync.Mutex)
+)
+
+func senderCtrlPathMutex(lockPath string) *sync.Mutex {
+	clean := filepath.Clean(lockPath)
+	if abs, err := filepath.Abs(clean); err == nil {
+		clean = abs
+	}
+	senderCtrlLockMapMu.Lock()
+	defer senderCtrlLockMapMu.Unlock()
+	m, ok := senderCtrlLockMap[clean]
+	if !ok {
+		m = &sync.Mutex{}
+		senderCtrlLockMap[clean] = m
+	}
+	return m
+}
+
+func flockRetry(fd int, how int) error {
+	for {
+		err := syscall.Flock(fd, how)
+		if !errors.Is(err, syscall.EINTR) {
+			return err
+		}
+	}
+}
+
+func (s *Store) lockPath() string {
+	return filepath.Join(s.feedbackRoot, "data", "sender_control", ".sender_ctrl.lock")
+}
+
+func (s *Store) acquireCrossProcessLock(shared bool) (func(), error) {
+	if s == nil || strings.TrimSpace(s.feedbackRoot) == "" {
+		return nil, errors.New("feedback root is empty")
+	}
+	lp := s.lockPath()
+	pm := senderCtrlPathMutex(lp)
+	pm.Lock()
+
+	if err := os.MkdirAll(filepath.Dir(lp), 0o755); err != nil {
+		pm.Unlock()
+		return nil, err
+	}
+	lf, err := os.OpenFile(lp, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		pm.Unlock()
+		return nil, err
+	}
+	how := syscall.LOCK_EX
+	if shared {
+		how = syscall.LOCK_SH
+	}
+	if err := flockRetry(int(lf.Fd()), how); err != nil {
+		_ = lf.Close()
+		pm.Unlock()
+		return nil, err
+	}
+	return func() {
+		_ = flockRetry(int(lf.Fd()), syscall.LOCK_UN)
+		_ = lf.Close()
+		pm.Unlock()
+	}, nil
 }
 
 func (s *Store) storageDir() string {
@@ -379,6 +447,9 @@ func (s *Store) saveLocked(st ClientState) error {
 func (s *Store) LoadClientState(slug string) ClientState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if rel, err := s.acquireCrossProcessLock(true); err == nil {
+		defer rel()
+	}
 	return s.loadLocked(slug)
 }
 
@@ -386,6 +457,11 @@ func (s *Store) LoadClientState(slug string) ClientState {
 func (s *Store) SetOverrides(slug string, overrides map[string]any, note string) (ClientState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	rel, err := s.acquireCrossProcessLock(false)
+	if err != nil {
+		return ClientState{}, err
+	}
+	defer rel()
 	st := s.loadLocked(slug)
 	st.Overrides = NormalizeOverrides(overrides)
 	st.Note = textutil.TruncateRunes(strings.TrimSpace(note), 200)
@@ -425,6 +501,11 @@ func (s *Store) EnqueueCommand(slug, cmdType string, params map[string]any, oper
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	rel, err := s.acquireCrossProcessLock(false)
+	if err != nil {
+		return nil, err
+	}
+	defer rel()
 	st := s.loadLocked(slug)
 	filtered := make([]RemoteCommand, 0, len(st.Commands)+1)
 	for _, existing := range st.Commands {
@@ -481,6 +562,11 @@ func (s *Store) AcknowledgeCommands(slug string, acks []any) (int, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	rel, err := s.acquireCrossProcessLock(false)
+	if err != nil {
+		return 0, err
+	}
+	defer rel()
 	st := s.loadLocked(slug)
 	nowStr := s.now().Format("2006-01-02 15:04:05")
 	changed := 0
@@ -518,6 +604,7 @@ func (s *Store) BuildEffectiveControl(slug string, markDelivered bool) map[strin
 	effective := global
 
 	s.mu.Lock()
+	rel, lockErr := s.acquireCrossProcessLock(false)
 	st := s.loadLocked(slug)
 	overrides := st.Overrides
 
@@ -609,8 +696,11 @@ func (s *Store) BuildEffectiveControl(slug string, markDelivered bool) map[strin
 			"created_by": cmd.CreatedBy,
 		})
 	}
-	if dirty {
+	if dirty && lockErr == nil {
 		_ = s.saveLocked(st)
+	}
+	if rel != nil {
+		rel()
 	}
 	s.mu.Unlock()
 

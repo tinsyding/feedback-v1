@@ -1,9 +1,11 @@
 package senderctrl
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -134,5 +136,41 @@ func TestLoadPHPLegacyEmptyArrayJSON(t *testing.T) {
 	}
 	if loaded.Commands[0].Params == nil {
 		t.Fatal("expected Params initialized to empty map, got nil")
+	}
+}
+
+func TestSenderCtrlFlockSerializesConcurrentStores(t *testing.T) {
+	root := t.TempDir()
+	loader := config.NewLoader(root, "")
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			st := NewStore(root, loader)
+			if _, err := st.SetOverrides("pc-concurrent", map[string]any{
+				"verifyMode": "api",
+			}, fmt.Sprintf("note-%d", idx)); err != nil {
+				t.Errorf("SetOverrides(%d): %v", idx, err)
+			}
+			if _, err := st.EnqueueCommand("pc-concurrent", "sync_logs", map[string]any{"idx": idx}, "admin"); err != nil {
+				t.Errorf("EnqueueCommand(%d): %v", idx, err)
+			}
+			eff := st.BuildEffectiveControl("pc-concurrent", true)
+			if eff["client_slug"] != "pc-concurrent" {
+				t.Errorf("unexpected client_slug: %v", eff["client_slug"])
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	lockFile := filepath.Join(root, "data", "sender_control", ".sender_ctrl.lock")
+	if _, err := os.Stat(lockFile); err != nil {
+		t.Fatalf("expected .sender_ctrl.lock to exist: %v", err)
+	}
+	final := NewStore(root, loader).LoadClientState("pc-concurrent")
+	if final.Overrides["verifyMode"] != "api" || len(final.Commands) != 1 {
+		t.Fatalf("unexpected final state after concurrent writes: %+v", final)
 	}
 }

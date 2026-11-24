@@ -4,10 +4,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 
 	"feedback-api/internal/tz"
 )
@@ -48,9 +51,83 @@ func (l *Loader) AISecretsPath() string {
 	return filepath.Join(l.FeedbackRoot, "data", ".ai_secrets.json")
 }
 
-// SaveAISecrets atomically writes <FeedbackRoot>/data/.ai_secrets.json with 0600 permissions.
+var (
+	configLockMapMu sync.Mutex
+	configLockMap   = make(map[string]*sync.Mutex)
+)
+
+func configPathMutex(lockPath string) *sync.Mutex {
+	clean := filepath.Clean(lockPath)
+	if abs, err := filepath.Abs(clean); err == nil {
+		clean = abs
+	}
+	configLockMapMu.Lock()
+	defer configLockMapMu.Unlock()
+	m, ok := configLockMap[clean]
+	if !ok {
+		m = &sync.Mutex{}
+		configLockMap[clean] = m
+	}
+	return m
+}
+
+func flockRetry(fd int, how int) error {
+	for {
+		err := syscall.Flock(fd, how)
+		if !errors.Is(err, syscall.EINTR) {
+			return err
+		}
+	}
+}
+
+// ConfigWriteLockPath returns the advisory file lock path for config/secrets writes.
+func (l *Loader) ConfigWriteLockPath() string {
+	return filepath.Join(l.FeedbackRoot, "data", ".config_write.lock")
+}
+
+// AcquireConfigFlock acquires an in-process per-path mutex and a cross-process advisory flock on <FeedbackRoot>/data/.config_write.lock.
+func (l *Loader) AcquireConfigFlock() (func(), error) {
+	if l == nil || strings.TrimSpace(l.FeedbackRoot) == "" {
+		return nil, fmt.Errorf("feedback root is empty")
+	}
+	lockPath := l.ConfigWriteLockPath()
+	pm := configPathMutex(lockPath)
+	pm.Lock()
+
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		pm.Unlock()
+		return nil, err
+	}
+	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		pm.Unlock()
+		return nil, err
+	}
+	if err := flockRetry(int(lf.Fd()), syscall.LOCK_EX); err != nil {
+		_ = lf.Close()
+		pm.Unlock()
+		return nil, err
+	}
+	return func() {
+		_ = flockRetry(int(lf.Fd()), syscall.LOCK_UN)
+		_ = lf.Close()
+		pm.Unlock()
+	}, nil
+}
+
+// SaveAISecrets atomically writes <FeedbackRoot>/data/.ai_secrets.json with 0600 permissions under the config write flock.
 // Mirrors PHP sender_auth_helper.php saveAiSecrets().
 func (l *Loader) SaveAISecrets(secrets map[string]any) error {
+	release, err := l.AcquireConfigFlock()
+	if err != nil {
+		return err
+	}
+	defer release()
+	return l.SaveAISecretsLocked(secrets)
+}
+
+// SaveAISecretsLocked atomically writes <FeedbackRoot>/data/.ai_secrets.json assuming the caller holds AcquireConfigFlock.
+func (l *Loader) SaveAISecretsLocked(secrets map[string]any) error {
 	if l == nil || strings.TrimSpace(l.FeedbackRoot) == "" {
 		return fmt.Errorf("feedback root is empty")
 	}
@@ -62,8 +139,33 @@ func (l *Loader) SaveAISecrets(secrets map[string]any) error {
 	return atomicWriteJSON(l.AISecretsPath(), out, 0o600)
 }
 
-// SaveConfigJSON atomically writes <FeedbackRoot>/config.json.
+// RestoreAISecretsSnapshotLocked restores or deletes data/.ai_secrets.json after a failed config transaction.
+func (l *Loader) RestoreAISecretsSnapshotLocked(existed bool, origBytes []byte) error {
+	if l == nil || strings.TrimSpace(l.FeedbackRoot) == "" {
+		return fmt.Errorf("feedback root is empty")
+	}
+	path := l.AISecretsPath()
+	if !existed {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	return atomicWriteBytes(path, origBytes, 0o600)
+}
+
+// SaveConfigJSON atomically writes <FeedbackRoot>/config.json under the config write flock.
 func (l *Loader) SaveConfigJSON(cfg map[string]any) error {
+	release, err := l.AcquireConfigFlock()
+	if err != nil {
+		return err
+	}
+	defer release()
+	return l.SaveConfigJSONLocked(cfg)
+}
+
+// SaveConfigJSONLocked atomically writes <FeedbackRoot>/config.json assuming the caller holds AcquireConfigFlock.
+func (l *Loader) SaveConfigJSONLocked(cfg map[string]any) error {
 	if l == nil || strings.TrimSpace(l.FeedbackRoot) == "" {
 		return fmt.Errorf("feedback root is empty")
 	}
@@ -71,12 +173,16 @@ func (l *Loader) SaveConfigJSON(cfg map[string]any) error {
 }
 
 func atomicWriteJSON(path string, payload any, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
 	raw, err := json.MarshalIndent(payload, "", "    ")
 	if err != nil {
+		return err
+	}
+	return atomicWriteBytes(path, raw, perm)
+}
+
+func atomicWriteBytes(path string, raw []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	var suffix [4]byte

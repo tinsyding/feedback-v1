@@ -46,6 +46,8 @@ type fakeAdminRepo struct {
 	lastUpdateTable string
 	lastUpdateID    string
 	lastUpdateInput map[string]any
+	lastDeleteTable string
+	lastDeleteIDs   []string
 	lastResetUserID int
 	lastResetPwd    string
 }
@@ -181,7 +183,9 @@ func (f *fakeAdminRepo) UpdateRecord(_ context.Context, table, id string, input 
 	}
 	return f.updatedAffected, fields, nil
 }
-func (f *fakeAdminRepo) DeleteRecords(_ context.Context, table string, _ []string, _ string, forceCascade bool) (int64, error) {
+func (f *fakeAdminRepo) DeleteRecords(_ context.Context, table string, ids []string, _ string, forceCascade bool) (int64, error) {
+	f.lastDeleteTable = table
+	f.lastDeleteIDs = append([]string(nil), ids...)
 	if f.deleteErr != nil {
 		return 0, f.deleteErr
 	}
@@ -873,5 +877,102 @@ func TestAdminQBankAuditEndpoints(t *testing.T) {
 	}
 	if !tlResp.Success || tlResp.Data == nil || tlResp.Data.Total != 2 || tlResp.Data.Stats.Revisions != 1 || tlResp.Data.Stats.Uploads != 1 || tlResp.Data.Stats.BlockedOrFailed != 2 || tlResp.Data.Stats.Cancelled != 1 {
 		t.Fatalf("unexpected qbank_timeline response: %+v", tlResp.Data)
+	}
+}
+
+func TestAdminConfigValidationOrderRollbackAndDeleteStringZeroPK(t *testing.T) {
+	h, repo, sessions, _, dir := setupAdminTestEnv(t)
+	ck := addAdminCookie(t, sessions, nil)
+
+	// 1. Validation failure on identifyApiBase must happen BEFORE legacy key migration or .ai_secrets.json write
+	reqBadBase := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/admin.php?action=config",
+		strings.NewReader(`{"identifyApiBase":"http://127.0.0.1:9000/v1","dashscopeApiKey":"sk-should-not-write"}`))
+	reqBadBase.Host = "feedback.wxjifang.cn"
+	reqBadBase.Header.Set("Origin", "http://feedback.wxjifang.cn")
+	reqBadBase.AddCookie(ck)
+	recBadBase := httptest.NewRecorder()
+	h.ServeHTTP(recBadBase, reqBadBase)
+	if recBadBase.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for SSRF identifyApiBase, got %d: %s", recBadBase.Code, recBadBase.Body.String())
+	}
+	secPath := filepath.Join(dir, "data", ".ai_secrets.json")
+	if _, err := os.Stat(secPath); !os.IsNotExist(err) {
+		t.Fatalf("expected .ai_secrets.json NOT to exist after failed validation, stat err=%v", err)
+	}
+
+	// 2. Host change without new key must also reject BEFORE migrating legacy key from config.json
+	reqSwap := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/admin.php?action=config",
+		strings.NewReader(`{"identifyApiBase":"https://other.example.com/v1"}`))
+	reqSwap.Host = "feedback.wxjifang.cn"
+	reqSwap.Header.Set("Origin", "http://feedback.wxjifang.cn")
+	reqSwap.AddCookie(ck)
+	recSwap := httptest.NewRecorder()
+	h.ServeHTTP(recSwap, reqSwap)
+	if recSwap.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for host change without key, got %d: %s", recSwap.Code, recSwap.Body.String())
+	}
+	if _, err := os.Stat(secPath); !os.IsNotExist(err) {
+		t.Fatalf("expected .ai_secrets.json NOT to be created by legacy migration on rejected POST, err=%v", err)
+	}
+
+	// 3. Seed .ai_secrets.json with original bytes, then force SaveConfigJSON to fail (chmod 0555 on dir while data/ remains writable)
+	origSecrets := `{"dashscopeApiKey":"sk-original-9999"}`
+	if err := os.MkdirAll(filepath.Join(dir, "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secPath, []byte(origSecrets), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	reqFailSave := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/admin.php?action=config",
+		strings.NewReader(`{"dashscopeApiKey":"sk-new-should-rollback","semesterYear":2029}`))
+	reqFailSave.Host = "feedback.wxjifang.cn"
+	reqFailSave.Header.Set("Origin", "http://feedback.wxjifang.cn")
+	reqFailSave.AddCookie(ck)
+	recFailSave := httptest.NewRecorder()
+	h.ServeHTTP(recFailSave, reqFailSave)
+	_ = os.Chmod(dir, 0o755)
+	if recFailSave.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when SaveConfigJSON fails, got %d: %s", recFailSave.Code, recFailSave.Body.String())
+	}
+	afterBytes, err := os.ReadFile(secPath)
+	if err != nil || string(afterBytes) != origSecrets {
+		t.Fatalf("expected .ai_secrets.json rolled back to %q, got %q (err=%v)", origSecrets, string(afterBytes), err)
+	}
+
+	// 4. Rollback when .ai_secrets.json did NOT exist previously removes the newly created file on SaveConfigJSON failure
+	_ = os.Remove(secPath)
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	reqFailNew := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/admin.php?action=config",
+		strings.NewReader(`{"dashscopeApiKey":"sk-new-file-rollback","semesterYear":2029}`))
+	reqFailNew.Host = "feedback.wxjifang.cn"
+	reqFailNew.Header.Set("Origin", "http://feedback.wxjifang.cn")
+	reqFailNew.AddCookie(ck)
+	recFailNew := httptest.NewRecorder()
+	h.ServeHTTP(recFailNew, reqFailNew)
+	_ = os.Chmod(dir, 0o755)
+	if recFailNew.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when SaveConfigJSON fails (new secrets), got %d: %s", recFailNew.Code, recFailNew.Body.String())
+	}
+	if _, err := os.Stat(secPath); !os.IsNotExist(err) {
+		t.Fatalf("expected newly created .ai_secrets.json to be removed on rollback, err=%v", err)
+	}
+
+	// 5. handleAdminDBDelete preserves string PK "0"
+	reqDelZero := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/admin.php?action=db_delete&table=retest_revoked_tokens",
+		strings.NewReader(`{"ids":["0"]}`))
+	reqDelZero.Host = "feedback.wxjifang.cn"
+	reqDelZero.Header.Set("Origin", "http://feedback.wxjifang.cn")
+	reqDelZero.AddCookie(ck)
+	recDelZero := httptest.NewRecorder()
+	h.ServeHTTP(recDelZero, reqDelZero)
+	if recDelZero.Code != http.StatusOK || len(repo.lastDeleteIDs) != 1 || repo.lastDeleteIDs[0] != "0" {
+		t.Fatalf("expected id='0' passed to DeleteRecords, got code=%d ids=%v body=%s", recDelZero.Code, repo.lastDeleteIDs, recDelZero.Body.String())
 	}
 }

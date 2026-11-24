@@ -119,18 +119,24 @@ func (r *MySQLRepository) RollbackRecord(ctx context.Context, historyID int, adm
 	if currentRec == nil && hBatchID > 0 && (hStudentKey != "" || hStudentName != "") {
 		var qRows *sql.Rows
 		var qErr error
-		if hStudentKey != "" {
+		switch {
+		case hStudentKey != "" && hStudentName != "":
 			qRows, qErr = tx.QueryContext(ctx,
-				"SELECT * FROM `student_records` WHERE batch_id = ? AND student_key = ? AND week_num = ? LIMIT 1 FOR UPDATE",
+				"SELECT * FROM `student_records` WHERE batch_id = ? AND (student_key = ? OR ((student_key IS NULL OR student_key = '') AND student_name = ?)) AND week_num = ? ORDER BY (student_key = ?) DESC, id DESC LIMIT 1 FOR UPDATE",
+				hBatchID, hStudentKey, hStudentName, hWeekNum, hStudentKey,
+			)
+		case hStudentKey != "":
+			qRows, qErr = tx.QueryContext(ctx,
+				"SELECT * FROM `student_records` WHERE batch_id = ? AND student_key = ? AND week_num = ? ORDER BY id DESC LIMIT 1 FOR UPDATE",
 				hBatchID, hStudentKey, hWeekNum,
 			)
-		} else {
+		default:
 			qRows, qErr = tx.QueryContext(ctx,
-				"SELECT * FROM `student_records` WHERE batch_id = ? AND student_name = ? AND week_num = ? LIMIT 1 FOR UPDATE",
+				"SELECT * FROM `student_records` WHERE batch_id = ? AND student_name = ? AND week_num = ? ORDER BY id DESC LIMIT 1 FOR UPDATE",
 				hBatchID, hStudentName, hWeekNum,
 			)
 		}
-		if qErr == nil {
+		if qErr == nil && qRows != nil {
 			if recs, err := scanDynamicRows(qRows); err == nil && len(recs) > 0 {
 				currentRec = recs[0]
 			}
@@ -333,12 +339,13 @@ func (r *MySQLRepository) SearchByToken(ctx context.Context, token, retestSecret
 		return out, nil
 	}
 
-	likePattern := "%" + token + "%"
+	likeReplacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	likePattern := "%" + likeReplacer.Replace(token) + "%"
 	if rows, err := r.db.QueryContext(ctx, `
 		SELECT sr.*, cb.year, cb.season, cb.grade, cb.tier, cb.subject, cb.class_name, cb.created_by AS batch_creator
 		FROM student_records sr
 		LEFT JOIN class_batches cb ON sr.batch_id = cb.id
-		WHERE sr.retest_token = ? OR sr.retest_token LIKE ?
+		WHERE sr.retest_token = ? OR sr.retest_token LIKE ? ESCAPE '\\'
 		ORDER BY (sr.retest_token = ?) DESC, sr.updated_at DESC
 		LIMIT 6`,
 		token, likePattern, token,

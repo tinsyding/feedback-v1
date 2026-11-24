@@ -118,4 +118,39 @@ func TestChunkDeduplicationAndClientList(t *testing.T) {
 	if _, err := os.Stat(cDir); err != nil {
 		t.Fatalf("expected current date directory to remain: %v", err)
 	}
+
+	// WriteChunk advances curSize/skip cleanly past mid-UTF-8 rune boundaries
+	utf8Dir := mgr.ClientDir("2026-11-22", "utf8-pc")
+	if err := os.MkdirAll(utf8Dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logFile := filepath.Join(utf8Dir, "sender_2026-11-22.log")
+	// Write "ab" + first byte of "中" (3 bytes total on disk) so curSize=3 lands inside "中"
+	fullContent := "ab中cd\n"
+	if err := os.WriteFile(logFile, []byte(fullContent[:3]), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sz := mgr.WriteChunk(utf8Dir, "2026-11-22", "sender", 0, fullContent)
+	if sz <= 3 {
+		t.Fatalf("expected WriteChunk(offset=0) to append suffix, got size=%d", sz)
+	}
+	gotBytes, _ := os.ReadFile(logFile)
+	// Appended slice must start at "cd\n" (index 5), never mid-UTF-8 rune at index 3
+	if !strings.HasSuffix(string(gotBytes), "cd\n") || !utf8.Valid(gotBytes[3:]) {
+		t.Fatalf("expected appended suffix to be valid UTF-8 \"cd\\n\", got %q", string(gotBytes[3:]))
+	}
+
+	// Test offset > 0 where skip = curSize - offset lands mid-UTF-8 rune
+	logFile2 := filepath.Join(utf8Dir, "error_2026-11-22.log")
+	chunk := "xy张zw\n" // "xy" (2) + "张" (3) + "zw\n" (3) = 8 bytes
+	// File on disk has 13 bytes; offset is 10 -> skip = 3 (inside "张" bytes [2..5))
+	if err := os.WriteFile(logFile2, []byte(strings.Repeat("a", 13)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mgr.WriteChunk(utf8Dir, "2026-11-22", "error", 10, chunk)
+	gotBytes2, _ := os.ReadFile(logFile2)
+	appended2 := gotBytes2[13:]
+	if string(appended2) != "zw\n" || !utf8.Valid(appended2) {
+		t.Fatalf("expected appended suffix \"zw\\n\" without mid-rune slice, got %q", string(appended2))
+	}
 }

@@ -1163,7 +1163,12 @@ func handleLogsDelete(w http.ResponseWriter, r *http.Request, deps LogsDeps) {
 		}
 		var cnt int64
 		if deps.Repo != nil {
-			cnt, _ = deps.Repo.DeleteByDate(r.Context(), date)
+			var err error
+			cnt, err = deps.Repo.DeleteByDate(r.Context(), date)
+			if err != nil {
+				httpx.SendResponse(w, false, nil, httpx.StrPtr("删除日志失败"), http.StatusInternalServerError)
+				return
+			}
 		}
 		auditlog.RecordFromRequest(r.Context(), deps.Audit, r, "warn", "admin", "delete_logs_by_date", sess.AdminUsername(), map[string]any{
 			"date":    date,
@@ -1183,7 +1188,10 @@ func handleLogsDelete(w http.ResponseWriter, r *http.Request, deps LogsDeps) {
 		return
 	}
 	if deps.Repo != nil {
-		_, _ = deps.Repo.DeleteByID(r.Context(), id)
+		if _, err := deps.Repo.DeleteByID(r.Context(), id); err != nil {
+			httpx.SendResponse(w, false, nil, httpx.StrPtr("删除日志失败"), http.StatusInternalServerError)
+			return
+		}
 	}
 	auditlog.RecordFromRequest(r.Context(), deps.Audit, r, "warn", "admin", "delete_log_by_id", sess.AdminUsername(), map[string]any{
 		"log_id":  id,

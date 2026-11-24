@@ -5,6 +5,23 @@
 
 require_once __DIR__ . '/../lib_retest_keys.php';
 
+if (!function_exists('isNonTextStrictColumn')) {
+    function isNonTextStrictColumn(string $colType): bool {
+        $base = strtolower(trim($colType));
+        $parenPos = strpos($base, '(');
+        if ($parenPos !== false) {
+            $base = substr($base, 0, $parenPos);
+        }
+        $parts = preg_split('/\s+/', trim($base));
+        $token = $parts[0] ?? '';
+        return in_array($token, [
+            'int', 'integer', 'bigint', 'smallint', 'tinyint', 'mediumint',
+            'decimal', 'numeric', 'float', 'double', 'real',
+            'json', 'date', 'datetime', 'timestamp', 'year'
+        ], true);
+    }
+}
+
 switch ($action) {
         case 'db_list':
             requireAdmin();
@@ -638,9 +655,9 @@ switch ($action) {
                     : null;
                 $sGrade = (string)($sBatch['grade'] ?? '');
                 $sSubject = (string)($sBatch['subject'] ?? '');
-                if (isset($input['student_id']) && isset($input['student_name']) && empty($input['student_key'])) {
-                    $sId = trim((string)$input['student_id']);
-                    $sName = trim((string)$input['student_name']);
+                $sName = trim((string)($input['student_name'] ?? ''));
+                if ($sName !== '' && trim((string)($input['student_key'] ?? '')) === '') {
+                    $sId = trim((string)($input['student_id'] ?? ''));
                     $input['student_key'] = build_student_key($sId, $sName, $sGrade, $sSubject);
                 }
                 if (isset($input['error_questions'])) {
@@ -717,16 +734,29 @@ switch ($action) {
                 }
                 if ($colName === 'created_at' || $colName === 'updated_at') {
                     if (isset($input[$colName])) {
+                        $tsVal = $input[$colName];
+                        if (is_string($tsVal) && trim($tsVal) === '') {
+                            continue;
+                        }
                         $fields[] = "`{$colName}`";
                         $placeholders[] = '?';
-                        $values[] = $input[$colName];
+                        $values[] = $tsVal;
                     }
                     continue;
                 }
                 if (array_key_exists($colName, $input)) {
+                    $val = $input[$colName];
+                    if (is_string($val) && trim($val) === '' && isNonTextStrictColumn((string)$colDef['type'])) {
+                        if (!empty($colDef['null'])) {
+                            $val = null;
+                        } elseif ($colDef['default'] !== null) {
+                            continue;
+                        } else {
+                            sendResponse(false, null, "字段 {$colName} 不能为空", 400);
+                        }
+                    }
                     $fields[] = "`{$colName}`";
                     $placeholders[] = '?';
-                    $val = $input[$colName];
                     if (is_array($val) || is_object($val)) {
                         $val = json_encode($val, JSON_UNESCAPED_UNICODE);
                     }
@@ -803,7 +833,7 @@ switch ($action) {
             }
 
             if ($table === 'student_records') {
-                if (isset($input['student_id']) || isset($input['student_name'])) {
+                if (isset($input['student_id']) || isset($input['student_name']) || isset($input['batch_id'])) {
                     $curr = DB::fetchOne("SELECT student_id, student_name, batch_id FROM student_records WHERE id = ?", [$id]);
                     $sId = trim((string)($input['student_id'] ?? ($curr['student_id'] ?? '')));
                     $sName = trim((string)($input['student_name'] ?? ($curr['student_name'] ?? '')));
@@ -884,13 +914,20 @@ switch ($action) {
                 if ($colDef['key'] === 'PRI' || $colName === 'created_at') {
                     continue;
                 }
-                if ($colName === 'updated_at' && !isset($input['updated_at'])) {
+                if ($colName === 'updated_at' && (!isset($input['updated_at']) || (is_string($input['updated_at']) && trim($input['updated_at']) === ''))) {
                     $setParts[] = "`updated_at` = NOW()";
                     continue;
                 }
                 if (array_key_exists($colName, $input)) {
-                    $setParts[] = "`{$colName}` = ?";
                     $val = $input[$colName];
+                    if (is_string($val) && trim($val) === '' && isNonTextStrictColumn((string)$colDef['type'])) {
+                        if (!empty($colDef['null'])) {
+                            $val = null;
+                        } else {
+                            sendResponse(false, null, "字段 {$colName} 不能为空", 400);
+                        }
+                    }
+                    $setParts[] = "`{$colName}` = ?";
                     if (is_array($val) || is_object($val)) {
                         $val = json_encode($val, JSON_UNESCAPED_UNICODE);
                     }
@@ -995,15 +1032,31 @@ switch ($action) {
             requireAdmin();
             $rawInput = json_decode(file_get_contents('php://input'), true) ?: [];
             $table = validateTable($_GET['table'] ?? ($rawInput['table'] ?? ''));
+            $cols = getTableColumns($table);
             $pk = getTablePrimaryKey($table);
+            $pkCol = $cols[$pk] ?? [];
+            $isAutoIncPk = stripos((string)($pkCol['extra'] ?? ''), 'auto_increment') !== false;
 
-            $ids = [];
-            if (isset($_GET['id']) && $_GET['id'] !== '') $ids[] = $_GET['id'];
-            if (!empty($rawInput['id'])) $ids[] = $rawInput['id'];
-            if (!empty($rawInput['ids']) && is_array($rawInput['ids'])) {
-                $ids = array_merge($ids, $rawInput['ids']);
+            $rawIds = [];
+            if (isset($_GET['id']) && (string)$_GET['id'] !== '') $rawIds[] = (string)$_GET['id'];
+            if (isset($rawInput['id']) && $rawInput['id'] !== '' && $rawInput['id'] !== null && !is_array($rawInput['id'])) {
+                $rawIds[] = (string)$rawInput['id'];
             }
-            $ids = array_unique(array_filter($ids));
+            if (!empty($rawInput['ids']) && is_array($rawInput['ids'])) {
+                foreach ($rawInput['ids'] as $item) {
+                    if ($item !== '' && $item !== null && !is_array($item)) {
+                        $rawIds[] = (string)$item;
+                    }
+                }
+            }
+            $ids = [];
+            foreach ($rawIds as $rid) {
+                $s = trim($rid);
+                if ($s === '') continue;
+                if ($isAutoIncPk && $s === '0') continue;
+                $ids[$s] = $s;
+            }
+            $ids = array_values($ids);
             if (empty($ids)) sendResponse(false, null, '请指定要删除的记录 ID', 400);
 
             if ($table === 'admin_users') {
@@ -1028,23 +1081,68 @@ switch ($action) {
                 }
             }
 
+            $txStartedForClassBatches = false;
+            $pdo = DB::getConnection();
             if ($table === 'class_batches') {
                 $forceCascade = filter_var(
                     $_GET['force_cascade'] ?? ($rawInput['force_cascade'] ?? false),
                     FILTER_VALIDATE_BOOLEAN
                 );
                 $placeholders = implode(',', array_fill(0, count($ids), '?'));
-                $relatedCount = (int)DB::fetchValue(
-                    "SELECT COUNT(*) FROM `student_records` WHERE `batch_id` IN ({$placeholders})",
-                    array_values($ids)
-                );
-                if ($relatedCount > 0 && !$forceCascade) {
-                    sendResponse(
-                        false,
-                        ['related_student_records' => $relatedCount],
-                        "所选班级期次关联了 {$relatedCount} 条学生学情记录，直接删除将触发外键级联清空。请先清理关联学情，或显式传入 force_cascade=true 确认级联删除",
-                        409
+                if ($pdo && !$pdo->inTransaction()) {
+                    $pdo->beginTransaction();
+                    $txStartedForClassBatches = true;
+                }
+                try {
+                    DB::fetchAll("SELECT `{$pk}` FROM `class_batches` WHERE `{$pk}` IN ({$placeholders}) FOR UPDATE", array_values($ids));
+                    if (DB::getLastError() !== null) {
+                        throw new RuntimeException(DB::getLastError());
+                    }
+                    $relatedCount = (int)DB::fetchValue(
+                        "SELECT COUNT(*) FROM `student_records` WHERE `batch_id` IN ({$placeholders})",
+                        array_values($ids)
                     );
+                    if (DB::getLastError() !== null) {
+                        throw new RuntimeException(DB::getLastError());
+                    }
+                    $relatedGenBatches = (int)DB::fetchValue(
+                        "SELECT COUNT(*) FROM `generation_batches` WHERE `class_id` IN ({$placeholders})",
+                        array_values($ids)
+                    );
+                    if (DB::getLastError() !== null) {
+                        throw new RuntimeException(DB::getLastError());
+                    }
+                    $relatedHistory = (int)DB::fetchValue(
+                        "SELECT COUNT(*) FROM `student_record_history` WHERE `batch_id` IN ({$placeholders})",
+                        array_values($ids)
+                    );
+                    if (DB::getLastError() !== null) {
+                        throw new RuntimeException(DB::getLastError());
+                    }
+                    if (!$forceCascade && ($relatedCount > 0 || $relatedGenBatches > 0 || $relatedHistory > 0)) {
+                        if ($txStartedForClassBatches && $pdo->inTransaction()) {
+                            $pdo->rollBack();
+                        }
+                        sendResponse(
+                            false,
+                            [
+                                'related_student_records' => $relatedCount,
+                                'related_generation_batches' => $relatedGenBatches,
+                                'related_student_record_history' => $relatedHistory,
+                            ],
+                            "所选班级期次关联了 {$relatedCount} 条学生学情记录、{$relatedGenBatches} 条生成批次、{$relatedHistory} 条历史版本，直接删除将级联清空。请先清理关联数据，或显式传入 force_cascade=true 确认级联删除",
+                            409
+                        );
+                    }
+                    DB::execute("DELETE FROM `generation_batches` WHERE `class_id` IN ({$placeholders})", array_values($ids));
+                    DB::execute("DELETE FROM `student_record_history` WHERE `batch_id` IN ({$placeholders})", array_values($ids));
+                    DB::execute("DELETE FROM `student_records` WHERE `batch_id` IN ({$placeholders})", array_values($ids));
+                } catch (Throwable $e) {
+                    if ($txStartedForClassBatches && $pdo && $pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    error_log("Cascade delete class_batches error: " . $e->getMessage());
+                    sendResponse(false, null, '清理班级期次关联数据失败', 500);
                 }
             }
 
@@ -1071,7 +1169,15 @@ switch ($action) {
             $inPlaceholders = implode(',', array_fill(0, count($ids), '?'));
             $sql = "DELETE FROM `{$table}` WHERE `{$pk}` IN ({$inPlaceholders})";
             $stmt = DB::query($sql, array_values($ids));
-            if (!$stmt) sendResponse(false, null, '删除失败', 500);
+            if (!$stmt) {
+                if ($txStartedForClassBatches && $pdo && $pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                sendResponse(false, null, '删除失败', 500);
+            }
+            if ($txStartedForClassBatches && $pdo && $pdo->inTransaction()) {
+                $pdo->commit();
+            }
 
             if ($table === 'qbank_questions' && !empty($affectedQbankIds)) {
                 try {

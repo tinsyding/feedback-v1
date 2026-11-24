@@ -23,18 +23,23 @@ type mockAdminSQLRecord struct {
 }
 
 type mockAdminDBState struct {
-	mu                   sync.Mutex
-	queries              []mockAdminSQLRecord
-	execs                []mockAdminSQLRecord
-	txBegun              int
-	txCommitted          int
-	txRolledBack         int
-	relatedStudentCount  int64
-	adminCount           int64
-	failQBankWeeksDelete bool
-	failRollbackUpdate   bool
-	resetUserUsername    string
-	missingRecord        bool
+	mu                     sync.Mutex
+	queries                []mockAdminSQLRecord
+	execs                  []mockAdminSQLRecord
+	txBegun                int
+	txCommitted            int
+	txRolledBack           int
+	relatedStudentCount    int64
+	relatedGenBatchesCount int64
+	relatedHistoryCount    int64
+	adminCount             int64
+	failQBankWeeksDelete   bool
+	failRollbackUpdate     bool
+	resetUserUsername      string
+	missingRecord          bool
+	noStudentByID          bool
+	customHistoryRow       []driver.Value
+	customStudentRow       []driver.Value
 }
 
 var (
@@ -119,6 +124,8 @@ func (c *mockAdminConn) QueryContext(_ context.Context, query string, args []dri
 	c.state.queries = append(c.state.queries, mockAdminSQLRecord{query: query, args: copied})
 	st := c.state
 	relatedCnt := st.relatedStudentCount
+	relatedGenCnt := st.relatedGenBatchesCount
+	relatedHistCnt := st.relatedHistoryCount
 	adminCnt := st.adminCount
 	if adminCnt == 0 {
 		adminCnt = 2
@@ -128,6 +135,9 @@ func (c *mockAdminConn) QueryContext(_ context.Context, query string, args []dri
 		resetUname = "t101"
 	}
 	missingRec := st.missingRecord
+	noByID := st.noStudentByID
+	customHist := st.customHistoryRow
+	customStud := st.customStudentRow
 	c.state.mu.Unlock()
 
 	utcTS := time.Date(2026, 11, 21, 16, 5, 30, 0, time.UTC) // 2026-11-22 00:05:30 Asia/Shanghai
@@ -139,7 +149,7 @@ func (c *mockAdminConn) QueryContext(_ context.Context, query string, args []dri
 			rows: [][]driver.Value{
 				{"student_records"}, {"class_batches"}, {"users"}, {"admin_users"},
 				{"qbank_weeks"}, {"qbank_questions"}, {"generation_batches"}, {"student_record_history"},
-				{"system_logs"}, {"retest_access_logs"}, {"app_sessions"}, {"auth_rate_limits"}, {"schema_migrations"},
+				{"system_logs"}, {"retest_access_logs"}, {"retest_revoked_tokens"}, {"app_sessions"}, {"auth_rate_limits"}, {"schema_migrations"},
 			},
 		}, nil
 
@@ -213,8 +223,35 @@ func (c *mockAdminConn) QueryContext(_ context.Context, query string, args []dri
 			{"subject", "varchar(32)", "NO", "", "", "", ""},
 			{"grade", "varchar(32)", "NO", "", "", "", ""},
 			{"tier", "varchar(16)", "NO", "", "", "", ""},
-			{"week", "int", "NO", "", "1", "", ""},
+			{"week", "int", "NO", "", "<nil>", "", ""},
 			{"updated_by", "varchar(50)", "YES", "", "<nil>", "", ""},
+		}), nil
+
+	case strings.HasPrefix(query, "SHOW FULL COLUMNS FROM `retest_revoked_tokens`"):
+		return fullColRows([][7]string{
+			{"token", "varchar(64)", "NO", "PRI", "<nil>", "", ""},
+			{"revoked_by", "varchar(50)", "NO", "", "", "", ""},
+			{"reason", "varchar(255)", "NO", "", "", "", ""},
+			{"revoked_at", "datetime", "NO", "", "CURRENT_TIMESTAMP", "", ""},
+		}), nil
+
+	case strings.HasPrefix(query, "SHOW FULL COLUMNS FROM `generation_batches`"):
+		return fullColRows([][7]string{
+			{"id", "bigint(20)", "NO", "PRI", "<nil>", "auto_increment", ""},
+			{"batch_code", "varchar(64)", "NO", "", "<nil>", "", ""},
+			{"class_id", "int(11)", "NO", "", "0", "", ""},
+			{"week_num", "int(11)", "NO", "", "0", "", ""},
+			{"source_files", "text", "YES", "", "<nil>", "", ""},
+			{"created_at", "timestamp", "YES", "", "CURRENT_TIMESTAMP", "", ""},
+		}), nil
+
+	case strings.HasPrefix(query, "SHOW FULL COLUMNS FROM `student_record_history`"):
+		return fullColRows([][7]string{
+			{"id", "bigint(20)", "NO", "PRI", "<nil>", "auto_increment", ""},
+			{"student_name", "varchar(50)", "NO", "", "<nil>", "", ""},
+			{"homework_score", "decimal(6,2)", "YES", "", "<nil>", "", ""},
+			{"error_questions", "json", "YES", "", "<nil>", "", ""},
+			{"updated_at", "datetime", "YES", "", "<nil>", "", ""},
 		}), nil
 
 	case strings.HasPrefix(query, "SHOW FULL COLUMNS FROM `qbank_questions`"):
@@ -265,8 +302,17 @@ func (c *mockAdminConn) QueryContext(_ context.Context, query string, args []dri
 	case strings.Contains(query, "SELECT `username`, `real_name` FROM `users` WHERE `status` = 1"):
 		return &mockAdminRows{cols: []string{"username", "real_name"}, rows: [][]driver.Value{{"t101", "张老师"}}}, nil
 
+	case strings.Contains(query, "SELECT `id` FROM `class_batches` WHERE"):
+		return &mockAdminRows{cols: []string{"id"}, rows: [][]driver.Value{{int64(5)}}}, nil
+
 	case strings.Contains(query, "FROM `student_records` WHERE `batch_id` IN"):
 		return &mockAdminRows{cols: []string{"cnt"}, rows: [][]driver.Value{{relatedCnt}}}, nil
+
+	case strings.Contains(query, "FROM `generation_batches` WHERE `class_id` IN"):
+		return &mockAdminRows{cols: []string{"cnt"}, rows: [][]driver.Value{{relatedGenCnt}}}, nil
+
+	case strings.Contains(query, "FROM `student_record_history` WHERE `batch_id` IN"):
+		return &mockAdminRows{cols: []string{"cnt"}, rows: [][]driver.Value{{relatedHistCnt}}}, nil
 
 	case strings.HasPrefix(query, "SELECT COUNT"):
 		return &mockAdminRows{cols: []string{"cnt"}, rows: [][]driver.Value{{int64(1)}}}, nil
@@ -305,14 +351,16 @@ func (c *mockAdminConn) QueryContext(_ context.Context, query string, args []dri
 		}, nil
 
 	case strings.HasPrefix(query, "SELECT * FROM `student_records` WHERE"):
-		if missingRec {
+		if missingRec || (noByID && strings.Contains(query, "WHERE id = ?")) {
 			return &mockAdminRows{cols: []string{"id"}}, nil
+		}
+		row := []driver.Value{int64(12), int64(5), "20260001", "张三", "k1", int64(3), nil, float64(90), nil, float64(90), int64(1), "[1]", nil, "不错", nil, "hw.csv", "tok123", "2026-11-21 10:00:00", "2026-11-21 11:00:00"}
+		if customStud != nil {
+			row = customStud
 		}
 		return &mockAdminRows{
 			cols: []string{"id", "batch_id", "student_id", "student_name", "student_key", "week_num", "preview_week_num", "homework_score", "preview_score", "total_score", "error_count", "error_questions", "preview_error_questions", "teacher_comment", "preview_comment", "source_files", "retest_token", "created_at", "updated_at"},
-			rows: [][]driver.Value{
-				{int64(12), int64(5), "20260001", "张三", "k1", int64(3), nil, float64(90), nil, float64(90), int64(1), "[1]", nil, "不错", nil, "hw.csv", "tok123", "2026-11-21 10:00:00", "2026-11-21 11:00:00"},
-			},
+			rows: [][]driver.Value{row},
 		}, nil
 
 	case strings.HasPrefix(query, "SELECT * FROM `admin_users` WHERE"):
@@ -343,9 +391,13 @@ func (c *mockAdminConn) QueryContext(_ context.Context, query string, args []dri
 		}, nil
 
 	case strings.HasPrefix(query, "SELECT * FROM `student_record_history` WHERE id = ?"):
+		hRow := []driver.Value{int64(77), int64(12), int64(5), "20260001", "张三", "", int64(3), nil, float64(85), nil, float64(85), int64(2), "[1,2]", nil, "加油", nil, "hw.csv", "tok123", "2026-11-20 09:00:00", "2026-11-20 10:00:00"}
+		if customHist != nil {
+			hRow = customHist
+		}
 		return &mockAdminRows{
 			cols: []string{"id", "record_id", "batch_id", "student_id", "student_name", "student_key", "week_num", "preview_week_num", "homework_score", "preview_score", "total_score", "error_count", "error_questions", "preview_error_questions", "teacher_comment", "preview_comment", "source_files", "retest_token", "record_created_at", "record_updated_at"},
-			rows: [][]driver.Value{{int64(77), int64(12), int64(5), "20260001", "张三", "", int64(3), nil, float64(85), nil, float64(85), int64(2), "[1,2]", nil, "加油", nil, "hw.csv", "tok123", "2026-11-20 09:00:00", "2026-11-20 10:00:00"}},
+			rows: [][]driver.Value{hRow},
 		}, nil
 
 	case strings.HasPrefix(query, "SELECT `batch_code`, `student_name`, `record_created_at`"):
@@ -648,8 +700,8 @@ func TestMySQLRepositoryListGetCreateUpdateDeleteAndReset(t *testing.T) {
 	if n, err := repo.DeleteRecords(ctx, "qbank_weeks", []string{"9"}, "boss", false); err != nil || n != 1 {
 		t.Fatalf("DeleteRecords(qbank_weeks): n=%d err=%v", n, err)
 	}
-	if st.txCommitted != 2 {
-		t.Fatalf("expected txCommitted=2, got %d", st.txCommitted)
+	if st.txCommitted != 3 {
+		t.Fatalf("expected txCommitted=3, got %d", st.txCommitted)
 	}
 	st.failQBankWeeksDelete = true
 	prevRB := st.txRolledBack
@@ -775,4 +827,276 @@ func TestMySQLRepositoryAttestationGuardsAndAdminAudit(t *testing.T) {
 			t.Fatalf("expected revision %d to be admin_edit by boss, got %+v", i, revs[i])
 		}
 	}
+}
+
+func TestMySQLRepositoryBug12_18_26_30Fixes(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. #12 RollbackRecord fallback when record_id doesn't match and hStudentKey != "" && hStudentName != ""
+	t.Run("RollbackRecord_LegacyStudentNameFallback", func(t *testing.T) {
+		st := &mockAdminDBState{
+			noStudentByID: true,
+			customStudentRow: []driver.Value{
+				int64(88), int64(5), "", "张三", "", int64(3), nil, float64(90), nil, float64(90), int64(1), "[1]", nil, "不错", nil, "hw.csv", "tok123", "2026-11-21 10:00:00", "2026-11-21 11:00:00",
+			},
+		}
+		repo := NewMySQLRepository(openMockAdminDB(t, st))
+		rb, err := repo.RollbackRecord(ctx, 77, "boss")
+		if err != nil || rb.TargetRecordID != 88 {
+			t.Fatalf("expected in-place update of legacy row #88, got rb=%+v err=%v", rb, err)
+		}
+		foundFallbackQuery := false
+		for _, q := range st.queries {
+			if strings.Contains(q.query, "((student_key IS NULL OR student_key = '') AND student_name = ?)") &&
+				strings.Contains(q.query, "ORDER BY (student_key = ?) DESC, id DESC LIMIT 1 FOR UPDATE") {
+				foundFallbackQuery = true
+			}
+		}
+		if !foundFallbackQuery {
+			t.Fatalf("expected fallback query with empty student_key + student_name match, queries=%+v", st.queries)
+		}
+		foundUpdate := false
+		for _, ex := range st.execs {
+			if strings.Contains(ex.query, "UPDATE student_records SET") {
+				foundUpdate = true
+			}
+			if strings.Contains(ex.query, "INSERT INTO student_records") {
+				t.Fatalf("must not insert duplicate student_records when legacy row matches: %s", ex.query)
+			}
+		}
+		if !foundUpdate {
+			t.Fatal("expected UPDATE student_records")
+		}
+	})
+
+	t.Run("RollbackRecord_StudentKeyOnlyAndStudentNameOnly", func(t *testing.T) {
+		// hStudentKey != "" only (hStudentName == "")
+		stKeyOnly := &mockAdminDBState{
+			noStudentByID: true,
+			customHistoryRow: []driver.Value{
+				int64(78), int64(0), int64(5), "20260001", "", "20260001__七年级_数学", int64(3), nil, float64(85), nil, float64(85), int64(1), "[1]", nil, "", nil, "", "tok", "2026-11-20 09:00:00", "2026-11-20 10:00:00",
+			},
+		}
+		repo1 := NewMySQLRepository(openMockAdminDB(t, stKeyOnly))
+		if _, err := repo1.RollbackRecord(ctx, 78, "boss"); err != nil {
+			t.Fatalf("RollbackRecord key-only: %v", err)
+		}
+		foundKeyOnly := false
+		for _, q := range stKeyOnly.queries {
+			if strings.Contains(q.query, "WHERE batch_id = ? AND student_key = ? AND week_num = ?") {
+				foundKeyOnly = true
+			}
+		}
+		if !foundKeyOnly {
+			t.Fatalf("expected student_key-only query, got %+v", stKeyOnly.queries)
+		}
+
+		// hStudentName != "" only (hStudentKey == "", e.g. whitespace-only name with empty student_id)
+		stNameOnly := &mockAdminDBState{
+			noStudentByID: true,
+			customHistoryRow: []driver.Value{
+				int64(79), int64(0), int64(5), "", "   ", "", int64(3), nil, float64(85), nil, float64(85), int64(1), "[1]", nil, "", nil, "", "tok", "2026-11-20 09:00:00", "2026-11-20 10:00:00",
+			},
+		}
+		repo2 := NewMySQLRepository(openMockAdminDB(t, stNameOnly))
+		if _, err := repo2.RollbackRecord(ctx, 79, "boss"); err != nil {
+			t.Fatalf("RollbackRecord name-only: %v", err)
+		}
+		foundNameOnly := false
+		for _, q := range stNameOnly.queries {
+			if strings.Contains(q.query, "WHERE batch_id = ? AND student_name = ? AND week_num = ?") {
+				foundNameOnly = true
+			}
+		}
+		if !foundNameOnly {
+			t.Fatalf("expected student_name-only query, got %+v", stNameOnly.queries)
+		}
+	})
+
+	// 2. #30 SearchByToken escapes \, %, _ with ESCAPE '\\'
+	t.Run("SearchByToken_EscapesLikeWildcards", func(t *testing.T) {
+		st := &mockAdminDBState{}
+		repo := NewMySQLRepository(openMockAdminDB(t, st))
+		if _, err := repo.SearchByToken(ctx, `%_\abc`, "secret_2026"); err != nil {
+			t.Fatalf("SearchByToken: %v", err)
+		}
+		foundEscaped := false
+		for _, q := range st.queries {
+			if strings.Contains(q.query, "LIKE ? ESCAPE '\\\\'") {
+				if len(q.args) >= 2 && q.args[1] == `%\%\_\\abc%` {
+					foundEscaped = true
+				}
+			}
+		}
+		if !foundEscaped {
+			t.Fatalf("expected LIKE ? ESCAPE '\\\\' with escaped %%_\\, queries=%+v", st.queries)
+		}
+	})
+
+	// 3. #7 Lock order on qbank_weeks DeleteRecords even when attest == nil
+	t.Run("DeleteQBankWeeks_LocksWeeksBeforeDeletingQuestions", func(t *testing.T) {
+		st := &mockAdminDBState{}
+		repo := NewMySQLRepository(openMockAdminDB(t, st))
+		if _, err := repo.DeleteRecords(ctx, "qbank_weeks", []string{"9"}, "boss", false); err != nil {
+			t.Fatalf("DeleteRecords(qbank_weeks): %v", err)
+		}
+		foundLock := false
+		for _, q := range st.queries {
+			if strings.Contains(q.query, "FROM `qbank_weeks` WHERE `id` IN (?) FOR UPDATE") {
+				foundLock = true
+			}
+		}
+		if !foundLock {
+			t.Fatalf("expected SELECT ... FROM qbank_weeks ... FOR UPDATE before DELETE qbank_questions, queries=%+v", st.queries)
+		}
+	})
+
+	// 4. #18 CreateRecord on qbank_weeks records attestation revision
+	t.Run("CreateQBankWeek_AttestsRevision", func(t *testing.T) {
+		st := &mockAdminDBState{}
+		signer, err := qbankattest.NewEphemeralSigner("jf-qb-adm-create")
+		if err != nil {
+			t.Fatal(err)
+		}
+		attestStore := qbankattest.NewMemoryStore(signer, "")
+		repo := NewMySQLRepositoryWithAttest(openMockAdminDB(t, st), attestStore)
+		_, err = repo.CreateRecord(ctx, "qbank_weeks", map[string]any{
+			"bank_type": "homework",
+			"year":      2026,
+			"season":    "秋",
+			"subject":   "数学",
+			"grade":     "七年级",
+			"tier":      "S+",
+			"week":      3,
+		}, "", "boss")
+		if err != nil {
+			t.Fatalf("CreateRecord(qbank_weeks): %v", err)
+		}
+		revs, err := attestStore.ListRevisions(ctx, qbankattest.RevisionFilter{})
+		if err != nil || len(revs) != 1 || revs[0].Action != qbankattest.ActionAdminEdit || revs[0].Operator != "boss" {
+			t.Fatalf("expected 1 admin_edit revision for qbank_weeks create, got %+v err=%v", revs, err)
+		}
+	})
+
+	// 5. #26 Strict-mode "" coercion, omitted student_id -> student_key, string PK "0", class_batches orphan cleanup
+	t.Run("CRUD_StrictEmptyCoercion_OmittedStudentID_StringPK0_ClassBatchesCascade", func(t *testing.T) {
+		st := &mockAdminDBState{relatedGenBatchesCount: 2, relatedHistoryCount: 1}
+		repo := NewMySQLRepository(openMockAdminDB(t, st))
+
+		// Nullable non-text "" -> nil; created_at "" omitted
+		if _, err := repo.CreateRecord(ctx, "student_record_history", map[string]any{
+			"student_name":    "李四",
+			"homework_score":  "",
+			"error_questions": "",
+		}, "", "boss"); err != nil {
+			t.Fatalf("CreateRecord(student_record_history) strict empty: %v", err)
+		}
+		lastIns := st.execs[len(st.execs)-1]
+		if len(lastIns.args) != 3 || lastIns.args[0] != "李四" || lastIns.args[1] != nil || lastIns.args[2] != nil {
+			t.Fatalf("expected empty decimal/json coerced to nil, got args=%#v", lastIns.args)
+		}
+
+		// Non-null with default "" omitted on CreateRecord; created_at "" omitted
+		if _, err := repo.CreateRecord(ctx, "generation_batches", map[string]any{
+			"batch_code": "B1",
+			"class_id":   "",
+			"week_num":   json.Number("2"),
+			"created_at": "",
+		}, "", "boss"); err != nil {
+			t.Fatalf("CreateRecord(generation_batches) default omit: %v", err)
+		}
+		lastIns = st.execs[len(st.execs)-1]
+		if strings.Contains(lastIns.query, "class_id") || strings.Contains(lastIns.query, "created_at") {
+			t.Fatalf("expected class_id (default 0) and empty created_at omitted from INSERT, got %s", lastIns.query)
+		}
+
+		// Required non-null numeric column without default "" -> 400
+		if _, err := repo.CreateRecord(ctx, "qbank_weeks", map[string]any{
+			"subject": "数学",
+			"grade":   "七年级",
+			"tier":    "S+",
+			"week":    "",
+		}, "", "boss"); err == nil {
+			t.Fatal("expected HTTP 400 for empty required non-null numeric column")
+		} else if he, ok := err.(*HTTPError); !ok || he.Status != 400 {
+			t.Fatalf("expected HTTP 400, got %v", err)
+		}
+
+		// UpdateRecord nullable "" -> nil; updated_at "" -> NOW(); non-null "" -> 400
+		if _, _, err := repo.UpdateRecord(ctx, "student_record_history", "1", map[string]any{
+			"homework_score": "",
+			"updated_at":     "",
+		}, "boss"); err != nil {
+			t.Fatalf("UpdateRecord(student_record_history) strict empty: %v", err)
+		}
+		lastUpd := st.execs[len(st.execs)-1]
+		if !strings.Contains(lastUpd.query, "`updated_at` = NOW()") || lastUpd.args[0] != nil {
+			t.Fatalf("expected nil homework_score and NOW() updated_at, got query=%s args=%#v", lastUpd.query, lastUpd.args)
+		}
+		if _, _, err := repo.UpdateRecord(ctx, "generation_batches", "1", map[string]any{
+			"class_id": "",
+		}, "boss"); err == nil {
+			t.Fatal("expected HTTP 400 for empty non-null numeric column on UpdateRecord")
+		} else if he, ok := err.(*HTTPError); !ok || he.Status != 400 {
+			t.Fatalf("expected HTTP 400, got %v", err)
+		}
+
+		// Omitted student_id -> student_key derived from student_name
+		if _, err := repo.CreateRecord(ctx, "student_records", map[string]any{
+			"batch_id":     json.Number("5"),
+			"student_name": "王五",
+			"week_num":     json.Number("2"),
+			"retest_token": "tok_wangwu",
+		}, "secret_2026", "boss"); err != nil {
+			t.Fatalf("CreateRecord(student_records) omitted student_id: %v", err)
+		}
+		lastIns = st.execs[len(st.execs)-1]
+		foundNameKey := false
+		for _, a := range lastIns.args {
+			if a == "王五" {
+				foundNameKey = true
+			}
+		}
+		if !foundNameKey {
+			t.Fatalf("expected student_key=\"王五\" when student_id omitted, args=%#v", lastIns.args)
+		}
+
+		// String PK "0" allowed for non-auto_increment table, rejected for auto_increment table
+		if n, err := repo.DeleteRecords(ctx, "retest_revoked_tokens", []string{"0"}, "boss", false); err != nil || n != 1 {
+			t.Fatalf("expected DeleteRecords on retest_revoked_tokens id='0' to succeed, got n=%d err=%v", n, err)
+		}
+		if _, err := repo.DeleteRecords(ctx, "student_records", []string{"0"}, "boss", false); err == nil {
+			t.Fatal("expected HTTP 400 deleting '0' on auto_increment student_records")
+		} else if he, ok := err.(*HTTPError); !ok || he.Status != 400 {
+			t.Fatalf("expected HTTP 400, got %v", err)
+		}
+
+		// class_batches with 0 student_records but >0 generation_batches/history -> 409 without forceCascade
+		if _, err := repo.DeleteRecords(ctx, "class_batches", []string{"5"}, "boss", false); err == nil {
+			t.Fatal("expected HTTP 409 when generation_batches/student_record_history exist")
+		} else if he, ok := err.(*HTTPError); !ok || he.Status != 409 {
+			t.Fatalf("expected HTTP 409, got %v", err)
+		}
+		execStart := len(st.execs)
+		if n, err := repo.DeleteRecords(ctx, "class_batches", []string{"5"}, "boss", true); err != nil || n != 1 {
+			t.Fatalf("DeleteRecords(class_batches, force): n=%d err=%v", n, err)
+		}
+		newExecs := st.execs[execStart:]
+		var delGen, delHist, delStud, delBatch bool
+		for _, ex := range newExecs {
+			switch {
+			case strings.Contains(ex.query, "DELETE FROM `generation_batches` WHERE `class_id` IN"):
+				delGen = true
+			case strings.Contains(ex.query, "DELETE FROM `student_record_history` WHERE `batch_id` IN"):
+				delHist = true
+			case strings.Contains(ex.query, "DELETE FROM `student_records` WHERE `batch_id` IN"):
+				delStud = true
+			case strings.Contains(ex.query, "DELETE FROM `class_batches` WHERE `id` IN"):
+				delBatch = true
+			}
+		}
+		if !delGen || !delHist || !delStud || !delBatch {
+			t.Fatalf("expected all cascade deletes in tx, got execs=%+v", newExecs)
+		}
+	})
 }

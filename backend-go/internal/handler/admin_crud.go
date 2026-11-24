@@ -239,7 +239,7 @@ func handleAdminDBDelete(w http.ResponseWriter, r *http.Request, deps AdminDeps)
 	seen := map[string]struct{}{}
 	addID := func(s string) {
 		s = strings.TrimSpace(s)
-		if s == "" || s == "0" {
+		if s == "" {
 			return
 		}
 		if _, ok := seen[s]; ok {

@@ -327,11 +327,20 @@ if [ "$ROLLBACK" -eq 1 ]; then
 fi
 
 for domain in $SITES; do
-    probe_endpoint "$domain" "/api/public_config.php" "$expect_go" || fail=1
-    probe_endpoint "$domain" "/api/calibrate_roi.php" "$expect_go" || fail=1
-    probe_endpoint "$domain" "/api/changelog.php?action=getActive" "$expect_go" || fail=1
-    probe_endpoint "$domain" "/api/auth.php?action=check" "$expect_go" || fail=1
-    probe_endpoint "$domain" "/api/retest.php?action=captcha" "$expect_go" || fail=1
+    if [[ "$domain" =~ ^vip\. ]]; then
+        probe_endpoint "$domain" "/api/public_config.php" "$expect_go" || fail=1
+        probe_endpoint "$domain" "/api/retest.php?action=captcha" "$expect_go" || fail=1
+    else
+        probe_endpoint "$domain" "/api/public_config.php" "$expect_go" || fail=1
+        probe_endpoint "$domain" "/api/calibrate_roi.php" "$expect_go" || fail=1
+        probe_endpoint "$domain" "/api/changelog.php?action=getActive" "$expect_go" || fail=1
+        probe_endpoint "$domain" "/api/auth.php?action=check" "$expect_go" || fail=1
+        probe_endpoint "$domain" "/api/retest.php?action=captcha" "$expect_go" || fail=1
+        if [ "$ROLLBACK" -eq 0 ]; then
+            probe_endpoint "$domain" "/.well-known/jwks.json" "$expect_go" || fail=1
+            probe_endpoint "$domain" "/api/v1/qbank/anchors" "$expect_go" || fail=1
+        fi
+    fi
 done
 
 if [ "$fail" -ne 0 ]; then

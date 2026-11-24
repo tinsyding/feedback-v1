@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"feedback-api/internal/config"
 	"feedback-api/internal/senderctrl"
@@ -250,13 +251,19 @@ func (m *Manager) WriteChunk(clientDir, dateStr, logType string, offset int64, c
 			_ = os.WriteFile(targetPath, []byte(content), 0644)
 		} else if offset == 0 {
 			if curSize < int64(len(content)) {
-				appendBytes(targetPath, []byte(content[curSize:]))
+				start := advanceToUTF8Boundary(content, curSize)
+				if start < len(content) {
+					appendBytes(targetPath, []byte(content[start:]))
+				}
 			}
 		} else if curSize == offset {
 			appendBytes(targetPath, []byte(content))
 		} else if curSize >= offset && curSize < offset+int64(len(content)) {
 			skip := curSize - offset
-			appendBytes(targetPath, []byte(content[skip:]))
+			start := advanceToUTF8Boundary(content, skip)
+			if start < len(content) {
+				appendBytes(targetPath, []byte(content[start:]))
+			}
 		} else if curSize < offset {
 			appendBytes(targetPath, []byte(content))
 		}
@@ -553,6 +560,21 @@ func (m *Manager) CleanupOld(retentionDays int) {
 			_ = os.RemoveAll(filepath.Join(m.baseDir(), e.Name()))
 		}
 	}
+}
+
+func advanceToUTF8Boundary(s string, off int64) int {
+	if off <= 0 {
+		return 0
+	}
+	n := len(s)
+	if off >= int64(n) {
+		return n
+	}
+	i := int(off)
+	for i < n && !utf8.RuneStart(s[i]) {
+		i++
+	}
+	return i
 }
 
 func appendBytes(path string, data []byte) {

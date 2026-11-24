@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -26,9 +27,11 @@ import (
 )
 
 type mockSysLogsRepo struct {
-	inserted []syslogs.LogRecord
-	export   []syslogs.ExportRow
-	deleted  int64
+	inserted         []syslogs.LogRecord
+	export           []syslogs.ExportRow
+	deleted          int64
+	deleteByDateErr  error
+	deleteByIDErr    error
 }
 
 func (m *mockSysLogsRepo) InsertBatch(_ context.Context, entries []syslogs.LogRecord) error {
@@ -68,10 +71,16 @@ func (m *mockSysLogsRepo) Stats(_ context.Context) (*syslogs.StatsResult, error)
 }
 
 func (m *mockSysLogsRepo) DeleteByDate(_ context.Context, _ string) (int64, error) {
+	if m.deleteByDateErr != nil {
+		return 0, m.deleteByDateErr
+	}
 	return m.deleted, nil
 }
 
 func (m *mockSysLogsRepo) DeleteByID(_ context.Context, _ string) (int64, error) {
+	if m.deleteByIDErr != nil {
+		return 0, m.deleteByIDErr
+	}
 	return 1, nil
 }
 
@@ -376,5 +385,25 @@ func TestLogsSenderSyncSnapshotPullFiltersStatsAndSecurityHardening(t *testing.T
 	h.ServeHTTP(recNullSnap, reqNullSnap)
 	if recNullSnap.Code != http.StatusOK || !strings.Contains(recNullSnap.Body.String(), `"success":true`) {
 		t.Fatalf("null meta_json snapshot failed: code=%d body=%s", recNullSnap.Code, recNullSnap.Body.String())
+	}
+
+	// 7. DELETE clear / delete by id returns HTTP 500 on DB error
+	repo.deleteByDateErr = errors.New("db clear failed")
+	reqDelDateErr := httptest.NewRequest(http.MethodDelete, "/api/logs.php?action=clear&date=2026-11-21", nil)
+	reqDelDateErr.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: adminSID})
+	recDelDateErr := httptest.NewRecorder()
+	h.ServeHTTP(recDelDateErr, reqDelDateErr)
+	if recDelDateErr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 on DeleteByDate error, got %d: %s", recDelDateErr.Code, recDelDateErr.Body.String())
+	}
+	repo.deleteByDateErr = nil
+
+	repo.deleteByIDErr = errors.New("db delete id failed")
+	reqDelIDErr := httptest.NewRequest(http.MethodDelete, "/api/logs.php?id=log_1", nil)
+	reqDelIDErr.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: adminSID})
+	recDelIDErr := httptest.NewRecorder()
+	h.ServeHTTP(recDelIDErr, reqDelIDErr)
+	if recDelIDErr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 on DeleteByID error, got %d: %s", recDelIDErr.Code, recDelIDErr.Body.String())
 	}
 }

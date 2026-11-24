@@ -66,22 +66,25 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             go_changed="${{ inputs.force_go_build }}"
-            echo "manual dispatch: go_changed=$go_changed"
+            echo "manual dispatch: go_changed=$go_changed proxy_changed=true"
             echo "go_changed=$go_changed" >> "$GITHUB_OUTPUT"
+            echo "proxy_changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           BEFORE="${{ github.event.before }}"
           SHA="${{ github.sha }}"
           if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-            echo "initial/empty before SHA: go_changed=true"
+            echo "initial/empty before SHA: go_changed=true proxy_changed=true"
             echo "go_changed=true" >> "$GITHUB_OUTPUT"
+            echo "proxy_changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           if ! git fetch --no-tags --depth=1 origin "$BEFORE" 2>/dev/null; then
-            echo "failed to fetch before SHA $BEFORE: failing open (go_changed=true)"
+            echo "failed to fetch before SHA $BEFORE: failing open (go_changed=true proxy_changed=true)"
             echo "go_changed=true" >> "$GITHUB_OUTPUT"
+            echo "proxy_changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -94,6 +97,13 @@ jobs:
           else
             echo "No Go backend changes: go_changed=false"
             echo "go_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+          if echo "$CHANGED_FILES" | grep -Eq '^(feedback-v1/scripts/nginx/zz-feedback-go-proxy\.conf|backend-go/deploy/)'; then
+            echo "Nginx proxy/deploy changes detected: proxy_changed=true"
+            echo "proxy_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No Nginx proxy/deploy changes: proxy_changed=false"
+            echo "proxy_changed=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Set up Go
@@ -191,23 +201,64 @@ jobs:
               if [ -f /opt/feedback-go/feedback-api.prev ]; then
                 mv -f /opt/feedback-go/feedback-api.prev /opt/feedback-go/feedback-api
                 systemctl restart feedback-api || true
+                prev_ok=0
+                for _ in 1 2 3 4 5 6 7 8 9 10; do
+                  code=$(curl -sS --noproxy "*" --connect-timeout 2 --max-time 5 -o /dev/null -w "%{http_code}" http://127.0.0.1:8090/healthz || true)
+                  if [ "$code" = "200" ]; then
+                    echo "feedback-api rollback healthz OK (HTTP 200)"
+                    prev_ok=1
+                    break
+                  fi
+                  sleep 1
+                done
+                if [ "$prev_ok" -ne 1 ]; then
+                  echo "previous feedback-api binary also failed healthz; rolling back Nginx proxy to PHP" >&2
+                  bash /www/wwwroot/JF/feedback-git/backend-go/deploy/install_nginx_go_proxy.sh --rollback || true
+                fi
+              else
+                echo "no feedback-api.prev available; rolling back Nginx proxy to PHP" >&2
+                bash /www/wwwroot/JF/feedback-git/backend-go/deploy/install_nginx_go_proxy.sh --rollback || true
               fi
               exit 1
             fi
           else
             echo "feedback-api.service not enabled or active yet; skipping restart"
           fi
+          EOF
+
+      - name: Sync Nginx Go proxy config
+        if: steps.changes.outputs.go_changed == 'true' || steps.changes.outputs.proxy_changed == 'true'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          SSH="ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 $DEPLOY_USER@$DEPLOY_HOST"
+          $SSH "bash -s" <<'EOF'
+          set -e
           NGINX_EXT="/www/server/panel/vhost/nginx/extension/feedback.wxjifang.cn"
           SRC_PROXY="/www/wwwroot/JF/feedback-git/feedback-v1/scripts/nginx/zz-feedback-go-proxy.conf"
           DST_PROXY="$NGINX_EXT/zz-feedback-go-proxy.conf"
           if [ -d "$NGINX_EXT" ] && [ -f "$SRC_PROXY" ] && (systemctl is-enabled feedback-api >/dev/null 2>&1 || systemctl is-active --quiet feedback-api); then
             if [ ! -f "$DST_PROXY" ] || ! cmp -s "$SRC_PROXY" "$DST_PROXY"; then
+              had_backup=0
+              rm -f "$DST_PROXY.bak"
+              if [ -f "$DST_PROXY" ]; then
+                cp -a "$DST_PROXY" "$DST_PROXY.bak"
+                had_backup=1
+              fi
               install -m 600 -o root -g root "$SRC_PROXY" "$DST_PROXY"
               if nginx -t; then
+                rm -f "$DST_PROXY.bak"
                 nginx -s reload || /etc/init.d/nginx reload
                 echo "synced zz-feedback-go-proxy.conf and reloaded nginx"
               else
-                echo "nginx -t failed after syncing zz-feedback-go-proxy.conf" >&2
+                echo "nginx -t failed after syncing zz-feedback-go-proxy.conf; restoring previous config" >&2
+                if [ "$had_backup" -eq 1 ] && [ -f "$DST_PROXY.bak" ]; then
+                  mv -f "$DST_PROXY.bak" "$DST_PROXY"
+                else
+                  rm -f "$DST_PROXY"
+                fi
                 exit 1
               fi
             fi
@@ -261,6 +312,8 @@ jobs:
           check "https://feedback.wxjifang.cn/verify-qbank.html"
           check "https://feedback.wxjifang.cn/admin.html"
           check "https://feedback.wxjifang.cn/.well-known/jwks.json"
+          check "https://feedback.wxjifang.cn/api/v1/qbank/anchors"
+          check_status "https://feedback.wxjifang.cn/api/v1/qbank/verify" "400"
           check "https://feedback.wxjifang.cn/api/auth.php?action=check"
           check "https://feedback.wxjifang.cn/api/public_config.php"
           check "https://feedback.wxjifang.cn/api/calibrate_roi.php"
@@ -269,6 +322,8 @@ jobs:
           check_status "https://feedback.wxjifang.cn/api/qbank.php?action=list" "401"
           check_status "https://feedback.wxjifang.cn/api/logs.php?action=list" "401"
           check_status "https://feedback.wxjifang.cn/api/admin.php?action=db_tables" "401"
+          check_status "https://feedback.wxjifang.cn/api/upload_pdf.php" "401" "405"
+          check_status "https://feedback.wxjifang.cn/api/upload_capture.php" "401" "405"
           check "https://feedback.wxjifang.cn/css/tokens.css"
           check "https://feedback.wxjifang.cn/js/upload.js"
           check "https://vip.wxjifang.cn/retest.html"
