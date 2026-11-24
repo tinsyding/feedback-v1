@@ -5861,7 +5861,7 @@ function applySavedDataFilter() {
                         ${isAssistant ? '查看题目' : '查看 / 更改题目'}
                     </button>
                     <button type="button" class="saved-btn preview-btn" data-card-action="preview" title="直接进入全景预览核对页面">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
                             <circle cx="12" cy="12" r="3"></circle>
                         </svg>

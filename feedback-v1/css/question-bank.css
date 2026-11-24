@@ -6020,15 +6020,35 @@ span.rg-card-num-wrap {
 
 /* ===== Saved Card Preview Button ===== */
 .saved-btn.preview-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 6px 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    line-height: 1.25;
+    font-family: inherit;
+    white-space: nowrap;
+    flex-shrink: 0;
+    border-radius: var(--radius-xs, 6px);
     background: var(--bg-tertiary, rgba(148, 163, 184, 0.12));
     color: var(--text-primary);
     border: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .saved-btn.preview-btn:hover {
     border-color: var(--brand-500, #3b82f6);
     color: var(--brand-500, #3b82f6);
     background: rgba(59, 130, 246, 0.08);
+}
+
+.saved-btn.preview-btn svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
 }
 
 /* ===== Step 5: 题库预览核对页面 ===== */
