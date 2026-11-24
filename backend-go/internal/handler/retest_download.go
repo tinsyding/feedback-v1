@@ -99,56 +99,21 @@ func handleRetestCreateTempDownload(w http.ResponseWriter, r *http.Request, deps
 		return
 	}
 	if token != "" && deps.Repo != nil && !sess.IsAdminLoggedIn() {
-		if revoked, _ := deps.Repo.IsTokenRevoked(r.Context(), token); revoked {
+		revoked, revErr := deps.Repo.IsTokenRevoked(r.Context(), token)
+		if revErr != nil {
+			writeRawJSON(w, http.StatusInternalServerError, map[string]any{
+				"success": false,
+				"error":   "数据库查询服务异常，请稍后重试",
+			})
+			return
+		}
+		if revoked {
 			writeRawJSON(w, http.StatusForbidden, map[string]any{
 				"success": false,
 				"error":   "该错题本链接已被教师作废，无法下载",
 			})
 			return
 		}
-	}
-
-	// Per-session rate limit: max 30 temp files per hour (atomic read-modify-write)
-	nowUnix := deps.now().Unix()
-	rateLimited := false
-	if deps.Sessions != nil {
-		if _, err := session.Update(r.Context(), deps.Sessions, sess.ID, func(data map[string]any) (bool, error) {
-			dlCount := config.AsPHPInt(data["temp_download_count"])
-			dlTime := int64(config.AsPHPInt(data["temp_download_time"]))
-			if dlTime <= 0 || nowUnix-dlTime > 3600 {
-				dlCount = 0
-				dlTime = nowUnix
-			}
-			if dlCount >= 30 {
-				rateLimited = true
-				return false, nil
-			}
-			data["temp_download_count"] = dlCount + 1
-			data["temp_download_time"] = dlTime
-			return true, nil
-		}); err == nil && isNewSess {
-			session.SetCookie(w, r, sess.ID)
-		}
-	} else {
-		dlCount := sess.IntVal("temp_download_count")
-		dlTime := int64(sess.IntVal("temp_download_time"))
-		if dlTime <= 0 || nowUnix-dlTime > 3600 {
-			dlCount = 0
-			dlTime = nowUnix
-		}
-		if dlCount >= 30 {
-			rateLimited = true
-		} else {
-			sess.Data["temp_download_count"] = dlCount + 1
-			sess.Data["temp_download_time"] = dlTime
-		}
-	}
-	if rateLimited {
-		writeRawJSON(w, http.StatusTooManyRequests, map[string]any{
-			"success": false,
-			"error":   "生成下载文件过于频繁，请稍后再试",
-		})
-		return
 	}
 
 	var pdfBytes []byte
@@ -173,7 +138,13 @@ func handleRetestCreateTempDownload(w http.ResponseWriter, r *http.Request, deps
 		}
 	} else {
 		data, err := io.ReadAll(io.LimitReader(r.Body, maxTempPDFSize+1))
-		if err == nil && len(data) > 10 {
+		if err != nil {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				writeRawJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"success": false, "error": "文件大小超出限制（最大 25MB）"})
+				return
+			}
+		} else if len(data) > 10 {
 			pdfBytes = data
 			if fn := strings.TrimSpace(q.Get("filename")); fn != "" {
 				fileName = fn
@@ -191,6 +162,56 @@ func handleRetestCreateTempDownload(w http.ResponseWriter, r *http.Request, deps
 	}
 	if len(pdfBytes) < 4 || string(pdfBytes[:4]) != "%PDF" {
 		writeRawJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "文件非合法 PDF 格式"})
+		return
+	}
+
+	// Per-session rate limit: max 30 temp files per hour (atomic read-modify-write, after payload validation)
+	nowUnix := deps.now().Unix()
+	rateLimited := false
+	if deps.Sessions != nil {
+		if _, err := session.Update(r.Context(), deps.Sessions, sess.ID, func(data map[string]any) (bool, error) {
+			rateLimited = false
+			dlCount := config.AsPHPInt(data["temp_download_count"])
+			dlTime := int64(config.AsPHPInt(data["temp_download_time"]))
+			if dlTime <= 0 || nowUnix-dlTime > 3600 {
+				dlCount = 0
+				dlTime = nowUnix
+			}
+			if dlCount >= 30 {
+				rateLimited = true
+				return false, nil
+			}
+			data["temp_download_count"] = dlCount + 1
+			data["temp_download_time"] = dlTime
+			return true, nil
+		}); err != nil {
+			writeRawJSON(w, http.StatusInternalServerError, map[string]any{
+				"success": false,
+				"error":   "会话状态保存失败，请稍后重试",
+			})
+			return
+		} else if isNewSess {
+			session.SetCookie(w, r, sess.ID)
+		}
+	} else {
+		dlCount := sess.IntVal("temp_download_count")
+		dlTime := int64(sess.IntVal("temp_download_time"))
+		if dlTime <= 0 || nowUnix-dlTime > 3600 {
+			dlCount = 0
+			dlTime = nowUnix
+		}
+		if dlCount >= 30 {
+			rateLimited = true
+		} else {
+			sess.Data["temp_download_count"] = dlCount + 1
+			sess.Data["temp_download_time"] = dlTime
+		}
+	}
+	if rateLimited {
+		writeRawJSON(w, http.StatusTooManyRequests, map[string]any{
+			"success": false,
+			"error":   "生成下载文件过于频繁，请稍后再试",
+		})
 		return
 	}
 
@@ -213,7 +234,11 @@ func handleRetestCreateTempDownload(w http.ResponseWriter, r *http.Request, deps
 		"filename":   cleanFileName,
 		"created_at": nowUnix,
 	})
-	_ = writeFileAtomic(metaPath, metaBytes, 0o644)
+	if err := writeFileAtomic(metaPath, metaBytes, 0o644); err != nil {
+		_ = os.Remove(targetPath)
+		writeRawJSON(w, http.StatusInternalServerError, map[string]any{"success": false, "error": "临时文件写入失败"})
+		return
+	}
 
 	studentName := ""
 	if isMultipart {
@@ -288,8 +313,12 @@ func handleRetestDownloadFile(w http.ResponseWriter, r *http.Request, deps Retes
 		}
 	}
 
-	// 2-hour TTL
-	if metaCreatedAt > 0 && deps.now().Unix()-metaCreatedAt > 7200 {
+	// 2-hour TTL (fall back to file ModTime if metadata is missing or invalid)
+	createdAt := metaCreatedAt
+	if createdAt <= 0 {
+		createdAt = info.ModTime().Unix()
+	}
+	if createdAt > 0 && deps.now().Unix()-createdAt > 7200 {
 		_ = os.Remove(filePath)
 		_ = os.Remove(metaPath)
 		w.WriteHeader(http.StatusGone)
@@ -302,14 +331,6 @@ func handleRetestDownloadFile(w http.ResponseWriter, r *http.Request, deps Retes
 	}
 	cleanFileName := sanitizeTempPDFName(fileName)
 
-	token := strings.TrimSpace(q.Get("token"))
-	studentName := ""
-	if token != "" {
-		sess, _ := loadAuthSession(r, deps.Sessions)
-		studentName = sess.StringVal(verifiedTokenSessionKey(token))
-	}
-	logRetestAccess(r, deps, token, studentName, "download_file", cleanFileName)
-
 	f, err := os.Open(filePath)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
@@ -321,6 +342,14 @@ func handleRetestDownloadFile(w http.ResponseWriter, r *http.Request, deps Retes
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+
+	token := strings.TrimSpace(q.Get("token"))
+	studentName := ""
+	if token != "" {
+		sess, _ := loadAuthSession(r, deps.Sessions)
+		studentName = sess.StringVal(verifiedTokenSessionKey(token))
+	}
+	logRetestAccess(r, deps, token, studentName, "download_file", cleanFileName)
 	encName := strings.ReplaceAll(url.QueryEscape(cleanFileName), "+", "%20")
 	w.Header().Set("Content-Description", "File Transfer")
 	w.Header().Set("Content-Type", "application/pdf")

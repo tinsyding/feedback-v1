@@ -54,3 +54,21 @@ func TestGradeAndDeriveRetestToken(t *testing.T) {
 		t.Fatalf("unexpected deterministic token: %q vs %q", tok1, tok2)
 	}
 }
+
+func TestSubjectPHPTrimParity(t *testing.T) {
+	if got := Subject(" \t\n\r\x00\x0b数学\r\n "); got != "数学" {
+		t.Fatalf("Subject ASCII trim = %q, want 数学", got)
+	}
+	if got := Subject("\u3000数学\u3000"); got != "\u3000数学\u3000" {
+		t.Fatalf("Subject fullwidth space should be preserved like PHP trim(), got %q", got)
+	}
+	if got := Subject("\u00a0数学\u00a0"); got != "\u00a0数学\u00a0" {
+		t.Fatalf("Subject NBSP should be preserved like PHP trim(), got %q", got)
+	}
+	// Verify byte-for-byte parity with PHP lib_normalize.php + lib_retest_keys.php
+	subj := Subject("\u3000数学\u3000")
+	key := "\u00a03001_张三_七年级_" + subj
+	if got := DeriveRetestToken(subj, "七年级", key, "test_secret_parity"); got != "TniXg6cJOG" {
+		t.Fatalf("DeriveRetestToken Unicode whitespace parity = %q, want TniXg6cJOG", got)
+	}
+}

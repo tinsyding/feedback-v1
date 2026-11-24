@@ -2,14 +2,18 @@ package retestkeys
 
 import "strings"
 
+func phpTrim(s string) string {
+	return strings.Trim(s, " \t\n\r\x00\x0b")
+}
+
 // BuildStudentKey constructs the canonical student identity key:
 // "{id}_{name}_{grade}_{subject}".
 // Mirrors PHP feedback-v1/api/lib_retest_keys.php build_student_key().
 func BuildStudentKey(id, name, grade, subject string) string {
-	id = strings.TrimSpace(id)
-	name = strings.TrimSpace(name)
-	grade = strings.TrimSpace(grade)
-	subject = strings.TrimSpace(subject)
+	id = phpTrim(id)
+	name = phpTrim(name)
+	grade = phpTrim(grade)
+	subject = phpTrim(subject)
 
 	if id == "" {
 		return name
@@ -23,8 +27,8 @@ func BuildStudentKey(id, name, grade, subject string) string {
 // LegacyStudentKey returns the pre-migration key "{id}_{name}" (or pure name if id is empty).
 // Mirrors PHP legacy_student_key().
 func LegacyStudentKey(id, name string) string {
-	id = strings.TrimSpace(id)
-	name = strings.TrimSpace(name)
+	id = phpTrim(id)
+	name = phpTrim(name)
 	if id != "" {
 		return id + "_" + name
 	}
@@ -50,7 +54,7 @@ func StudentKeyCandidates(id, name, grade, subject string) []string {
 // IsLegacyNameOnlyKey reports whether key represents a name-only row (empty or equal to name).
 // Mirrors PHP is_legacy_name_only_key().
 func IsLegacyNameOnlyKey(key, name string) bool {
-	key = strings.TrimSpace(key)
-	name = strings.TrimSpace(name)
+	key = phpTrim(key)
+	name = phpTrim(name)
 	return name != "" && (key == "" || key == name)
 }

@@ -264,3 +264,32 @@ func TestRevokeTokenAndLogAccessRuneSafeTruncation(t *testing.T) {
 		t.Fatal("LogAccess produced invalid UTF-8")
 	}
 }
+
+func TestLoadStudentHistoryDoesNotFallbackByTierWhenStudentIDPresent(t *testing.T) {
+	state := &mockDecryptState{}
+	repo := NewMySQLRepository(openMockDecryptDB(t, state))
+
+	if _, err := repo.LoadStudentHistoryAndAverages(context.Background(), "数学", "七年级", "目标A班", "1002", "王磊", []string{"1002_王磊_七年级_数学", "1002_王磊"}); err != nil {
+		t.Fatalf("LoadStudentHistoryAndAverages failed: %v", err)
+	}
+
+	state.mu.Lock()
+	qWithID := state.queries[0]
+	state.mu.Unlock()
+	if strings.Contains(qWithID, "cb.tier = ?") || strings.Contains(qWithID, "sr.student_name = ?") {
+		t.Fatalf("must not fall back to name-only/tier match when studentID is non-empty, got query: %s", qWithID)
+	}
+
+	// When studentID is empty, name-only fallback IS allowed (matching PHP retest.php:1893-1896)
+	stateNoID := &mockDecryptState{}
+	repoNoID := NewMySQLRepository(openMockDecryptDB(t, stateNoID))
+	if _, err := repoNoID.LoadStudentHistoryAndAverages(context.Background(), "数学", "七年级", "目标A班", "", "王磊", []string{"王磊"}); err != nil {
+		t.Fatalf("LoadStudentHistoryAndAverages no-ID failed: %v", err)
+	}
+	stateNoID.mu.Lock()
+	qNoID := stateNoID.queries[0]
+	stateNoID.mu.Unlock()
+	if !strings.Contains(qNoID, "sr.student_name = ?") || strings.Contains(qNoID, "cb.tier = ?") {
+		t.Fatalf("expected name-only fallback without tier filter when studentID is empty, got query: %s", qNoID)
+	}
+}

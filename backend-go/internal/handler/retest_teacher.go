@@ -63,15 +63,15 @@ func firstParam(input map[string]any, r *http.Request, keys ...string) string {
 	for _, k := range keys {
 		if input != nil {
 			if v, ok := input[k]; ok && v != nil {
-				if s := strings.TrimSpace(config.AsPHPString(v)); s != "" {
+				if s := phpTrim(config.AsPHPString(v)); s != "" {
 					return s
 				}
 			}
 		}
-		if v := strings.TrimSpace(r.URL.Query().Get(k)); v != "" {
+		if v := phpTrim(r.URL.Query().Get(k)); v != "" {
 			return v
 		}
-		if v := strings.TrimSpace(r.PostFormValue(k)); v != "" {
+		if v := phpTrim(r.PostFormValue(k)); v != "" {
 			return v
 		}
 	}
@@ -114,8 +114,8 @@ func handleRetestCheckExistingBatch(w http.ResponseWriter, r *http.Request, deps
 				continue
 			}
 			in.IncomingStudents = append(in.IncomingStudents, retest.CheckBatchStudent{
-				Name:   strings.TrimSpace(config.AsPHPString(stMap["name"])),
-				ID:     strings.TrimSpace(config.AsPHPString(stMap["id"])),
+				Name:   phpTrim(config.AsPHPString(stMap["name"])),
+				ID:     phpTrim(config.AsPHPString(stMap["id"])),
 				Score:  config.AsPHPFloat(stMap["score"]),
 				Errors: retest.NormalizeErrorNums(stMap["errors"]),
 			})
@@ -337,9 +337,9 @@ func handleRetestEncryptBatch(w http.ResponseWriter, r *http.Request, deps Retes
 		}
 
 		students = append(students, retest.EncryptStudentInput{
-			Name:                    strings.TrimSpace(config.AsPHPString(sm["name"])),
-			FullName:                strings.TrimSpace(config.AsPHPString(sm["fullName"])),
-			ID:                      strings.TrimSpace(config.AsPHPString(sm["id"])),
+			Name:                    phpTrim(config.AsPHPString(sm["name"])),
+			FullName:                phpTrim(config.AsPHPString(sm["fullName"])),
+			ID:                      phpTrim(config.AsPHPString(sm["id"])),
 			Errors:                  retest.NormalizeErrorNums(sm["errors"]),
 			PreviewErrors:           retest.NormalizeErrorNums(sm["previewErrors"]),
 			HomeworkScore:           parseOptFloat(sm, "homeworkScore"),
@@ -429,7 +429,11 @@ func handleRetestRevokeToggle(w http.ResponseWriter, r *http.Request, deps Retes
 		return
 	}
 
-	exists, _ := deps.Repo.TokenExists(r.Context(), token, action == "unrevoke_token")
+	exists, err := deps.Repo.TokenExists(r.Context(), token, action == "unrevoke_token")
+	if err != nil {
+		writeRawJSON(w, http.StatusInternalServerError, map[string]any{"success": false, "error": "数据库查询服务异常，请稍后重试"})
+		return
+	}
 	if !exists {
 		writeRawJSON(w, http.StatusNotFound, map[string]any{"success": false, "error": "未找到该 Token 对应的错题本记录"})
 		return
@@ -444,7 +448,6 @@ func handleRetestRevokeToggle(w http.ResponseWriter, r *http.Request, deps Retes
 	}
 
 	var event, msg string
-	var err error
 	if action == "revoke_token" {
 		reason := strings.TrimSpace(config.AsPHPString(body["reason"]))
 		if reason == "" {

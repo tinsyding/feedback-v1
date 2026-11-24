@@ -84,10 +84,13 @@ function isTokenRevoked(string $token): bool {
     try {
         $db = Database::getInstance();
         $row = $db->fetchOne("SELECT `token` FROM `retest_revoked_tokens` WHERE `token` = ? LIMIT 1", [$token]);
+        if (DB::getLastError() !== null) {
+            throw new RuntimeException(DB::getLastError());
+        }
         return !empty($row);
     } catch (Throwable $e) {
         error_log("isTokenRevoked error: " . $e->getMessage());
-        return false;
+        throw $e;
     }
 }
 
@@ -266,6 +269,7 @@ function getWeekPdfs($subject, $grade, $tier, $weekNum, $errorNums, $year = null
     $bankType = $bankType === 'preview' ? 'preview' : 'homework';
     $pdfList = [];
     $uniquePdfs = []; // 映射 exerciseUrl => $pdfList 索引，支持同篇大题多错题聚合与去重
+    $seenVarKeys = []; // 独立记录变式去重 Key，避免共享 PDF 的变式阻塞后续原题
 
     // 从 MySQL qbank_questions（或批量预加载内存缓存）查询
     try {
@@ -541,7 +545,7 @@ function getWeekPdfs($subject, $grade, $tier, $weekNum, $errorNums, $year = null
                             if ($vExUrl && $vMode === 'region_crop') {
                                 $vUniqueKey = $vExUrl . '::var::' . ($vRow['id'] ?? ($qNum . '_' . intval($vRow['sub_num'] ?? 1)));
                             }
-                            if ($vExUrl && !isset($uniquePdfs[$vUniqueKey])) {
+                            if ($vExUrl && !isset($uniquePdfs[$vUniqueKey]) && !isset($seenVarKeys[$vUniqueKey])) {
                                 $pdfList[] = [
                                     'errorNum' => $errNum,
                                     'parentNum' => $qNum,
@@ -561,7 +565,7 @@ function getWeekPdfs($subject, $grade, $tier, $weekNum, $errorNums, $year = null
                                     'sourceType' => 'variation',
                                     'isVariation' => true
                                 ];
-                                $uniquePdfs[$vUniqueKey] = true;
+                                $seenVarKeys[$vUniqueKey] = true;
                             }
                         }
                     }
@@ -1477,6 +1481,12 @@ if ($action === 'encrypt_batch') {
         $hwSubmissionStatus = $hasHomeworkData
             ? resolveSubmissionStatus($rawHwStatus, $errors, $hwScore, $comment)
             : 'submitted';
+        $preserveExistingHwStatus = $hasHomeworkData
+            && $isErrorsOnly
+            && $rawHwStatus === ''
+            && empty($errors)
+            && $hwScore === null
+            && $comment === '';
 
         $rawPvStatus = trim((string)($student['previewSubmissionStatus'] ?? ($student['preview_submission_status'] ?? '')));
         if ($rawPvStatus === '' && array_key_exists('isPreviewUnsubmitted', $student)) {
@@ -1485,6 +1495,12 @@ if ($action === 'encrypt_batch') {
         $pvSubmissionStatus = $studentHasPreview
             ? resolveSubmissionStatus($rawPvStatus, $previewErrors, $preScore, $previewComment)
             : 'submitted';
+        $preserveExistingPvStatus = $studentHasPreview
+            && $isErrorsOnly
+            && $rawPvStatus === ''
+            && empty($previewErrors)
+            && $preScore === null
+            && $previewComment === '';
 
         // 生成简短、高熵且防篡改的短 Token（10位，基于 HMAC-SHA256）
         // 哈希因子不再包含班型：学生换班型后仍得到同一个稳定链接，历史不断档
@@ -1521,10 +1537,15 @@ if ($action === 'encrypt_batch') {
                     "`updated_at` = CURRENT_TIMESTAMP"
                 ];
                 if ($studentHasPreview) {
-                    $updateParts[] = "`preview_submission_status` = VALUES(`preview_submission_status`)";
+                    $updateParts[] = $preserveExistingPvStatus
+                        ? "`preview_submission_status` = IF(`preview_submission_status` IN ('submitted','exempt'), `preview_submission_status`, VALUES(`preview_submission_status`))"
+                        : "`preview_submission_status` = VALUES(`preview_submission_status`)";
                 }
                 if ($hasHomeworkData) {
                     if ($isErrorsOnly) {
+                        $hwStatusUpdate = $preserveExistingHwStatus
+                            ? "`submission_status` = IF(`submission_status` IN ('submitted','exempt'), `submission_status`, VALUES(`submission_status`))"
+                            : "`submission_status` = VALUES(`submission_status`)";
                         array_unshift($updateParts,
                             "`batch_code` = VALUES(`batch_code`)",
                             "`source_files` = COALESCE(VALUES(`source_files`), `source_files`)",
@@ -1533,7 +1554,7 @@ if ($action === 'encrypt_batch') {
                             "`error_count` = VALUES(`error_count`)",
                             "`error_questions` = VALUES(`error_questions`)",
                             "`teacher_comment` = IF(VALUES(`teacher_comment`) != '', VALUES(`teacher_comment`), `teacher_comment`)",
-                            "`submission_status` = VALUES(`submission_status`)"
+                            $hwStatusUpdate
                         );
                     } else {
                         array_unshift($updateParts,
@@ -1580,9 +1601,12 @@ if ($action === 'encrypt_batch') {
                 );
                 // 若本次更新了预习错题，同步更新该生在同一批次下其它关联了相同 preview_week_num 的行，确保预习按专题归档时数据一致
                 if ($studentHasPreview && $previewWeekValue > 0) {
+                    $pvSubClause = $preserveExistingPvStatus
+                        ? "`preview_submission_status` = IF(`preview_submission_status` IN ('submitted','exempt'), `preview_submission_status`, COALESCE(?, `preview_submission_status`))"
+                        : "`preview_submission_status` = COALESCE(?, `preview_submission_status`)";
                     $db->execute(
                         "UPDATE `student_records`
-                         SET `preview_error_questions` = ?, `preview_submission_status` = COALESCE(?, `preview_submission_status`), `updated_at` = CURRENT_TIMESTAMP
+                         SET `preview_error_questions` = ?, {$pvSubClause}, `updated_at` = CURRENT_TIMESTAMP
                          WHERE `batch_id` = ? AND `student_key` = ? AND `preview_week_num` = ? AND `week_num` != ?",
                         [$previewErrJson, $pvSubmissionStatus, $batchId, $studentKey, $previewWeekValue, $week]
                     );
@@ -1736,11 +1760,17 @@ if ($action === 'decrypt') {
         exit;
     }
 
-    // 黑名单吊销检查（失败前置：被作废的链接连核验门都不展示）
-    if (isTokenRevoked($rawToken)) {
-        logRetestAccess($rawToken, $data['n'] ?? '', 'access_revoked', '链接已被作废');
-        http_response_code(403);
-        echo json_encode(['success' => false, 'error' => '该错题本链接已被老师作废，请联系老师重新获取'], JSON_UNESCAPED_UNICODE);
+    // 黑名单吊销检查（失败前置：被作废的链接连核验门都不展示；查询异常时失败关闭返回 500）
+    try {
+        if (isTokenRevoked($rawToken)) {
+            logRetestAccess($rawToken, $data['n'] ?? '', 'access_revoked', '链接已被作废');
+            http_response_code(403);
+            echo json_encode(['success' => false, 'error' => '该错题本链接已被老师作废，请联系老师重新获取'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => '数据库查询服务异常，请稍后重试'], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
@@ -2440,12 +2470,18 @@ if ($action === 'revoke_token' || $action === 'unrevoke_token') {
     $exists = false;
     try {
         $db = Database::getInstance();
-        $exists = (bool)$db->fetchOne("SELECT id FROM student_records WHERE retest_token = ? LIMIT 1", [$token]);
+        $row = $db->fetchOne("SELECT id FROM student_records WHERE retest_token = ? LIMIT 1", [$token]);
+        if (DB::getLastError() !== null) {
+            throw new RuntimeException(DB::getLastError());
+        }
+        $exists = !empty($row);
         if (!$exists && $action === 'unrevoke_token') {
             $exists = isTokenRevoked($token);
         }
     } catch (Throwable $e) {
-        $exists = false;
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => '数据库查询服务异常，请稍后重试'], JSON_UNESCAPED_UNICODE);
+        exit;
     }
     if (!$exists) {
         http_response_code(404);

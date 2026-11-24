@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -44,6 +45,8 @@ type fakeRetestRepo struct {
 	weekRecRes       retest.StudentWeekResult
 	lastWeekQ        retest.StudentWeekQuery
 	tokenExists      bool
+	revokedErr       error
+	tokenExistsErr   error
 }
 
 func newFakeRetestRepo() *fakeRetestRepo {
@@ -140,9 +143,17 @@ func (f *fakeRetestRepo) PreloadMultiWeekQbankRows(_ context.Context, _, _ strin
 func (f *fakeRetestRepo) IsTokenRevoked(_ context.Context, token string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.revokedErr != nil {
+		return false, f.revokedErr
+	}
 	return f.revoked[token], nil
 }
 func (f *fakeRetestRepo) TokenExists(_ context.Context, _ string, _ bool) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.tokenExistsErr != nil {
+		return false, f.tokenExistsErr
+	}
 	return f.tokenExists, nil
 }
 func (f *fakeRetestRepo) RevokeToken(_ context.Context, token, _, reason string) error {
@@ -707,4 +718,171 @@ func TestRetestCreateTempDownloadParentVerifiedToken(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"success":true`) {
 		t.Fatalf("parent verified_token create_temp_download failed: %d %s", rec.Code, rec.Body.String())
 	}
+}
+
+type failingUpdateSessionStore struct {
+	*session.MemoryStore
+	updateErr error
+}
+
+func (f *failingUpdateSessionStore) Update(_ context.Context, _ string, _ func(map[string]any) (bool, error)) (*session.Session, error) {
+	return nil, f.updateErr
+}
+
+func TestRetestAuditFixes(t *testing.T) {
+	t.Run("IsTokenRevoked DB error fails closed with 500 on decrypt and create_temp_download", func(t *testing.T) {
+		h, repo, sessions, _, _ := setupRetestTestEnv(t, "prod_retest_secret_2026")
+		repo.revokedErr = errors.New("mysql connection lost")
+
+		reqDec := httptest.NewRequest(http.MethodGet, "http://feedback.wxjifang.cn/api/retest.php?action=decrypt&token=tok1234567", nil)
+		recDec := httptest.NewRecorder()
+		h.ServeHTTP(recDec, reqDec)
+		if recDec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected 500 on IsTokenRevoked DB error in decrypt, got %d (%s)", recDec.Code, recDec.Body.String())
+		}
+
+		tSess := &session.Session{ID: "rev_err_sess_1234567890ab", Data: map[string]any{"user_logged_in": true, "username": "t1"}}
+		_ = sessions.Save(context.Background(), tSess)
+		reqDL := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/retest.php?action=create_temp_download&token=tok1234567", bytes.NewReader([]byte("%PDF-1.4\nhello world\n")))
+		reqDL.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: tSess.ID})
+		recDL := httptest.NewRecorder()
+		h.ServeHTTP(recDL, reqDL)
+		if recDL.Code != http.StatusInternalServerError {
+			t.Fatalf("expected 500 on IsTokenRevoked DB error in create_temp_download, got %d (%s)", recDL.Code, recDL.Body.String())
+		}
+	})
+
+	t.Run("create_temp_download validates before rate-limit and fails closed on session.Update error", func(t *testing.T) {
+		h, _, sessions, _, _ := setupRetestTestEnv(t, "prod_retest_secret_2026")
+		tSess := &session.Session{ID: "rl_sess_1234567890abcdefg", Data: map[string]any{"user_logged_in": true, "username": "t1"}}
+		_ = sessions.Save(context.Background(), tSess)
+		ck := &http.Cookie{Name: "PHPSESSID", Value: tSess.ID}
+
+		// 35 invalid payloads must not consume the 30/hr quota
+		for i := 0; i < 35; i++ {
+			reqBad := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/retest.php?action=create_temp_download", bytes.NewReader([]byte("NOT_A_PDF_AT_ALL")))
+			reqBad.AddCookie(ck)
+			recBad := httptest.NewRecorder()
+			h.ServeHTTP(recBad, reqBad)
+			if recBad.Code != http.StatusBadRequest {
+				t.Fatalf("invalid req %d expected 400, got %d", i, recBad.Code)
+			}
+		}
+
+		// Next 30 valid PDFs succeed, 31st hits 429
+		validPDF := []byte("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n")
+		for i := 0; i < 30; i++ {
+			reqOK := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/retest.php?action=create_temp_download", bytes.NewReader(validPDF))
+			reqOK.AddCookie(ck)
+			recOK := httptest.NewRecorder()
+			h.ServeHTTP(recOK, reqOK)
+			if recOK.Code != http.StatusOK {
+				t.Fatalf("valid req %d expected 200, got %d (%s)", i, recOK.Code, recOK.Body.String())
+			}
+		}
+		reqCap := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/retest.php?action=create_temp_download", bytes.NewReader(validPDF))
+		reqCap.AddCookie(ck)
+		recCap := httptest.NewRecorder()
+		h.ServeHTTP(recCap, reqCap)
+		if recCap.Code != http.StatusTooManyRequests {
+			t.Fatalf("31st valid req expected 429, got %d", recCap.Code)
+		}
+
+		// Session Update error fails closed with 500
+		dir := t.TempDir()
+		_ = os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"retestSecret":"prod_retest_secret_2026"}`), 0o644)
+		mem := session.NewMemoryStore()
+		_ = mem.Save(context.Background(), tSess)
+		failStore := &failingUpdateSessionStore{MemoryStore: mem, updateErr: errors.New("session store write failed")}
+		hFail := httpx.Middleware(Retest(RetestDeps{
+			Repo:         newFakeRetestRepo(),
+			Sessions:     failStore,
+			ConfigLoader: config.NewLoader(dir, ""),
+			FeedbackRoot: dir,
+		}))
+		reqFail := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/retest.php?action=create_temp_download", bytes.NewReader(validPDF))
+		reqFail.AddCookie(ck)
+		recFail := httptest.NewRecorder()
+		hFail.ServeHTTP(recFail, reqFail)
+		if recFail.Code != http.StatusInternalServerError {
+			t.Fatalf("expected 500 on session.Update error, got %d (%s)", recFail.Code, recFail.Body.String())
+		}
+	})
+
+	t.Run("decrypt config null defaults, body size/JSON errors, and revoke 500", func(t *testing.T) {
+		h, repo, sessions, dir, nowUnix := setupRetestTestEnv(t, "prod_retest_secret_2026")
+		_ = os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"retestSecret":"prod_retest_secret_2026","retestQuestionSpacing":null,"retestQrCodeEnabled":null}`), 0o644)
+
+		sig := admin.SignRetestAdminSig("tok1234567", *nowUnix, "prod_retest_secret_2026")
+		reqNull := httptest.NewRequest(http.MethodGet, fmt.Sprintf("http://feedback.wxjifang.cn/api/retest.php?action=decrypt&token=tok1234567&admin_sig=%s&admin_ts=%d", sig, *nowUnix), nil)
+		recNull := httptest.NewRecorder()
+		h.ServeHTTP(recNull, reqNull)
+		if recNull.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", recNull.Code)
+		}
+		var nullResp struct {
+			Spacing int  `json:"retestQuestionSpacing"`
+			QR      bool `json:"retestQrCodeEnabled"`
+		}
+		_ = json.Unmarshal(recNull.Body.Bytes(), &nullResp)
+		if nullResp.Spacing != 26 || !nullResp.QR {
+			t.Fatalf("expected spacing=26 and qr=true for JSON null config, got spacing=%d qr=%v", nullResp.Spacing, nullResp.QR)
+		}
+
+		// POST decrypt invalid JSON without query token => 400
+		reqBadJSON := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/retest.php?action=decrypt", strings.NewReader("{bad"))
+		recBadJSON := httptest.NewRecorder()
+		h.ServeHTTP(recBadJSON, reqBadJSON)
+		if recBadJSON.Code != http.StatusBadRequest || !strings.Contains(recBadJSON.Body.String(), "JSON") {
+			t.Fatalf("expected 400 invalid JSON error, got %d %s", recBadJSON.Code, recBadJSON.Body.String())
+		}
+
+		// POST decrypt >1MiB => 413
+		reqTooBig := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/retest.php?action=decrypt", bytes.NewReader(bytes.Repeat([]byte("a"), (1<<20)+100)))
+		recTooBig := httptest.NewRecorder()
+		h.ServeHTTP(recTooBig, reqTooBig)
+		if recTooBig.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("expected 413 for >1MiB decrypt body, got %d", recTooBig.Code)
+		}
+
+		// TokenExists DB error in revoke_token => 500
+		tSess := &session.Session{ID: "tk_err_sess_1234567890abc", Data: map[string]any{"user_logged_in": true, "username": "t1", "user_role": "teacher"}}
+		_ = sessions.Save(context.Background(), tSess)
+		repo.tokenExistsErr = errors.New("mysql read error")
+		reqRev := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/retest.php?action=revoke_token", strings.NewReader(`{"token":"tok1234567"}`))
+		reqRev.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: tSess.ID})
+		recRev := httptest.NewRecorder()
+		h.ServeHTTP(recRev, reqRev)
+		if recRev.Code != http.StatusInternalServerError {
+			t.Fatalf("expected 500 when TokenExists returns DB error, got %d (%s)", recRev.Code, recRev.Body.String())
+		}
+	})
+
+	t.Run("download_file falls back to ModTime TTL when meta missing and opens before logging", func(t *testing.T) {
+		h, repo, _, dir, nowUnix := setupRetestTestEnv(t, "prod_retest_secret_2026")
+		tempDir := filepath.Join(dir, "data", "temp")
+		_ = os.MkdirAll(tempDir, 0o755)
+		fileKey := "0123456789abcdef0123456789abcdef"
+		pdfPath := filepath.Join(tempDir, fileKey+".pdf")
+		if err := os.WriteFile(pdfPath, []byte("%PDF-1.4\n%%EOF\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		modTime := time.Unix(*nowUnix-7201, 0)
+		if err := os.Chtimes(pdfPath, modTime, modTime); err != nil {
+			t.Fatal(err)
+		}
+
+		reqExp := httptest.NewRequest(http.MethodGet, "http://feedback.wxjifang.cn/api/retest.php?action=download_file&key="+fileKey, nil)
+		recExp := httptest.NewRecorder()
+		h.ServeHTTP(recExp, reqExp)
+		if recExp.Code != http.StatusGone {
+			t.Fatalf("expected 410 Gone via ModTime fallback when meta json missing, got %d", recExp.Code)
+		}
+		repo.mu.Lock()
+		logsCount := len(repo.accessLogs)
+		repo.mu.Unlock()
+		if logsCount != 0 {
+			t.Fatalf("expected 0 access logs for expired file, got %d", logsCount)
+		}
+	})
 }

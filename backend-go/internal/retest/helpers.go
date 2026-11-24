@@ -267,6 +267,9 @@ func BuildWeekPDFs(allRows []QbankQuestionRow, bankType, tier string, weekNum in
 			rowMap[qn] = wr
 		}
 	}
+	if len(rowMap) == 0 {
+		return pdfList
+	}
 
 	// Build variation map keyed by matched parent question num
 	type varItem struct {

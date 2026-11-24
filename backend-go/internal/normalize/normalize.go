@@ -113,9 +113,15 @@ func Grade(grade string) string {
 	return g
 }
 
+// phpTrim strips only ASCII whitespace matching PHP's trim(" \t\n\r\0\x0B"),
+// preserving NBSP (\u00a0) and fullwidth spaces (\u3000) for exact key/token parity.
+func phpTrim(s string) string {
+	return strings.Trim(s, " \t\n\r\x00\x0b")
+}
+
 // Subject mirrors PHP normalizeSubject($subject).
 func Subject(subject string) string {
-	return strings.TrimSpace(subject)
+	return phpTrim(subject)
 }
 
 // DeriveRetestToken mirrors PHP deriveRetestToken($subject, $grade, $studentKey, $secretKey).

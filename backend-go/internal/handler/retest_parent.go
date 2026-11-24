@@ -2,7 +2,9 @@ package handler
 
 import (
 	"crypto/subtle"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"sort"
@@ -52,7 +54,24 @@ func handleRetestDecrypt(w http.ResponseWriter, r *http.Request, deps RetestDeps
 	var rawToken, inputName, inputCaptcha string
 	q := r.URL.Query()
 	if r.Method == http.MethodPost {
-		postInput, _ := decodeRetestJSONBody(w, r, 1<<20)
+		postInput, err := decodeRetestJSONBody(w, r, 1<<20)
+		if err != nil && !errors.Is(err, io.EOF) {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				writeRawJSON(w, http.StatusRequestEntityTooLarge, map[string]any{
+					"success": false,
+					"error":   "请求体过大",
+				})
+				return
+			}
+			if strings.TrimSpace(q.Get("token")) == "" {
+				writeRawJSON(w, http.StatusBadRequest, map[string]any{
+					"success": false,
+					"error":   "请求体 JSON 格式无效",
+				})
+				return
+			}
+		}
 		rawToken = strings.TrimSpace(config.AsPHPString(postInput["token"]))
 		if rawToken == "" {
 			rawToken = strings.TrimSpace(q.Get("token"))
@@ -105,8 +124,16 @@ func handleRetestDecrypt(w http.ResponseWriter, r *http.Request, deps RetestDeps
 		"u":      rec.UpdatedUnix,
 	}
 
-	// Revocation blacklist check (fail fast before verification gate)
-	if revoked, _ := deps.Repo.IsTokenRevoked(r.Context(), rawToken); revoked {
+	// Revocation blacklist check (fail fast before verification gate; fail closed on DB error)
+	revoked, revErr := deps.Repo.IsTokenRevoked(r.Context(), rawToken)
+	if revErr != nil {
+		writeRawJSON(w, http.StatusInternalServerError, map[string]any{
+			"success": false,
+			"error":   "数据库查询服务异常，请稍后重试",
+		})
+		return
+	}
+	if revoked {
 		logRetestAccess(r, deps, rawToken, rec.StudentName, "access_revoked", "链接已被作废")
 		writeRawJSON(w, http.StatusForbidden, map[string]any{
 			"success": false,
@@ -129,12 +156,12 @@ func handleRetestDecrypt(w http.ResponseWriter, r *http.Request, deps RetestDeps
 			currWeek = wv
 		}
 	}
-	studentName := strings.TrimSpace(rec.StudentName)
-	studentKey := strings.TrimSpace(rec.StudentKey)
+	studentName := phpTrim(rec.StudentName)
+	studentKey := phpTrim(rec.StudentKey)
 	if studentKey == "" {
 		studentKey = studentName
 	}
-	studentID := strings.TrimSpace(rec.StudentID)
+	studentID := phpTrim(rec.StudentID)
 	if studentID == "" {
 		if m := reLegacyIDPrefix.FindStringSubmatch(studentKey); len(m) == 2 {
 			studentID = m[1]
@@ -570,7 +597,7 @@ func handleRetestDecrypt(w http.ResponseWriter, r *http.Request, deps RetestDeps
 	retestQR := true
 	if deps.ConfigLoader != nil {
 		rt := deps.ConfigLoader.Load()
-		if v, ok := rt.Raw["retestQuestionSpacing"]; ok {
+		if v, ok := rt.Raw["retestQuestionSpacing"]; ok && v != nil {
 			sp := config.AsPHPInt(v)
 			if sp < 10 {
 				sp = 10
@@ -580,7 +607,7 @@ func handleRetestDecrypt(w http.ResponseWriter, r *http.Request, deps RetestDeps
 			}
 			retestSpacing = sp
 		}
-		if v, ok := rt.Raw["retestQrCodeEnabled"]; ok {
+		if v, ok := rt.Raw["retestQrCodeEnabled"]; ok && v != nil {
 			retestQR = config.AsPHPBool(v)
 		}
 	}

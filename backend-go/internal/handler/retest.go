@@ -150,6 +150,10 @@ func writeRetestRepoError(w http.ResponseWriter, err error, fallbackMsg string) 
 	})
 }
 
+func phpTrim(s string) string {
+	return strings.Trim(s, " \t\n\r\x00\x0b")
+}
+
 func verifiedTokenSessionKey(token string) string {
 	sum := md5.Sum([]byte(token))
 	return "verified_token_" + hex.EncodeToString(sum[:])

@@ -42,8 +42,8 @@ func (r *MySQLRepository) FindTokenRecord(ctx context.Context, token string) (*T
 		log.Printf("retest: FindTokenRecord error (token=%s): %v", token, err)
 		return nil, NewHTTPError(500, "数据库查询服务异常，请稍后重试")
 	}
-	rec.StudentKey = strings.TrimSpace(studentKey.String)
-	rec.StudentID = strings.TrimSpace(studentID.String)
+	rec.StudentKey = phpTrim(studentKey.String)
+	rec.StudentID = phpTrim(studentID.String)
 	if previewWeek.Valid && previewWeek.Int64 > 0 {
 		rec.PreviewWeekNum = int(previewWeek.Int64)
 	} else {
@@ -83,9 +83,6 @@ func (r *MySQLRepository) LoadStudentHistoryAndAverages(ctx context.Context, sub
 	if studentID == "" {
 		where += " OR ((sr.student_key IS NULL OR sr.student_key = '' OR sr.student_key = sr.student_name) AND sr.student_name = ?)"
 		params = append(params, studentName)
-	} else if tier != "" {
-		where += " OR (cb.tier = ? AND (sr.student_id IS NULL OR sr.student_id = '') AND (sr.student_key IS NULL OR sr.student_key = '' OR sr.student_key = sr.student_name) AND sr.student_name = ?)"
-		params = append(params, tier, studentName)
 	}
 	where += ")"
 

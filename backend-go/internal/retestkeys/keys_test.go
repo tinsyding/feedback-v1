@@ -56,3 +56,20 @@ func TestIsLegacyNameOnlyKey(t *testing.T) {
 		t.Fatal("empty name should return false")
 	}
 }
+
+func TestPHPTrimUnicodeWhitespaceParity(t *testing.T) {
+	// ASCII whitespace is trimmed (matching PHP trim())
+	if got := BuildStudentKey(" \t\r\n\x00\x0b1001 ", " 张三 ", " 七年级 ", " 数学 "); got != "1001_张三_七年级_数学" {
+		t.Fatalf("ASCII trim mismatch: got %q", got)
+	}
+	// NBSP (\u00a0) and fullwidth space (\u3000) are preserved identically to PHP trim()
+	if got := BuildStudentKey("\u00a03001", "张三", "七年级", "\u3000数学\u3000"); got != "\u00a03001_张三_七年级_\u3000数学\u3000" {
+		t.Fatalf("Unicode whitespace parity mismatch: got %q", got)
+	}
+	if got := LegacyStudentKey("\u00a03001", "\u3000张三"); got != "\u00a03001_\u3000张三" {
+		t.Fatalf("LegacyStudentKey Unicode parity mismatch: got %q", got)
+	}
+	if !IsLegacyNameOnlyKey("\u3000张三", "\u3000张三") {
+		t.Fatal("expected IsLegacyNameOnlyKey to preserve fullwidth space")
+	}
+}

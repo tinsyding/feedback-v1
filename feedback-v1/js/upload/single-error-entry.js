@@ -712,6 +712,10 @@
                 const pvCommentPayload = pvWasUnsub
                     ? (pvErrors.length > 0 ? `预习已补交，错题题号：${pvErrors.join('、')}` : '预习已补交，全部正确')
                     : '';
+                const hwMarkingMakeUp = hasHomeworkData && /补交/.test(hwCommentPayload);
+                const pvMarkingMakeUp = hasPreviewData && /补交/.test(pvCommentPayload);
+                const isHwUnsubmittedPayload = hwWasUnsub && !hwMarkingMakeUp;
+                const isPvUnsubmittedPayload = pvWasUnsub && !pvMarkingMakeUp;
 
                 const payload = {
                     year: window.semesterYear || 2026,
@@ -740,7 +744,9 @@
                             previewScore: null,
                             totalScore: null,
                             comment: hwCommentPayload,
-                            previewComment: pvCommentPayload
+                            previewComment: pvCommentPayload,
+                            isUnsubmitted: isHwUnsubmittedPayload,
+                            isPreviewUnsubmitted: isPvUnsubmittedPayload
                         }
                     ]
                 };

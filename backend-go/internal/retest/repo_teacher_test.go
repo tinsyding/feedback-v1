@@ -4,12 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/go-sql-driver/mysql"
 )
 
 type mockExecCall struct {
@@ -30,6 +33,8 @@ type mockRetestDBState struct {
 	archiveRows      [][]driver.Value
 	fallbackCount    int64
 	fallbackRows     [][]driver.Value
+	legacyUpdateErr  error
+	tokenQueryErr    error
 	queries          []string
 	execs            []mockExecCall
 	committed        bool
@@ -162,6 +167,12 @@ func (c *mockRetestConn) QueryContext(_ context.Context, query string, _ []drive
 			cols: []string{"student_name", "student_id", "student_key", "homework_score", "error_count", "error_questions"},
 			data: c.state.fallbackRows,
 		}, nil
+
+	case strings.Contains(query, "FROM student_records WHERE retest_token = ?"):
+		if c.state.tokenQueryErr != nil {
+			return nil, c.state.tokenQueryErr
+		}
+		return &mockRetestRows{cols: []string{"id"}}, nil
 	}
 
 	return nil, fmt.Errorf("unexpected query in mock_retest_mysql: %s", query)
@@ -175,6 +186,9 @@ func (c *mockRetestConn) ExecContext(_ context.Context, query string, args []dri
 		copied[i] = a.Value
 	}
 	c.state.execs = append(c.state.execs, mockExecCall{query: query, args: copied})
+	if c.state.legacyUpdateErr != nil && strings.Contains(query, "UPDATE `student_records` SET `student_key` = ?") {
+		return nil, c.state.legacyUpdateErr
+	}
 	return driver.RowsAffected(1), nil
 }
 
@@ -475,4 +489,178 @@ func TestCheckExistingBatchSkipsPreviewOnlyAndNullScore(t *testing.T) {
 			t.Fatalf("expected fallback query to filter preview-only rows, queries=%+v", state.queries)
 		}
 	})
+}
+
+func TestEncryptBatchNoNameHijackAndLegacy1062Handling(t *testing.T) {
+	t.Run("does not archive or hijack name-only rows when studentID is non-empty, ignores 1062", func(t *testing.T) {
+		state := &mockRetestDBState{
+			batchID:         31,
+			batchCreator:    "JF036",
+			legacyUpdateErr: &mysql.MySQLError{Number: 1062, Message: "Duplicate entry"},
+		}
+		repo := NewMySQLRepository(openMockRetestDB(t, state))
+		res, err := repo.EncryptBatch(context.Background(), EncryptBatchInput{
+			Subject:         "数学",
+			Grade:           "七年级",
+			Tier:            "U",
+			Week:            1,
+			HasHomeworkData: true,
+			Year:            2026,
+			Season:          "秋",
+			CurrentTeacher:  "JF036",
+			Students: []EncryptStudentInput{
+				{ID: "1002", Name: "张三", Errors: []int{1}},
+				{ID: "", Name: ""}, // empty name should not inflate StudentCount
+			},
+			SecretKey: "test_secret",
+		})
+		if err != nil {
+			t.Fatalf("expected 1062 duplicate key on legacy upgrade to be ignored, got error: %v", err)
+		}
+		if res.StudentCount != 1 {
+			t.Fatalf("expected StudentCount=1 (excluding empty name), got %d", res.StudentCount)
+		}
+
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		for _, q := range state.queries {
+			if strings.Contains(q, "SELECT id, batch_id, student_id") && strings.Contains(q, "`student_name` IN") {
+				t.Fatalf("archive SELECT must not query student_name IN when all valid students have IDs: %s", q)
+			}
+		}
+		for _, ex := range state.execs {
+			if strings.Contains(ex.query, "SET `student_key` = ?, `student_id` = ?") {
+				t.Fatalf("must not run name-only hijack UPDATE when studentID != \"\": %s", ex.query)
+			}
+		}
+	})
+
+	t.Run("aborts transaction with 500 on real DB error during legacyKey upgrade", func(t *testing.T) {
+		state := &mockRetestDBState{
+			batchID:         31,
+			batchCreator:    "JF036",
+			legacyUpdateErr: &mysql.MySQLError{Number: 1205, Message: "Lock wait timeout exceeded"},
+		}
+		repo := NewMySQLRepository(openMockRetestDB(t, state))
+		_, err := repo.EncryptBatch(context.Background(), EncryptBatchInput{
+			Subject:         "数学",
+			Grade:           "七年级",
+			Tier:            "U",
+			Week:            1,
+			HasHomeworkData: true,
+			Year:            2026,
+			Season:          "秋",
+			CurrentTeacher:  "JF036",
+			Students: []EncryptStudentInput{
+				{ID: "1002", Name: "张三", Errors: []int{1}},
+			},
+			SecretKey: "test_secret",
+		})
+		var httpErr *HTTPError
+		if !errors.As(err, &httpErr) || httpErr.Status != 500 {
+			t.Fatalf("expected HTTPError 500 on non-1062 legacy upgrade error, got %v", err)
+		}
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		if state.committed || !state.rolledBack {
+			t.Fatalf("expected rollback on real DB error; committed=%v rolledBack=%v", state.committed, state.rolledBack)
+		}
+	})
+}
+
+func TestEncryptBatchErrorsOnlyPreservesSubmittedStatus(t *testing.T) {
+	t.Run("omitted status with empty errors/score/comment preserves submitted/exempt in DB", func(t *testing.T) {
+		state := &mockRetestDBState{batchID: 31, batchCreator: "JF036"}
+		repo := NewMySQLRepository(openMockRetestDB(t, state))
+		_, err := repo.EncryptBatch(context.Background(), EncryptBatchInput{
+			Subject:         "数学",
+			Grade:           "七年级",
+			Tier:            "U",
+			Week:            1,
+			HasHomeworkData: true,
+			HasPreviewData:  true,
+			IsErrorsOnly:    true,
+			Year:            2026,
+			Season:          "秋",
+			CurrentTeacher:  "JF036",
+			Students: []EncryptStudentInput{
+				{ID: "1001", Name: "张三", Errors: []int{}, PreviewErrors: []int{}, PreviewProvided: true},
+			},
+			SecretKey: "test_secret",
+		})
+		if err != nil {
+			t.Fatalf("EncryptBatch failed: %v", err)
+		}
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		var upsertSQL, crossPvSQL string
+		for _, ex := range state.execs {
+			if strings.Contains(ex.query, "INSERT INTO student_records") {
+				upsertSQL = ex.query
+			}
+			if strings.Contains(ex.query, "`preview_week_num` = ? AND `week_num` != ?") {
+				crossPvSQL = ex.query
+			}
+		}
+		if !strings.Contains(upsertSQL, "`submission_status` = IF(`submission_status` IN ('submitted','exempt'), `submission_status`, VALUES(`submission_status`))") {
+			t.Fatalf("expected IF(submission_status IN ('submitted','exempt'), ...) in upsert SQL: %s", upsertSQL)
+		}
+		if !strings.Contains(upsertSQL, "`preview_submission_status` = IF(`preview_submission_status` IN ('submitted','exempt'), `preview_submission_status`, VALUES(`preview_submission_status`))") {
+			t.Fatalf("expected IF(preview_submission_status IN ('submitted','exempt'), ...) in upsert SQL: %s", upsertSQL)
+		}
+		if !strings.Contains(crossPvSQL, "`preview_submission_status` = IF(`preview_submission_status` IN ('submitted','exempt'), `preview_submission_status`, COALESCE(?, `preview_submission_status`))") {
+			t.Fatalf("expected guarded cross-week preview update SQL: %s", crossPvSQL)
+		}
+	})
+
+	t.Run("explicit submitted status writes VALUES(submission_status)", func(t *testing.T) {
+		state := &mockRetestDBState{batchID: 31, batchCreator: "JF036"}
+		repo := NewMySQLRepository(openMockRetestDB(t, state))
+		_, err := repo.EncryptBatch(context.Background(), EncryptBatchInput{
+			Subject:         "数学",
+			Grade:           "七年级",
+			Tier:            "U",
+			Week:            1,
+			HasHomeworkData: true,
+			IsErrorsOnly:    true,
+			Year:            2026,
+			Season:          "秋",
+			CurrentTeacher:  "JF036",
+			Students: []EncryptStudentInput{
+				{ID: "1001", Name: "张三", Errors: []int{}, SubmissionStatus: "submitted"},
+			},
+			SecretKey: "test_secret",
+		})
+		if err != nil {
+			t.Fatalf("EncryptBatch failed: %v", err)
+		}
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		var upsertSQL string
+		for _, ex := range state.execs {
+			if strings.Contains(ex.query, "INSERT INTO student_records") {
+				upsertSQL = ex.query
+			}
+		}
+		if strings.Contains(upsertSQL, "IF(`submission_status` IN ('submitted','exempt')") {
+			t.Fatalf("explicit submission status should overwrite directly, got: %s", upsertSQL)
+		}
+	})
+}
+
+func TestTokenExistsAndIsTokenRevokedPropagateDBErrors(t *testing.T) {
+	dbErr := errors.New("db connection reset")
+	state := &mockRetestDBState{tokenQueryErr: dbErr}
+	repo := NewMySQLRepository(openMockRetestDB(t, state))
+
+	exists, err := repo.TokenExists(context.Background(), "tok1234567", false)
+	if err == nil || exists {
+		t.Fatalf("expected TokenExists to propagate DB error, got exists=%v err=%v", exists, err)
+	}
+
+	nilRepo := NewMySQLRepository(nil)
+	revoked, err := nilRepo.IsTokenRevoked(context.Background(), "tok1234567")
+	if err == nil || revoked {
+		t.Fatalf("expected IsTokenRevoked to fail closed on nil DB, got revoked=%v err=%v", revoked, err)
+	}
 }

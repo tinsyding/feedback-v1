@@ -19,7 +19,20 @@ import (
 	"feedback-api/internal/retestkeys"
 	"feedback-api/internal/textutil"
 	"feedback-api/internal/tz"
+	"github.com/go-sql-driver/mysql"
 )
+
+func phpTrim(s string) string {
+	return strings.Trim(s, " \t\n\r\x00\x0b")
+}
+
+func isMySQLDuplicateKeyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
+}
 
 // MySQLRepository implements Repository backed by MySQL *sql.DB.
 type MySQLRepository struct {
@@ -132,11 +145,11 @@ func (r *MySQLRepository) CheckExistingBatch(ctx context.Context, in CheckBatchI
 		nameOnlySet := map[string]struct{}{}
 
 		for _, st := range in.IncomingStudents {
-			sName := strings.TrimSpace(st.Name)
+			sName := phpTrim(st.Name)
 			if sName == "" {
 				continue
 			}
-			sID := strings.TrimSpace(st.ID)
+			sID := phpTrim(st.ID)
 			sKey := retestkeys.BuildStudentKey(sID, sName, in.Grade, in.Subject)
 			legacyKey := retestkeys.LegacyStudentKey(sID, sName)
 			errs := make([]int, len(st.Errors))
@@ -399,11 +412,11 @@ func (r *MySQLRepository) GetStudentWeekRecord(ctx context.Context, q StudentWee
 			if err := rows.Scan(&sID, &sName, &sKey, &rTier, &lastSeen, &isCurTerm, &isCurTier); err != nil {
 				continue
 			}
-			sn := strings.TrimSpace(sName.String)
+			sn := phpTrim(sName.String)
 			if sn == "" {
 				continue
 			}
-			sid := strings.TrimSpace(sID.String)
+			sid := phpTrim(sID.String)
 			dedup := sn
 			if sid != "" {
 				dedup = sid + "_" + sn
@@ -703,6 +716,14 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 		_, _ = tx.ExecContext(ctx, "UPDATE class_batches SET `created_by` = ? WHERE `id` = ?", in.CurrentTeacher, batchID)
 	}
 
+	// Count valid students (non-empty name) consistently for both debounce and generation_batches
+	incomingValidCount := 0
+	for _, st := range in.Students {
+		if phpTrim(st.Name) != "" {
+			incomingValidCount++
+		}
+	}
+
 	// 60-second debounce check
 	isDebounced := false
 	var prevBatchCode, prevCreator sql.NullString
@@ -716,7 +737,7 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 		if prevCreatedAt.Valid {
 			diff := time.Since(prevCreatedAt.Time).Seconds()
 			sameTeacher := in.CurrentTeacher == "" || strings.TrimSpace(prevCreator.String) == "" || strings.TrimSpace(prevCreator.String) == in.CurrentTeacher
-			if diff >= 0 && diff <= 60 && sameTeacher && prevStudentCount == len(in.Students) {
+			if diff >= 0 && diff <= 60 && sameTeacher && prevStudentCount == incomingValidCount {
 				isDebounced = true
 			}
 		}
@@ -740,15 +761,16 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 		keySet := map[string]struct{}{}
 		nameSet := map[string]struct{}{}
 		for _, st := range in.Students {
-			sn := strings.TrimSpace(st.Name)
+			sn := phpTrim(st.Name)
 			if sn == "" {
 				continue
 			}
-			nameSet[sn] = struct{}{}
-			sid := strings.TrimSpace(st.ID)
+			sid := phpTrim(st.ID)
 			if sid != "" {
 				keySet[retestkeys.BuildStudentKey(sid, sn, in.Grade, in.Subject)] = struct{}{}
 				keySet[retestkeys.LegacyStudentKey(sid, sn)] = struct{}{}
+			} else {
+				nameSet[sn] = struct{}{}
 			}
 		}
 		var whereOr []string
@@ -828,11 +850,11 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 	errorStudentCount := 0
 
 	for _, st := range in.Students {
-		name := strings.TrimSpace(st.Name)
+		name := phpTrim(st.Name)
 		if name == "" {
 			continue
 		}
-		studentID := strings.TrimSpace(st.ID)
+		studentID := phpTrim(st.ID)
 		studentKey := retestkeys.BuildStudentKey(studentID, name, in.Grade, in.Subject)
 		legacyKey := retestkeys.LegacyStudentKey(studentID, name)
 
@@ -855,12 +877,22 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 		studentHasPreview := in.HasPreviewData || st.PreviewProvided || st.PreviewComment != "" || len(pvErrs) > 0
 
 		hwStatus := "submitted"
+		preserveExistingHwStatus := false
 		if in.HasHomeworkData {
 			hwStatus = ResolveSubmissionStatus(st.SubmissionStatus, errs, st.HomeworkScore, st.Comment)
+			if in.IsErrorsOnly && strings.TrimSpace(st.SubmissionStatus) == "" &&
+				len(errs) == 0 && st.HomeworkScore == nil && strings.TrimSpace(st.Comment) == "" {
+				preserveExistingHwStatus = true
+			}
 		}
 		pvStatus := "submitted"
+		preserveExistingPvStatus := false
 		if studentHasPreview {
 			pvStatus = ResolveSubmissionStatus(st.PreviewSubmissionStatus, pvErrs, st.PreviewScore, st.PreviewComment)
+			if in.IsErrorsOnly && strings.TrimSpace(st.PreviewSubmissionStatus) == "" &&
+				len(pvErrs) == 0 && st.PreviewScore == nil && strings.TrimSpace(st.PreviewComment) == "" {
+				preserveExistingPvStatus = true
+			}
 		}
 
 		shortToken := normalize.DeriveRetestToken(in.Subject, in.Grade, studentKey, in.SecretKey)
@@ -887,21 +919,22 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 		}
 
 		if legacyKey != studentKey {
-			_, _ = tx.ExecContext(ctx,
+			if _, err := tx.ExecContext(ctx,
 				"UPDATE `student_records` SET `student_key` = ? WHERE `batch_id` = ? AND `week_num` = ? AND `student_key` = ?",
 				studentKey, batchID, in.Week, legacyKey,
-			)
-		}
-		if studentID != "" && name != "" && name != studentKey {
-			_, _ = tx.ExecContext(ctx,
-				"UPDATE `student_records` SET `student_key` = ?, `student_id` = ? WHERE `batch_id` = ? AND `week_num` = ? AND (`student_id` IS NULL OR `student_id` = '') AND (`student_key` = ? OR `student_key` IS NULL OR `student_key` = '') AND `student_name` = ?",
-				studentKey, studentID, batchID, in.Week, name, name,
-			)
+			); err != nil && !isMySQLDuplicateKeyError(err) {
+				log.Printf("retest: EncryptBatch legacyKey upgrade error (legacy_key=%s -> student_key=%s): %v", legacyKey, studentKey, err)
+				return EncryptBatchResult{}, NewHTTPError(500, "学生学情记录写入失败，操作已回滚")
+			}
 		}
 
 		var updateParts []string
 		if in.HasHomeworkData {
 			if in.IsErrorsOnly {
+				hwStatusUpdate := "`submission_status` = VALUES(`submission_status`)"
+				if preserveExistingHwStatus {
+					hwStatusUpdate = "`submission_status` = IF(`submission_status` IN ('submitted','exempt'), `submission_status`, VALUES(`submission_status`))"
+				}
 				updateParts = append(updateParts,
 					"`batch_code` = VALUES(`batch_code`)",
 					"`source_files` = COALESCE(VALUES(`source_files`), `source_files`)",
@@ -910,7 +943,7 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 					"`error_count` = VALUES(`error_count`)",
 					"`error_questions` = VALUES(`error_questions`)",
 					"`teacher_comment` = IF(VALUES(`teacher_comment`) != '', VALUES(`teacher_comment`), `teacher_comment`)",
-					"`submission_status` = VALUES(`submission_status`)",
+					hwStatusUpdate,
 				)
 			} else {
 				updateParts = append(updateParts,
@@ -937,7 +970,11 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 			"`updated_at` = CURRENT_TIMESTAMP",
 		)
 		if studentHasPreview {
-			updateParts = append(updateParts, "`preview_submission_status` = VALUES(`preview_submission_status`)")
+			if preserveExistingPvStatus {
+				updateParts = append(updateParts, "`preview_submission_status` = IF(`preview_submission_status` IN ('submitted','exempt'), `preview_submission_status`, VALUES(`preview_submission_status`))")
+			} else {
+				updateParts = append(updateParts, "`preview_submission_status` = VALUES(`preview_submission_status`)")
+			}
 		}
 
 		upsertSQL := "INSERT INTO student_records " +
@@ -955,8 +992,12 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 		}
 
 		if studentHasPreview && pvWeekVal > 0 {
+			pvSubSQL := "`preview_submission_status` = COALESCE(?, `preview_submission_status`)"
+			if preserveExistingPvStatus {
+				pvSubSQL = "`preview_submission_status` = IF(`preview_submission_status` IN ('submitted','exempt'), `preview_submission_status`, COALESCE(?, `preview_submission_status`))"
+			}
 			_, _ = tx.ExecContext(ctx,
-				"UPDATE `student_records` SET `preview_error_questions` = ?, `preview_score` = COALESCE(?, `preview_score`), `preview_comment` = COALESCE(?, `preview_comment`), `preview_submission_status` = COALESCE(?, `preview_submission_status`), `updated_at` = `updated_at` WHERE `batch_id` = ? AND `student_key` = ? AND `preview_week_num` = ? AND `week_num` != ?",
+				"UPDATE `student_records` SET `preview_error_questions` = ?, `preview_score` = COALESCE(?, `preview_score`), `preview_comment` = COALESCE(?, `preview_comment`), "+pvSubSQL+", `updated_at` = `updated_at` WHERE `batch_id` = ? AND `student_key` = ? AND `preview_week_num` = ? AND `week_num` != ?",
 				pvErrJSON, st.PreviewScore, pvCommentForDB, pvStatus, batchID, studentKey, pvWeekVal, in.Week,
 			)
 		}
@@ -999,7 +1040,7 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 		BatchCode:    batchCode,
 		ClassName:    className,
 		IsDebounced:  isDebounced,
-		StudentCount: len(in.Students),
+		StudentCount: validStudentCount,
 		Tokens:       tokens,
 	}, nil
 }
@@ -1007,8 +1048,11 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 // IsTokenRevoked reports whether token exists in retest_revoked_tokens.
 func (r *MySQLRepository) IsTokenRevoked(ctx context.Context, token string) (bool, error) {
 	token = strings.TrimSpace(token)
-	if token == "" || r == nil || r.db == nil {
+	if token == "" {
 		return false, nil
+	}
+	if err := r.requireDB(); err != nil {
+		return false, err
 	}
 	var found string
 	err := r.db.QueryRowContext(ctx, "SELECT `token` FROM `retest_revoked_tokens` WHERE `token` = ? LIMIT 1", token).Scan(&found)
@@ -1030,6 +1074,9 @@ func (r *MySQLRepository) TokenExists(ctx context.Context, token string, include
 	err := r.db.QueryRowContext(ctx, "SELECT id FROM student_records WHERE retest_token = ? LIMIT 1", token).Scan(&id)
 	if err == nil {
 		return true, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, err
 	}
 	if includeRevoked {
 		return r.IsTokenRevoked(ctx, token)
