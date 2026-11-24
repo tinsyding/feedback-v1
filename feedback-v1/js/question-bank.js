@@ -8170,6 +8170,119 @@ function renderQuestionBankPreview(options = {}) {
     }
 }
 
+function collectBigGroupOverlayBoxes(idx, kind) {
+    const q = currentQuestions[idx];
+    if (!q || !getQuestionGroupKey(q)) {
+        return { stemBoxes: [], subBoxes: [] };
+    }
+    const memberIndices = getBigQuestionGroupMemberIndices(idx);
+    const stemBoxes = [];
+    const subBoxes = [];
+
+    if (kind === 'exercise') {
+        const rawStems = (q.questionMeta && Array.isArray(q.questionMeta.stemBoxes))
+            ? q.questionMeta.stemBoxes
+            : [];
+        rawStems.forEach((sb, sIdx) => {
+            if (sb && typeof sb.x === 'number' && typeof sb.y === 'number' && typeof sb.w === 'number' && typeof sb.h === 'number') {
+                stemBoxes.push({
+                    pageOffset: Math.max(0, parseInt(sb.pageOffset, 10) || 0),
+                    x: sb.x,
+                    y: sb.y,
+                    w: sb.w,
+                    h: sb.h,
+                    label: rawStems.length > 1 ? `原文 ${sIdx + 1}` : '原文'
+                });
+            }
+        });
+    }
+
+    memberIndices.forEach(mIdx => {
+        const mq = currentQuestions[mIdx];
+        if (!mq || !mq.questionMeta) return;
+        const box = kind === 'answer' ? mq.questionMeta.answerBox : mq.questionMeta.box;
+        if (box && typeof box.x === 'number' && typeof box.y === 'number' && typeof box.w === 'number' && typeof box.h === 'number') {
+            subBoxes.push({
+                pageOffset: Math.max(0, parseInt(box.pageOffset, 10) || 0),
+                x: box.x,
+                y: box.y,
+                w: box.w,
+                h: box.h,
+                label: `第 ${mq.id} 题`
+            });
+        }
+    });
+
+    return { stemBoxes, subBoxes };
+}
+
+function drawBigGroupOverlayBoxes(ctx, { pageOffset, viewportWidth, viewportHeight, offsetX = 0, offsetY = 0, canvasWidth, canvasHeight, dpr = 1, stemBoxes = [], subBoxes = [] }) {
+    const drawList = (list, style) => {
+        list.forEach(b => {
+            if (b.pageOffset !== pageOffset) return;
+            const rx = b.x * viewportWidth - offsetX;
+            const ry = b.y * viewportHeight - offsetY;
+            const rw = b.w * viewportWidth;
+            const rh = b.h * viewportHeight;
+
+            // 跳过完全在当前裁剪画布之外的框
+            if (rx + rw <= 1 || ry + rh <= 1 || rx >= canvasWidth - 1 || ry >= canvasHeight - 1) {
+                return;
+            }
+
+            const cx = Math.max(1, rx);
+            const cy = Math.max(1, ry);
+            const cw = Math.min(canvasWidth - 1, rx + rw) - cx;
+            const ch = Math.min(canvasHeight - 1, ry + rh) - cy;
+            if (cw < 4 || ch < 4) return;
+
+            ctx.save();
+            ctx.fillStyle = style.fill;
+            ctx.fillRect(cx, cy, cw, ch);
+
+            ctx.strokeStyle = style.stroke;
+            ctx.lineWidth = Math.max(1.5, 2 * dpr);
+            if (style.dash) ctx.setLineDash(style.dash.map(v => v * dpr));
+            ctx.strokeRect(cx, cy, cw, ch);
+            ctx.setLineDash([]);
+
+            // 左上角题号/原文角标
+            const fontSize = Math.round(12 * dpr);
+            ctx.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+            const textMetrics = ctx.measureText(b.label);
+            const padX = Math.round(6 * dpr);
+            const tagW = Math.ceil(textMetrics.width) + padX * 2;
+            const tagH = Math.round(20 * dpr);
+            const tagX = Math.min(canvasWidth - tagW - 2, Math.max(2, cx));
+            const tagY = Math.max(2, cy);
+
+            ctx.fillStyle = style.badgeBg;
+            ctx.fillRect(tagX, tagY, tagW, tagH);
+            ctx.fillStyle = '#ffffff';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(b.label, tagX + padX, tagY + tagH / 2);
+            ctx.restore();
+        });
+    };
+
+    if (stemBoxes.length > 0) {
+        drawList(stemBoxes, {
+            fill: 'rgba(16, 185, 129, 0.06)',
+            stroke: '#10b981',
+            badgeBg: '#059669',
+            dash: [6, 4]
+        });
+    }
+    if (subBoxes.length > 0) {
+        drawList(subBoxes, {
+            fill: 'rgba(59, 130, 246, 0.08)',
+            stroke: '#2563eb',
+            badgeBg: '#2563eb',
+            dash: null
+        });
+    }
+}
+
 async function renderPreviewPdfSlot(slotEl, sessionId) {
     if (!slotEl || slotEl.dataset.rendered === '1') return;
     slotEl.dataset.rendered = '1';
@@ -8181,6 +8294,8 @@ async function renderPreviewPdfSlot(slotEl, sessionId) {
 
     const pdfObj = kind === 'answer' ? q.answerPdf : q.exercisePdf;
     if (!pdfObj || !pdfObj.url) return;
+
+    const { stemBoxes, subBoxes } = collectBigGroupOverlayBoxes(idx, kind);
 
     try {
         const pdf = await getPreviewPdfDoc(pdfObj.url);
@@ -8198,7 +8313,8 @@ async function renderPreviewPdfSlot(slotEl, sessionId) {
             const sorted = [...regions].sort((a, b) => (a.pageOffset || 0) - (b.pageOffset || 0) || (a.y || 0) - (b.y || 0));
             for (const rg of sorted) {
                 if (sessionId !== previewRenderSessionId) return;
-                const pageNum = Math.min(pdf.numPages, Math.max(1, (parseInt(rg.pageOffset, 10) || 0) + 1));
+                const pOff = Math.max(0, parseInt(rg.pageOffset, 10) || 0);
+                const pageNum = Math.min(pdf.numPages, pOff + 1);
                 const page = await pdf.getPage(pageNum);
                 const baseVp = page.getViewport({ scale: 1 });
                 const scale = Math.min(2.2, Math.max(1.35, 860 / Math.max(1, baseVp.width)));
@@ -8229,6 +8345,21 @@ async function renderPreviewPdfSlot(slotEl, sessionId) {
                     transform: [1, 0, 0, 1, -cropX, -cropY]
                 }).promise;
 
+                if (stemBoxes.length > 0 || subBoxes.length > 0) {
+                    drawBigGroupOverlayBoxes(ctx, {
+                        pageOffset: pOff,
+                        viewportWidth: viewport.width,
+                        viewportHeight: viewport.height,
+                        offsetX: cropX,
+                        offsetY: cropY,
+                        canvasWidth: cropW,
+                        canvasHeight: cropH,
+                        dpr,
+                        stemBoxes,
+                        subBoxes
+                    });
+                }
+
                 frag.appendChild(canvas);
             }
         } else {
@@ -8248,6 +8379,22 @@ async function renderPreviewPdfSlot(slotEl, sessionId) {
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
 
                 await page.render({ canvasContext: ctx, viewport }).promise;
+
+                if (stemBoxes.length > 0 || subBoxes.length > 0) {
+                    drawBigGroupOverlayBoxes(ctx, {
+                        pageOffset: p - 1,
+                        viewportWidth: viewport.width,
+                        viewportHeight: viewport.height,
+                        offsetX: 0,
+                        offsetY: 0,
+                        canvasWidth: canvas.width,
+                        canvasHeight: canvas.height,
+                        dpr,
+                        stemBoxes,
+                        subBoxes
+                    });
+                }
+
                 frag.appendChild(canvas);
             }
         }
