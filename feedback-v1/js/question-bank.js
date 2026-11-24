@@ -3942,9 +3942,10 @@ async function executeSaveQuestions(data) {
                 });
             }
 
-            if (receiptObj && receiptObj.receipt_code) {
-                openReceiptModal(receiptObj, { allowTierSync: true, saveData: data });
-            }
+            // 保存题库后暂不自动弹出存证回执卡（保留回执状态更新及手动查看入口）
+            // if (receiptObj && receiptObj.receipt_code) {
+            //     openReceiptModal(receiptObj, { allowTierSync: true, saveData: data });
+            // }
         } else {
             showToast('保存失败: ' + (result.error || '未知错误'), 'error');
         }
