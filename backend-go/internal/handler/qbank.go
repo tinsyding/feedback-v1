@@ -397,17 +397,17 @@ func handleQBankPost(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 			qNum = config.AsPHPInt(qm["num"])
 		}
 		if qNum <= 0 {
+			errMsg := fmt.Sprintf("第 %d 条题目缺少有效的正整数题号 (id)", idx+1)
+			recordQBankAttemptBestEffort(r.Context(), deps, r, qbankattest.EventSaveRejected, scope, currentTeacher, operatorName, errMsg, map[string]any{"questionIndex": idx + 1})
 			httpx.SendJSON(w, http.StatusBadRequest, map[string]any{
 				"success": false,
-				"error":   fmt.Sprintf("第 %d 条题目缺少有效的正整数题号 (id)", idx+1),
+				"error":   errMsg,
 			})
 			return
 		}
 		if exName == "" {
 			exName = config.AsPHPString(qm["exercise_name"])
 		}
-
-		rawMaps = append(rawMaps, qm)
 
 		rawParentList := qm["parentQuestionNums"]
 		if rawParentList == nil {
@@ -465,15 +465,17 @@ func handleQBankPost(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 			AnswerName:        ansName,
 		}
 		replaced := false
-		for idx, existing := range saveQuestions {
+		for i, existing := range saveQuestions {
 			if existing.QuestionNum == qNum {
-				saveQuestions[idx] = item
+				saveQuestions[i] = item
+				rawMaps[i] = qm
 				replaced = true
 				break
 			}
 		}
 		if !replaced {
 			saveQuestions = append(saveQuestions, item)
+			rawMaps = append(rawMaps, qm)
 		}
 	}
 
@@ -520,6 +522,29 @@ func handleQBankPost(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 			}
 			issuedReceipt = rec
 			return nil
+		},
+		OnVariationRecordTx: func(txCtx context.Context, tx *sql.Tx, vScope qbank.WeekScope, action string, vQuestions []qbank.QuestionItem) error {
+			if deps.Attest == nil {
+				return nil
+			}
+			_, recErr := deps.Attest.RecordRevisionTx(txCtx, tx, qbankattest.RecordRevisionInput{
+				QBankID: vScope.QBankID,
+				Action:  action,
+				Scope: qbankattest.Scope{
+					BankType: vScope.BankType,
+					Year:     vScope.Year,
+					Season:   vScope.Season,
+					Subject:  vScope.Subject,
+					Grade:    vScope.Grade,
+					Tier:     vScope.Tier,
+					Week:     vScope.Week,
+				},
+				Operator:     currentTeacher,
+				OperatorName: operatorName,
+				ClientIP:     clientIP,
+				Questions:    qbankattest.SnapshotQuestionsFromWeekDetail(vQuestions),
+			})
+			return recErr
 		},
 	})
 	if err != nil {
@@ -778,21 +803,22 @@ func handleQBankDelete(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 
 func resolveQBankOperator(ctx context.Context, deps QBankDeps, sess *session.Session, fallbackTeacher string) (string, string) {
 	op := strings.TrimSpace(sess.Username())
-	opName := strings.TrimSpace(sess.StringVal("real_name"))
-	if op == "" && sess.IsAdminLoggedIn() {
+	opName := ""
+	fromAdmin := false
+	if op != "" {
+		opName = strings.TrimSpace(sess.StringVal("real_name"))
+	} else if fb := strings.TrimSpace(fallbackTeacher); fb != "" {
+		op = fb
+	} else if sess.IsAdminLoggedIn() {
 		op = strings.TrimSpace(sess.AdminUsername())
-		if opName == "" {
-			opName = strings.TrimSpace(sess.StringVal("admin_realname"))
-		}
-	}
-	if op == "" {
-		op = strings.TrimSpace(fallbackTeacher)
+		opName = strings.TrimSpace(sess.StringVal("admin_realname"))
+		fromAdmin = true
 	}
 	if opName == "" && op != "" && deps.DB != nil {
 		var realName sql.NullString
 		if err := deps.DB.QueryRowContext(ctx, "SELECT `real_name` FROM `users` WHERE `username` = ? LIMIT 1", op).Scan(&realName); err == nil && realName.String != "" {
 			opName = realName.String
-		} else if sess.IsAdminLoggedIn() {
+		} else if fromAdmin || sess.IsAdminLoggedIn() {
 			if err := deps.DB.QueryRowContext(ctx, "SELECT `real_name` FROM `admin_users` WHERE `username` = ? LIMIT 1", op).Scan(&realName); err == nil {
 				opName = realName.String
 			}

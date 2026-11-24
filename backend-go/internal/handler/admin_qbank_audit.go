@@ -207,7 +207,11 @@ func handleAdminQBankRollback(w http.ResponseWriter, r *http.Request, deps Admin
 	if adminUser == "" {
 		adminUser = "admin"
 	}
-	res, err := deps.Repo.RollbackQBankRevision(r.Context(), receiptCode, adminUser, adminUser, httpx.GetClientIP(r))
+	adminName := strings.TrimSpace(adminSess.StringVal("admin_realname"))
+	if adminName == "" {
+		adminName = adminUser
+	}
+	res, err := deps.Repo.RollbackQBankRevision(r.Context(), receiptCode, adminUser, adminName, httpx.GetClientIP(r))
 	if err != nil {
 		writeAdminRepoError(w, err)
 		return
@@ -278,14 +282,18 @@ func handleAdminQBankAnchorNow(w http.ResponseWriter, r *http.Request, deps Admi
 		return
 	}
 
-	adminAuditLog(r, deps, adminSess, "action", "qbank_anchor_now", map[string]any{
+	auditDetails := map[string]any{
 		"anchor_code":    anc.AnchorCode,
 		"seq_from":       anc.SeqFrom,
 		"seq_to":         anc.SeqTo,
 		"revision_count": anc.RevisionCount,
 		"merkle_root":    anc.MerkleRoot,
 		"tsa_status":     anc.TSAStatus,
-	})
+	}
+	if anc.ErrorMessage != "" {
+		auditDetails["error_message"] = anc.ErrorMessage
+	}
+	adminAuditLog(r, deps, adminSess, "action", "qbank_anchor_now", auditDetails)
 	httpx.SendResponse(w, true, map[string]any{
 		"anchored": true,
 		"anchor":   anc,

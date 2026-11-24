@@ -610,6 +610,7 @@ type mockAttestDBState struct {
 	registeredKeys    map[string]keyRecord
 	revisions         []*revisionRecord
 	attempts          []*attemptRecord
+	anchors           []*AnchorRecord
 	matrixRows        [][]driver.Value
 	hasRecentPDFMatch bool
 }
@@ -706,6 +707,27 @@ func (c *mockAttestConn) ExecContext(_ context.Context, query string, args []dri
 
 	case strings.Contains(query, "INSERT INTO `qbank_attempt_logs`"):
 		return mockAttestResult{lastID: 1, affected: 1}, nil
+
+	case strings.Contains(query, "INSERT INTO `qbank_attestation_anchors`"):
+		id := int64(len(c.state.anchors) + 1)
+		token, _ := copied[9].(string)
+		errMsg, _ := copied[11].(string)
+		anc := &AnchorRecord{
+			ID:            id,
+			AnchorCode:    copied[0].(string),
+			SeqFrom:       copied[2].(int64),
+			SeqTo:         copied[3].(int64),
+			RevisionCount: int(copied[4].(int64)),
+			MerkleRoot:    copied[5].(string),
+			TSAURL:        copied[7].(string),
+			TSAStatus:     copied[8].(string),
+			TSATokenB64:   token,
+			TSAGenTime:    copied[10].(string),
+			ErrorMessage:  errMsg,
+			AnchoredAt:    formatReceiptTimestamp(time.Now()),
+		}
+		c.state.anchors = append(c.state.anchors, anc)
+		return mockAttestResult{lastID: id, affected: 1}, nil
 	}
 	return mockAttestResult{lastID: 1, affected: 1}, nil
 }
@@ -751,9 +773,9 @@ func (c *mockAttestConn) QueryContext(_ context.Context, query string, args []dr
 		last := c.state.revisions[len(c.state.revisions)-1]
 		return &mockAttestRows{cols: []string{"entry_hash"}, rows: [][]driver.Value{{last.entryHash}}}, nil
 
-	case strings.Contains(query, "SELECT `revision_no`, `receipt_code`, `action` FROM `qbank_revisions`"):
+	case strings.Contains(query, "SELECT `revision_no`, `receipt_code`, `action`, `question_count` FROM `qbank_revisions`"):
 		if len(c.state.revisions) == 0 {
-			return &mockAttestRows{cols: []string{"revision_no", "receipt_code", "action"}}, nil
+			return &mockAttestRows{cols: []string{"revision_no", "receipt_code", "action", "question_count"}}, nil
 		}
 		for i := len(c.state.revisions) - 1; i >= 0; i-- {
 			r := c.state.revisions[i]
@@ -761,15 +783,74 @@ func (c *mockAttestConn) QueryContext(_ context.Context, query string, args []dr
 				r.scope.BankType == copied[2].(string) && r.scope.Subject == copied[3].(string) &&
 				r.scope.Grade == copied[4].(string) && r.scope.Tier == copied[5].(string) && r.scope.Week == int(copied[6].(int64)) {
 				return &mockAttestRows{
-					cols: []string{"revision_no", "receipt_code", "action"},
-					rows: [][]driver.Value{{int64(r.revisionNo), r.receiptCode, r.action}},
+					cols: []string{"revision_no", "receipt_code", "action", "question_count"},
+					rows: [][]driver.Value{{int64(r.revisionNo), r.receiptCode, r.action, int64(r.questionCount)}},
 				}, nil
 			}
 		}
-		return &mockAttestRows{cols: []string{"revision_no", "receipt_code", "action"}}, nil
+		return &mockAttestRows{cols: []string{"revision_no", "receipt_code", "action", "question_count"}}, nil
 
 	case strings.Contains(query, "SELECT `real_name` FROM `users`"):
 		return &mockAttestRows{cols: []string{"real_name"}, rows: [][]driver.Value{{"王老师"}}}, nil
+
+	case strings.Contains(query, "SELECT `real_name` FROM `admin_users`"):
+		return &mockAttestRows{cols: []string{"real_name"}, rows: [][]driver.Value{{"管理员"}}}, nil
+
+	case strings.Contains(query, "SELECT GET_LOCK"):
+		return &mockAttestRows{cols: []string{"ok"}, rows: [][]driver.Value{{int64(1)}}}, nil
+
+	case strings.Contains(query, "SELECT COALESCE(MAX(`seq_to`), 0)"):
+		var lastSeq int64
+		var prevRoot string
+		if n := len(c.state.anchors); n > 0 {
+			lastSeq = c.state.anchors[n-1].SeqTo
+			prevRoot = c.state.anchors[n-1].MerkleRoot
+		}
+		return &mockAttestRows{cols: []string{"last_seq", "prev_root"}, rows: [][]driver.Value{{lastSeq, prevRoot}}}, nil
+
+	case strings.Contains(query, "SELECT `id`, `entry_hash` FROM `qbank_revisions` WHERE `id` > ?"):
+		afterID := copied[0].(int64)
+		var rows [][]driver.Value
+		for _, r := range c.state.revisions {
+			if r.id > afterID {
+				rows = append(rows, []driver.Value{r.id, r.entryHash})
+			}
+		}
+		return &mockAttestRows{cols: []string{"id", "entry_hash"}, rows: rows}, nil
+
+	case strings.Contains(query, "SELECT `id`, `entry_hash` FROM `qbank_revisions` WHERE `id` BETWEEN"):
+		lo, hi := copied[0].(int64), copied[1].(int64)
+		var rows [][]driver.Value
+		for _, r := range c.state.revisions {
+			if r.id >= lo && r.id <= hi {
+				rows = append(rows, []driver.Value{r.id, r.entryHash})
+			}
+		}
+		return &mockAttestRows{cols: []string{"id", "entry_hash"}, rows: rows}, nil
+
+	case strings.Contains(query, "FROM `qbank_attestation_anchors` WHERE `seq_from` <="):
+		revID := copied[0].(int64)
+		for i := len(c.state.anchors) - 1; i >= 0; i-- {
+			a := c.state.anchors[i]
+			if a.SeqFrom <= revID && a.SeqTo >= revID {
+				return &mockAttestRows{
+					cols: []string{"id", "anchor_code", "seq_from", "seq_to", "leaf_count", "merkle_root", "tsa_url", "tsa_status", "tsa_token_b64", "tsa_gen_time", "error_message", "created_at"},
+					rows: [][]driver.Value{{a.ID, a.AnchorCode, a.SeqFrom, a.SeqTo, int64(a.RevisionCount), a.MerkleRoot, a.TSAURL, a.TSAStatus, a.TSATokenB64, a.TSAGenTime, a.ErrorMessage, time.Now().UTC()}},
+				}, nil
+			}
+		}
+		return &mockAttestRows{cols: []string{"id", "anchor_code", "seq_from", "seq_to", "leaf_count", "merkle_root", "tsa_url", "tsa_status", "tsa_token_b64", "tsa_gen_time", "error_message", "created_at"}}, nil
+
+	case strings.Contains(query, "FROM `qbank_attestation_anchors` ORDER BY `id` DESC LIMIT"):
+		var rows [][]driver.Value
+		for i := len(c.state.anchors) - 1; i >= 0; i-- {
+			a := c.state.anchors[i]
+			rows = append(rows, []driver.Value{a.ID, a.AnchorCode, a.SeqFrom, a.SeqTo, int64(a.RevisionCount), a.MerkleRoot, a.TSAURL, a.TSAStatus, a.TSATokenB64, a.TSAGenTime, a.ErrorMessage, time.Now().UTC()})
+		}
+		return &mockAttestRows{
+			cols: []string{"id", "anchor_code", "seq_from", "seq_to", "leaf_count", "merkle_root", "tsa_url", "tsa_status", "tsa_token_b64", "tsa_gen_time", "error_message", "created_at"},
+			rows: rows,
+		}, nil
 
 	case strings.Contains(query, "FROM `qbank_revisions` WHERE `receipt_code` = ?"):
 		code := copied[0].(string)
@@ -1099,4 +1180,132 @@ func TestMySQLStoreEndToEnd(t *testing.T) {
 	if _, err := store.HasRecentPDFReference(ctx, "../evil.pdf", 180*24*time.Hour); err != nil {
 		t.Fatalf("HasRecentPDFReference invalid path unexpected err: %v", err)
 	}
+}
+
+func TestMySQLStoreLazyKeyRegistrationAndCanonicalChecks(t *testing.T) {
+	ctx := context.Background()
+	st := &mockAttestDBState{
+		registeredKeys: make(map[string]keyRecord),
+	}
+	db := openMockAttestDB(t, st)
+	signer, _ := NewEphemeralSigner("jf-qb-lazy")
+	// Deliberately skip EnsureKeyRegistered (simulating startup DB outage + recovery).
+	store := NewMySQLStore(db, signer, "")
+
+	scope := Scope{BankType: "homework", Year: 2026, Season: "秋", Subject: "数学", Grade: "七年级", Tier: "S+", Week: 7}
+	rec, err := store.RecordRevisionTx(ctx, nil, RecordRevisionInput{
+		QBankID:   70,
+		Scope:     scope,
+		Operator:  "t101",
+		Questions: []SnapshotQuestion{{QuestionNum: 1, Topic: "函数"}},
+	})
+	if err != nil {
+		t.Fatalf("lazy RecordRevisionTx failed: %v", err)
+	}
+	if _, ok := st.registeredKeys[signer.Kid()]; !ok {
+		t.Fatal("expected lazy RecordRevisionTx to register signer key in qbank_attestation_keys")
+	}
+	vr, err := store.VerifyReceipt(ctx, rec.ReceiptCode)
+	if err != nil || !vr.SignatureValid || !vr.ChainValid {
+		t.Fatalf("expected VerifyReceipt to pass after lazy registration, got %+v err=%v", vr, err)
+	}
+
+	// Verify canonicalMatchesRecord rejects tampered operator real_name or question_count.
+	cp, err := ParseCanonicalPayload(rec.ReceiptCode)
+	_ = cp
+	_ = err
+	ms := NewMemoryStore(signer, "")
+	r1, err := ms.RecordRevisionTx(ctx, nil, RecordRevisionInput{
+		QBankID: 1, Action: ActionCreate, Scope: scope, Operator: "t1", OperatorName: "张老师",
+		Questions: []SnapshotQuestion{{QuestionNum: 1, Topic: "T1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Check zero-question admin_rollback is treated as DELETED in VerifyReceipt, ListMatrix, and auto action.
+	rDel, err := ms.RecordRevisionTx(ctx, nil, RecordRevisionInput{
+		QBankID: 1, Action: ActionAdminRollback, Scope: scope, Operator: "admin", OperatorName: "管理员",
+		Questions: nil,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vrDel1, err := ms.VerifyReceipt(ctx, r1.ReceiptCode)
+	if err != nil || vrDel1.Status != StatusDeleted || vrDel1.DeletedInfo == nil || vrDel1.DeletedInfo.ReceiptCode != rDel.ReceiptCode {
+		t.Fatalf("expected zero-question admin_rollback to mark scope DELETED, got %+v err=%v", vrDel1, err)
+	}
+	vrDelSelf, err := ms.VerifyReceipt(ctx, rDel.ReceiptCode)
+	if err != nil || vrDelSelf.Status != StatusDeleted {
+		t.Fatalf("expected zero-question admin_rollback self status DELETED, got %+v err=%v", vrDelSelf, err)
+	}
+	mx, err := ms.ListMatrix(ctx, MatrixFilter{})
+	if err != nil || len(mx) != 0 {
+		t.Fatalf("expected deleted admin_rollback scope excluded from ListMatrix, got %+v err=%v", mx, err)
+	}
+	rRecreate, err := ms.RecordRevisionTx(ctx, nil, RecordRevisionInput{
+		QBankID: 2, Scope: scope, Operator: "t1", OperatorName: "张老师",
+		Questions: []SnapshotQuestion{{QuestionNum: 1, Topic: "重建"}},
+	})
+	if err != nil || rRecreate.Action != ActionCreate {
+		t.Fatalf("expected auto-action after zero-question admin_rollback to resolve to create, got %+v err=%v", rRecreate, err)
+	}
+
+	// Verify canonicalMatchesRecord directly rejects mismatched operator real_name or question_count.
+	parsedCP, _ := ParseCanonicalPayload(rRecreate.CanonicalPayload)
+	recMismatchName := &revisionRecord{
+		receiptCode:           rRecreate.ReceiptCode,
+		action:                rRecreate.Action,
+		issuedAtUTC:           rRecreate.IssuedAt,
+		revisionNo:            rRecreate.RevisionNo,
+		supersedesReceiptCode: rRecreate.Supersedes,
+		contentSHA256:         rRecreate.ContentSHA256,
+		prevEntryHash:         rRecreate.PrevEntryHash,
+		scope:                 rRecreate.Scope,
+		operator:              rRecreate.Operator.Username,
+		operatorName:          "冒名老师",
+		questionCount:         rRecreate.Summary.QuestionCount,
+		exercisePDFCount:      rRecreate.Summary.ExercisePDFCount,
+		answerPDFCount:        rRecreate.Summary.AnswerPDFCount,
+		topicFilledCount:      rRecreate.Summary.TopicFilledCount,
+	}
+	if canonicalMatchesRecord(parsedCP, recMismatchName) {
+		t.Fatal("expected canonicalMatchesRecord to reject mismatched operatorName")
+	}
+	recMismatchCount := *recMismatchName
+	recMismatchCount.operatorName = rRecreate.Operator.RealName
+	recMismatchCount.questionCount = 99
+	if canonicalMatchesRecord(parsedCP, &recMismatchCount) {
+		t.Fatal("expected canonicalMatchesRecord to reject mismatched questionCount")
+	}
+
+	// Verify MySQLStore.AnchorUnanchoredRevisions persists TSAStatusFailed + ErrorMessage and exposes via ListAnchors & VerifyReceipt.
+	failTSA := &mockFailingTSAClient{url: "https://tsa.example/tsr", errMsg: "connection refused"}
+	anc, err := store.AnchorUnanchoredRevisions(ctx, failTSA)
+	if err != nil {
+		t.Fatalf("MySQLStore.AnchorUnanchoredRevisions failed: %v", err)
+	}
+	if anc == nil || anc.TSAStatus != TSAStatusFailed || anc.ErrorMessage != "connection refused" {
+		t.Fatalf("expected failed anchor with error_message, got %+v", anc)
+	}
+	anchors, err := store.ListAnchors(ctx, 10)
+	if err != nil || len(anchors) != 1 || anchors[0].TSAStatus != TSAStatusFailed || anchors[0].ErrorMessage != "connection refused" {
+		t.Fatalf("unexpected MySQLStore.ListAnchors: %+v err=%v", anchors, err)
+	}
+	vrAnc, err := store.VerifyReceipt(ctx, rec.ReceiptCode)
+	if err != nil || vrAnc.Anchor == nil || vrAnc.Anchor.TSAStatus != TSAStatusFailed || vrAnc.Anchor.ErrorMessage != "connection refused" {
+		t.Fatalf("expected failed anchor proof in MySQLStore.VerifyReceipt, got %+v err=%v", vrAnc, err)
+	}
+	if name := store.LookupOperatorName(ctx, "t101"); name != "王老师" {
+		t.Fatalf("expected LookupOperatorName='王老师', got %q", name)
+	}
+}
+
+type mockFailingTSAClient struct {
+	url    string
+	errMsg string
+}
+
+func (m *mockFailingTSAClient) Endpoint() string { return m.url }
+func (m *mockFailingTSAClient) Timestamp(_ context.Context, _ []byte) (*TSAResponse, error) {
+	return nil, fmt.Errorf("%s", m.errMsg)
 }

@@ -134,11 +134,18 @@ func UploadCapture(feedbackRoot string, store session.Store) http.HandlerFunc {
 
 		targetFile := filepath.Join(targetDir, filename)
 		if err := writeFileAtomic(targetFile, data, 0644); err != nil {
-			httpx.SendJSON(w, http.StatusOK, map[string]any{
-				"success": false,
-				"error":   "Failed to move",
-			})
-			return
+			if errors.Is(err, os.ErrNotExist) {
+				if mkErr := os.MkdirAll(targetDir, 0755); mkErr == nil {
+					err = writeFileAtomic(targetFile, data, 0644)
+				}
+			}
+			if err != nil {
+				httpx.SendJSON(w, http.StatusOK, map[string]any{
+					"success": false,
+					"error":   "Failed to move",
+				})
+				return
+			}
 		}
 
 		appendCaptureIndex(filepath.Join(uploadDir, "index.jsonl"), map[string]any{

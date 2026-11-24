@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -183,11 +184,18 @@ func UploadPDFWithAttest(feedbackRoot string, store session.Store, attest qbanka
 					season = normalize.Season(rawSeason, rawSeason)
 				}
 				op := strings.TrimSpace(sess.Username())
-				opName := strings.TrimSpace(sess.StringVal("real_name"))
-				if op == "" && sess.IsAdminLoggedIn() {
+				opName := ""
+				if op != "" {
+					opName = strings.TrimSpace(sess.StringVal("real_name"))
+				} else if sess.IsAdminLoggedIn() {
 					op = strings.TrimSpace(sess.AdminUsername())
-					if opName == "" {
-						opName = strings.TrimSpace(sess.StringVal("admin_realname"))
+					opName = strings.TrimSpace(sess.StringVal("admin_realname"))
+				}
+				if opName == "" && op != "" {
+					if l, ok := attest.(interface {
+						LookupOperatorName(context.Context, string) string
+					}); ok {
+						opName = strings.TrimSpace(l.LookupOperatorName(r.Context(), op))
 					}
 				}
 				details := map[string]any{

@@ -1,6 +1,7 @@
 package qbank
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -10,7 +11,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/go-sql-driver/mysql"
 
 	"feedback-api/internal/tz"
 )
@@ -18,9 +22,24 @@ import (
 // AttestationPDFRetention is the minimum retention period for orphan PDFs still referenced in attestation snapshots.
 const AttestationPDFRetention = 180 * 24 * time.Hour
 
+var orphanPDFCleanupMu sync.Mutex
+
+// WithPDFCleanupLock runs fn while holding the orphan PDF cleanup mutex so rollbacks and GC do not race.
+func WithPDFCleanupLock(fn func() error) error {
+	orphanPDFCleanupMu.Lock()
+	defer orphanPDFCleanupMu.Unlock()
+	return fn()
+}
+
 // PDFReferenceChecker checks whether a managed PDF URL was referenced in recent attestation snapshots.
 type PDFReferenceChecker interface {
 	HasRecentPDFReference(ctx context.Context, relURL string, maxAge time.Duration) (bool, error)
+}
+
+// VariationRevisionRecorder records an attestation revision for a variation week inside an active transaction
+// after homework topic cascade updates.
+type VariationRevisionRecorder interface {
+	RecordWeekRevisionTx(ctx context.Context, tx *sql.Tx, scope WeekScope, action, operator, operatorName, clientIP string, questions []QuestionItem) error
 }
 
 // WeekScope describes the canonical 7-dimension question bank scope and primary row id.
@@ -137,20 +156,21 @@ type SaveQuestionInput struct {
 
 // SaveWeekRequest holds all inputs for transactional POST save.
 type SaveWeekRequest struct {
-	BankType     string
-	Year         int
-	Season       string
-	Subject      string
-	Grade        string
-	Tier         string
-	Week         int
-	Operator     string
-	OperatorName string
-	ClientIP     string
-	SaveMode     string
-	Questions    []SaveQuestionInput
-	RawMaps      []map[string]any
-	OnRecordTx   func(ctx context.Context, tx *sql.Tx, qbankID int64, action string) error
+	BankType            string
+	Year                int
+	Season              string
+	Subject             string
+	Grade               string
+	Tier                string
+	Week                int
+	Operator            string
+	OperatorName        string
+	ClientIP            string
+	SaveMode            string
+	Questions           []SaveQuestionInput
+	RawMaps             []map[string]any
+	OnRecordTx          func(ctx context.Context, tx *sql.Tx, qbankID int64, action string) error
+	OnVariationRecordTx func(ctx context.Context, tx *sql.Tx, scope WeekScope, action string, questions []QuestionItem) error
 }
 
 // Repository abstracts persistence for /api/qbank.php.
@@ -166,7 +186,11 @@ type Repository interface {
 // and no recent attestation snapshot (180 days) references the PDF.
 func CleanupUnreferencedPDFs(ctx context.Context, repo Repository, feedbackRoot string, candidates []string) int {
 	var checker PDFReferenceChecker
-	if c, ok := repo.(PDFReferenceChecker); ok {
+	if m, ok := repo.(*MySQLRepository); ok {
+		if m.pdfChecker != nil {
+			checker = m.pdfChecker
+		}
+	} else if c, ok := repo.(PDFReferenceChecker); ok {
 		checker = c
 	}
 	return CleanupUnreferencedPDFsWithAttest(ctx, repo, checker, feedbackRoot, candidates)
@@ -178,6 +202,9 @@ func CleanupUnreferencedPDFsWithAttest(ctx context.Context, repo Repository, che
 	if repo == nil || strings.TrimSpace(feedbackRoot) == "" || len(candidates) == 0 {
 		return 0
 	}
+	orphanPDFCleanupMu.Lock()
+	defer orphanPDFCleanupMu.Unlock()
+
 	seen := make(map[string]struct{}, len(candidates))
 	pdfDir := filepath.Join(feedbackRoot, "data", "pdfs")
 	deleted := 0
@@ -205,9 +232,12 @@ func CleanupUnreferencedPDFsWithAttest(ctx context.Context, repo Repository, che
 			continue
 		}
 		if checker != nil {
-			if hasRecent, checkErr := checker.HasRecentPDFReference(ctx, relURL, AttestationPDFRetention); checkErr == nil && hasRecent {
+			hasRecent, checkErr := checker.HasRecentPDFReference(ctx, relURL, AttestationPDFRetention)
+			if checkErr != nil || hasRecent {
 				continue
 			}
+		} else if time.Since(info.ModTime()) < 60*time.Second {
+			continue
 		}
 		if os.Remove(fullPath) == nil {
 			deleted++
@@ -377,7 +407,7 @@ func (r *MySQLRepository) enrichListItems(ctx context.Context, db *sql.DB, items
 
 	// Best-effort lookup of latest attestation receipt_code per scope (gracefully degraded if qbank_revisions absent).
 	revSQL := "SELECT r1.`qbank_id`, r1.`bank_type`, r1.`year`, r1.`season`, r1.`subject`, r1.`grade`, r1.`tier`, r1.`week`, " +
-		"r1.`receipt_code`, r1.`action`, r1.`operator`, r1.`operator_name` " +
+		"r1.`receipt_code`, r1.`action`, r1.`question_count`, r1.`operator`, r1.`operator_name` " +
 		"FROM `qbank_revisions` r1 " +
 		"INNER JOIN (" +
 		"  SELECT `year`, `season`, `bank_type`, `subject`, `grade`, `tier`, `week`, MAX(`id`) AS `max_id` " +
@@ -387,9 +417,10 @@ func (r *MySQLRepository) enrichListItems(ctx context.Context, db *sql.DB, items
 		for rRows.Next() {
 			var qbankID int64
 			var year, week int
+			var revQCount sql.NullInt64
 			var bt, season, subj, grade, tier, code, action, op, opName sql.NullString
-			if scanErr := rRows.Scan(&qbankID, &bt, &year, &season, &subj, &grade, &tier, &week, &code, &action, &op, &opName); scanErr == nil {
-				if action.String == "delete" || action.String == "admin_delete" {
+			if scanErr := rRows.Scan(&qbankID, &bt, &year, &season, &subj, &grade, &tier, &week, &code, &action, &revQCount, &op, &opName); scanErr == nil {
+				if action.String == "delete" || action.String == "admin_delete" || (action.String == "admin_rollback" && revQCount.Int64 == 0) {
 					continue
 				}
 				sk := listScopeKey{
@@ -519,6 +550,106 @@ func (r *MySQLRepository) GetWeek(ctx context.Context, key WeekKey) (*WeekDetail
 	}
 	defer func() { _ = qRows.Close() }()
 
+	questions, err := scanQuestionItems(qRows)
+	if err != nil {
+		return nil, err
+	}
+
+	resolvedBankType := NormalizeBankType(w.bankType)
+	if resolvedBankType == "variation" && len(questions) > 0 {
+		hwTopics := r.loadHomeworkTopicMap(ctx, db, w.year, w.season, w.subject, w.grade, w.tier, w.week)
+		if len(hwTopics) > 0 {
+			for i := range questions {
+				for _, pNum := range VariationParentNums(questions[i].ParentQuestionNum, questions[i].ParentQuestionNums) {
+					if t := hwTopics[pNum]; t != "" {
+						questions[i].Topic = t
+						break
+					}
+				}
+			}
+		}
+	}
+
+	operator := w.updatedBy
+	if operator == "" {
+		operator = w.createdBy
+	}
+	operatorName := ""
+	if operator != "" {
+		var realName sql.NullString
+		if err := db.QueryRowContext(ctx, "SELECT `real_name` FROM `users` WHERE `username` = ? LIMIT 1", operator).Scan(&realName); err == nil {
+			operatorName = realName.String
+		}
+	}
+
+	qCount := w.questionCount
+	if qCount == 0 && len(questions) > 0 {
+		qCount = len(questions)
+	}
+
+	var latestReceiptCode string
+	var latestRevisionNo int
+	var revCode, revAction sql.NullString
+	var revNo, revQCount sql.NullInt64
+	if revErr := db.QueryRowContext(
+		ctx,
+		"SELECT `receipt_code`, `revision_no`, `action`, `question_count` FROM `qbank_revisions` "+
+			"WHERE `year` = ? AND `season` = ? AND `bank_type` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? "+
+			"ORDER BY `revision_no` DESC, `id` DESC LIMIT 1",
+		w.year, w.season, resolvedBankType, w.subject, w.grade, w.tier, w.week,
+	).Scan(&revCode, &revNo, &revAction, &revQCount); revErr == nil {
+		if revAction.String != "delete" && revAction.String != "admin_delete" && !(revAction.String == "admin_rollback" && revQCount.Int64 == 0) {
+			latestReceiptCode = revCode.String
+			if revNo.Valid {
+				latestRevisionNo = int(revNo.Int64)
+			}
+		}
+	}
+
+	return &WeekDetail{
+		BankType:           resolvedBankType,
+		Year:               w.year,
+		Season:             w.season,
+		Subject:            w.subject,
+		Grade:              w.grade,
+		Tier:               w.tier,
+		Week:               w.week,
+		QuestionCount:      qCount,
+		CreatedBy:          w.createdBy,
+		UpdatedBy:          w.updatedBy,
+		Operator:           operator,
+		OperatorName:       operatorName,
+		UpdatedAt:          w.updatedAtMs,
+		UpdatedAtFormatted: formatUpdatedAtMinute(w.updatedAtStr),
+		MatchedExactTerm:   matchedExact,
+		LatestReceiptCode:  latestReceiptCode,
+		LatestRevisionNo:   latestRevisionNo,
+		Questions:          questions,
+	}, nil
+}
+
+func (r *MySQLRepository) loadHomeworkTopicMap(ctx context.Context, db *sql.DB, year int, season, subject, grade, tier string, week int) map[int]string {
+	out := make(map[int]string)
+	rows, err := db.QueryContext(
+		ctx,
+		"SELECT `question_num`, `topic` FROM `qbank_questions` WHERE `bank_type` = 'homework' AND `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? ORDER BY `question_num` ASC",
+		year, season, subject, grade, tier, week,
+	)
+	if err != nil {
+		return out
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var qNum int
+		var topic sql.NullString
+		if err := rows.Scan(&qNum, &topic); err == nil && qNum > 0 && strings.TrimSpace(topic.String) != "" {
+			out[qNum] = strings.TrimSpace(topic.String)
+		}
+	}
+	return out
+}
+
+func scanQuestionItems(qRows *sql.Rows) ([]QuestionItem, error) {
 	questions := make([]QuestionItem, 0)
 	for qRows.Next() {
 		var qNum, subNum int
@@ -577,99 +708,18 @@ func (r *MySQLRepository) GetWeek(ctx context.Context, key WeekKey) (*WeekDetail
 	if err := qRows.Err(); err != nil {
 		return nil, err
 	}
-
-	resolvedBankType := NormalizeBankType(w.bankType)
-	if resolvedBankType == "variation" && len(questions) > 0 {
-		hwTopics := r.loadHomeworkTopicMap(ctx, db, w.year, w.season, w.subject, w.grade, w.tier, w.week)
-		if len(hwTopics) > 0 {
-			for i := range questions {
-				for _, pNum := range VariationParentNums(questions[i].ParentQuestionNum, questions[i].ParentQuestionNums) {
-					if t := hwTopics[pNum]; t != "" {
-						questions[i].Topic = t
-						break
-					}
-				}
-			}
-		}
-	}
-
-	operator := w.updatedBy
-	if operator == "" {
-		operator = w.createdBy
-	}
-	operatorName := ""
-	if operator != "" {
-		var realName sql.NullString
-		if err := db.QueryRowContext(ctx, "SELECT `real_name` FROM `users` WHERE `username` = ? LIMIT 1", operator).Scan(&realName); err == nil {
-			operatorName = realName.String
-		}
-	}
-
-	qCount := w.questionCount
-	if qCount == 0 && len(questions) > 0 {
-		qCount = len(questions)
-	}
-
-	var latestReceiptCode string
-	var latestRevisionNo int
-	var revCode, revAction sql.NullString
-	var revNo sql.NullInt64
-	if revErr := db.QueryRowContext(
-		ctx,
-		"SELECT `receipt_code`, `revision_no`, `action` FROM `qbank_revisions` "+
-			"WHERE `year` = ? AND `season` = ? AND `bank_type` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? "+
-			"ORDER BY `revision_no` DESC, `id` DESC LIMIT 1",
-		w.year, w.season, resolvedBankType, w.subject, w.grade, w.tier, w.week,
-	).Scan(&revCode, &revNo, &revAction); revErr == nil {
-		if revAction.String != "delete" && revAction.String != "admin_delete" {
-			latestReceiptCode = revCode.String
-			if revNo.Valid {
-				latestRevisionNo = int(revNo.Int64)
-			}
-		}
-	}
-
-	return &WeekDetail{
-		BankType:           resolvedBankType,
-		Year:               w.year,
-		Season:             w.season,
-		Subject:            w.subject,
-		Grade:              w.grade,
-		Tier:               w.tier,
-		Week:               w.week,
-		QuestionCount:      qCount,
-		CreatedBy:          w.createdBy,
-		UpdatedBy:          w.updatedBy,
-		Operator:           operator,
-		OperatorName:       operatorName,
-		UpdatedAt:          w.updatedAtMs,
-		UpdatedAtFormatted: formatUpdatedAtMinute(w.updatedAtStr),
-		MatchedExactTerm:   matchedExact,
-		LatestReceiptCode:  latestReceiptCode,
-		LatestRevisionNo:   latestRevisionNo,
-		Questions:          questions,
-	}, nil
+	return questions, nil
 }
 
-func (r *MySQLRepository) loadHomeworkTopicMap(ctx context.Context, db *sql.DB, year int, season, subject, grade, tier string, week int) map[int]string {
-	out := make(map[int]string)
-	rows, err := db.QueryContext(
-		ctx,
-		"SELECT `question_num`, `topic` FROM `qbank_questions` WHERE `bank_type` = 'homework' AND `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? ORDER BY `question_num` ASC",
-		year, season, subject, grade, tier, week,
-	)
-	if err != nil {
-		return out
+func isMySQLDeadlockError(err error) bool {
+	if err == nil {
+		return false
 	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var qNum int
-		var topic sql.NullString
-		if err := rows.Scan(&qNum, &topic); err == nil && qNum > 0 && strings.TrimSpace(topic.String) != "" {
-			out[qNum] = strings.TrimSpace(topic.String)
-		}
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1213 {
+		return true
 	}
-	return out
+	return strings.Contains(err.Error(), "Error 1213")
 }
 
 func (r *MySQLRepository) SaveWeek(ctx context.Context, req SaveWeekRequest) ([]string, error) {
@@ -678,28 +728,48 @@ func (r *MySQLRepository) SaveWeek(ctx context.Context, req SaveWeekRequest) ([]
 		return nil, err
 	}
 
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			t := time.NewTimer(time.Duration(5*attempt) * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				return nil, ctx.Err()
+			case <-t.C:
+			}
+		}
+		removed, err := r.saveWeekOnce(ctx, db, req)
+		if err == nil {
+			return removed, nil
+		}
+		lastErr = err
+		if !isMySQLDeadlockError(err) {
+			return nil, err
+		}
+	}
+	return nil, lastErr
+}
+
+func (r *MySQLRepository) saveWeekOnce(ctx context.Context, db *sql.DB, req SaveWeekRequest) ([]string, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var existingWeekID int64
-	existErr := tx.QueryRowContext(
-		ctx,
-		"SELECT `id` FROM `qbank_weeks` WHERE `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? AND `bank_type` = ? LIMIT 1 FOR UPDATE",
-		req.Year, req.Season, req.Subject, req.Grade, req.Tier, req.Week, req.BankType,
-	).Scan(&existingWeekID)
-	if existErr != nil && !errors.Is(existErr, sql.ErrNoRows) {
-		return nil, existErr
-	}
-	existed := existErr == nil && existingWeekID > 0
-
-	_, err = tx.ExecContext(
+	// Upsert without pre-insert FOR UPDATE to avoid InnoDB gap-lock deadlocks on concurrent first-create;
+	// RowsAffected == 1 indicates a fresh row insert, whereas 0 or 2 indicates an existing row update.
+	upsertRes, err := tx.ExecContext(
 		ctx,
 		`INSERT INTO `+"`qbank_weeks`"+` (`+"`bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week`, `question_count`, `created_by`, `updated_by`, `updated_at`"+`)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 		 ON DUPLICATE KEY UPDATE
+		   `+"`id`"+` = LAST_INSERT_ID(`+"`id`"+`),
 		   `+"`question_count`"+` = VALUES(`+"`question_count`"+`),
 		   `+"`created_by`"+` = IF(`+"`created_by`"+` = '' OR `+"`created_by`"+` IS NULL, VALUES(`+"`created_by`"+`), `+"`created_by`"+`),
 		   `+"`updated_by`"+` = IF(VALUES(`+"`updated_by`"+`) != '', VALUES(`+"`updated_by`"+`), `+"`updated_by`"+`),
@@ -709,6 +779,11 @@ func (r *MySQLRepository) SaveWeek(ctx context.Context, req SaveWeekRequest) ([]
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	existed := false
+	if affected, affErr := upsertRes.RowsAffected(); affErr == nil && affected != 1 {
+		existed = true
 	}
 
 	var qbankID int64
@@ -833,6 +908,34 @@ func (r *MySQLRepository) SaveWeek(ctx context.Context, req SaveWeekRequest) ([]
 		}
 	}
 
+	// Cascade homework topics to variation rows inside the same transaction and attest variation updates.
+	if NormalizeBankType(req.BankType) == "homework" {
+		topicMap := BuildHomeworkTopicMapFromMaps(req.RawMaps)
+		for _, q := range req.Questions {
+			if q.QuestionNum > 0 && strings.TrimSpace(q.Topic) != "" {
+				if _, exists := topicMap[q.QuestionNum]; !exists {
+					topicMap[q.QuestionNum] = strings.TrimSpace(q.Topic)
+				}
+			}
+		}
+		var recorder VariationRevisionRecorder
+		if vr, ok := r.pdfChecker.(VariationRevisionRecorder); ok {
+			recorder = vr
+		}
+		if err := CascadeHomeworkTopicsToVariationsTx(ctx, tx, WeekScope{
+			QBankID:  qbankID,
+			BankType: req.BankType,
+			Year:     req.Year,
+			Season:   req.Season,
+			Subject:  req.Subject,
+			Grade:    req.Grade,
+			Tier:     req.Tier,
+			Week:     req.Week,
+		}, topicMap, req.Operator, req.OperatorName, req.ClientIP, recorder, req.OnVariationRecordTx); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -844,26 +947,43 @@ func (r *MySQLRepository) SaveWeek(ctx context.Context, req SaveWeekRequest) ([]
 		}
 	}
 
-	// Best-effort cascade homework topics to variation questions
-	if req.BankType == "homework" {
-		r.cascadeHomeworkTopicsToVariations(ctx, db, req)
-	}
-
 	return removed, nil
 }
 
-func (r *MySQLRepository) cascadeHomeworkTopicsToVariations(ctx context.Context, db *sql.DB, req SaveWeekRequest) {
-	topicMap := BuildHomeworkTopicMapFromMaps(req.RawMaps)
-	if len(topicMap) == 0 {
-		return
+// CascadeHomeworkTopicsToVariationsTx locks and updates any variation rows whose linked homework topic changed,
+// and records a signed "update" attestation revision for that variation week inside tx when >=1 row changed.
+func CascadeHomeworkTopicsToVariationsTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	hwScope WeekScope,
+	topicMap map[int]string,
+	operator string,
+	operatorName string,
+	clientIP string,
+	recorder VariationRevisionRecorder,
+	onRecordFallback func(ctx context.Context, tx *sql.Tx, scope WeekScope, action string, questions []QuestionItem) error,
+) error {
+	if tx == nil || len(topicMap) == 0 {
+		return nil
 	}
-	rows, err := db.QueryContext(
+
+	var varWeekID int64
+	weekErr := tx.QueryRowContext(
 		ctx,
-		"SELECT `id`, `parent_question_num`, `parent_question_nums`, `topic` FROM `qbank_questions` WHERE `bank_type` = 'variation' AND `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ?",
-		req.Year, req.Season, req.Subject, req.Grade, req.Tier, req.Week,
+		"SELECT `id` FROM `qbank_weeks` WHERE `bank_type` = 'variation' AND `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? ORDER BY `id` DESC LIMIT 1 FOR UPDATE",
+		hwScope.Year, hwScope.Season, hwScope.Subject, hwScope.Grade, hwScope.Tier, hwScope.Week,
+	).Scan(&varWeekID)
+	if weekErr != nil && !errors.Is(weekErr, sql.ErrNoRows) {
+		return weekErr
+	}
+
+	rows, err := tx.QueryContext(
+		ctx,
+		"SELECT `id`, `parent_question_num`, `parent_question_nums`, `topic` FROM `qbank_questions` WHERE `bank_type` = 'variation' AND `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? FOR UPDATE",
+		hwScope.Year, hwScope.Season, hwScope.Subject, hwScope.Grade, hwScope.Tier, hwScope.Week,
 	)
 	if err != nil {
-		return
+		return err
 	}
 	type varRow struct {
 		id         int64
@@ -876,26 +996,33 @@ func (r *MySQLRepository) cascadeHomeworkTopicsToVariations(ctx context.Context,
 		var id int64
 		var pNum sql.NullInt64
 		var pNumsStr, topic sql.NullString
-		if err := rows.Scan(&id, &pNum, &pNumsStr, &topic); err == nil {
-			var pAny any
-			if pNum.Valid {
-				pAny = int(pNum.Int64)
-			}
-			primaryPtr, list := ParseParentNums(pAny, pNumsStr.String)
-			targets = append(targets, varRow{id: id, parentNum: primaryPtr, parentNums: list, topic: topic.String})
+		if scanErr := rows.Scan(&id, &pNum, &pNumsStr, &topic); scanErr != nil {
+			_ = rows.Close()
+			return scanErr
 		}
+		var pAny any
+		if pNum.Valid {
+			pAny = int(pNum.Int64)
+		}
+		primaryPtr, list := ParseParentNums(pAny, pNumsStr.String)
+		targets = append(targets, varRow{id: id, parentNum: primaryPtr, parentNums: list, topic: topic.String})
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
 	}
 	_ = rows.Close()
 
 	if len(targets) == 0 {
-		return
+		return nil
 	}
-	stmt, err := db.PrepareContext(ctx, "UPDATE `qbank_questions` SET `topic` = ?, `updated_at` = `updated_at` WHERE `id` = ?")
+	stmt, err := tx.PrepareContext(ctx, "UPDATE `qbank_questions` SET `topic` = ?, `updated_at` = `updated_at` WHERE `id` = ?")
 	if err != nil {
-		return
+		return err
 	}
 	defer func() { _ = stmt.Close() }()
 
+	changed := 0
 	for _, vr := range targets {
 		newTopic := ""
 		for _, pNum := range VariationParentNums(vr.parentNum, vr.parentNums) {
@@ -905,9 +1032,55 @@ func (r *MySQLRepository) cascadeHomeworkTopicsToVariations(ctx context.Context,
 			}
 		}
 		if newTopic != "" && newTopic != vr.topic {
-			_, _ = stmt.ExecContext(ctx, newTopic, vr.id)
+			if _, err := stmt.ExecContext(ctx, newTopic, vr.id); err != nil {
+				return err
+			}
+			changed++
 		}
 	}
+	if changed == 0 || (recorder == nil && onRecordFallback == nil) {
+		return nil
+	}
+
+	var qRows *sql.Rows
+	if varWeekID > 0 {
+		qRows, err = tx.QueryContext(
+			ctx,
+			"SELECT `question_num`, `parent_question_num`, `parent_question_nums`, `sub_num`, `topic`, `video_url`, `question_meta`, `exercise_pdf`, `exercise_name`, `answer_pdf`, `answer_name` "+
+				"FROM `qbank_questions` WHERE `qbank_id` = ? ORDER BY `question_num` ASC",
+			varWeekID,
+		)
+	} else {
+		qRows, err = tx.QueryContext(
+			ctx,
+			"SELECT `question_num`, `parent_question_num`, `parent_question_nums`, `sub_num`, `topic`, `video_url`, `question_meta`, `exercise_pdf`, `exercise_name`, `answer_pdf`, `answer_name` "+
+				"FROM `qbank_questions` WHERE `bank_type` = 'variation' AND `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? ORDER BY `question_num` ASC",
+			hwScope.Year, hwScope.Season, hwScope.Subject, hwScope.Grade, hwScope.Tier, hwScope.Week,
+		)
+	}
+	if err != nil {
+		return err
+	}
+	varQuestions, scanErr := scanQuestionItems(qRows)
+	_ = qRows.Close()
+	if scanErr != nil {
+		return scanErr
+	}
+
+	varScope := WeekScope{
+		QBankID:  varWeekID,
+		BankType: "variation",
+		Year:     hwScope.Year,
+		Season:   hwScope.Season,
+		Subject:  hwScope.Subject,
+		Grade:    hwScope.Grade,
+		Tier:     hwScope.Tier,
+		Week:     hwScope.Week,
+	}
+	if recorder != nil {
+		return recorder.RecordWeekRevisionTx(ctx, tx, varScope, "update", operator, operatorName, clientIP, varQuestions)
+	}
+	return onRecordFallback(ctx, tx, varScope, "update", varQuestions)
 }
 
 func (r *MySQLRepository) DeleteWeek(ctx context.Context, key WeekKey) ([]string, error) {
@@ -1057,15 +1230,17 @@ func JoinParentNums(nums []int) *string {
 	return &s
 }
 
-// MarshalMetaJSON encodes sanitized questionMeta to JSON string pointer (nil if empty).
+// MarshalMetaJSON encodes sanitized questionMeta to JSON string pointer (nil if empty) without HTML escaping.
 func MarshalMetaJSON(meta map[string]any) *string {
 	if len(meta) == 0 {
 		return nil
 	}
-	b, err := json.Marshal(meta)
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(meta); err != nil {
 		return nil
 	}
-	s := string(b)
+	s := strings.TrimSuffix(buf.String(), "\n")
 	return &s
 }

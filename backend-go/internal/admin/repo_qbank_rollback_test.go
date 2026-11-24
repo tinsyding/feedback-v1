@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -14,11 +16,12 @@ import (
 )
 
 type rbMockState struct {
-	queries      []string
-	execArgs     [][]driver.NamedValue
-	failOnDelete bool
-	committed    bool
-	rolledBack   bool
+	queries       []string
+	execArgs      [][]driver.NamedValue
+	failOnDelete  bool
+	committed     bool
+	rolledBack    bool
+	variationRows [][]driver.Value
 }
 
 type rbMockDriver struct{ state *rbMockState }
@@ -29,9 +32,14 @@ func (d *rbMockDriver) Open(_ string) (driver.Conn, error) {
 
 type rbMockConn struct{ state *rbMockState }
 
-func (c *rbMockConn) Prepare(_ string) (driver.Stmt, error) { return nil, errors.New("unused") }
-func (c *rbMockConn) Close() error                          { return nil }
-func (c *rbMockConn) Begin() (driver.Tx, error)             { return &rbMockTx{state: c.state}, nil }
+func (c *rbMockConn) Prepare(_ string) (driver.Stmt, error) {
+	return &rbMockStmt{state: c.state}, nil
+}
+func (c *rbMockConn) PrepareContext(_ context.Context, _ string) (driver.Stmt, error) {
+	return &rbMockStmt{state: c.state}, nil
+}
+func (c *rbMockConn) Close() error              { return nil }
+func (c *rbMockConn) Begin() (driver.Tx, error) { return &rbMockTx{state: c.state}, nil }
 func (c *rbMockConn) BeginTx(_ context.Context, _ driver.TxOptions) (driver.Tx, error) {
 	return &rbMockTx{state: c.state}, nil
 }
@@ -45,11 +53,37 @@ func (c *rbMockConn) ExecContext(_ context.Context, query string, args []driver.
 }
 func (c *rbMockConn) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
 	c.state.queries = append(c.state.queries, query)
+	if strings.Contains(query, "SELECT `id`, `parent_question_num`, `parent_question_nums`, `topic` FROM `qbank_questions` WHERE `bank_type` = 'variation'") {
+		return &rbMockRows{cols: []string{"id", "parent_question_num", "parent_question_nums", "topic"}, rows: c.state.variationRows}, nil
+	}
+	if strings.Contains(query, "SELECT `question_num`, `parent_question_num`") {
+		return &rbMockRows{
+			cols: []string{"question_num", "parent_question_num", "parent_question_nums", "sub_num", "topic", "video_url", "question_meta", "exercise_pdf", "exercise_name", "answer_pdf", "answer_name"},
+			rows: [][]driver.Value{{int64(1), int64(1), "1", int64(1), "受力分析", "", "", "data/pdfs/pdf_var_rb.pdf", "v.pdf", "", ""}},
+		}, nil
+	}
 	if strings.Contains(query, "SELECT `id` FROM `qbank_weeks`") {
 		return &rbMockRows{cols: []string{"id"}, rows: [][]driver.Value{{int64(88)}}}, nil
 	}
 	return &rbMockRows{cols: []string{"id"}, rows: nil}, nil
 }
+
+type rbMockStmt struct{ state *rbMockState }
+
+func (s *rbMockStmt) Close() error  { return nil }
+func (s *rbMockStmt) NumInput() int { return -1 }
+func (s *rbMockStmt) Exec(args []driver.Value) (driver.Result, error) {
+	named := make([]driver.NamedValue, len(args))
+	for i, v := range args {
+		named[i] = driver.NamedValue{Ordinal: i + 1, Value: v}
+	}
+	return s.ExecContext(context.Background(), named)
+}
+func (s *rbMockStmt) ExecContext(_ context.Context, args []driver.NamedValue) (driver.Result, error) {
+	s.state.execArgs = append(s.state.execArgs, args)
+	return driver.RowsAffected(1), nil
+}
+func (s *rbMockStmt) Query([]driver.Value) (driver.Rows, error) { return nil, driver.ErrSkip }
 
 type rbMockTx struct{ state *rbMockState }
 
@@ -175,5 +209,129 @@ func TestRollbackQBankRevisionAndAnchorsProtection(t *testing.T) {
 	}
 	if !stFail.rolledBack || stFail.committed {
 		t.Fatalf("expected tx rollback without commit, got rolledBack=%v committed=%v", stFail.rolledBack, stFail.committed)
+	}
+}
+
+func TestRollbackPDFCheckEmptyLockOrderMetaAndVariationCascade(t *testing.T) {
+	t.Setenv("QBANK_ATTESTATION_PRIVATE_KEY", "")
+	t.Setenv("QBANK_ATTESTATION_KEY_FILE", "")
+	signer, err := qbankattest.LoadSigner("rollback-extra-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	pdfDir := filepath.Join(root, "data", "pdfs")
+	if err := os.MkdirAll(pdfDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	attest := qbankattest.NewMemoryStore(signer, root)
+	ctx := context.Background()
+
+	scope := qbankattest.Scope{Year: 2026, Season: "spring", BankType: "homework", Subject: "物理", Grade: "高一", Tier: "实验班", Week: 2}
+	pdfURL := "data/pdfs/pdf_rb_check.pdf"
+	revPDF, err := attest.RecordRevisionTx(ctx, nil, qbankattest.RecordRevisionInput{
+		QBankID:  88,
+		Action:   qbankattest.ActionCreate,
+		Scope:    scope,
+		Operator: "teacher1",
+		Questions: []qbankattest.SnapshotQuestion{
+			{
+				QuestionNum:  1,
+				Topic:        "受力分析",
+				ExercisePDF:  pdfURL,
+				QuestionMeta: map[string]any{"mode": "region_crop", "note": "x < 5 & y > 0"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Missing referenced PDF on disk -> 409 Conflict before DB tx.
+	stMissing := &rbMockState{}
+	dbMissing := sql.OpenDB(&rbMockConnector{state: stMissing})
+	defer dbMissing.Close()
+	repoMissing := NewMySQLRepositoryWithAttest(dbMissing, attest)
+	var httpErr *HTTPError
+	err = func() error {
+		_, e := repoMissing.RollbackQBankRevision(ctx, revPDF.ReceiptCode, "boss", "管理员", "127.0.0.1")
+		return e
+	}()
+	if !errors.As(err, &httpErr) || httpErr.Status != http.StatusConflict {
+		t.Fatalf("expected 409 HTTPError when snapshot PDF missing, got %v", err)
+	}
+	if len(stMissing.queries) != 0 {
+		t.Fatalf("expected no SQL queries when PDF precheck fails, got %v", stMissing.queries)
+	}
+
+	// 2. When PDF exists on disk, rollback restores unescaped meta + cascades variation + attests variation.
+	if err := os.WriteFile(filepath.Join(pdfDir, "pdf_rb_check.pdf"), []byte("%PDF-1.4"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stOK := &rbMockState{
+		variationRows: [][]driver.Value{
+			{int64(901), int64(1), "1", "旧变式考点"},
+		},
+	}
+	dbOK := sql.OpenDB(&rbMockConnector{state: stOK})
+	defer dbOK.Close()
+	repoOK := NewMySQLRepositoryWithAttest(dbOK, attest)
+	resOK, err := repoOK.RollbackQBankRevision(ctx, revPDF.ReceiptCode, "boss", "管理员", "127.0.0.1")
+	if err != nil {
+		t.Fatalf("RollbackQBankRevision with existing PDF failed: %v", err)
+	}
+	if !stOK.committed {
+		t.Fatal("expected tx commit")
+	}
+	// Check SetEscapeHTML(false) on QuestionMeta (no \u003c or \u0026).
+	foundUnescapedMeta := false
+	for _, args := range stOK.execArgs {
+		for _, a := range args {
+			if s, ok := a.Value.(string); ok && strings.Contains(s, "region_crop") {
+				if strings.Contains(s, `\u003c`) || strings.Contains(s, `\u0026`) {
+					t.Fatalf("expected MarshalMetaJSON with SetEscapeHTML(false), got %q", s)
+				}
+				foundUnescapedMeta = true
+			}
+		}
+	}
+	if !foundUnescapedMeta {
+		t.Fatal("expected QuestionMeta in rollback INSERT args")
+	}
+	// Check variation attestation revision was recorded.
+	varScope := qbankattest.RevisionFilter{BankType: "variation", Year: &scope.Year, Season: scope.Season, Subject: scope.Subject, Grade: scope.Grade, Tier: scope.Tier, Week: &scope.Week}
+	varRevs, err := attest.ListRevisions(ctx, varScope)
+	if err != nil || len(varRevs) != 1 || varRevs[0].Action != qbankattest.ActionUpdate {
+		t.Fatalf("expected 1 variation update revision after homework rollback cascade, got %+v err=%v", varRevs, err)
+	}
+	if vr, err := attest.VerifyReceipt(ctx, resOK.NewReceiptCode); err != nil || vr.Status != qbankattest.StatusValid {
+		t.Fatalf("expected VALID rollback receipt, got %+v err=%v", vr, err)
+	}
+
+	// 3. Empty-snapshot (delete) rollback locks qbank_weeks FOR UPDATE before DELETE qbank_questions, and VerifyReceipt returns DELETED.
+	revEmpty, err := attest.RecordRevisionTx(ctx, nil, qbankattest.RecordRevisionInput{
+		QBankID:   88,
+		Action:    qbankattest.ActionDelete,
+		Scope:     scope,
+		Operator:  "teacher1",
+		Questions: nil,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stEmpty := &rbMockState{}
+	dbEmpty := sql.OpenDB(&rbMockConnector{state: stEmpty})
+	defer dbEmpty.Close()
+	repoEmpty := NewMySQLRepositoryWithAttest(dbEmpty, attest)
+	resEmpty, err := repoEmpty.RollbackQBankRevision(ctx, revEmpty.ReceiptCode, "boss", "管理员", "127.0.0.1")
+	if err != nil {
+		t.Fatalf("empty rollback failed: %v", err)
+	}
+	if len(stEmpty.queries) < 2 || !strings.Contains(stEmpty.queries[0], "FOR UPDATE") || !strings.Contains(stEmpty.queries[1], "DELETE FROM `qbank_questions`") {
+		t.Fatalf("expected qbank_weeks FOR UPDATE before DELETE qbank_questions, got %v", stEmpty.queries)
+	}
+	vrEmpty, err := attest.VerifyReceipt(ctx, resEmpty.NewReceiptCode)
+	if err != nil || vrEmpty.Status != qbankattest.StatusDeleted {
+		t.Fatalf("expected DELETED status for empty rollback receipt, got %+v err=%v", vrEmpty, err)
 	}
 }

@@ -224,3 +224,51 @@ func TestUploadPDFWithAttestSHA256AndAttemptLog(t *testing.T) {
 		t.Fatalf("expected upload without scope metadata to skip attempt log, got total=%d", tl2.Total)
 	}
 }
+
+type uploadPDFMockLookupAttest struct {
+	*qbankattest.MemoryStore
+}
+
+func (u *uploadPDFMockLookupAttest) LookupOperatorName(_ context.Context, username string) string {
+	if username == "t_lookup" {
+		return "查询教师"
+	}
+	return ""
+}
+
+func TestUploadPDFWithAttestOperatorNameLookupFallback(t *testing.T) {
+	root := t.TempDir()
+	store := session.NewMemoryStore()
+	sid := "sess_teacher_lookup_fallback"
+	store.Set(sid, map[string]any{
+		"user_logged_in": true,
+		"username":       "t_lookup",
+		"user_role":      "teacher",
+	})
+	signer, err := qbankattest.NewEphemeralSigner("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	attest := &uploadPDFMockLookupAttest{MemoryStore: qbankattest.NewMemoryStore(signer, root)}
+	h := httpx.Middleware(UploadPDFWithAttest(root, store, attest))
+
+	pdfPayload := []byte("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n")
+	body, ct := buildSingleFileMultipart(t, "file", "lookup.pdf", pdfPayload, map[string]string{
+		"subject": "数学",
+		"grade":   "七年级",
+		"tier":    "S+",
+		"week":    "1",
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/upload_pdf.php", body)
+	req.Header.Set("Content-Type", ct)
+	req.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: sid})
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("upload failed: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	tl, err := attest.ListTimeline(context.Background(), qbankattest.TimelineFilter{EventType: qbankattest.EventUploadPDF})
+	if err != nil || tl.Total != 1 || tl.Items[0].OperatorName != "查询教师" {
+		t.Fatalf("expected LookupOperatorName fallback '查询教师', got %+v err=%v", tl, err)
+	}
+}

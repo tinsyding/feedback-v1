@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -332,11 +333,15 @@ func isDeleteAction(action string) bool {
 	return action == ActionDelete || action == ActionAdminDelete
 }
 
+func isDeletedRevision(action string, questionCount int) bool {
+	return isDeleteAction(action) || (action == ActionAdminRollback && questionCount == 0)
+}
+
 func normalizeAction(raw string, prevScopeRev *revisionRecord) (string, error) {
 	a := strings.TrimSpace(raw)
 	switch a {
 	case "", "auto":
-		if prevScopeRev == nil || isDeleteAction(prevScopeRev.action) {
+		if prevScopeRev == nil || isDeletedRevision(prevScopeRev.action, prevScopeRev.questionCount) {
 			return ActionCreate, nil
 		}
 		return ActionUpdate, nil
@@ -583,7 +588,7 @@ func evaluateVerification(
 	}
 
 	switch {
-	case isDeleteAction(latestRev.action):
+	case isDeletedRevision(latestRev.action, latestRev.questionCount):
 		res.Status = StatusDeleted
 		res.DeletedInfo = &DeletedInfo{
 			ReceiptCode:      latestRev.receiptCode,
@@ -622,7 +627,12 @@ func canonicalMatchesRecord(cp *CanonicalPayload, rec *revisionRecord) bool {
 		cp.ContentSHA256 == rec.contentSHA256 &&
 		cp.PrevEntryHash == rec.prevEntryHash &&
 		cp.Scope == rec.scope &&
-		cp.Operator.Username == rec.operator
+		cp.Operator.Username == rec.operator &&
+		cp.Operator.RealName == rec.operatorName &&
+		cp.Summary.QuestionCount == rec.questionCount &&
+		cp.Summary.ExercisePDFCount == rec.exercisePDFCount &&
+		cp.Summary.AnswerPDFCount == rec.answerPDFCount &&
+		cp.Summary.TopicFilledCount == rec.topicFilledCount
 }
 
 func snapshotMatchesContentHash(snapshotJSON, contentSHA256 string) bool {
@@ -771,11 +781,12 @@ func buildRevisionDetails(rec *revisionRecord) map[string]any {
 
 // MySQLStore implements Store backed by MySQL 8.0 (*sql.DB).
 type MySQLStore struct {
-	db           *sql.DB
-	signer       *Signer
-	feedbackRoot string
-	cfg          storeConfig
-	anchorMu     sync.Mutex
+	db            *sql.DB
+	signer        *Signer
+	feedbackRoot  string
+	cfg           storeConfig
+	anchorMu      sync.Mutex
+	keyRegistered atomic.Bool
 }
 
 // NewMySQLStore creates a MySQLStore.
@@ -792,6 +803,14 @@ func NewMySQLStore(db *sql.DB, signer *Signer, feedbackRoot string, opts ...Stor
 		feedbackRoot: feedbackRoot,
 		cfg:          cfg,
 	}
+}
+
+// FeedbackRoot returns the configured feedback-v1 root directory.
+func (s *MySQLStore) FeedbackRoot() string {
+	if s == nil {
+		return ""
+	}
+	return strings.TrimSpace(s.feedbackRoot)
 }
 
 func (s *MySQLStore) requireDB() (*sql.DB, error) {
@@ -811,32 +830,44 @@ func (s *MySQLStore) EnsureKeyRegistered(ctx context.Context) error {
 	if s.signer == nil {
 		return errors.New("attestation signer is not configured")
 	}
+	if _, err := s.ensureKeyRegisteredWithRunner(ctx, db, true); err != nil {
+		return err
+	}
+	return nil
+}
 
+func (s *MySQLStore) ensureKeyRegisteredWithRunner(ctx context.Context, runner sqlQueryRower, markCommitted bool) (bool, error) {
 	var existingPub, existingStatus string
-	err = db.QueryRowContext(
+	err := runner.QueryRowContext(
 		ctx,
 		"SELECT `public_key`, `status` FROM `qbank_attestation_keys` WHERE `kid` = ? LIMIT 1",
 		s.signer.Kid(),
 	).Scan(&existingPub, &existingStatus)
 	if err == nil {
 		if existingPub != s.signer.PublicKeyBase64URL() {
-			return fmt.Errorf("attestation key id %q already registered with a different public key", s.signer.Kid())
+			return false, fmt.Errorf("attestation key id %q already registered with a different public key", s.signer.Kid())
 		}
 		if existingStatus == KeyStatusRevoked {
-			return fmt.Errorf("attestation key id %q is revoked", s.signer.Kid())
+			return false, fmt.Errorf("attestation key id %q is revoked", s.signer.Kid())
 		}
-		return nil
+		s.keyRegistered.Store(true)
+		return true, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return err
+		return false, err
 	}
 
-	_, err = db.ExecContext(
+	if _, err := runner.ExecContext(
 		ctx,
 		"INSERT IGNORE INTO `qbank_attestation_keys` (`kid`, `alg`, `public_key`, `status`) VALUES (?, ?, ?, ?)",
 		s.signer.Kid(), s.signer.Alg(), s.signer.PublicKeyBase64URL(), KeyStatusActive,
-	)
-	return err
+	); err != nil {
+		return false, err
+	}
+	if markCommitted {
+		s.keyRegistered.Store(true)
+	}
+	return false, nil
 }
 
 type sqlQueryRower interface {
@@ -868,6 +899,17 @@ func (s *MySQLStore) RecordRevisionTx(ctx context.Context, tx *sql.Tx, in Record
 		runner = ownedTx
 	}
 
+	insertedKeyInOwnedTx := false
+	if !s.keyRegistered.Load() {
+		alreadyPresent, err := s.ensureKeyRegisteredWithRunner(ctx, runner, false)
+		if err != nil {
+			return nil, err
+		}
+		if !alreadyPresent && ownedTx != nil {
+			insertedKeyInOwnedTx = true
+		}
+	}
+
 	// Lock the signer's key row first (concrete primary key record lock) to serialize chain appends
 	// without empty-table gap-lock deadlocks, then lock the chain tail and scope head in fixed order.
 	var lockedKid string
@@ -890,20 +932,21 @@ func (s *MySQLStore) RecordRevisionTx(ctx context.Context, tx *sql.Tx, in Record
 
 	normScope := NormalizeScope(in.Scope)
 	var prevScopeRev *revisionRecord
-	var prevRevNo int
+	var prevRevNo, prevQCount int
 	var prevCode, prevAction sql.NullString
 	err = runner.QueryRowContext(
 		ctx,
-		"SELECT `revision_no`, `receipt_code`, `action` FROM `qbank_revisions` "+
+		"SELECT `revision_no`, `receipt_code`, `action`, `question_count` FROM `qbank_revisions` "+
 			"WHERE `year` = ? AND `season` = ? AND `bank_type` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? "+
 			"ORDER BY `revision_no` DESC, `id` DESC LIMIT 1 FOR UPDATE",
 		normScope.Year, normScope.Season, normScope.BankType, normScope.Subject, normScope.Grade, normScope.Tier, normScope.Week,
-	).Scan(&prevRevNo, &prevCode, &prevAction)
+	).Scan(&prevRevNo, &prevCode, &prevAction, &prevQCount)
 	if err == nil {
 		prevScopeRev = &revisionRecord{
-			revisionNo:  prevRevNo,
-			receiptCode: prevCode.String,
-			action:      prevAction.String,
+			revisionNo:    prevRevNo,
+			receiptCode:   prevCode.String,
+			action:        prevAction.String,
+			questionCount: prevQCount,
 		}
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
@@ -957,8 +1000,34 @@ func (s *MySQLStore) RecordRevisionTx(ctx context.Context, tx *sql.Tx, in Record
 		if err := ownedTx.Commit(); err != nil {
 			return nil, err
 		}
+		if insertedKeyInOwnedTx {
+			s.keyRegistered.Store(true)
+		}
 	}
 	return receipt, nil
+}
+
+// RecordWeekRevisionTx implements qbank.VariationRevisionRecorder so qbank.MySQLRepository can
+// attest variation topic cascades inside SaveWeek's transaction without a circular package import.
+func (s *MySQLStore) RecordWeekRevisionTx(ctx context.Context, tx *sql.Tx, scope qbank.WeekScope, action, operator, operatorName, clientIP string, questions []qbank.QuestionItem) error {
+	_, err := s.RecordRevisionTx(ctx, tx, RecordRevisionInput{
+		QBankID: scope.QBankID,
+		Action:  action,
+		Scope: Scope{
+			BankType: scope.BankType,
+			Year:     scope.Year,
+			Season:   scope.Season,
+			Subject:  scope.Subject,
+			Grade:    scope.Grade,
+			Tier:     scope.Tier,
+			Week:     scope.Week,
+		},
+		Operator:     operator,
+		OperatorName: operatorName,
+		ClientIP:     clientIP,
+		Questions:    SnapshotQuestionsFromWeekDetail(questions),
+	})
+	return err
 }
 
 func prevChainEntryHash(ns sql.NullString) string {
@@ -966,6 +1035,22 @@ func prevChainEntryHash(ns sql.NullString) string {
 		return ""
 	}
 	return strings.TrimSpace(ns.String)
+}
+
+// LookupOperatorName resolves a teacher or admin real_name from users / admin_users.
+func (s *MySQLStore) LookupOperatorName(ctx context.Context, username string) string {
+	db, err := s.requireDB()
+	if err != nil {
+		return ""
+	}
+	u := strings.TrimSpace(username)
+	if u == "" {
+		return ""
+	}
+	if name := s.lookupOperatorName(ctx, db, u, ""); name != "" {
+		return name
+	}
+	return s.lookupOperatorName(ctx, db, u, ActionAdminEdit)
 }
 
 func (s *MySQLStore) lookupOperatorName(ctx context.Context, runner sqlQueryRower, username, action string) string {
@@ -995,7 +1080,7 @@ func (s *MySQLStore) RecordAttempt(ctx context.Context, in AttemptInput) error {
 	op := truncateRunes(strings.TrimSpace(in.Operator), 50)
 	opName := truncateRunes(strings.TrimSpace(in.OperatorName), 50)
 	if opName == "" && op != "" {
-		opName = truncateRunes(s.lookupOperatorName(ctx, db, op, ""), 50)
+		opName = truncateRunes(s.LookupOperatorName(ctx, op), 50)
 	}
 
 	bankType := strings.TrimSpace(in.Scope.BankType)
@@ -1163,18 +1248,19 @@ func (s *MySQLStore) VerifyReceipt(ctx context.Context, receiptCode string) (*Ve
 
 func (s *MySQLStore) findAnchorProofForRevision(ctx context.Context, db *sql.DB, revID int64) (*AnchorProof, error) {
 	var anc AnchorRecord
-	var tsaToken sql.NullString
+	var tsaToken, errMsg sql.NullString
 	var createdAt time.Time
 	err := db.QueryRowContext(
 		ctx,
-		"SELECT `id`, `anchor_code`, `seq_from`, `seq_to`, `leaf_count`, `merkle_root`, `tsa_url`, `tsa_status`, `tsa_token_b64`, `tsa_gen_time`, `created_at` "+
+		"SELECT `id`, `anchor_code`, `seq_from`, `seq_to`, `leaf_count`, `merkle_root`, `tsa_url`, `tsa_status`, `tsa_token_b64`, `tsa_gen_time`, `error_message`, `created_at` "+
 			"FROM `qbank_attestation_anchors` WHERE `seq_from` <= ? AND `seq_to` >= ? ORDER BY `id` DESC LIMIT 1",
 		revID, revID,
-	).Scan(&anc.ID, &anc.AnchorCode, &anc.SeqFrom, &anc.SeqTo, &anc.RevisionCount, &anc.MerkleRoot, &anc.TSAURL, &anc.TSAStatus, &tsaToken, &anc.TSAGenTime, &createdAt)
+	).Scan(&anc.ID, &anc.AnchorCode, &anc.SeqFrom, &anc.SeqTo, &anc.RevisionCount, &anc.MerkleRoot, &anc.TSAURL, &anc.TSAStatus, &tsaToken, &anc.TSAGenTime, &errMsg, &createdAt)
 	if err != nil {
 		return nil, err
 	}
 	anc.TSATokenB64 = tsaToken.String
+	anc.ErrorMessage = errMsg.String
 	anc.AnchoredAt = formatReceiptTimestamp(createdAt)
 
 	rows, err := db.QueryContext(
@@ -1326,10 +1412,18 @@ func (s *MySQLStore) AnchorUnanchoredRevisions(ctx context.Context, tsa TSAClien
 	}
 	if tsa != nil && strings.TrimSpace(tsa.Endpoint()) != "" {
 		anc.TSAURL = strings.TrimSpace(tsa.Endpoint())
-		if resp, tsaErr := tsa.Timestamp(ctx, rootBytes); tsaErr == nil && resp != nil {
+		resp, tsaErr := tsa.Timestamp(ctx, rootBytes)
+		if tsaErr == nil && resp != nil {
 			anc.TSAStatus = TSAStatusAnchored
 			anc.TSATokenB64 = resp.TokenB64
 			anc.TSAGenTime = resp.GenTime
+		} else {
+			anc.TSAStatus = TSAStatusFailed
+			if tsaErr != nil {
+				anc.ErrorMessage = truncateRunes(strings.TrimSpace(tsaErr.Error()), 255)
+			} else {
+				anc.ErrorMessage = "empty tsa response"
+			}
 		}
 	}
 
@@ -1343,9 +1437,9 @@ func (s *MySQLStore) AnchorUnanchoredRevisions(ctx context.Context, tsa TSAClien
 	}
 	res, err := conn.ExecContext(
 		ctx,
-		"INSERT INTO `qbank_attestation_anchors` (`anchor_code`, `anchor_type`, `seq_from`, `seq_to`, `leaf_count`, `merkle_root`, `prev_anchor_hash`, `tsa_url`, `tsa_status`, `tsa_token_b64`, `tsa_gen_time`, `created_at`) "+
-			"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		anc.AnchorCode, anchorType, anc.SeqFrom, anc.SeqTo, anc.RevisionCount, anc.MerkleRoot, prevRoot.String, anc.TSAURL, anc.TSAStatus, tokenNull, anc.TSAGenTime, tz.In(now),
+		"INSERT INTO `qbank_attestation_anchors` (`anchor_code`, `anchor_type`, `seq_from`, `seq_to`, `leaf_count`, `merkle_root`, `prev_anchor_hash`, `tsa_url`, `tsa_status`, `tsa_token_b64`, `tsa_gen_time`, `error_message`, `created_at`) "+
+			"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		anc.AnchorCode, anchorType, anc.SeqFrom, anc.SeqTo, anc.RevisionCount, anc.MerkleRoot, prevRoot.String, anc.TSAURL, anc.TSAStatus, tokenNull, anc.TSAGenTime, anc.ErrorMessage, tz.In(now),
 	)
 	if err != nil {
 		return nil, err
@@ -1370,7 +1464,7 @@ func (s *MySQLStore) ListAnchors(ctx context.Context, limit int) ([]AnchorRecord
 	}
 	rows, err := db.QueryContext(
 		ctx,
-		"SELECT `id`, `anchor_code`, `seq_from`, `seq_to`, `leaf_count`, `merkle_root`, `tsa_url`, `tsa_status`, `tsa_token_b64`, `tsa_gen_time`, `created_at` "+
+		"SELECT `id`, `anchor_code`, `seq_from`, `seq_to`, `leaf_count`, `merkle_root`, `tsa_url`, `tsa_status`, `tsa_token_b64`, `tsa_gen_time`, `error_message`, `created_at` "+
 			"FROM `qbank_attestation_anchors` ORDER BY `id` DESC LIMIT ?",
 		limit,
 	)
@@ -1382,12 +1476,13 @@ func (s *MySQLStore) ListAnchors(ctx context.Context, limit int) ([]AnchorRecord
 	out := make([]AnchorRecord, 0)
 	for rows.Next() {
 		var anc AnchorRecord
-		var tsaToken sql.NullString
+		var tsaToken, errMsg sql.NullString
 		var createdAt time.Time
-		if err := rows.Scan(&anc.ID, &anc.AnchorCode, &anc.SeqFrom, &anc.SeqTo, &anc.RevisionCount, &anc.MerkleRoot, &anc.TSAURL, &anc.TSAStatus, &tsaToken, &anc.TSAGenTime, &createdAt); err != nil {
+		if err := rows.Scan(&anc.ID, &anc.AnchorCode, &anc.SeqFrom, &anc.SeqTo, &anc.RevisionCount, &anc.MerkleRoot, &anc.TSAURL, &anc.TSAStatus, &tsaToken, &anc.TSAGenTime, &errMsg, &createdAt); err != nil {
 			return nil, err
 		}
 		anc.TSATokenB64 = tsaToken.String
+		anc.ErrorMessage = errMsg.String
 		anc.AnchoredAt = formatReceiptTimestamp(createdAt)
 		out = append(out, anc)
 	}
@@ -1433,6 +1528,7 @@ func buildAnchorProofFromHashes(anc AnchorRecord, ids []int64, hashes []string, 
 		TSAStatus:     anc.TSAStatus,
 		TSATokenB64:   anc.TSATokenB64,
 		TSAGenTime:    anc.TSAGenTime,
+		ErrorMessage:  anc.ErrorMessage,
 		AnchoredAt:    anc.AnchoredAt,
 	}
 }
@@ -1809,6 +1905,7 @@ func (s *MySQLStore) ListMatrix(ctx context.Context, filter MatrixFilter) ([]Mat
 		params = append(params, kw, kw, kw, kw, kw)
 	}
 
+	where = append(where, "(lr.`action` IS NULL OR (lr.`action` NOT IN ('delete', 'admin_delete') AND NOT (lr.`action` = 'admin_rollback' AND COALESCE(lr.`question_count`, 0) = 0)))")
 	whereClause := ""
 	if len(where) > 0 {
 		whereClause = "WHERE " + strings.Join(where, " AND ")
@@ -1827,7 +1924,7 @@ func (s *MySQLStore) ListMatrix(ctx context.Context, filter MatrixFilter) ([]Mat
 		"FROM `qbank_weeks` qw " +
 		"LEFT JOIN (" +
 		"  SELECT r1.`year`, r1.`season`, r1.`bank_type`, r1.`subject`, r1.`grade`, r1.`tier`, r1.`week`, " +
-		"         r1.`receipt_code`, r1.`revision_no`, r1.`action`, r1.`operator`, r1.`operator_name` " +
+		"         r1.`receipt_code`, r1.`revision_no`, r1.`action`, r1.`question_count`, r1.`operator`, r1.`operator_name` " +
 		"  FROM `qbank_revisions` r1 " +
 		"  INNER JOIN (" +
 		"    SELECT `year`, `season`, `bank_type`, `subject`, `grade`, `tier`, `week`, MAX(`id`) AS `max_id` " +
@@ -2002,6 +2099,36 @@ func NewMemoryStore(signer *Signer, feedbackRoot string, opts ...StoreOption) *M
 		}
 	}
 	return ms
+}
+
+// FeedbackRoot returns the configured feedback-v1 root directory.
+func (m *MemoryStore) FeedbackRoot() string {
+	if m == nil {
+		return ""
+	}
+	return strings.TrimSpace(m.feedbackRoot)
+}
+
+// RecordWeekRevisionTx implements qbank.VariationRevisionRecorder for MemoryStore.
+func (m *MemoryStore) RecordWeekRevisionTx(ctx context.Context, tx *sql.Tx, scope qbank.WeekScope, action, operator, operatorName, clientIP string, questions []qbank.QuestionItem) error {
+	_, err := m.RecordRevisionTx(ctx, tx, RecordRevisionInput{
+		QBankID: scope.QBankID,
+		Action:  action,
+		Scope: Scope{
+			BankType: scope.BankType,
+			Year:     scope.Year,
+			Season:   scope.Season,
+			Subject:  scope.Subject,
+			Grade:    scope.Grade,
+			Tier:     scope.Tier,
+			Week:     scope.Week,
+		},
+		Operator:     operator,
+		OperatorName: operatorName,
+		ClientIP:     clientIP,
+		Questions:    SnapshotQuestionsFromWeekDetail(questions),
+	})
+	return err
 }
 
 // EnsureKeyRegistered registers the signer's key in memory.
@@ -2451,7 +2578,7 @@ func (m *MemoryStore) ListMatrix(_ context.Context, filter MatrixFilter) ([]Matr
 	search := strings.ToLower(strings.TrimSpace(filter.Search))
 	items := make([]MatrixItem, 0, len(aggs))
 	for sc, agg := range aggs {
-		if agg.latest == nil || isDeleteAction(agg.latest.action) {
+		if agg.latest == nil || isDeletedRevision(agg.latest.action, agg.latest.questionCount) {
 			continue
 		}
 		if filter.Year != nil && *filter.Year > 0 && sc.Year != *filter.Year {
@@ -2619,10 +2746,18 @@ func (m *MemoryStore) AnchorUnanchoredRevisions(ctx context.Context, tsa TSAClie
 	m.nextAncID++
 	if tsa != nil && strings.TrimSpace(tsa.Endpoint()) != "" {
 		anc.TSAURL = strings.TrimSpace(tsa.Endpoint())
-		if resp, tsaErr := tsa.Timestamp(ctx, rootBytes); tsaErr == nil && resp != nil {
+		resp, tsaErr := tsa.Timestamp(ctx, rootBytes)
+		if tsaErr == nil && resp != nil {
 			anc.TSAStatus = TSAStatusAnchored
 			anc.TSATokenB64 = resp.TokenB64
 			anc.TSAGenTime = resp.GenTime
+		} else {
+			anc.TSAStatus = TSAStatusFailed
+			if tsaErr != nil {
+				anc.ErrorMessage = truncateRunes(strings.TrimSpace(tsaErr.Error()), 255)
+			} else {
+				anc.ErrorMessage = "empty tsa response"
+			}
 		}
 	}
 	m.anchors = append(m.anchors, anc)

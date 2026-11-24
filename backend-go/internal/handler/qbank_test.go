@@ -169,6 +169,9 @@ func TestQBankSaveValidationOrphanCleanupAndDelete(t *testing.T) {
 	keptFile := filepath.Join(pdfDir, "pdf_still_used.pdf")
 	_ = os.WriteFile(orphanFile, []byte("%PDF-1.4"), 0644)
 	_ = os.WriteFile(keptFile, []byte("%PDF-1.4"), 0644)
+	oldModTime := time.Now().Add(-2 * time.Minute)
+	_ = os.Chtimes(orphanFile, oldModTime, oldModTime)
+	_ = os.Chtimes(keptFile, oldModTime, oldModTime)
 
 	sessStore := session.NewMemoryStore()
 	teacherSID := "1111aaaa2222bbbb3333cccc4444dddd"
@@ -551,6 +554,7 @@ type sqlQBankWireState struct {
 	txRolledBack     int
 	exactMissing     bool
 	failRevisionsTbl bool
+	emptyRollbackRev bool
 	existingWeekID   int64
 }
 
@@ -588,8 +592,15 @@ func (c *wireQBankConn) Begin() (driver.Tx, error) { return c.BeginTx(context.Ba
 func (c *wireQBankConn) BeginTx(_ context.Context, _ driver.TxOptions) (driver.Tx, error) {
 	return &wireQBankTx{state: c.state}, nil
 }
-func (c *wireQBankConn) ExecContext(_ context.Context, _ string, _ []driver.NamedValue) (driver.Result, error) {
-	return wireQBankRes{lastID: 42, affected: 1}, nil
+func (c *wireQBankConn) ExecContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Result, error) {
+	c.state.mu.Lock()
+	existingID := c.state.existingWeekID
+	c.state.mu.Unlock()
+	aff := int64(1)
+	if strings.Contains(query, "INSERT INTO `qbank_weeks`") && existingID > 0 {
+		aff = 2
+	}
+	return wireQBankRes{lastID: 42, affected: aff}, nil
 }
 func (c *wireQBankConn) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
 	c.state.mu.Lock()
@@ -600,6 +611,9 @@ func (c *wireQBankConn) QueryContext(_ context.Context, query string, _ []driver
 	c.state.mu.Unlock()
 
 	ts := time.Date(2026, 11, 22, 4, 0, 0, 0, time.UTC)
+	c.state.mu.Lock()
+	emptyRollback := st.emptyRollbackRev
+	c.state.mu.Unlock()
 	switch {
 	case strings.Contains(query, "FROM `qbank_weeks`") && strings.Contains(query, "ROUND(UNIX_TIMESTAMP(`updated_at`)*1000)") && !strings.Contains(query, "`created_by`"):
 		return &wireQBankRows{
@@ -615,9 +629,15 @@ func (c *wireQBankConn) QueryContext(_ context.Context, query string, _ []driver
 		if failRev {
 			return nil, errors.New("Table 'feedback.qbank_revisions' doesn't exist")
 		}
+		if emptyRollback {
+			return &wireQBankRows{
+				cols: []string{"qbank_id", "bank_type", "year", "season", "subject", "grade", "tier", "week", "receipt_code", "action", "question_count", "operator", "operator_name"},
+				rows: [][]driver.Value{{int64(42), "homework", int64(2026), "秋", "数学", "七年级", "S+", int64(3), "QB-20261123-RB0000-ZERO", "admin_rollback", int64(0), "boss", "管理员"}},
+			}, nil
+		}
 		return &wireQBankRows{
-			cols: []string{"qbank_id", "bank_type", "year", "season", "subject", "grade", "tier", "week", "receipt_code", "action", "operator", "operator_name"},
-			rows: [][]driver.Value{{int64(42), "homework", int64(2026), "秋", "数学", "七年级", "S+", int64(3), "QB-20261123-AAAAAA-BBBB", "create", "t101", "张老师"}},
+			cols: []string{"qbank_id", "bank_type", "year", "season", "subject", "grade", "tier", "week", "receipt_code", "action", "question_count", "operator", "operator_name"},
+			rows: [][]driver.Value{{int64(42), "homework", int64(2026), "秋", "数学", "七年级", "S+", int64(3), "QB-20261123-AAAAAA-BBBB", "create", int64(1), "t101", "张老师"}},
 		}, nil
 	case strings.Contains(query, "FROM `qbank_weeks`") && strings.Contains(query, "`created_by`"):
 		cols := []string{"id", "bank_type", "year", "season", "subject", "grade", "tier", "week", "question_count", "created_by", "updated_by", "updated_at", "updated_at_ms"}
@@ -633,15 +653,23 @@ func (c *wireQBankConn) QueryContext(_ context.Context, query string, _ []driver
 			cols: []string{"question_num", "parent_question_num", "parent_question_nums", "sub_num", "topic", "video_url", "question_meta", "exercise_pdf", "exercise_name", "answer_pdf", "answer_name"},
 			rows: [][]driver.Value{{int64(1), nil, nil, int64(1), "代数", "", "", "data/pdfs/pdf_1.pdf", "1.pdf", "", ""}},
 		}, nil
+	case strings.Contains(query, "SELECT `id`, `parent_question_num`, `parent_question_nums`, `topic` FROM `qbank_questions` WHERE `bank_type` = 'variation'"):
+		return &wireQBankRows{cols: []string{"id", "parent_question_num", "parent_question_nums", "topic"}}, nil
 	case strings.Contains(query, "SELECT `real_name` FROM `users`"):
 		return &wireQBankRows{cols: []string{"real_name"}, rows: [][]driver.Value{{"张老师"}}}, nil
-	case strings.Contains(query, "SELECT `receipt_code`, `revision_no`, `action` FROM `qbank_revisions`"):
+	case strings.Contains(query, "SELECT `receipt_code`, `revision_no`, `action`, `question_count` FROM `qbank_revisions`"):
 		if failRev {
 			return nil, errors.New("Table 'feedback.qbank_revisions' doesn't exist")
 		}
+		if emptyRollback {
+			return &wireQBankRows{
+				cols: []string{"receipt_code", "revision_no", "action", "question_count"},
+				rows: [][]driver.Value{{"QB-20261123-RB0000-ZERO", int64(5), "admin_rollback", int64(0)}},
+			}, nil
+		}
 		return &wireQBankRows{
-			cols: []string{"receipt_code", "revision_no", "action"},
-			rows: [][]driver.Value{{"QB-20261123-CCCCCC-DDDD", int64(4), "update"}},
+			cols: []string{"receipt_code", "revision_no", "action", "question_count"},
+			rows: [][]driver.Value{{"QB-20261123-CCCCCC-DDDD", int64(4), "update", int64(1)}},
 		}, nil
 	case strings.Contains(query, "LIMIT 1 FOR UPDATE") && strings.Contains(query, "FROM `qbank_weeks`"):
 		cols := []string{"id"}
@@ -831,5 +859,99 @@ func TestQBankMySQLRepositoryStrictTermAttestAndEnrichment(t *testing.T) {
 	})
 	if err != nil || deletedScope.Year != 2025 || deletedScope.Season != "秋" || deletedScope.QBankID != 42 {
 		t.Fatalf("unexpected DeleteWeek scope: %+v err=%v", deletedScope, err)
+	}
+
+	// 7. Zero-question admin_rollback hides LatestReceiptCode in ListWeeks and GetWeek.
+	st.mu.Lock()
+	st.failRevisionsTbl = false
+	st.emptyRollbackRev = true
+	st.mu.Unlock()
+	rbList, err := repo.ListWeeks(ctx, qbank.ListFilter{})
+	if err != nil || len(rbList) != 1 || rbList[0].LatestReceiptCode != "" {
+		t.Fatalf("expected empty LatestReceiptCode after zero-question admin_rollback in ListWeeks, got %+v err=%v", rbList, err)
+	}
+	rbDetail, err := repo.GetWeek(ctx, qbank.WeekKey{
+		Year: &yr2026, Season: "秋", Subject: "数学", Grade: "七年级", Tier: "S+", Week: 3, BankType: "homework", Strict: true,
+	})
+	if err != nil || rbDetail == nil || rbDetail.LatestReceiptCode != "" {
+		t.Fatalf("expected empty LatestReceiptCode after zero-question admin_rollback in GetWeek, got %+v err=%v", rbDetail, err)
+	}
+}
+
+func TestQBankDuplicateQNumZeroQNumAttemptLogAndOperatorPrecedence(t *testing.T) {
+	root := t.TempDir()
+	signer, _ := qbankattest.NewEphemeralSigner("jf-qb-h19")
+	attestStore := qbankattest.NewMemoryStore(signer, root)
+	sessStore := session.NewMemoryStore()
+
+	// Admin session without teacher username: teacher_username param must beat admin_username (PHP parity).
+	adminSID := "4444dddd5555eeee6666ffff7777aaaa"
+	sessStore.Set(adminSID, map[string]any{
+		"admin_logged_in": true,
+		"admin_username":  "boss",
+		"admin_realname":  "超级管理员",
+	})
+
+	repo := &mockQBankRepo{}
+	h := httpx.Middleware(QBank(QBankDeps{
+		Repo:         repo,
+		Sessions:     sessStore,
+		ConfigLoader: config.NewLoader(root, ""),
+		Audit:        auditlog.NoopLogger{},
+		Attest:       attestStore,
+		FeedbackRoot: root,
+	}))
+
+	// 1. Duplicate question_num=1 deduplicates both saveQuestions and rawMaps / receipt.
+	dupBody := `{"bankType":"homework","year":2026,"season":"autumn","subject":"数学","grade":"七年级","tier":"S+","week":5,"teacher_username":"t_fallback","questions":[{"id":1,"topic":"旧知识点","exercisePdf":{"url":"data/pdfs/pdf_a.pdf","name":"a.pdf"}},{"id":1,"topic":"新知识点","exercisePdf":{"url":"data/pdfs/pdf_b.pdf","name":"b.pdf"}}]}`
+	reqDup := httptest.NewRequest(http.MethodPost, "/api/qbank.php", strings.NewReader(dupBody))
+	reqDup.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: adminSID})
+	recDup := httptest.NewRecorder()
+	h.ServeHTTP(recDup, reqDup)
+	if recDup.Code != http.StatusOK {
+		t.Fatalf("duplicate qNum POST status=%d body=%s", recDup.Code, recDup.Body.String())
+	}
+	var dupResp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Questions []map[string]any `json:"questions"`
+		} `json:"data"`
+		Receipt *qbankattest.Receipt `json:"receipt"`
+	}
+	if err := json.Unmarshal(recDup.Body.Bytes(), &dupResp); err != nil {
+		t.Fatal(err)
+	}
+	if len(dupResp.Data.Questions) != 1 || dupResp.Receipt == nil || dupResp.Receipt.Summary.QuestionCount != 1 {
+		t.Fatalf("expected deduplicated questions len=1 matching receipt QuestionCount=1, got dataLen=%d receipt=%+v", len(dupResp.Data.Questions), dupResp.Receipt)
+	}
+	if repo.savedReq == nil || repo.savedReq.Operator != "t_fallback" || len(repo.savedReq.RawMaps) != 1 {
+		t.Fatalf("expected operator=t_fallback and len(RawMaps)=1, got %+v", repo.savedReq)
+	}
+	if dupResp.Receipt.Operator.Username != "t_fallback" {
+		t.Fatalf("expected receipt operator t_fallback ahead of admin_username, got %+v", dupResp.Receipt.Operator)
+	}
+
+	// 2. When teacher_username is also omitted, falls back to admin_username.
+	noTeacherBody := `{"bankType":"homework","year":2026,"season":"autumn","subject":"数学","grade":"七年级","tier":"S+","week":6,"questions":[{"id":1,"topic":"几何","exercisePdf":{"url":"data/pdfs/pdf_c.pdf","name":"c.pdf"}}]}`
+	reqAdm := httptest.NewRequest(http.MethodPost, "/api/qbank.php", strings.NewReader(noTeacherBody))
+	reqAdm.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: adminSID})
+	recAdm := httptest.NewRecorder()
+	h.ServeHTTP(recAdm, reqAdm)
+	if recAdm.Code != http.StatusOK || repo.savedReq.Operator != "boss" || repo.savedReq.OperatorName != "超级管理员" {
+		t.Fatalf("expected admin fallback operator=boss/超级管理员, got code=%d req=%+v", recAdm.Code, repo.savedReq)
+	}
+
+	// 3. qNum <= 0 returns 400 AND records EventSaveRejected attempt log.
+	zeroBody := `{"bankType":"homework","year":2026,"season":"autumn","subject":"数学","grade":"七年级","tier":"S+","week":7,"questions":[{"id":0,"topic":"几何","exercisePdf":{"url":"data/pdfs/pdf_c.pdf","name":"c.pdf"}}]}`
+	reqZero := httptest.NewRequest(http.MethodPost, "/api/qbank.php", strings.NewReader(zeroBody))
+	reqZero.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: adminSID})
+	recZero := httptest.NewRecorder()
+	h.ServeHTTP(recZero, reqZero)
+	if recZero.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for qNum=0, got %d", recZero.Code)
+	}
+	tl, err := attestStore.ListTimeline(context.Background(), qbankattest.TimelineFilter{EventType: qbankattest.EventSaveRejected})
+	if err != nil || tl.Total != 1 {
+		t.Fatalf("expected 1 save_rejected attempt log for qNum<=0, got tl=%+v err=%v", tl, err)
 	}
 }

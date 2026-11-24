@@ -1141,8 +1141,16 @@
             `;
         }
         const isAnchored = anchor.tsa_status === 'anchored';
-        const badgeCls = isAnchored ? 'pass' : 'warn';
-        const badgeText = isAnchored ? '外部 TSA 时间戳已锚定' : '本地 Merkle 已封装（待外部 TSA）';
+        const isFailed = anchor.tsa_status === 'failed';
+        const badgeCls = isAnchored ? 'pass' : (isFailed ? 'fail' : 'warn');
+        const badgeText = isAnchored
+            ? '外部 TSA 时间戳已锚定'
+            : (isFailed ? '外部 TSA 请求失败（已保留本地 Merkle 封装）' : '本地 Merkle 已封装（待外部 TSA）');
+        const tsaDetail = isAnchored
+            ? `TSA 签发时间：${anchor.tsa_gen_time || anchor.anchored_at || '-'}`
+            : (isFailed
+                ? `TSA 请求失败：${anchor.error_message || '外部 TSA 服务异常或令牌验签未通过'}`
+                : '当前批次仅完成本地 Merkle 封装');
         const merkleOk = merkleCheck && merkleCheck.valid;
         const merkleCls = merkleCheck?.supported === false ? 'warn' : (merkleOk ? 'pass' : 'fail');
         const merkleState = merkleCheck?.supported === false ? '浏览器不支持' : (merkleOk ? '浏览器 Merkle Proof 验真通过' : 'Merkle Proof 校验失败');
@@ -1163,7 +1171,7 @@
                     <div class="vq-check-item ${badgeCls}">
                         <div class="vq-check-title">外部 RFC 3161 TSA 可信时间源</div>
                         <div class="vq-check-state">${escapeHtml(badgeText)}</div>
-                        <div class="vq-check-detail">${escapeHtml(isAnchored ? `TSA 签发时间：${anchor.tsa_gen_time || anchor.anchored_at || '-'}` : '当前批次仅完成本地 Merkle 封装')}</div>
+                        <div class="vq-check-detail">${escapeHtml(tsaDetail)}</div>
                     </div>
                 </div>
                 <div class="vq-kv-grid" style="margin-top:12px;">

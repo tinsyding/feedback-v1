@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"feedback-api/internal/httpx"
 	"feedback-api/internal/session"
@@ -93,6 +94,31 @@ func TestUploadCapture(t *testing.T) {
 	}
 	if tmps, err := filepath.Glob(filepath.Join(filepath.Dir(savedCapture), ".tmp-*")); err != nil || len(tmps) != 0 {
 		t.Fatalf("unexpected leftover temp files: %v (err=%v)", tmps, err)
+	}
+
+	// 5. Concurrent cleanup removing old empty fingerprint dir does not break concurrent upload.
+	uploadDir := filepath.Join(root, "data", "uploads")
+	oldFP := filepath.Join(uploadDir, "fp_old_race")
+	if err := os.MkdirAll(oldFP, 0755); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-40 * 24 * time.Hour)
+	_ = os.Chtimes(oldFP, oldTime, oldTime)
+	cleanupUploadCaptures(uploadDir, time.Now().Add(-30*24*time.Hour))
+	if _, err := os.Stat(oldFP); !os.IsNotExist(err) {
+		t.Fatalf("expected old empty fingerprint dir to be cleaned up")
+	}
+	body, ct = buildSingleFileMultipart(t, "file", "after_clean.csv", []byte("a,b\n1,2\n"), map[string]string{
+		"fingerprint": "fp_old_race",
+		"type":        "homework",
+	})
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/api/upload_capture.php", body)
+	req2.Header.Set("Content-Type", ct)
+	req2.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: assistSID})
+	h.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK || !strings.Contains(rec2.Body.String(), `"success":true`) {
+		t.Fatalf("expected upload after cleanup to succeed, got %d %s", rec2.Code, rec2.Body.String())
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"github.com/go-sql-driver/mysql"
 )
 
 type mockQBankSQLRecord struct {
@@ -28,6 +29,7 @@ type mockQBankDBState struct {
 	txCommitted      int
 	txRolledBack     int
 	failDeleteWeeks  bool
+	deadlockCount    int
 	yearFallbackOnly bool
 	weekDetailNil    bool
 	bankType         string
@@ -91,8 +93,15 @@ func (c *mockQBankConn) ExecContext(_ context.Context, query string, args []driv
 	c.state.mu.Lock()
 	c.state.execs = append(c.state.execs, mockQBankSQLRecord{query: query, args: copied})
 	failDel := c.state.failDeleteWeeks
+	dlRemaining := c.state.deadlockCount
+	if dlRemaining > 0 && strings.Contains(query, "INSERT INTO `qbank_weeks`") {
+		c.state.deadlockCount--
+	}
 	c.state.mu.Unlock()
 
+	if dlRemaining > 0 && strings.Contains(query, "INSERT INTO `qbank_weeks`") {
+		return nil, &mysql.MySQLError{Number: 1213, Message: "Deadlock found when trying to get lock; try restarting transaction"}
+	}
 	if failDel && strings.Contains(query, "DELETE FROM `qbank_weeks`") {
 		return nil, errors.New("simulated delete qbank_weeks failure")
 	}
@@ -431,7 +440,7 @@ func TestMySQLRepositorySaveDeleteAndCleanup(t *testing.T) {
 		t.Fatalf("expected tx.Rollback() on DeleteWeek error, txRolledBack=%d prev=%d", st.txRolledBack, prevRollback)
 	}
 
-	// CleanupUnreferencedPDFs deletes orphan with refCount == 0 and skips traversal paths.
+	// CleanupUnreferencedPDFs skips <60s files when no revision checker is wired, and deletes older ones.
 	root := t.TempDir()
 	pdfDir := filepath.Join(root, "data", "pdfs")
 	if err := os.MkdirAll(pdfDir, 0o755); err != nil {
@@ -439,10 +448,99 @@ func TestMySQLRepositorySaveDeleteAndCleanup(t *testing.T) {
 	}
 	orphan := filepath.Join(pdfDir, "pdf_kept_orphan.pdf")
 	_ = os.WriteFile(orphan, []byte("%PDF-1.4"), 0o644)
+	if n := CleanupUnreferencedPDFs(ctx, repo, root, []string{"data/pdfs/pdf_kept_orphan.pdf"}); n != 0 {
+		t.Fatalf("expected fresh (<60s) file without revision checker to be skipped, got deleted=%d", n)
+	}
+	oldTS := time.Now().Add(-2 * time.Minute)
+	if err := os.Chtimes(orphan, oldTS, oldTS); err != nil {
+		t.Fatal(err)
+	}
 	if n := CleanupUnreferencedPDFs(ctx, repo, root, []string{"data/pdfs/pdf_kept_orphan.pdf", "../etc/passwd"}); n != 1 {
 		t.Fatalf("CleanupUnreferencedPDFs deleted %d, want 1", n)
 	}
 	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
 		t.Fatal("expected orphan pdf file to be deleted")
+	}
+}
+
+type failingPDFChecker struct{}
+
+func (failingPDFChecker) HasRecentPDFReference(_ context.Context, _ string, _ time.Duration) (bool, error) {
+	return false, errors.New("simulated mysql query timeout")
+}
+
+type mockVariationRecorder struct {
+	calls []WeekScope
+	Qs    [][]QuestionItem
+}
+
+func (m *mockVariationRecorder) RecordWeekRevisionTx(_ context.Context, _ *sql.Tx, scope WeekScope, _, _, _, _ string, questions []QuestionItem) error {
+	m.calls = append(m.calls, scope)
+	m.Qs = append(m.Qs, questions)
+	return nil
+}
+
+func TestCleanupFailClosedSaveDeadlockRetryAndVariationAttest(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	pdfDir := filepath.Join(root, "data", "pdfs")
+	if err := os.MkdirAll(pdfDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	failClosedFile := filepath.Join(pdfDir, "pdf_keep_on_err.pdf")
+	_ = os.WriteFile(failClosedFile, []byte("%PDF-1.4"), 0o644)
+
+	st := &mockQBankDBState{
+		deadlockCount: 2, // Succeeds on 3rd attempt
+		variationRows: [][]driver.Value{
+			{int64(701), int64(2), "2,3", "旧错题"},
+		},
+		refCounts: map[string]int64{
+			"data/pdfs/pdf_keep_on_err.pdf": 0,
+		},
+	}
+	rec := &mockVariationRecorder{}
+	repo := NewMySQLRepository(openMockQBankDB(t, st))
+
+	// Fail closed when HasRecentPDFReference errors.
+	if n := CleanupUnreferencedPDFsWithAttest(ctx, repo, failingPDFChecker{}, root, []string{"data/pdfs/pdf_keep_on_err.pdf"}); n != 0 {
+		t.Fatalf("expected 0 deleted on HasRecentPDFReference error (fail-closed), got %d", n)
+	}
+	if _, err := os.Stat(failClosedFile); err != nil {
+		t.Fatalf("expected file to remain after fail-closed check: %v", err)
+	}
+
+	// SaveWeek retries on 1213 deadlock and records variation attestation inside tx.
+	_, err := repo.SaveWeek(ctx, SaveWeekRequest{
+		BankType: "homework",
+		Year:     2026,
+		Season:   "秋",
+		Subject:  "数学",
+		Grade:    "七年级",
+		Tier:     "S+",
+		Week:     3,
+		Operator: "t101",
+		Questions: []SaveQuestionInput{
+			{QuestionNum: 2, SubNum: 1, Topic: "整式加减精讲", ExerciseURL: "data/pdfs/pdf_hw.pdf"},
+		},
+		RawMaps: []map[string]any{{"id": 2, "topic": "整式加减精讲"}},
+		OnVariationRecordTx: func(c context.Context, tx *sql.Tx, scope WeekScope, action string, qs []QuestionItem) error {
+			return rec.RecordWeekRevisionTx(c, tx, scope, action, "", "", "", qs)
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveWeek after 2 deadlocks failed: %v", err)
+	}
+	if st.txBegun != 3 || st.txCommitted != 1 || st.txRolledBack != 2 {
+		t.Fatalf("unexpected retry tx counts: begun=%d committed=%d rolledBack=%d", st.txBegun, st.txCommitted, st.txRolledBack)
+	}
+	if len(rec.calls) != 1 || rec.calls[0].BankType != "variation" {
+		t.Fatalf("expected variation attestation callback inside tx, got %+v", rec.calls)
+	}
+
+	// MarshalMetaJSON preserves literal <, >, & (SetEscapeHTML(false)).
+	metaPtr := MarshalMetaJSON(map[string]any{"note": "x < 5 & y > 0"})
+	if metaPtr == nil || strings.Contains(*metaPtr, `\u003c`) || !strings.Contains(*metaPtr, "x < 5 & y > 0") {
+		t.Fatalf("expected unescaped HTML chars in MarshalMetaJSON, got %v", metaPtr)
 	}
 }

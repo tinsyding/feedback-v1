@@ -3,10 +3,12 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"feedback-api/internal/qbankattest"
 )
@@ -113,5 +115,32 @@ func TestQBankAnchorsAndAdminRollbackEndpoints(t *testing.T) {
 	}
 	if !strings.Contains(recRB.Body.String(), "QB-2026-MOCK-ROLLBACK") {
 		t.Fatalf("expected mock rollback receipt in body, got %s", recRB.Body.String())
+	}
+
+	// 5. Failed TSA in AnchorUnanchoredRevisions surfaces tsa_status="failed" and error_message in /api/v1/qbank/anchors.
+	_, err = attest.RecordRevisionTx(ctx, nil, qbankattest.RecordRevisionInput{
+		QBankID:   2,
+		Action:    qbankattest.ActionCreate,
+		Scope:     qbankattest.Scope{Year: 2026, Season: "spring", BankType: "weekly", Subject: "数学", Grade: "高一", Tier: "实验班", Week: 2},
+		Operator:  "t1",
+		Questions: []qbankattest.SnapshotQuestion{{QuestionNum: 1, Topic: "函数周期性"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failTSA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer failTSA.Close()
+	ancFail, err := attest.AnchorUnanchoredRevisions(ctx, &qbankattest.HTTPTSAClient{URL: failTSA.URL, HTTPClient: &http.Client{Timeout: 2 * time.Second}})
+	if err != nil || ancFail == nil || ancFail.TSAStatus != qbankattest.TSAStatusFailed || ancFail.ErrorMessage == "" {
+		t.Fatalf("expected failed anchor with error_message, got anc=%+v err=%v", ancFail, err)
+	}
+	reqPub2 := httptest.NewRequest(http.MethodGet, "/api/v1/qbank/anchors", nil)
+	recPub2 := httptest.NewRecorder()
+	anchorsHandler.ServeHTTP(recPub2, reqPub2)
+	if recPub2.Code != http.StatusOK || !strings.Contains(recPub2.Body.String(), `"tsa_status":"failed"`) || !strings.Contains(recPub2.Body.String(), `"error_message":`) {
+		t.Fatalf("expected tsa_status=failed and error_message in public anchors, got code=%d body=%s", recPub2.Code, recPub2.Body.String())
 	}
 }

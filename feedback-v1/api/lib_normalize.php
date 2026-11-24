@@ -282,14 +282,53 @@ if (!function_exists('cleanupUnreferencedPdfs')) {
                 continue;
             }
             try {
-                $refCount = (int)DB::fetchValue(
+                $refCount = DB::fetchValue(
                     "SELECT COUNT(*) FROM `qbank_questions` WHERE `exercise_pdf` = ? OR `answer_pdf` = ?",
                     [$relUrl, $relUrl]
                 );
-                if (DB::getLastError() === null && $refCount === 0) {
-                    if (@unlink($fullPath)) {
-                        $deletedCount++;
+                if (DB::getLastError() !== null || $refCount === false || $refCount === null || (int)$refCount !== 0) {
+                    continue;
+                }
+
+                // 180 天存证快照保留期检查：DB 错误一律 fail-closed（仅在 qbank_revisions 表尚未迁移 1146 时放行）
+                $needle = '"' . $relUrl . '"';
+                $hasAttestRef = false;
+                $pdo = method_exists('DB', 'getConnection') ? DB::getConnection() : null;
+                if ($pdo instanceof PDO) {
+                    try {
+                        $stmtRev = $pdo->prepare(
+                            "SELECT 1 FROM `qbank_revisions` WHERE `created_at` >= DATE_SUB(NOW(), INTERVAL 180 DAY) AND LOCATE(?, `snapshot_json`) > 0 LIMIT 1"
+                        );
+                        $stmtRev->execute([$needle]);
+                        $hasAttestRef = ($stmtRev->fetchColumn() !== false);
+                    } catch (PDOException $pdoErr) {
+                        $mysqlCode = (int)($pdoErr->errorInfo[1] ?? 0);
+                        $sqlState = (string)$pdoErr->getCode();
+                        if ($mysqlCode !== 1146 && $sqlState !== '42S02') {
+                            continue;
+                        }
                     }
+                } else {
+                    $revHit = DB::fetchValue(
+                        "SELECT 1 FROM `qbank_revisions` WHERE `created_at` >= DATE_SUB(NOW(), INTERVAL 180 DAY) AND LOCATE(?, `snapshot_json`) > 0 LIMIT 1",
+                        [$needle]
+                    );
+                    $lastErr = DB::getLastError();
+                    if ($lastErr !== null) {
+                        $isMissingTable = (strpos($lastErr, '1146') !== false || stripos($lastErr, '42S02') !== false || stripos($lastErr, "doesn't exist") !== false);
+                        if (!$isMissingTable) {
+                            continue;
+                        }
+                    } else {
+                        $hasAttestRef = ($revHit !== false && $revHit !== null);
+                    }
+                }
+                if ($hasAttestRef) {
+                    continue;
+                }
+
+                if (@unlink($fullPath)) {
+                    $deletedCount++;
                 }
             } catch (Throwable $ignore) {
             }
