@@ -72,7 +72,7 @@
                 const isActive = batFilters.teacher === t.username;
                 const label = t.real_name ? `${t.real_name} (${t.username})` : t.username;
                 return `
-                    <button type="button" class="filter-pill ${isActive ? 'active' : ''}" onclick="setBatFilter('teacher', '${escapeHtml(t.username)}')">
+                    <button type="button" class="filter-pill ${isActive ? 'active' : ''}" onclick="setBatFilter('teacher', '${escapeInlineJs(t.username)}')">
                         ${escapeHtml(label)}
                     </button>
                 `;
@@ -80,21 +80,21 @@
 
             const gradeList = ((typeof dbFilterOptions !== 'undefined' && dbFilterOptions.grades) || []).filter(Boolean);
             const gradePills = gradeList.map(g => `
-                <button type="button" class="filter-pill ${batFilters.grade === g ? 'active' : ''}" onclick="setBatFilter('grade', '${escapeHtml(g)}')">
+                <button type="button" class="filter-pill ${batFilters.grade === g ? 'active' : ''}" onclick="setBatFilter('grade', '${escapeInlineJs(g)}')">
                     ${escapeHtml(g)}
                 </button>
             `).join('');
 
             const subjectList = ((typeof dbFilterOptions !== 'undefined' && dbFilterOptions.subjects) || []).filter(Boolean);
             const subjectPills = subjectList.map(s => `
-                <button type="button" class="filter-pill ${batFilters.subject === s ? 'active' : ''}" onclick="setBatFilter('subject', '${escapeHtml(s)}')">
+                <button type="button" class="filter-pill ${batFilters.subject === s ? 'active' : ''}" onclick="setBatFilter('subject', '${escapeInlineJs(s)}')">
                     ${escapeHtml(s)}
                 </button>
             `).join('');
 
             const tierList = ((typeof dbFilterOptions !== 'undefined' && dbFilterOptions.tiers) || []).filter(Boolean);
             const tierPills = tierList.map(t => `
-                <button type="button" class="filter-pill ${batFilters.tier === t ? 'active' : ''}" onclick="setBatFilter('tier', '${escapeHtml(t)}')">
+                <button type="button" class="filter-pill ${batFilters.tier === t ? 'active' : ''}" onclick="setBatFilter('tier', '${escapeInlineJs(t)}')">
                     ${escapeHtml(t)}层
                 </button>
             `).join('');
@@ -318,7 +318,7 @@
                             <input type="checkbox" class="bat-row-cb" data-id="${r.id}" ${isSelected ? 'checked' : ''} onchange="toggleBatchesSelectRow(${r.id}, this)" style="accent-color: var(--primary); cursor: pointer;">
                         </td>
                         <td class="cell-mono" style="font-size: 0.8rem;" title="${escapeHtml(batchCode)}">
-                            <span style="cursor: pointer; color: var(--text-primary);" onclick="jumpToBatchRecords('${escapeHtml(batchCode)}')" title="点击查看该批次的学情记录">${escapeHtml(batchCode)}</span>
+                            <span style="cursor: pointer; color: var(--text-primary);" onclick="jumpToBatchRecords('${escapeInlineJs(batchCode)}')" title="点击查看该批次的学情记录">${escapeHtml(batchCode)}</span>
                         </td>
                         <td style="white-space: nowrap;">
                             <div style="font-weight: 600; color: var(--text-primary); font-size: 0.85rem;">${escapeHtml(className)}</div>
@@ -332,8 +332,8 @@
                         </td>
                         <td class="cell-mono" style="font-size:0.8rem; color:var(--text-secondary);">${formatTimestamp(r.created_at)}</td>
                         <td style="text-align: right; white-space: nowrap;">
-                            <button type="button" class="btn-action detail" onclick="jumpToBatchRecords('${escapeHtml(batchCode)}')" title="查看该批次的学情记录">学情</button>
-                            <button type="button" class="btn-action danger" onclick="deleteBatchDirect(${r.id}, '${escapeHtml(batchCode)}')" title="删除该批次记录（不影响学情数据）">删除</button>
+                            <button type="button" class="btn-action detail" onclick="jumpToBatchRecords('${escapeInlineJs(batchCode)}')" title="查看该批次的学情记录">学情</button>
+                            <button type="button" class="btn-action danger" onclick="deleteBatchDirect(${Number(r.id) || 0}, '${escapeInlineJs(batchCode)}')" title="删除该批次记录（不影响学情数据）">删除</button>
                         </td>
                     </tr>
                 `;

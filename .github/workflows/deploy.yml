@@ -197,6 +197,21 @@ jobs:
           else
             echo "feedback-api.service not enabled or active yet; skipping restart"
           fi
+          NGINX_EXT="/www/server/panel/vhost/nginx/extension/feedback.wxjifang.cn"
+          SRC_PROXY="/www/wwwroot/JF/feedback-git/feedback-v1/scripts/nginx/zz-feedback-go-proxy.conf"
+          DST_PROXY="$NGINX_EXT/zz-feedback-go-proxy.conf"
+          if [ -d "$NGINX_EXT" ] && [ -f "$SRC_PROXY" ] && (systemctl is-enabled feedback-api >/dev/null 2>&1 || systemctl is-active --quiet feedback-api); then
+            if [ ! -f "$DST_PROXY" ] || ! cmp -s "$SRC_PROXY" "$DST_PROXY"; then
+              install -m 600 -o root -g root "$SRC_PROXY" "$DST_PROXY"
+              if nginx -t; then
+                nginx -s reload || /etc/init.d/nginx reload
+                echo "synced zz-feedback-go-proxy.conf and reloaded nginx"
+              else
+                echo "nginx -t failed after syncing zz-feedback-go-proxy.conf" >&2
+                exit 1
+              fi
+            fi
+          fi
           EOF
 
       - name: Reload PHP-FPM (clear opcache)

@@ -12,6 +12,7 @@ import (
 	_ "image/png"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -57,7 +58,18 @@ type Client struct {
 }
 
 // NewClient creates a Vision client with an SSRF-blocking, no-redirect HTTP transport.
+// When FEEDBACK_ALLOW_LOOPBACK_VISION=1 (used strictly by local parity tests), loopback
+// mock servers are permitted while redirects remain disabled.
 func NewClient() *Client {
+	if strings.TrimSpace(os.Getenv("FEEDBACK_ALLOW_LOOPBACK_VISION")) == "1" {
+		return &Client{
+			HTTPClient: &http.Client{
+				CheckRedirect: func(*http.Request, []*http.Request) error {
+					return http.ErrUseLastResponse
+				},
+			},
+		}
+	}
 	return &Client{
 		HTTPClient: httpx.NewSafeHTTPClient(0),
 	}
@@ -134,7 +146,7 @@ func (c *Client) Complete(ctx context.Context, apiBase, apiKey, model string, ti
 		if errors.Is(err, context.DeadlineExceeded) {
 			return "", fmt.Errorf("视觉模型调用超时")
 		}
-		return "", fmt.Errorf("视觉模型网络请求失败")
+		return "", fmt.Errorf("视觉模型调用失败：%v", err)
 	}
 	defer resp.Body.Close()
 
@@ -146,7 +158,7 @@ func (c *Client) Complete(ctx context.Context, apiBase, apiKey, model string, ti
 	if err != nil {
 		return "", fmt.Errorf("视觉模型响应读取失败")
 	}
-	if len(raw) == 0 {
+	if len(raw) == 0 && resp.StatusCode == http.StatusOK {
 		return "", fmt.Errorf("视觉模型调用失败：empty response (HTTP %d)", resp.StatusCode)
 	}
 

@@ -922,19 +922,21 @@ func (r *MySQLRepository) DeleteWeek(ctx context.Context, key WeekKey) ([]string
 	defer func() { _ = tx.Rollback() }()
 
 	var qbankID int64
-	if key.Year != nil && key.Season != "" {
-		err = tx.QueryRowContext(
-			ctx,
-			"SELECT `id` FROM `qbank_weeks` WHERE `year` = ? AND `season` = ? AND `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? AND `bank_type` = ? LIMIT 1",
-			*key.Year, key.Season, key.Subject, key.Grade, key.Tier, key.Week, key.BankType,
-		).Scan(&qbankID)
-	} else {
-		err = tx.QueryRowContext(
-			ctx,
-			"SELECT `id` FROM `qbank_weeks` WHERE `subject` = ? AND `grade` = ? AND `tier` = ? AND `week` = ? AND `bank_type` = ? LIMIT 1",
-			key.Subject, key.Grade, key.Tier, key.Week, key.BankType,
-		).Scan(&qbankID)
+	whereParts := []string{"`subject` = ?", "`grade` = ?", "`tier` = ?", "`week` = ?", "`bank_type` = ?"}
+	whereArgs := []any{key.Subject, key.Grade, key.Tier, key.Week, key.BankType}
+	if key.Year != nil {
+		whereParts = append(whereParts, "`year` = ?")
+		whereArgs = append(whereArgs, *key.Year)
 	}
+	if key.Season != "" {
+		whereParts = append(whereParts, "`season` = ?")
+		whereArgs = append(whereArgs, key.Season)
+	}
+	err = tx.QueryRowContext(
+		ctx,
+		"SELECT `id` FROM `qbank_weeks` WHERE "+strings.Join(whereParts, " AND ")+" ORDER BY `id` DESC LIMIT 1 FOR UPDATE",
+		whereArgs...,
+	).Scan(&qbankID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

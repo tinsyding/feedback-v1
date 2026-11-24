@@ -10,17 +10,23 @@ import (
 	"feedback-api/internal/textutil"
 )
 
-// SanitizeCSVCell defends against Excel/WPS formula injection (=, +, -, @, \t, \r).
+// SanitizeCSVCell defends against Excel/WPS formula injection (=, +, -, @, \t, \r, \n, or leading spaces before formula triggers).
 func SanitizeCSVCell(val string) string {
 	if val == "" {
 		return val
 	}
 	switch val[0] {
-	case '=', '+', '-', '@', '\t', '\r':
+	case '=', '+', '-', '@', '\t', '\r', '\n':
 		return "'" + val
-	default:
-		return val
 	}
+	trimmed := strings.TrimLeft(val, " \t\r\n")
+	if trimmed != "" {
+		switch trimmed[0] {
+		case '=', '+', '-', '@':
+			return "'" + val
+		}
+	}
+	return val
 }
 
 // LevelLabel returns the Chinese level label for CSV export.

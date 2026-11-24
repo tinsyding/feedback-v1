@@ -40,7 +40,7 @@ type calibrateResponseData struct {
 // CalibrateROI ports feedback-v1/api/calibrate_roi.php.
 func CalibrateROI(loader *config.Loader, vc *vision.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		if r.Method == http.MethodGet {
 			httpx.SendResponse(w, true, map[string]string{
 				"service": "calibrate_roi",
 				"status":  "ready",

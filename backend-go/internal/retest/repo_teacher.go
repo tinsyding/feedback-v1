@@ -505,7 +505,7 @@ func (r *MySQLRepository) GetStudentWeekRecord(ctx context.Context, q StudentWee
 			hwParams := append([]any{q.Subject, q.Grade, q.Week}, studentParams...)
 			hwParams = append(hwParams, q.Tier)
 			if rows, err := r.db.QueryContext(ctx,
-				"SELECT sr.retest_token, sr.error_questions, sr.error_count, sr.homework_score, sr.teacher_comment, sr.submission_status, sr.updated_at FROM `student_records` sr INNER JOIN `class_batches` cb ON sr.batch_id = cb.id WHERE cb.subject = ? AND cb.grade = ? AND sr.week_num = ? AND "+whereStudent+" ORDER BY (cb.tier = ?) DESC, sr.updated_at DESC, sr.id DESC",
+				"SELECT sr.retest_token, sr.error_questions, sr.error_count, sr.homework_score, sr.teacher_comment, sr.submission_status, sr.preview_week_num, sr.updated_at FROM `student_records` sr INNER JOIN `class_batches` cb ON sr.batch_id = cb.id WHERE cb.subject = ? AND cb.grade = ? AND sr.week_num = ? AND "+whereStudent+" ORDER BY (cb.tier = ?) DESC, sr.updated_at DESC, sr.id DESC",
 				hwParams...,
 			); err != nil {
 				log.Printf("retest: GetStudentWeekRecord hw query error: %v", err)
@@ -513,9 +513,9 @@ func (r *MySQLRepository) GetStudentWeekRecord(ctx context.Context, q StudentWee
 				for rows.Next() {
 					var tok, eqRaw, comment, subSt sql.NullString
 					var updAt sql.NullTime
-					var errCnt sql.NullInt64
+					var errCnt, pvWk sql.NullInt64
 					var score sql.NullFloat64
-					if err := rows.Scan(&tok, &eqRaw, &errCnt, &score, &comment, &subSt, &updAt); err != nil {
+					if err := rows.Scan(&tok, &eqRaw, &errCnt, &score, &comment, &subSt, &pvWk, &updAt); err != nil {
 						log.Printf("retest: GetStudentWeekRecord hw scan error: %v", err)
 						continue
 					}
@@ -536,7 +536,8 @@ func (r *MySQLRepository) GetStudentWeekRecord(ctx context.Context, q StudentWee
 					}
 					cComment := strings.TrimSpace(comment.String)
 					expSt := strings.TrimSpace(subSt.String)
-					hasHw := len(errs) > 0 || scPtr != nil || cComment != "" || expSt != "" || errCnt.Int64 > 0
+					isPreviewOnly := pvWk.Valid && pvWk.Int64 > 0 && len(errs) == 0 && scPtr == nil && cComment == "" && errCnt.Int64 == 0 && (expSt == "" || expSt == "submitted")
+					hasHw := !isPreviewOnly && (len(errs) > 0 || scPtr != nil || cComment != "" || expSt != "" || errCnt.Int64 > 0)
 					if hasHw || !hasHwRecord {
 						hwErrors = errs
 						hasHwRecord = hasHw
@@ -545,12 +546,14 @@ func (r *MySQLRepository) GetStudentWeekRecord(ctx context.Context, q StudentWee
 						if updAt.Valid {
 							hwUpdatedAt = tz.In(updAt.Time).Format("01-02 15:04")
 						}
-						resolved := ResolveSubmissionStatus(expSt, errs, scPtr, cComment)
-						isHwUnsubmitted = resolved == "unsubmitted"
-						isHwFullScore = !isHwUnsubmitted && len(errs) == 0
 						if hasHw {
+							resolved := ResolveSubmissionStatus(expSt, errs, scPtr, cComment)
+							isHwUnsubmitted = resolved == "unsubmitted"
+							isHwFullScore = !isHwUnsubmitted && len(errs) == 0
 							break
 						}
+						isHwUnsubmitted = false
+						isHwFullScore = false
 					}
 				}
 				_ = rows.Close()
@@ -669,14 +672,21 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 	}
 	className := fmt.Sprintf("%s%s_%s_%s_%s", shortYear, normSeason, in.Grade, in.Tier, in.Subject)
 
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		log.Printf("retest: EncryptBatch begin tx error: %v", err)
+		return EncryptBatchResult{}, NewHTTPError(500, "数据库事务启动失败")
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	var batchID int
 	var batchCreator sql.NullString
-	err := r.db.QueryRowContext(ctx,
+	err = tx.QueryRowContext(ctx,
 		"SELECT id, created_by FROM class_batches WHERE `year` = ? AND (`season` = ? OR `season` = ?) AND `grade` = ? AND `tier` = ? AND `subject` = ? LIMIT 1",
 		in.Year, normSeason, in.Season, in.Grade, in.Tier, in.Subject,
 	).Scan(&batchID, &batchCreator)
 	if errors.Is(err, sql.ErrNoRows) {
-		res, insErr := r.db.ExecContext(ctx,
+		res, insErr := tx.ExecContext(ctx,
 			"INSERT INTO class_batches (`year`, `season`, `grade`, `tier`, `subject`, `class_name`, `created_by`) VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE `id` = LAST_INSERT_ID(`id`)",
 			in.Year, normSeason, in.Grade, in.Tier, in.Subject, className, in.CurrentTeacher,
 		)
@@ -690,7 +700,7 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 		log.Printf("retest: EncryptBatch class_batches query error: %v", err)
 		return EncryptBatchResult{}, NewHTTPError(500, "无法创建或获取班级批次信息，数据库操作异常")
 	} else if in.CurrentTeacher != "" && strings.TrimSpace(batchCreator.String) == "" {
-		_, _ = r.db.ExecContext(ctx, "UPDATE class_batches SET `created_by` = ? WHERE `id` = ?", in.CurrentTeacher, batchID)
+		_, _ = tx.ExecContext(ctx, "UPDATE class_batches SET `created_by` = ? WHERE `id` = ?", in.CurrentTeacher, batchID)
 	}
 
 	// 60-second debounce check
@@ -699,8 +709,8 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 	var prevCreatedAt sql.NullTime
 	var prevStudentCount int
 	var prevGenID int
-	if err := r.db.QueryRowContext(ctx,
-		"SELECT id, batch_code, created_by, student_count, created_at FROM `generation_batches` WHERE `class_id` = ? AND `week_num` = ? ORDER BY id DESC LIMIT 1",
+	if err := tx.QueryRowContext(ctx,
+		"SELECT id, batch_code, created_by, student_count, created_at FROM `generation_batches` WHERE `class_id` = ? AND `week_num` = ? ORDER BY id DESC LIMIT 1 FOR UPDATE",
 		batchID, in.Week,
 	).Scan(&prevGenID, &prevBatchCode, &prevCreator, &prevStudentCount, &prevCreatedAt); err == nil {
 		if prevCreatedAt.Valid {
@@ -725,13 +735,6 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 		sourceFilesJSON = string(b)
 	}
 
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		log.Printf("retest: EncryptBatch begin tx error: %v", err)
-		return EncryptBatchResult{}, NewHTTPError(500, "数据库事务启动失败")
-	}
-	defer func() { _ = tx.Rollback() }()
-
 	// Archive existing records before overwriting (skip when debounced)
 	if !isDebounced && len(in.Students) > 0 {
 		keySet := map[string]struct{}{}
@@ -741,12 +744,11 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 			if sn == "" {
 				continue
 			}
+			nameSet[sn] = struct{}{}
 			sid := strings.TrimSpace(st.ID)
 			if sid != "" {
 				keySet[retestkeys.BuildStudentKey(sid, sn, in.Grade, in.Subject)] = struct{}{}
 				keySet[retestkeys.LegacyStudentKey(sid, sn)] = struct{}{}
-			} else {
-				nameSet[sn] = struct{}{}
 			}
 		}
 		var whereOr []string
@@ -890,6 +892,12 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 				studentKey, batchID, in.Week, legacyKey,
 			)
 		}
+		if studentID != "" && name != "" && name != studentKey {
+			_, _ = tx.ExecContext(ctx,
+				"UPDATE `student_records` SET `student_key` = ?, `student_id` = ? WHERE `batch_id` = ? AND `week_num` = ? AND (`student_id` IS NULL OR `student_id` = '') AND (`student_key` = ? OR `student_key` IS NULL OR `student_key` = '') AND `student_name` = ?",
+				studentKey, studentID, batchID, in.Week, name, name,
+			)
+		}
 
 		var updateParts []string
 		if in.HasHomeworkData {
@@ -948,8 +956,8 @@ func (r *MySQLRepository) EncryptBatch(ctx context.Context, in EncryptBatchInput
 
 		if studentHasPreview && pvWeekVal > 0 {
 			_, _ = tx.ExecContext(ctx,
-				"UPDATE `student_records` SET `preview_error_questions` = ?, `preview_submission_status` = COALESCE(?, `preview_submission_status`), `updated_at` = CURRENT_TIMESTAMP WHERE `batch_id` = ? AND `student_key` = ? AND `preview_week_num` = ? AND `week_num` != ?",
-				pvErrJSON, pvStatus, batchID, studentKey, pvWeekVal, in.Week,
+				"UPDATE `student_records` SET `preview_error_questions` = ?, `preview_score` = COALESCE(?, `preview_score`), `preview_comment` = COALESCE(?, `preview_comment`), `preview_submission_status` = COALESCE(?, `preview_submission_status`), `updated_at` = `updated_at` WHERE `batch_id` = ? AND `student_key` = ? AND `preview_week_num` = ? AND `week_num` != ?",
+				pvErrJSON, st.PreviewScore, pvCommentForDB, pvStatus, batchID, studentKey, pvWeekVal, in.Week,
 			)
 		}
 

@@ -829,6 +829,10 @@ func handleLogsSenderClientOverride(w http.ResponseWriter, r *http.Request, deps
 		overrides, _ = input["overrides"].(map[string]any)
 		note = config.AsPHPString(input["note"])
 	}
+	if deps.SenderCtrl == nil {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("云控服务未初始化"), http.StatusInternalServerError)
+		return
+	}
 	st, err := deps.SenderCtrl.SetOverrides(clientSlug, overrides, note)
 	if err != nil {
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("保存单机云控覆盖策略失败，请检查目录权限"), http.StatusInternalServerError)
@@ -878,6 +882,10 @@ func handleLogsSenderClientCommand(w http.ResponseWriter, r *http.Request, deps 
 	}
 	if op == "" {
 		op = "admin"
+	}
+	if deps.SenderCtrl == nil {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("云控服务未初始化"), http.StatusInternalServerError)
+		return
 	}
 	cmd, err := deps.SenderCtrl.EnqueueCommand(clientSlug, cmdType, params, op)
 	if err != nil {
@@ -964,6 +972,10 @@ func handleLogsSenderClients(w http.ResponseWriter, r *http.Request, deps LogsDe
 	if _, ok := session.RequireAdmin(w, r, deps.Sessions); !ok {
 		return
 	}
+	if deps.SenderLogs == nil || deps.SenderCtrl == nil {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("发送器日志/云控服务未初始化"), http.StatusInternalServerError)
+		return
+	}
 	reqDate := strings.TrimSpace(r.URL.Query().Get("date"))
 	dates, clients := deps.SenderLogs.ListClients(reqDate)
 	httpx.SendResponse(w, true, map[string]any{
@@ -975,6 +987,10 @@ func handleLogsSenderClients(w http.ResponseWriter, r *http.Request, deps LogsDe
 
 func handleLogsSenderClientControl(w http.ResponseWriter, r *http.Request, deps LogsDeps) {
 	if _, ok := session.RequireAdmin(w, r, deps.Sessions); !ok {
+		return
+	}
+	if deps.SenderCtrl == nil {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("云控服务未初始化"), http.StatusInternalServerError)
 		return
 	}
 	clientSlug := strings.TrimSpace(r.URL.Query().Get("client"))
@@ -992,6 +1008,10 @@ func handleLogsSenderClientControl(w http.ResponseWriter, r *http.Request, deps 
 
 func handleLogsSenderLogFile(w http.ResponseWriter, r *http.Request, deps LogsDeps) {
 	if _, ok := session.RequireAdmin(w, r, deps.Sessions); !ok {
+		return
+	}
+	if deps.SenderLogs == nil {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("发送器日志服务未初始化"), http.StatusInternalServerError)
 		return
 	}
 	q := r.URL.Query()
@@ -1051,6 +1071,10 @@ func handleLogsSenderLogFile(w http.ResponseWriter, r *http.Request, deps LogsDe
 
 func handleLogsSenderSnapshotImg(w http.ResponseWriter, r *http.Request, deps LogsDeps) {
 	if _, ok := session.RequireAdmin(w, r, deps.Sessions); !ok {
+		return
+	}
+	if deps.SenderLogs == nil {
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 	q := r.URL.Query()
@@ -1122,7 +1146,11 @@ func handleLogsStats(w http.ResponseWriter, r *http.Request, deps LogsDeps) {
 }
 
 func handleLogsDelete(w http.ResponseWriter, r *http.Request, deps LogsDeps) {
-	if _, ok := session.RequireAdmin(w, r, deps.Sessions); !ok {
+	if !httpx.RequireStrictSameOrigin(w, r) {
+		return
+	}
+	sess, ok := session.RequireAdmin(w, r, deps.Sessions)
+	if !ok {
 		return
 	}
 	q := r.URL.Query()
@@ -1137,6 +1165,11 @@ func handleLogsDelete(w http.ResponseWriter, r *http.Request, deps LogsDeps) {
 		if deps.Repo != nil {
 			cnt, _ = deps.Repo.DeleteByDate(r.Context(), date)
 		}
+		auditlog.RecordFromRequest(r.Context(), deps.Audit, r, "warn", "admin", "delete_logs_by_date", sess.AdminUsername(), map[string]any{
+			"date":    date,
+			"deleted": cnt,
+			"message": fmt.Sprintf("管理员按日期清理了 %d 条系统日志 (%s)", cnt, date),
+		})
 		httpx.SendResponse(w, true, map[string]any{
 			"deleted": cnt,
 			"message": fmt.Sprintf("已删除 %d 条日志", cnt),
@@ -1152,5 +1185,9 @@ func handleLogsDelete(w http.ResponseWriter, r *http.Request, deps LogsDeps) {
 	if deps.Repo != nil {
 		_, _ = deps.Repo.DeleteByID(r.Context(), id)
 	}
+	auditlog.RecordFromRequest(r.Context(), deps.Audit, r, "warn", "admin", "delete_log_by_id", sess.AdminUsername(), map[string]any{
+		"log_id":  id,
+		"message": fmt.Sprintf("管理员删除了系统日志 #%s", id),
+	})
 	httpx.SendResponse(w, true, map[string]any{"message": "日志已删除"}, nil, http.StatusOK)
 }

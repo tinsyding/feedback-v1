@@ -196,10 +196,15 @@
         const resetErr = document.getElementById('front-reset-error');
         if (loginErr) loginErr.style.display = 'none';
         if (resetErr) resetErr.style.display = 'none';
+        const loginCaptchaField = document.getElementById('front-auth-captcha-field');
+        const resetCaptchaField = document.getElementById('front-reset-captcha-field');
 
         if (mode === 'reset') {
             if (loginView) loginView.style.display = 'none';
             if (resetView) resetView.style.display = 'block';
+            if (resetCaptchaField && resetCaptchaField.style.display !== 'none' && typeof window.refreshFrontAuthCaptcha === 'function') {
+                window.refreshFrontAuthCaptcha('reset');
+            }
             const isUserLoggedIn = isLoggedInModal || !!currentUser;
             if (closeBtn) closeBtn.style.display = isUserLoggedIn ? 'flex' : 'none';
             if (backBtn) {
@@ -227,6 +232,9 @@
             if (loginView) loginView.style.display = 'block';
             if (resetView) resetView.style.display = 'none';
             if (closeBtn) closeBtn.style.display = 'none';
+            if (loginCaptchaField && loginCaptchaField.style.display !== 'none' && typeof window.refreshFrontAuthCaptcha === 'function') {
+                window.refreshFrontAuthCaptcha('login');
+            }
         }
     };
 
@@ -933,6 +941,11 @@
                     return false;
                 }
                 window.switchAuthMode('login');
+                if (json.data?.require_captcha) {
+                    showFrontAuthCaptcha('login');
+                } else {
+                    hideFrontAuthCaptcha('login');
+                }
                 showAuthModal();
                 window.dispatchEvent(new CustomEvent('authChecked', { detail: null }));
                 return false;

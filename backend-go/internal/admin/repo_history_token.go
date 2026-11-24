@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"feedback-api/internal/config"
+	"feedback-api/internal/retest"
 	"feedback-api/internal/retestkeys"
 	"feedback-api/internal/tz"
 )
@@ -137,6 +138,31 @@ func (r *MySQLRepository) RollbackRecord(ctx context.Context, historyID int, adm
 		}
 	}
 
+	eqVal := h["error_questions"]
+	if eqVal == nil || strings.TrimSpace(config.AsPHPString(eqVal)) == "" {
+		eqVal = "[]"
+	}
+	eqStr := config.AsPHPString(eqVal)
+	hwErrs := retest.ParseJSONErrorInts(&eqStr)
+	var hwScorePtr *float64
+	if h["homework_score"] != nil && strings.TrimSpace(config.AsPHPString(h["homework_score"])) != "" {
+		f := config.AsPHPFloat(h["homework_score"])
+		hwScorePtr = &f
+	}
+	hwSubStatus := retest.ResolveSubmissionStatus("", hwErrs, hwScorePtr, config.AsPHPString(h["teacher_comment"]))
+
+	var pvErrs []int
+	if h["preview_error_questions"] != nil {
+		peqStr := config.AsPHPString(h["preview_error_questions"])
+		pvErrs = retest.ParseJSONErrorInts(&peqStr)
+	}
+	var pvScorePtr *float64
+	if h["preview_score"] != nil && strings.TrimSpace(config.AsPHPString(h["preview_score"])) != "" {
+		f := config.AsPHPFloat(h["preview_score"])
+		pvScorePtr = &f
+	}
+	pvSubStatus := retest.ResolveSubmissionStatus("", pvErrs, pvScorePtr, config.AsPHPString(h["preview_comment"]))
+
 	var targetID int
 	if currentRec != nil {
 		curBatchCode := strings.TrimSpace(config.AsPHPString(currentRec["batch_code"]))
@@ -193,16 +219,12 @@ func (r *MySQLRepository) RollbackRecord(ctx context.Context, historyID int, adm
 			return RollbackResult{}, NewHTTPError(500, "学情记录回溯失败，数据库操作已回滚", nil)
 		}
 
-		eqVal := h["error_questions"]
-		if eqVal == nil || strings.TrimSpace(config.AsPHPString(eqVal)) == "" {
-			eqVal = "[]"
-		}
-
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE student_records SET
 				student_id = ?, student_name = ?, student_key = ?, preview_week_num = ?,
 				homework_score = ?, preview_score = ?, total_score = ?, error_count = ?,
 				error_questions = ?, preview_error_questions = ?, teacher_comment = ?, preview_comment = ?,
+				submission_status = ?, preview_submission_status = ?,
 				source_files = ?, retest_token = ?, updated_at = NOW()
 			WHERE id = ?`,
 			hStudentID,
@@ -217,6 +239,8 @@ func (r *MySQLRepository) RollbackRecord(ctx context.Context, historyID int, adm
 			h["preview_error_questions"],
 			h["teacher_comment"],
 			h["preview_comment"],
+			hwSubStatus,
+			pvSubStatus,
 			h["source_files"],
 			h["retest_token"],
 			currentRec["id"],
@@ -229,22 +253,20 @@ func (r *MySQLRepository) RollbackRecord(ctx context.Context, historyID int, adm
 		if recCreatedAt == "" {
 			recCreatedAt = tz.Now().Format("2006-01-02 15:04:05")
 		}
-		eqVal := h["error_questions"]
-		if eqVal == nil || strings.TrimSpace(config.AsPHPString(eqVal)) == "" {
-			eqVal = "[]"
-		}
 		hBatchCode := strings.TrimSpace(config.AsPHPString(h["batch_code"]))
 		hCreatedBy := strings.TrimSpace(config.AsPHPString(h["created_by"]))
 		res, err := tx.ExecContext(ctx, `
 			INSERT INTO student_records (
 				batch_id, batch_code, student_id, student_name, student_key, week_num, preview_week_num,
 				homework_score, preview_score, total_score, error_count,
-				error_questions, preview_error_questions, teacher_comment, preview_comment, source_files, retest_token,
+				error_questions, preview_error_questions, teacher_comment, preview_comment,
+				submission_status, preview_submission_status, source_files, retest_token,
 				created_by, created_at, updated_at
 			) VALUES (
 				?, ?, ?, ?, ?, ?, ?,
 				?, ?, ?, ?,
-				?, ?, ?, ?, ?, ?,
+				?, ?, ?, ?,
+				?, ?, ?, ?,
 				?, ?, NOW()
 			)`,
 			h["batch_id"],
@@ -262,6 +284,8 @@ func (r *MySQLRepository) RollbackRecord(ctx context.Context, historyID int, adm
 			h["preview_error_questions"],
 			h["teacher_comment"],
 			h["preview_comment"],
+			hwSubStatus,
+			pvSubStatus,
 			h["source_files"],
 			h["retest_token"],
 			hCreatedBy,

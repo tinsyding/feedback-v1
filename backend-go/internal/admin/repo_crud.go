@@ -1143,17 +1143,25 @@ func (r *MySQLRepository) UpdateRecord(ctx context.Context, table, id string, in
 
 	if validTbl == "qbank_questions" {
 		if qid, ok := data["qbank_id"]; ok && qid != nil {
-			if qRows, err := r.db.QueryContext(ctx,
+			qRows, err := r.db.QueryContext(ctx,
 				"SELECT `bank_type`, `year`, `season`, `subject`, `grade`, `tier`, `week` FROM `qbank_weeks` WHERE `id` = ? LIMIT 1",
 				marshalIfComposite(qid),
-			); err == nil {
-				if list, err := scanDynamicRows(qRows); err == nil && len(list) > 0 {
-					pw := list[0]
-					for _, k := range []string{"bank_type", "year", "season", "subject", "grade", "tier", "week"} {
-						data[k] = pw[k]
-					}
-				}
-				_ = qRows.Close()
+			)
+			if err != nil {
+				return 0, nil, NewHTTPError(500, "校验目标题库期次失败: "+err.Error(), nil)
+			}
+			list, scanErr := scanDynamicRows(qRows)
+			_ = qRows.Close()
+			if scanErr != nil || len(list) == 0 {
+				return 0, nil, NewHTTPError(400, "指定的 qbank_id 题库期次不存在", nil)
+			}
+			pw := list[0]
+			for _, k := range []string{"bank_type", "year", "season", "subject", "grade", "tier", "week"} {
+				data[k] = pw[k]
+			}
+		} else {
+			for _, k := range []string{"bank_type", "year", "season", "subject", "grade", "tier", "week"} {
+				delete(data, k)
 			}
 		}
 	}

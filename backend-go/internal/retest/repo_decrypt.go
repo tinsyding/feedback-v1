@@ -83,6 +83,9 @@ func (r *MySQLRepository) LoadStudentHistoryAndAverages(ctx context.Context, sub
 	if studentID == "" {
 		where += " OR ((sr.student_key IS NULL OR sr.student_key = '' OR sr.student_key = sr.student_name) AND sr.student_name = ?)"
 		params = append(params, studentName)
+	} else if tier != "" {
+		where += " OR (cb.tier = ? AND (sr.student_id IS NULL OR sr.student_id = '') AND (sr.student_key IS NULL OR sr.student_key = '' OR sr.student_key = sr.student_name) AND sr.student_name = ?)"
+		params = append(params, tier, studentName)
 	}
 	where += ")"
 

@@ -98,6 +98,15 @@ func handleRetestCreateTempDownload(w http.ResponseWriter, r *http.Request, deps
 		})
 		return
 	}
+	if token != "" && deps.Repo != nil && !sess.IsAdminLoggedIn() {
+		if revoked, _ := deps.Repo.IsTokenRevoked(r.Context(), token); revoked {
+			writeRawJSON(w, http.StatusForbidden, map[string]any{
+				"success": false,
+				"error":   "该错题本链接已被教师作废，无法下载",
+			})
+			return
+		}
+	}
 
 	// Per-session rate limit: max 30 temp files per hour (atomic read-modify-write)
 	nowUnix := deps.now().Unix()

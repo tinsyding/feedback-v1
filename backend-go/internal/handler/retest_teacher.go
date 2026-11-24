@@ -473,8 +473,6 @@ func handleRetestRevokeToggle(w http.ResponseWriter, r *http.Request, deps Retes
 
 	writeRawJSON(w, http.StatusOK, map[string]any{
 		"success": true,
-		"token":   token,
-		"revoked": action == "revoke_token",
 		"message": msg,
 	})
 }

@@ -1,7 +1,7 @@
 /**
  * ============================================================================
  * 极方管理后台 (Admin Console) 前端运行脚本 - 生产环境合并包
- * 自动生成时间: 2026-11-23 18:29:04
+ * 自动生成时间: 2026-11-24 01:40:43
  * 源码模块目录: js/admin/
  * 请勿直接手动修改此文件，开发时请修改 js/admin/ 中的子模块并执行本打包脚本。
  * ============================================================================
@@ -2790,7 +2790,7 @@
                 if (btn) btn.title = '切换为表格视图';
                 tableWrap.style.display = 'none';
                 cardsWrap.style.display = 'grid';
-                renderRecordsCards(recCurrentRecords, (recStats && recStats.total) ? recStats.total : recCurrentRecords.length);
+                renderRecordsCards(recCurrentRecords, recCurrentRecords.length);
             } else {
                 if (iconEl) iconEl.innerHTML = SVG_VIEW_CARDS;
                 if (textEl) textEl.textContent = '卡片视图';
@@ -3373,7 +3373,7 @@
                 const isActive = batFilters.teacher === t.username;
                 const label = t.real_name ? `${t.real_name} (${t.username})` : t.username;
                 return `
-                    <button type="button" class="filter-pill ${isActive ? 'active' : ''}" onclick="setBatFilter('teacher', '${escapeHtml(t.username)}')">
+                    <button type="button" class="filter-pill ${isActive ? 'active' : ''}" onclick="setBatFilter('teacher', '${escapeInlineJs(t.username)}')">
                         ${escapeHtml(label)}
                     </button>
                 `;
@@ -3381,21 +3381,21 @@
 
             const gradeList = ((typeof dbFilterOptions !== 'undefined' && dbFilterOptions.grades) || []).filter(Boolean);
             const gradePills = gradeList.map(g => `
-                <button type="button" class="filter-pill ${batFilters.grade === g ? 'active' : ''}" onclick="setBatFilter('grade', '${escapeHtml(g)}')">
+                <button type="button" class="filter-pill ${batFilters.grade === g ? 'active' : ''}" onclick="setBatFilter('grade', '${escapeInlineJs(g)}')">
                     ${escapeHtml(g)}
                 </button>
             `).join('');
 
             const subjectList = ((typeof dbFilterOptions !== 'undefined' && dbFilterOptions.subjects) || []).filter(Boolean);
             const subjectPills = subjectList.map(s => `
-                <button type="button" class="filter-pill ${batFilters.subject === s ? 'active' : ''}" onclick="setBatFilter('subject', '${escapeHtml(s)}')">
+                <button type="button" class="filter-pill ${batFilters.subject === s ? 'active' : ''}" onclick="setBatFilter('subject', '${escapeInlineJs(s)}')">
                     ${escapeHtml(s)}
                 </button>
             `).join('');
 
             const tierList = ((typeof dbFilterOptions !== 'undefined' && dbFilterOptions.tiers) || []).filter(Boolean);
             const tierPills = tierList.map(t => `
-                <button type="button" class="filter-pill ${batFilters.tier === t ? 'active' : ''}" onclick="setBatFilter('tier', '${escapeHtml(t)}')">
+                <button type="button" class="filter-pill ${batFilters.tier === t ? 'active' : ''}" onclick="setBatFilter('tier', '${escapeInlineJs(t)}')">
                     ${escapeHtml(t)}层
                 </button>
             `).join('');
@@ -3619,7 +3619,7 @@
                             <input type="checkbox" class="bat-row-cb" data-id="${r.id}" ${isSelected ? 'checked' : ''} onchange="toggleBatchesSelectRow(${r.id}, this)" style="accent-color: var(--primary); cursor: pointer;">
                         </td>
                         <td class="cell-mono" style="font-size: 0.8rem;" title="${escapeHtml(batchCode)}">
-                            <span style="cursor: pointer; color: var(--text-primary);" onclick="jumpToBatchRecords('${escapeHtml(batchCode)}')" title="点击查看该批次的学情记录">${escapeHtml(batchCode)}</span>
+                            <span style="cursor: pointer; color: var(--text-primary);" onclick="jumpToBatchRecords('${escapeInlineJs(batchCode)}')" title="点击查看该批次的学情记录">${escapeHtml(batchCode)}</span>
                         </td>
                         <td style="white-space: nowrap;">
                             <div style="font-weight: 600; color: var(--text-primary); font-size: 0.85rem;">${escapeHtml(className)}</div>
@@ -3633,8 +3633,8 @@
                         </td>
                         <td class="cell-mono" style="font-size:0.8rem; color:var(--text-secondary);">${formatTimestamp(r.created_at)}</td>
                         <td style="text-align: right; white-space: nowrap;">
-                            <button type="button" class="btn-action detail" onclick="jumpToBatchRecords('${escapeHtml(batchCode)}')" title="查看该批次的学情记录">学情</button>
-                            <button type="button" class="btn-action danger" onclick="deleteBatchDirect(${r.id}, '${escapeHtml(batchCode)}')" title="删除该批次记录（不影响学情数据）">删除</button>
+                            <button type="button" class="btn-action detail" onclick="jumpToBatchRecords('${escapeInlineJs(batchCode)}')" title="查看该批次的学情记录">学情</button>
+                            <button type="button" class="btn-action danger" onclick="deleteBatchDirect(${Number(r.id) || 0}, '${escapeInlineJs(batchCode)}')" title="删除该批次记录（不影响学情数据）">删除</button>
                         </td>
                     </tr>
                 `;
@@ -5673,7 +5673,7 @@
                     </div>
                 `;
             } else {
-                const schema = dbSchemaMap[dbCurrentTable] || [];
+                const schema = dbSchemaMap[dbModalActiveTable] || [];
                 let fieldsHtml = '<div class="form-grid">';
                 schema.forEach(col => {
                     const colName = col.field || col.name;
@@ -5733,9 +5733,8 @@
             }
 
             const data = {};
-            const schema = dbSchemaMap[dbCurrentTable] || [];
-
             const activeTable = dbModalActiveTable || dbCurrentTable;
+            const schema = dbSchemaMap[activeTable] || [];
             if (activeTable === 'student_records') {
                 const batchId = document.getElementById('field-batch_id')?.value;
                 const studentId = document.getElementById('field-student_id')?.value.trim();
@@ -7382,20 +7381,20 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
                 <tr>
                     <td>
                         <div style="font-weight:700; color: var(--text-primary); font-size:0.95rem;">${escapeHtml(cl.version || '未标注版本')}</div>
-                        <div class="cell-mono" style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">${cl.date || '-'}</div>
+                        <div class="cell-mono" style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">${escapeHtml(cl.date || '-')}</div>
                     </td>
                     <td>
                         <div style="font-weight:600; color: var(--text-primary);">${escapeHtml(cl.title || '无标题')}</div>
                         <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">包含 ${cl.items?.length || 0} 个更新明细项</div>
                     </td>
                     <td>
-                        <button class="action-tag ${cl.active ? 'action' : 'warn'}" onclick="toggleChangelogActive('${cl.id}')" style="cursor:pointer; border:none; outline:none;" title="点击切换是否向访客自动弹出">
+                        <button class="action-tag ${cl.active ? 'action' : 'warn'}" onclick="toggleChangelogActive('${escapeInlineJs(cl.id)}')" style="cursor:pointer; border:none; outline:none;" title="点击切换是否向访客自动弹出">
                             ${cl.active ? '<span class="status-dot green"></span>活跃推送中 (自动弹出)' : '<span class="status-dot gray"></span>存档未推送'}
                         </button>
                     </td>
                     <td style="text-align:right; white-space: nowrap;">
-                        <button class="btn-action edit" onclick="openChangelogModal('${cl.id}')">编辑</button>
-                        <button class="btn-action delete" onclick="deleteChangelog('${cl.id}')">删除</button>
+                        <button class="btn-action edit" onclick="openChangelogModal('${escapeInlineJs(cl.id)}')">编辑</button>
+                        <button class="btn-action delete" onclick="deleteChangelog('${escapeInlineJs(cl.id)}')">删除</button>
                     </td>
                 </tr>
             `).join('');
@@ -7415,8 +7414,8 @@ ${(r.teacher_comment && String(r.teacher_comment).trim()) ? String(r.teacher_com
 
             row.innerHTML = `
                 <div style="flex:1; display:flex; flex-direction:column; gap:8px;">
-                    <input type="text" class="custom-input cl-item-title" style="width:100%; box-sizing:border-box; padding:8px 12px;" placeholder="条目小标题，例如：新特性 / 性能优化" value="${title.replace(/"/g, '&quot;')}">
-                    <textarea class="custom-input cl-item-desc" style="width:100%; box-sizing:border-box; padding:8px 12px; resize:vertical; min-height:60px;" placeholder="详细描述内容...">${desc.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+                    <input type="text" class="custom-input cl-item-title" style="width:100%; box-sizing:border-box; padding:8px 12px;" placeholder="条目小标题，例如：新特性 / 性能优化" value="${escapeHtml(title)}">
+                    <textarea class="custom-input cl-item-desc" style="width:100%; box-sizing:border-box; padding:8px 12px; resize:vertical; min-height:60px;" placeholder="详细描述内容...">${escapeHtml(desc)}</textarea>
                 </div>
                 <button class="btn danger-subtle" style="padding:6px; height:fit-content;" onclick="this.closest('.cl-item-row').remove()" title="删除该项">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">

@@ -389,8 +389,6 @@ func handleQBankPost(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 			return
 		}
 
-		rawMaps = append(rawMaps, qm)
-
 		qNum := config.AsPHPInt(qm["id"])
 		if qNum <= 0 {
 			qNum = config.AsPHPInt(qm["question_num"])
@@ -399,8 +397,17 @@ func handleQBankPost(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 			qNum = config.AsPHPInt(qm["num"])
 		}
 		if qNum <= 0 {
-			continue
+			httpx.SendJSON(w, http.StatusBadRequest, map[string]any{
+				"success": false,
+				"error":   fmt.Sprintf("第 %d 条题目缺少有效的正整数题号 (id)", idx+1),
+			})
+			return
 		}
+		if exName == "" {
+			exName = config.AsPHPString(qm["exercise_name"])
+		}
+
+		rawMaps = append(rawMaps, qm)
 
 		rawParentList := qm["parentQuestionNums"]
 		if rawParentList == nil {
@@ -437,8 +444,14 @@ func handleQBankPost(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 			ansURL = config.AsPHPString(ansObj["url"])
 			ansName = config.AsPHPString(ansObj["name"])
 		}
+		if ansURL == "" {
+			ansURL = config.AsPHPString(qm["answer_pdf"])
+		}
+		if ansName == "" {
+			ansName = config.AsPHPString(qm["answer_name"])
+		}
 
-		saveQuestions = append(saveQuestions, qbank.SaveQuestionInput{
+		item := qbank.SaveQuestionInput{
 			QuestionNum:       qNum,
 			ParentQuestionNum: primaryPtr,
 			ParentNumsStr:     qbank.JoinParentNums(parentList),
@@ -450,7 +463,18 @@ func handleQBankPost(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 			ExerciseName:      exName,
 			AnswerURL:         ansURL,
 			AnswerName:        ansName,
-		})
+		}
+		replaced := false
+		for idx, existing := range saveQuestions {
+			if existing.QuestionNum == qNum {
+				saveQuestions[idx] = item
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			saveQuestions = append(saveQuestions, item)
+		}
 	}
 
 	if deps.Repo == nil {

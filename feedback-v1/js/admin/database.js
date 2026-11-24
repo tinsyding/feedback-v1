@@ -1953,7 +1953,7 @@
                     </div>
                 `;
             } else {
-                const schema = dbSchemaMap[dbCurrentTable] || [];
+                const schema = dbSchemaMap[dbModalActiveTable] || [];
                 let fieldsHtml = '<div class="form-grid">';
                 schema.forEach(col => {
                     const colName = col.field || col.name;
@@ -2013,9 +2013,8 @@
             }
 
             const data = {};
-            const schema = dbSchemaMap[dbCurrentTable] || [];
-
             const activeTable = dbModalActiveTable || dbCurrentTable;
+            const schema = dbSchemaMap[activeTable] || [];
             if (activeTable === 'student_records') {
                 const batchId = document.getElementById('field-batch_id')?.value;
                 const studentId = document.getElementById('field-student_id')?.value.trim();

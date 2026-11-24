@@ -31,20 +31,20 @@
                 <tr>
                     <td>
                         <div style="font-weight:700; color: var(--text-primary); font-size:0.95rem;">${escapeHtml(cl.version || '未标注版本')}</div>
-                        <div class="cell-mono" style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">${cl.date || '-'}</div>
+                        <div class="cell-mono" style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">${escapeHtml(cl.date || '-')}</div>
                     </td>
                     <td>
                         <div style="font-weight:600; color: var(--text-primary);">${escapeHtml(cl.title || '无标题')}</div>
                         <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">包含 ${cl.items?.length || 0} 个更新明细项</div>
                     </td>
                     <td>
-                        <button class="action-tag ${cl.active ? 'action' : 'warn'}" onclick="toggleChangelogActive('${cl.id}')" style="cursor:pointer; border:none; outline:none;" title="点击切换是否向访客自动弹出">
+                        <button class="action-tag ${cl.active ? 'action' : 'warn'}" onclick="toggleChangelogActive('${escapeInlineJs(cl.id)}')" style="cursor:pointer; border:none; outline:none;" title="点击切换是否向访客自动弹出">
                             ${cl.active ? '<span class="status-dot green"></span>活跃推送中 (自动弹出)' : '<span class="status-dot gray"></span>存档未推送'}
                         </button>
                     </td>
                     <td style="text-align:right; white-space: nowrap;">
-                        <button class="btn-action edit" onclick="openChangelogModal('${cl.id}')">编辑</button>
-                        <button class="btn-action delete" onclick="deleteChangelog('${cl.id}')">删除</button>
+                        <button class="btn-action edit" onclick="openChangelogModal('${escapeInlineJs(cl.id)}')">编辑</button>
+                        <button class="btn-action delete" onclick="deleteChangelog('${escapeInlineJs(cl.id)}')">删除</button>
                     </td>
                 </tr>
             `).join('');
@@ -64,8 +64,8 @@
 
             row.innerHTML = `
                 <div style="flex:1; display:flex; flex-direction:column; gap:8px;">
-                    <input type="text" class="custom-input cl-item-title" style="width:100%; box-sizing:border-box; padding:8px 12px;" placeholder="条目小标题，例如：新特性 / 性能优化" value="${title.replace(/"/g, '&quot;')}">
-                    <textarea class="custom-input cl-item-desc" style="width:100%; box-sizing:border-box; padding:8px 12px; resize:vertical; min-height:60px;" placeholder="详细描述内容...">${desc.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+                    <input type="text" class="custom-input cl-item-title" style="width:100%; box-sizing:border-box; padding:8px 12px;" placeholder="条目小标题，例如：新特性 / 性能优化" value="${escapeHtml(title)}">
+                    <textarea class="custom-input cl-item-desc" style="width:100%; box-sizing:border-box; padding:8px 12px; resize:vertical; min-height:60px;" placeholder="详细描述内容...">${escapeHtml(desc)}</textarea>
                 </div>
                 <button class="btn danger-subtle" style="padding:6px; height:fit-content;" onclick="this.closest('.cl-item-row').remove()" title="删除该项">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">

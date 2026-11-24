@@ -318,7 +318,7 @@
                 if (btn) btn.title = '切换为表格视图';
                 tableWrap.style.display = 'none';
                 cardsWrap.style.display = 'grid';
-                renderRecordsCards(recCurrentRecords, (recStats && recStats.total) ? recStats.total : recCurrentRecords.length);
+                renderRecordsCards(recCurrentRecords, recCurrentRecords.length);
             } else {
                 if (iconEl) iconEl.innerHTML = SVG_VIEW_CARDS;
                 if (textEl) textEl.textContent = '卡片视图';

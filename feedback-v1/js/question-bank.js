@@ -5999,9 +5999,10 @@ function renderPdfBtn(q, index, type) {
     const hasRegionCrop = q && q.questionMeta && q.questionMeta.mode === 'region_crop' &&
         Array.isArray(type === 'answer' ? q.questionMeta.answerRegions : q.questionMeta.regions) &&
         (type === 'answer' ? q.questionMeta.answerRegions : q.questionMeta.regions).length > 0;
+    const escJs = (v) => escapeHtml(String(v ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r/g, '\\r').replace(/\n/g, '\\n'));
     const clickHandler = hasRegionCrop
         ? `previewRegionCropQuestion(${index}, '${type}')`
-        : `previewPdf('${escapeHtml(data.url)}', '${escapeHtml(data.name || label + ' PDF')}')`;
+        : `previewPdf('${escJs(data.url)}', '${escJs(data.name || label + ' PDF')}')`;
 
     return `
         <div class="q-pdf-thumb-card" onclick="${clickHandler}" title="点击全屏预览${label} PDF">

@@ -1132,20 +1132,22 @@ function checkWenjuanxingNameMatches() {
     const body = document.getElementById('wjx-name-body');
     if (!modal || !body) return;
     
+    const esc = (s) => (typeof escapeHtml === 'function' ? escapeHtml(s) : String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
     // Create a datalist with homework student names for suggestions
     let html = `<datalist id="wjx-hw-names">`;
     hwNames.forEach(name => {
-        html += `<option value="${name}">`;
+        html += `<option value="${esc(name)}">`;
     });
     html += `</datalist>`;
     
     unmatched.forEach((name, idx) => {
+        const safeName = esc(name);
         html += `
         <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px; padding:8px 12px; background:var(--ui-fill-weak); border:1px solid var(--border-light); border-radius:var(--radius-sm);">
-            <span style="flex:0 0 auto; font-size:0.82rem; color:var(--text-secondary); min-width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${name}">${name}</span>
+            <span style="flex:0 0 auto; font-size:0.82rem; color:var(--text-secondary); min-width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${safeName}">${safeName}</span>
             <svg style="flex:0 0 16px; width:16px; height:16px; color:var(--text-tertiary);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
             <input type="text" class="modern-input wjx-name-fix" 
-                data-original="${name}" 
+                data-original="${safeName}" 
                 list="wjx-hw-names"
                 placeholder="请输入正确姓名" 
                 style="flex:1; font-size:0.82rem; padding:6px 10px;">
@@ -3123,9 +3125,10 @@ window.previewUploadedFile = function(type, index, e) {
 
         // Render column tag badges
         if (colTagsEl) {
+            const escCol = (s) => (typeof escapeHtml === 'function' ? escapeHtml(s) : String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
             colTagsEl.innerHTML = keyCols.map(c => `
-                <span class="preview-col-tag" style="border-left: 3px solid ${c.badgeColor};">
-                    ${c.name}
+                <span class="preview-col-tag" style="border-left: 3px solid ${escCol(c.badgeColor)};">
+                    ${escCol(c.name)}
                 </span>
             `).join('');
         }
@@ -3638,7 +3641,7 @@ function renderPreviewTableRows() {
                     } else if (c.role === 'class') {
                         thStyle = 'min-width: 95px;';
                     }
-                    return `<th style="${thStyle}">${c.name}</th>`;
+                    return `<th style="${thStyle}">${String(c.name ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</th>`;
                 }).join('')}
                 ${actionTh}
             </tr>
@@ -3746,24 +3749,24 @@ function renderPreviewTableRows() {
                             <input type="text" inputmode="numeric" pattern="[0-9]*" class="preview-cell-input preview-score-input" value="${escapeAttr(safeScore)}" oninput="this.value = this.value.replace(/[^0-9]/g, ''); updatePreviewDraftCell(${row._id}, ${c.index}, this.value)" placeholder="分数" style="width:65px; text-align:center; font-weight:700;" />
                         </td>`;
                     }
-                    return `<td><input type="text" class="preview-cell-input" value="${escapeAttr(rawVal)}" oninput="updatePreviewDraftCell(${row._id}, ${c.index}, this.value)" placeholder="${c.name}" /></td>`;
+                    return `<td><input type="text" class="preview-cell-input" value="${escapeAttr(rawVal)}" oninput="updatePreviewDraftCell(${row._id}, ${c.index}, this.value)" placeholder="${escapeAttr(c.name)}" /></td>`;
                 }
 
-                let cellHtml = rawVal;
+                let cellHtml = escapeAttr(rawVal);
                 if (c.role === 'virtual_id') {
                     const idMatch = rawVal.match(/^(\d+)/);
                     const curId = idMatch ? idMatch[1] : '';
-                    cellHtml = curId ? `<span class="preview-id-badge">${curId}</span>` : `<span style="color:var(--text-tertiary)">-</span>`;
+                    cellHtml = curId ? `<span class="preview-id-badge">${escapeAttr(curId)}</span>` : `<span style="color:var(--text-tertiary)">-</span>`;
                 } else if (c.role === 'split_name') {
                     const nameMatch = rawVal.match(/^\d+[\s_\-–—]*(.+)$/);
                     const curName = nameMatch ? nameMatch[1].trim() : rawVal.replace(/^\d+/, '').trim();
-                    cellHtml = `<strong>${curName || '-'}</strong>`;
+                    cellHtml = `<strong>${escapeAttr(curName || '-')}</strong>`;
                 } else if (c.role === 'name') {
                     const nameMatch = rawVal.match(/^\d+[\s_\-–—]*(.+)$/);
                     const cleanName = nameMatch ? nameMatch[1].trim() : rawVal;
-                    cellHtml = `<strong>${cleanName || '-'}</strong>`;
+                    cellHtml = `<strong>${escapeAttr(cleanName || '-')}</strong>`;
                 } else if (c.role === 'id') {
-                    cellHtml = rawVal ? `<span class="preview-id-badge">${rawVal}</span>` : `<span style="color:var(--text-tertiary)">-</span>`;
+                    cellHtml = rawVal ? `<span class="preview-id-badge">${escapeAttr(rawVal)}</span>` : `<span style="color:var(--text-tertiary)">-</span>`;
                 } else if (c.role === 'attendance') {
                     cellHtml = isRowAbsent
                         ? `<span class="preview-status-badge badge-absent">缺勤</span>`

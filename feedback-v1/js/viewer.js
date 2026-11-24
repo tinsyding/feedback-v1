@@ -2780,9 +2780,10 @@ function enterFocusMode(rowIndex) {
     if (focusedRow) {
         const nameEl = focusedRow.querySelector('.student-name');
         const sn = nameEl ? nameEl.innerText : '';
+        const esc = (s) => (typeof escapeHtml === 'function' ? escapeHtml(s) : String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
         const indicator = document.createElement('div');
         indicator.className = 'focus-indicator';
-        indicator.innerHTML = '<div class="focus-indicator-content"><span class="focus-indicator-dot"></span><span class="focus-indicator-name">' + sn + '</span><span class="focus-indicator-hint">点击评语复制</span><button class="focus-exit-btn" onclick="clearFocusMode()" title="退出专注模式"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button></div>';
+        indicator.innerHTML = '<div class="focus-indicator-content"><span class="focus-indicator-dot"></span><span class="focus-indicator-name">' + esc(sn) + '</span><span class="focus-indicator-hint">点击评语复制</span><button class="focus-exit-btn" onclick="clearFocusMode()" title="退出专注模式"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button></div>';
         document.body.appendChild(indicator);
     }
 }
@@ -2846,7 +2847,8 @@ function toggleStudentOnlineStatus(studentKey, tagElement) {
         showToast(`错误：${studentKey} 不在专注度积分名单中，无法切换为线上`);
         return;
     }
-    showCustomDialog({ title: '切换上课方式', body: `将 <strong>${studentKey}</strong> 修改为 <strong>「${tgt}」</strong>？`, confirmText: `切换为${tgt}`,
+    const esc = (s) => (typeof escapeHtml === 'function' ? escapeHtml(s) : String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
+    showCustomDialog({ title: '切换上课方式', body: `将 <strong>${esc(studentKey)}</strong> 修改为 <strong>「${tgt}」</strong>？`, confirmText: `切换为${tgt}`,
         onConfirm: () => {
             onlineOverrides[studentKey] = cur ? 'offline' : 'online';
             updateRuntimeState({ onlineOverrides });
@@ -3084,7 +3086,7 @@ function checkUnsubmittedStudents(previewMap, homeworkMap, pvLesson, hwLesson, n
                         </button>
                     </div>
                     <div class="unsubmitted-card-names">
-                        ${previewUnsubmitted.join('、')}
+                        ${previewUnsubmitted.map(escapeHtml).join('、')}
                     </div>
                 </div>
             `;
@@ -3103,7 +3105,7 @@ function checkUnsubmittedStudents(previewMap, homeworkMap, pvLesson, hwLesson, n
                         </button>
                     </div>
                     <div class="unsubmitted-card-names">
-                        ${homeworkUnsubmitted.join('、')}
+                        ${homeworkUnsubmitted.map(escapeHtml).join('、')}
                     </div>
                 </div>
             `;
@@ -3122,7 +3124,7 @@ function checkUnsubmittedStudents(previewMap, homeworkMap, pvLesson, hwLesson, n
                         </button>
                     </div>
                     <div class="unsubmitted-card-names">
-                        ${noteUnsubmitted.join('、')}
+                        ${noteUnsubmitted.map(escapeHtml).join('、')}
                     </div>
                 </div>
             `;
@@ -3141,7 +3143,7 @@ function checkUnsubmittedStudents(previewMap, homeworkMap, pvLesson, hwLesson, n
                         </button>
                     </div>
                     <div class="unsubmitted-card-names">
-                        ${classTestUnsubmitted.join('、')}
+                        ${classTestUnsubmitted.map(escapeHtml).join('、')}
                     </div>
                 </div>
             `;
@@ -4132,7 +4134,8 @@ async function executeExport(format) {
         if (saved) showToast(`已导出${exportData.length}条Excel数据`);
     } else if (format === 'docx') {
         let html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>反馈数据</title></head><body><table border="1" style="border-collapse:collapse;width:100%;"><tbody>`;
-        exportData.forEach(i => { html += `<tr><td style="padding:8px;vertical-align:top;">${i.studentName}</td><td style="padding:8px;vertical-align:top;"><p style="white-space:pre-wrap;margin:0;">${i.message.replace(/\n/g,'<br>')}</p></td></tr>`; });
+        const escDoc = (s) => (typeof escapeHtml === 'function' ? escapeHtml(s) : String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
+        exportData.forEach(i => { html += `<tr><td style="padding:8px;vertical-align:top;">${escDoc(i.studentName)}</td><td style="padding:8px;vertical-align:top;"><p style="white-space:pre-wrap;margin:0;">${escDoc(i.message).replace(/\n/g,'<br>')}</p></td></tr>`; });
         html += '</tbody></table></body></html>';
         const blob = new Blob(['\ufeff',html],{type:'application/msword'});
         const saved = await saveFileWithDialog(blob, `${baseFilename}.doc`, 'Word Document', 'doc', 'application/msword');

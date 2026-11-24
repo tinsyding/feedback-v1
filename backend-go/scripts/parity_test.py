@@ -2461,6 +2461,7 @@ def main(argv: list[str] | None = None) -> int:
                 go_env = base_env.copy()
                 go_env["FEEDBACK_ROOT"] = str(feedback_root)
                 go_env["FEEDBACK_LISTEN_ADDR"] = f"127.0.0.1:{go_port}"
+                go_env["FEEDBACK_ALLOW_LOOPBACK_VISION"] = "1"
                 with go_log.open("wb") as go_log_f:
                     go_proc = subprocess.Popen(
                         [go_bin_path],
