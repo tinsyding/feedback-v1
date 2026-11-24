@@ -61,12 +61,16 @@ func (d RetestDeps) resolveSecretKey() string {
 // Retest handles all 10 actions of /api/retest.php.
 func Retest(deps RetestDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Ensure data/temp exists and probabilistically clean files older than 2 hours (25% chance)
+		action := r.URL.Query().Get("action")
+		// Ensure data/temp exists and probabilistically clean files older than 2 hours (25% chance).
+		// Skip pre-dispatch cleanup on download_file so expired links deterministically return 410 Gone.
 		if deps.FeedbackRoot != "" {
 			tempDir := deps.tempDir()
 			_ = os.MkdirAll(tempDir, 0o755)
-			if n, err := rand.Int(rand.Reader, big.NewInt(4)); err == nil && n.Int64() == 0 {
-				cleanupExpiredTempFiles(tempDir, deps.now(), 2*time.Hour)
+			if action != "download_file" {
+				if n, err := rand.Int(rand.Reader, big.NewInt(4)); err == nil && n.Int64() == 0 {
+					cleanupExpiredTempFiles(tempDir, deps.now(), 2*time.Hour)
+				}
 			}
 		}
 
@@ -79,7 +83,6 @@ func Retest(deps RetestDeps) http.HandlerFunc {
 			return
 		}
 
-		action := r.URL.Query().Get("action")
 		switch action {
 		case "captcha":
 			handleRetestCaptcha(w, r, deps)
