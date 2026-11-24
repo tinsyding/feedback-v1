@@ -701,7 +701,8 @@ switch ($action) {
                         }
                     }
                 }
-                if (empty($input['retest_token']) || $input['retest_token'] === 'auto') {
+                $rtTrim = trim((string)($input['retest_token'] ?? ''));
+                if ($rtTrim === '' || $rtTrim === 'auto') {
                     $sKeyForToken = (string)($input['student_key'] ?? build_student_key(
                         trim((string)($input['student_id'] ?? '')),
                         trim((string)($input['student_name'] ?? '')),
@@ -729,7 +730,8 @@ switch ($action) {
             $values = [];
 
             foreach ($cols as $colName => $colDef) {
-                if ($colDef['key'] === 'PRI' && ($colDef['extra'] === 'auto_increment' || empty($input[$colName]))) {
+                $isAutoInc = stripos((string)($colDef['extra'] ?? ''), 'auto_increment') !== false;
+                if ($colDef['key'] === 'PRI' && ($isAutoInc || !isset($input[$colName]) || trim((string)$input[$colName]) === '')) {
                     continue;
                 }
                 if ($colName === 'created_at' || $colName === 'updated_at') {
