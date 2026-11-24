@@ -725,10 +725,14 @@
 .saved-btn.edit-btn {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 14px;
-    font-size: 0.82rem;
+    justify-content: center;
+    gap: 5px;
+    padding: 6px 12px;
+    font-size: 0.8rem;
     font-weight: 600;
+    line-height: 1.25;
+    white-space: nowrap;
+    flex-shrink: 0;
     border-radius: var(--radius-xs, 6px);
     border: none;
     background: var(--accent);
@@ -745,6 +749,7 @@
 .saved-btn.edit-btn svg {
     width: 14px;
     height: 14px;
+    flex-shrink: 0;
 }
 
 .saved-btn.delete-btn {
@@ -753,6 +758,7 @@
     justify-content: center;
     width: 30px;
     height: 30px;
+    flex-shrink: 0;
     border-radius: var(--radius-xs, 6px);
     border: 1px solid transparent;
     background: transparent;
@@ -5376,7 +5382,8 @@ span.rg-card-num-wrap {
     display: flex;
     align-items: center;
     gap: 6px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    min-width: 0;
 }
 
 .saved-btn.history-btn {
@@ -6609,6 +6616,34 @@ span.rg-card-num-wrap {
     }
     100% {
         box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+    }
+}
+
+.question-item.qb-jump-highlight {
+    animation: qbJumpPulse 0.9s ease 2;
+    border-color: #3b82f6 !important;
+}
+
+@media (max-width: 768px) {
+    .qb-preview-media-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .qb-preview-card {
+        padding: 12px;
+    }
+
+    .qb-preview-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .qb-preview-layout-seg {
+        align-self: flex-start;
+    }
+}
+
+a(59, 130, 246, 0);
     }
 }
 

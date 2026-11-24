@@ -5835,8 +5835,8 @@ function applySavedDataFilter() {
                     ${typeBadge}
                     <span class="saved-badge ${subjectClass}">${escapeHtml(item.subject)}</span>
                     <span class="saved-season-tag">${escapeHtml(String(itemYear))}${escapeHtml(itemSeason)}</span>
-                    <span class="saved-grade-tag">${escapeHtml(itemGrade)} · ${escapeHtml(item.tier)}层</span>
                 </div>
+                <span class="saved-grade-tag">${escapeHtml(itemGrade)} · ${escapeHtml(item.tier)}层</span>
             </div>
             <div class="saved-card-body">
                 <h4 class="saved-card-title">${escapeHtml(topicName)}</h4>
