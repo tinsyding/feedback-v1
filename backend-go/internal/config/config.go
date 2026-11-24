@@ -299,16 +299,16 @@ func (l *Loader) loadSecrets() Secrets {
 	if v := strings.TrimSpace(os.Getenv("DASHSCOPE_API_KEY")); v != "" {
 		out.DashscopeApiKey = v
 	}
-	if v := os.Getenv("IDENTIFY_API_BASE"); v != "" {
+	if v := strings.TrimSpace(os.Getenv("IDENTIFY_API_BASE")); v != "" {
 		out.IdentifyApiBase = v
 	}
-	if v := os.Getenv("IDENTIFY_MODEL"); v != "" {
+	if v := strings.TrimSpace(os.Getenv("IDENTIFY_MODEL")); v != "" {
 		out.IdentifyModel = v
 	}
-	if v := os.Getenv("IDENTIFY_FAST_MODEL"); v != "" {
+	if v := strings.TrimSpace(os.Getenv("IDENTIFY_FAST_MODEL")); v != "" {
 		out.IdentifyFastModel = v
 	}
-	if v := os.Getenv("RETEST_SECRET"); v != "" {
+	if v := strings.TrimSpace(os.Getenv("RETEST_SECRET")); v != "" {
 		out.RetestSecret = v
 	}
 
@@ -633,7 +633,7 @@ func (c RuntimeConfig) aiSecretString(key string) string {
 func (c RuntimeConfig) IdentifyAPIBase() string {
 	base := strings.TrimSpace(c.RawString("identifyApiBase"))
 	if base == "" {
-		base = c.Secrets.IdentifyApiBase
+		base = strings.TrimSpace(c.Secrets.IdentifyApiBase)
 	}
 	if base == "" {
 		return DefaultIdentifyAPIBase
@@ -664,7 +664,7 @@ func (c RuntimeConfig) IdentifyModel(mode, purpose string) string {
 	case "title":
 		fast := strings.TrimSpace(c.RawString("identifyFastModel"))
 		if fast == "" {
-			fast = c.Secrets.IdentifyFastModel
+			fast = strings.TrimSpace(c.Secrets.IdentifyFastModel)
 		}
 		if fast == "" {
 			fast = DefaultIdentifyFastModel
@@ -684,8 +684,8 @@ func (c RuntimeConfig) baseIdentifyModel() string {
 	if v := strings.TrimSpace(c.RawString("identifyModel")); v != "" {
 		return v
 	}
-	if c.Secrets.IdentifyModel != "" {
-		return c.Secrets.IdentifyModel
+	if m := strings.TrimSpace(c.Secrets.IdentifyModel); m != "" {
+		return m
 	}
 	return DefaultIdentifyModel
 }

@@ -113,6 +113,12 @@ type AtomicUpdater interface {
 	Update(ctx context.Context, sessionID string, fn func(data map[string]any) (changed bool, err error)) (*Session, error)
 }
 
+// AtomicRegenerator is an optional interface for Stores that support transactional
+// session ID rotation (locking oldID, merging updates, persisting newID before deleting oldID).
+type AtomicRegenerator interface {
+	Regenerate(ctx context.Context, oldID, newID string, fn func(data map[string]any) error) (*Session, error)
+}
+
 // Update atomically reads, mutates via fn, and persists a session when supported by Store,
 // falling back to Load + fn + Save for simpler Store implementations.
 func Update(ctx context.Context, store Store, sessionID string, fn func(data map[string]any) (changed bool, err error)) (*Session, error) {
@@ -358,6 +364,90 @@ func (s *MySQLStore) Update(ctx context.Context, sessionID string, fn func(data 
 	return &Session{ID: sid, Data: data}, nil
 }
 
+// Regenerate atomically locks oldID, applies fn onto the latest payload, inserts newID FIRST,
+// and deletes oldID only after newID is saved, all inside one database transaction.
+func (s *MySQLStore) Regenerate(ctx context.Context, oldID, newID string, fn func(data map[string]any) error) (*Session, error) {
+	oldSID := strings.TrimSpace(oldID)
+	newSID := strings.TrimSpace(newID)
+	if !reValidSessionID.MatchString(newSID) {
+		return nil, errors.New("invalid session id")
+	}
+	if s == nil || s.db == nil {
+		return nil, errors.New("session store database is not configured")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	now := s.now().Unix()
+	data := make(map[string]any)
+	hasValidOld := oldSID != "" && reValidSessionID.MatchString(oldSID)
+	if hasValidOld {
+		var rawJSON sql.NullString
+		var expiresAt int64
+		err = tx.QueryRowContext(
+			ctx,
+			"SELECT `payload_json`, `expires_at` FROM `app_sessions` WHERE `session_id` = ? AND `expires_at` >= ? FOR UPDATE",
+			oldSID,
+			now,
+		).Scan(&rawJSON, &expiresAt)
+		if err == nil {
+			if rawJSON.Valid && strings.TrimSpace(rawJSON.String) != "" {
+				dec := json.NewDecoder(strings.NewReader(rawJSON.String))
+				dec.UseNumber()
+				if decErr := dec.Decode(&data); decErr != nil {
+					data = make(map[string]any)
+				}
+			}
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+	}
+
+	if fn != nil {
+		if err := fn(data); err != nil {
+			return nil, err
+		}
+	}
+
+	if len(data) > 0 {
+		rawBytes, mErr := json.Marshal(data)
+		if mErr != nil {
+			return nil, mErr
+		}
+		newExpires := now + int64(s.effectiveTTL().Seconds())
+		if _, err := tx.ExecContext(
+			ctx,
+			`INSERT INTO `+"`app_sessions`"+` (`+"`session_id`, `payload_php`, `payload_json`, `expires_at`"+`)
+			 VALUES (?, '', ?, ?)
+			 ON DUPLICATE KEY UPDATE
+			   `+"`payload_php`"+` = '',
+			   `+"`payload_json`"+` = VALUES(`+"`payload_json`"+`),
+			   `+"`expires_at`"+` = VALUES(`+"`expires_at`"+`),
+			   `+"`updated_at`"+` = CURRENT_TIMESTAMP`,
+			newSID,
+			string(rawBytes),
+			newExpires,
+		); err != nil {
+			return nil, err
+		}
+	}
+
+	if hasValidOld && oldSID != newSID {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM `app_sessions` WHERE `session_id` = ?", oldSID); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &Session{ID: newSID, Data: data}, nil
+}
+
 // Destroy deletes a session row from `app_sessions`.
 func (s *MySQLStore) Destroy(ctx context.Context, sessionID string) error {
 	sessionID = strings.TrimSpace(sessionID)
@@ -526,6 +616,42 @@ func (m *MemoryStore) Update(_ context.Context, sessionID string, fn func(data m
 	return &Session{ID: sid, Data: copySessionMap(data)}, nil
 }
 
+// Regenerate executes an atomic read-modify-regenerate on MemoryStore under m.mu.Lock(),
+// saving newID before deleting oldID.
+func (m *MemoryStore) Regenerate(_ context.Context, oldID, newID string, fn func(data map[string]any) error) (*Session, error) {
+	oldSID := strings.TrimSpace(oldID)
+	newSID := strings.TrimSpace(newID)
+	if !reValidSessionID.MatchString(newSID) {
+		return nil, errors.New("invalid session id")
+	}
+	if m == nil {
+		return nil, errors.New("session store is nil")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var data map[string]any
+	if oldSID != "" && reValidSessionID.MatchString(oldSID) {
+		data = copySessionMap(m.sessions[oldSID])
+	} else {
+		data = make(map[string]any)
+	}
+	if fn != nil {
+		if err := fn(data); err != nil {
+			return nil, err
+		}
+	}
+	if len(data) == 0 {
+		delete(m.sessions, newSID)
+	} else {
+		m.sessions[newSID] = copySessionMap(data)
+	}
+	if oldSID != "" && oldSID != newSID {
+		delete(m.sessions, oldSID)
+	}
+	return &Session{ID: newSID, Data: copySessionMap(data)}, nil
+}
+
 // NewSessionID generates a cryptographically random 32-char hex PHPSESSID.
 func NewSessionID() (string, error) {
 	buf := make([]byte, 16)
@@ -548,24 +674,37 @@ func SetCookie(w http.ResponseWriter, r *http.Request, sessionID string) {
 	})
 }
 
+// ExtractCookieID returns the trimmed PHPSESSID cookie value if present and syntactically valid, or "".
+func ExtractCookieID(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	cookie, err := r.Cookie("PHPSESSID")
+	if err != nil {
+		return ""
+	}
+	sid := strings.TrimSpace(cookie.Value)
+	if !reValidSessionID.MatchString(sid) {
+		return ""
+	}
+	return sid
+}
+
 // LoadOrInit loads an existing session by PHPSESSID cookie or initializes a new in-memory Session with a fresh ID.
-// The second return value (isNew) is true when no valid PHPSESSID cookie was present on the request.
+// Strict mode: unrecognized, expired, or unbacked PHPSESSID cookies are never adopted; a fresh ID is minted with isNew=true.
 func LoadOrInit(ctx context.Context, r *http.Request, store Store) (*Session, bool, error) {
-	sid := extractSessionID(r)
-	if sid != "" && reValidSessionID.MatchString(sid) {
-		if store != nil {
-			sess, err := store.Load(ctx, sid)
-			if err != nil {
-				return nil, false, err
-			}
-			if sess != nil {
-				if sess.Data == nil {
-					sess.Data = make(map[string]any)
-				}
-				return sess, false, nil
-			}
+	sid := ExtractCookieID(r)
+	if sid != "" && store != nil {
+		sess, err := store.Load(ctx, sid)
+		if err != nil {
+			return nil, false, err
 		}
-		return &Session{ID: sid, Data: make(map[string]any)}, false, nil
+		if sess != nil {
+			if sess.Data == nil {
+				sess.Data = make(map[string]any)
+			}
+			return sess, false, nil
+		}
 	}
 	newID, err := NewSessionID()
 	if err != nil {
@@ -574,8 +713,9 @@ func LoadOrInit(ctx context.Context, r *http.Request, store Store) (*Session, bo
 	return &Session{ID: newID, Data: make(map[string]any)}, true, nil
 }
 
-// Regenerate rotates the session ID to defend against session fixation, deleting the old row and writing Set-Cookie.
-func Regenerate(ctx context.Context, w http.ResponseWriter, r *http.Request, store Store, sess *Session) error {
+// RegenerateWithUpdate atomically locks oldID (if valid), applies fn onto the latest payload,
+// saves newID before deleting oldID, updates sess in-place, and writes Set-Cookie.
+func RegenerateWithUpdate(ctx context.Context, w http.ResponseWriter, r *http.Request, store Store, sess *Session, fn func(data map[string]any) error) error {
 	if sess == nil {
 		return errors.New("nil session")
 	}
@@ -584,31 +724,77 @@ func Regenerate(ctx context.Context, w http.ResponseWriter, r *http.Request, sto
 	if err != nil {
 		return err
 	}
-	if oldID != "" && store != nil {
-		_ = store.Destroy(ctx, oldID)
+	if store == nil {
+		if sess.Data == nil {
+			sess.Data = make(map[string]any)
+		}
+		if fn != nil {
+			if err := fn(sess.Data); err != nil {
+				return err
+			}
+		}
+		sess.ID = newID
+		SetCookie(w, r, newID)
+		return nil
 	}
-	sess.ID = newID
-	if store != nil {
-		if err := store.Save(ctx, sess); err != nil {
+	if reg, ok := store.(AtomicRegenerator); ok {
+		updated, err := reg.Regenerate(ctx, oldID, newID, fn)
+		if err != nil {
+			return err
+		}
+		sess.ID = updated.ID
+		sess.Data = updated.Data
+		SetCookie(w, r, newID)
+		return nil
+	}
+	// Generic fallback: load latest payload, apply fn, Save(newID) BEFORE Destroy(oldID).
+	data := make(map[string]any)
+	hasValidOld := oldID != "" && reValidSessionID.MatchString(oldID)
+	if hasValidOld {
+		existing, err := store.Load(ctx, oldID)
+		if err != nil {
+			return err
+		}
+		if existing != nil && existing.Data != nil {
+			data = copySessionMap(existing.Data)
+		}
+	}
+	if fn != nil {
+		if err := fn(data); err != nil {
 			return err
 		}
 	}
+	newSess := &Session{ID: newID, Data: data}
+	if err := store.Save(ctx, newSess); err != nil {
+		return err
+	}
+	if hasValidOld && oldID != newID {
+		_ = store.Destroy(ctx, oldID)
+	}
+	sess.ID = newID
+	sess.Data = data
 	SetCookie(w, r, newID)
 	return nil
 }
 
-func extractSessionID(r *http.Request) string {
-	cookie, err := r.Cookie("PHPSESSID")
-	if err != nil {
-		return ""
+// Regenerate rotates the session ID to defend against session fixation, saving the new session before deleting the old row and writing Set-Cookie.
+func Regenerate(ctx context.Context, w http.ResponseWriter, r *http.Request, store Store, sess *Session) error {
+	if sess == nil {
+		return errors.New("nil session")
 	}
-	return strings.TrimSpace(cookie.Value)
+	snapshot := copySessionMap(sess.Data)
+	return RegenerateWithUpdate(ctx, w, r, store, sess, func(data map[string]any) error {
+		for k, v := range snapshot {
+			data[k] = v
+		}
+		return nil
+	})
 }
 
 // RequireAuth mirrors PHP bootstrap.php requireAuth().
 // On unauthenticated or failed session lookup, writes HTTP 401 and returns (nil, false).
 func RequireAuth(w http.ResponseWriter, r *http.Request, store Store) (*Session, bool) {
-	sid := extractSessionID(r)
+	sid := ExtractCookieID(r)
 	if sid == "" || store == nil {
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("未登录或登录会话已过期，请重新登录"), http.StatusUnauthorized)
 		return nil, false
@@ -633,7 +819,7 @@ func RequireNonAssistant(w http.ResponseWriter, sess *Session, actionDesc string
 
 // RequireAdmin mirrors PHP bootstrap.php requireAdmin().
 func RequireAdmin(w http.ResponseWriter, r *http.Request, store Store) (*Session, bool) {
-	sid := extractSessionID(r)
+	sid := ExtractCookieID(r)
 	if sid == "" || store == nil {
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("未登录或会话已过期，需管理员权限"), http.StatusUnauthorized)
 		return nil, false

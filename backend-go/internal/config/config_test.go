@@ -426,3 +426,47 @@ return [
 	}
 }
 
+func TestTrimSpaceOnEnvFallbacks(t *testing.T) {
+	root := t.TempDir()
+	loader := NewLoader(root, "")
+
+	t.Setenv("IDENTIFY_API_BASE", "  https://trimmed.example/v1/  ")
+	t.Setenv("IDENTIFY_MODEL", "  qwen-max-trimmed  ")
+	t.Setenv("IDENTIFY_FAST_MODEL", "  qwen-flash-trimmed  ")
+	t.Setenv("RETEST_SECRET", "  retest-secret-trimmed  ")
+
+	cfg := loader.Load()
+	if got := cfg.IdentifyAPIBase(); got != "https://trimmed.example/v1/chat/completions" {
+		t.Fatalf("IdentifyAPIBase = %q", got)
+	}
+	if got := cfg.IdentifyModel("full", ""); got != "qwen-max-trimmed" {
+		t.Fatalf("IdentifyModel(full) = %q", got)
+	}
+	if got := cfg.IdentifyModel("title", ""); got != "qwen-flash-trimmed" {
+		t.Fatalf("IdentifyModel(title) = %q", got)
+	}
+	if got := cfg.Secrets.RetestSecret; got != "retest-secret-trimmed" {
+		t.Fatalf("RetestSecret = %q", got)
+	}
+
+	// Whitespace-only env vars fall back to defaults instead of polluting values.
+	t.Setenv("IDENTIFY_API_BASE", "   \t  ")
+	t.Setenv("IDENTIFY_MODEL", "   ")
+	t.Setenv("IDENTIFY_FAST_MODEL", "\n")
+	t.Setenv("RETEST_SECRET", "   ")
+
+	cfgDefaults := loader.Load()
+	if got := cfgDefaults.IdentifyAPIBase(); got != DefaultIdentifyAPIBase {
+		t.Fatalf("whitespace IDENTIFY_API_BASE = %q, want %q", got, DefaultIdentifyAPIBase)
+	}
+	if got := cfgDefaults.IdentifyModel("full", ""); got != DefaultIdentifyModel {
+		t.Fatalf("whitespace IDENTIFY_MODEL = %q, want %q", got, DefaultIdentifyModel)
+	}
+	if got := cfgDefaults.IdentifyModel("title", ""); got != DefaultIdentifyFastModel {
+		t.Fatalf("whitespace IDENTIFY_FAST_MODEL = %q, want %q", got, DefaultIdentifyFastModel)
+	}
+	if got := cfgDefaults.Secrets.RetestSecret; got != "" {
+		t.Fatalf("whitespace RETEST_SECRET = %q, want empty", got)
+	}
+}
+

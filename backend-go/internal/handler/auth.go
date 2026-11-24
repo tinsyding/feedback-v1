@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -82,12 +83,55 @@ func loadAuthSession(r *http.Request, store session.Store) (*session.Session, bo
 	return sess, isNew
 }
 
-func persistAuthSession(w http.ResponseWriter, r *http.Request, store session.Store, sess *session.Session, isNew bool) {
-	if store == nil || sess == nil {
+func incrementSessionFailCounter(w http.ResponseWriter, r *http.Request, store session.Store, sess *session.Session, isNew bool, counterKey string) {
+	if sess == nil {
 		return
 	}
-	if err := store.Save(r.Context(), sess); err == nil && isNew && len(sess.Data) > 0 {
+	delete(sess.Data, "front_captcha_code")
+	delete(sess.Data, "front_captcha_time")
+	if store != nil {
+		updated, err := session.Update(r.Context(), store, sess.ID, func(data map[string]any) (bool, error) {
+			delete(data, "front_captcha_code")
+			delete(data, "front_captcha_time")
+			data[counterKey] = config.AsPHPInt(data[counterKey]) + 1
+			return true, nil
+		})
+		if err == nil {
+			if updated != nil {
+				sess.Data = updated.Data
+			}
+			if isNew {
+				session.SetCookie(w, r, sess.ID)
+			}
+		}
+		return
+	}
+	sess.Data[counterKey] = sess.IntVal(counterKey) + 1
+	if isNew {
 		session.SetCookie(w, r, sess.ID)
+	}
+}
+
+func clearSessionResetCounters(ctx context.Context, store session.Store, sess *session.Session, isNew bool) {
+	if sess == nil {
+		return
+	}
+	delete(sess.Data, "reset_pwd_fail_count")
+	delete(sess.Data, "front_captcha_code")
+	delete(sess.Data, "front_captcha_time")
+	if store != nil && !isNew {
+		_, _ = session.Update(ctx, store, sess.ID, func(data map[string]any) (bool, error) {
+			_, hasFail := data["reset_pwd_fail_count"]
+			_, hasCode := data["front_captcha_code"]
+			_, hasTime := data["front_captcha_time"]
+			if !hasFail && !hasCode && !hasTime {
+				return false, nil
+			}
+			delete(data, "reset_pwd_fail_count")
+			delete(data, "front_captcha_code")
+			delete(data, "front_captcha_time")
+			return true, nil
+		})
 	}
 }
 
@@ -108,13 +152,17 @@ func readJSONBodyMap(r *http.Request) map[string]any {
 	return m
 }
 
+var fallbackRateLimitStore = ratelimit.NewMemoryStore()
+
 func getRateStatus(ctx context.Context, rl ratelimit.Store, scope, id string, windowSec int) ratelimit.Status {
 	if rl == nil || id == "" {
 		return ratelimit.Status{}
 	}
 	st, err := rl.Status(ctx, scope, id, windowSec)
 	if err != nil {
-		return ratelimit.Status{}
+		log.Printf("warning: ratelimit.Status(%s) failed (%v); using in-memory fallback", scope, err)
+		fbSt, _ := fallbackRateLimitStore.Status(ctx, scope, id, windowSec)
+		return fbSt
 	}
 	return st
 }
@@ -123,14 +171,20 @@ func recordRateFailure(ctx context.Context, rl ratelimit.Store, scope, id string
 	if rl == nil || id == "" {
 		return
 	}
-	_, _ = rl.RecordFailure(ctx, scope, id, maxAttempts, windowSec, lockoutSec)
+	if _, err := rl.RecordFailure(ctx, scope, id, maxAttempts, windowSec, lockoutSec); err != nil {
+		log.Printf("warning: ratelimit.RecordFailure(%s) failed (%v); using in-memory fallback", scope, err)
+		_, _ = fallbackRateLimitStore.RecordFailure(ctx, scope, id, maxAttempts, windowSec, lockoutSec)
+	}
 }
 
 func clearRateFailure(ctx context.Context, rl ratelimit.Store, scope, id string) {
 	if rl == nil || id == "" {
 		return
 	}
-	_ = rl.Clear(ctx, scope, id)
+	if err := rl.Clear(ctx, scope, id); err != nil {
+		log.Printf("warning: ratelimit.Clear(%s) failed (%v); clearing in-memory fallback", scope, err)
+	}
+	_ = fallbackRateLimitStore.Clear(ctx, scope, id)
 }
 
 func handleAuthCaptcha(w http.ResponseWriter, r *http.Request, deps AuthDeps) {
@@ -140,12 +194,19 @@ func handleAuthCaptcha(w http.ResponseWriter, r *http.Request, deps AuthDeps) {
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("验证码生成失败"), http.StatusInternalServerError)
 		return
 	}
-	sess.Data["front_captcha_code"] = strings.ToLower(code)
-	sess.Data["front_captcha_time"] = deps.nowUnix()
+	lowerCode := strings.ToLower(code)
+	nowTs := deps.nowUnix()
 	if deps.Sessions != nil {
-		_ = deps.Sessions.Save(r.Context(), sess)
-	}
-	if isNew {
+		if _, err := session.Update(r.Context(), deps.Sessions, sess.ID, func(data map[string]any) (bool, error) {
+			data["front_captcha_code"] = lowerCode
+			data["front_captcha_time"] = nowTs
+			return true, nil
+		}); err == nil && isNew {
+			session.SetCookie(w, r, sess.ID)
+		}
+	} else if isNew {
+		sess.Data["front_captcha_code"] = lowerCode
+		sess.Data["front_captcha_time"] = nowTs
 		session.SetCookie(w, r, sess.ID)
 	}
 
@@ -229,7 +290,14 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request, deps AuthDeps) {
 	}
 
 	ctx := r.Context()
-	sess, isNew := loadAuthSession(r, deps.Sessions)
+	sess, isNew, sessErr := session.LoadOrInit(ctx, r, deps.Sessions)
+	if sessErr != nil {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("数据库连接异常，请稍后重试"), http.StatusInternalServerError)
+		return
+	}
+	if sess.Data == nil {
+		sess.Data = make(map[string]any)
+	}
 	input := readJSONBodyMap(r)
 	username := strings.TrimSpace(config.AsPHPString(input["username"]))
 	password := strings.TrimSpace(config.AsPHPString(input["password"]))
@@ -259,10 +327,7 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request, deps AuthDeps) {
 		}
 		sessionCaptcha, captchaExpired, consumeErr := consumeFrontCaptcha(ctx, deps, sess)
 		if consumeErr != nil || captchaExpired || sessionCaptcha == "" || captchaInput != sessionCaptcha {
-			delete(sess.Data, "front_captcha_code")
-			delete(sess.Data, "front_captcha_time")
-			sess.Data["front_login_fail_count"] = sess.IntVal("front_login_fail_count") + 1
-			persistAuthSession(w, r, deps.Sessions, sess, isNew)
+			incrementSessionFailCounter(w, r, deps.Sessions, sess, isNew, "front_login_fail_count")
 			recordRateFailure(ctx, deps.RateLimit, "front_login_ip", clientIP, 10, 600, 600)
 			msg := "验证码错误，请重新输入"
 			if captchaExpired {
@@ -279,9 +344,7 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request, deps AuthDeps) {
 	}
 
 	if username == "0" {
-		sess.Data["front_login_fail_count"] = sess.IntVal("front_login_fail_count") + 1
-		delete(sess.Data, "front_captcha_code")
-		persistAuthSession(w, r, deps.Sessions, sess, isNew)
+		incrementSessionFailCounter(w, r, deps.Sessions, sess, isNew, "front_login_fail_count")
 		recordRateFailure(ctx, deps.RateLimit, "front_login_ip", clientIP, 10, 600, 600)
 		httpx.SendResponse(w, false, map[string]any{"require_captcha": true},
 			httpx.StrPtr("测试账号已退出历史舞台，请使用已分配的教师专属账号登录"), http.StatusForbidden)
@@ -301,9 +364,7 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request, deps AuthDeps) {
 	adminUser, _ := deps.Repo.FindAdminByUsername(ctx, username)
 
 	if user == nil && adminUser == nil {
-		sess.Data["front_login_fail_count"] = sess.IntVal("front_login_fail_count") + 1
-		delete(sess.Data, "front_captcha_code")
-		persistAuthSession(w, r, deps.Sessions, sess, isNew)
+		incrementSessionFailCounter(w, r, deps.Sessions, sess, isNew, "front_login_fail_count")
 		recordRateFailure(ctx, deps.RateLimit, "front_login_ip", clientIP, 10, 600, 600)
 		recordRateFailure(ctx, deps.RateLimit, "front_login_user", username, 5, 600, 600)
 		auditlog.RecordFromRequest(ctx, deps.Audit, r, "warn", "user_auth", "login_failed_not_found", "", map[string]any{
@@ -318,9 +379,7 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request, deps AuthDeps) {
 	userActive := user != nil && user.Status == 1
 	adminActive := adminUser != nil && adminUser.Status == 1
 	if !userActive && !adminActive {
-		sess.Data["front_login_fail_count"] = sess.IntVal("front_login_fail_count") + 1
-		delete(sess.Data, "front_captcha_code")
-		persistAuthSession(w, r, deps.Sessions, sess, isNew)
+		incrementSessionFailCounter(w, r, deps.Sessions, sess, isNew, "front_login_fail_count")
 		recordRateFailure(ctx, deps.RateLimit, "front_login_ip", clientIP, 10, 600, 600)
 		recordRateFailure(ctx, deps.RateLimit, "front_login_user", username, 5, 600, 600)
 		auditlog.RecordFromRequest(ctx, deps.Audit, r, "warn", "user_auth", "login_failed_disabled", "", map[string]any{
@@ -347,9 +406,7 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request, deps AuthDeps) {
 	}
 
 	if !userValid && !adminValid {
-		sess.Data["front_login_fail_count"] = sess.IntVal("front_login_fail_count") + 1
-		delete(sess.Data, "front_captcha_code")
-		persistAuthSession(w, r, deps.Sessions, sess, isNew)
+		incrementSessionFailCounter(w, r, deps.Sessions, sess, isNew, "front_login_fail_count")
 		recordRateFailure(ctx, deps.RateLimit, "front_login_ip", clientIP, 10, 600, 600)
 		recordRateFailure(ctx, deps.RateLimit, "front_login_user", username, 5, 600, 600)
 		auditlog.RecordFromRequest(ctx, deps.Audit, r, "warn", "user_auth", "login_failed_wrong_password", "", map[string]any{
@@ -361,51 +418,62 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request, deps AuthDeps) {
 		return
 	}
 
-	// Login succeeded: reset failure counters & captcha
-	delete(sess.Data, "front_login_fail_count")
-	delete(sess.Data, "front_captcha_code")
+	// Login succeeded: clear rate limits, then atomically merge session state and rotate PHPSESSID.
 	clearRateFailure(ctx, deps.RateLimit, "front_login_ip", clientIP)
 	clearRateFailure(ctx, deps.RateLimit, "front_login_user", username)
 
+	if isNew {
+		sess.ID = ""
+	}
 	nowTs := deps.nowUnix()
-	if userValid {
-		uRole := user.Role
-		if uRole == "" {
-			uRole = "teacher"
-		}
-		sess.Data["user_logged_in"] = true
-		sess.Data["user_id"] = user.ID
-		sess.Data["username"] = user.Username
-		sess.Data["real_name"] = user.RealName
-		sess.Data["user_role"] = uRole
-		sess.Data["user_teacher_id"] = user.TeacherID
-		sess.Data["user_created_by"] = user.CreatedBy
-		sess.Data["user_login_time"] = nowTs
-		_ = deps.Repo.UpdateUserLogin(ctx, user.ID, clientIP)
-	} else {
-		clearUserSessionKeys(sess.Data)
-	}
+	if err := session.RegenerateWithUpdate(ctx, w, r, deps.Sessions, sess, func(data map[string]any) error {
+		delete(data, "front_login_fail_count")
+		delete(data, "front_captcha_code")
+		delete(data, "front_captcha_time")
 
-	if adminValid {
-		aReal := adminUser.RealName
-		if aReal == "" {
-			aReal = "管理员"
+		if userValid {
+			uRole := user.Role
+			if uRole == "" {
+				uRole = "teacher"
+			}
+			data["user_logged_in"] = true
+			data["user_id"] = user.ID
+			data["username"] = user.Username
+			data["real_name"] = user.RealName
+			data["user_role"] = uRole
+			data["user_teacher_id"] = user.TeacherID
+			data["user_created_by"] = user.CreatedBy
+			data["user_login_time"] = nowTs
+		} else {
+			clearUserSessionKeys(data)
 		}
-		aRole := adminUser.Role
-		if aRole == "" {
-			aRole = "super_admin"
-		}
-		sess.Data["admin_logged_in"] = true
-		sess.Data["admin_username"] = adminUser.Username
-		sess.Data["admin_realname"] = aReal
-		sess.Data["admin_role"] = aRole
-		sess.Data["login_time"] = nowTs
-		_ = deps.Repo.UpdateAdminLogin(ctx, adminUser.ID, clientIP)
-	}
 
-	if err := session.Regenerate(ctx, w, r, deps.Sessions, sess); err != nil {
+		if adminValid {
+			aReal := adminUser.RealName
+			if aReal == "" {
+				aReal = "管理员"
+			}
+			aRole := adminUser.Role
+			if aRole == "" {
+				aRole = "super_admin"
+			}
+			data["admin_logged_in"] = true
+			data["admin_username"] = adminUser.Username
+			data["admin_realname"] = aReal
+			data["admin_role"] = aRole
+			data["login_time"] = nowTs
+		}
+		return nil
+	}); err != nil {
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("登录会话保存失败，请稍后重试"), http.StatusInternalServerError)
 		return
+	}
+
+	if userValid {
+		_ = deps.Repo.UpdateUserLogin(ctx, user.ID, clientIP)
+	}
+	if adminValid {
+		_ = deps.Repo.UpdateAdminLogin(ctx, adminUser.ID, clientIP)
 	}
 
 	logUsername := username
@@ -528,25 +596,20 @@ func handleAuthLogout(w http.ResponseWriter, r *http.Request, deps AuthDeps) {
 		return
 	}
 	ctx := r.Context()
-	sess, isNew := loadAuthSession(r, deps.Sessions)
-
-	uname := sess.StringVal("username")
-	if uname == "" {
-		uname = sess.StringVal("admin_username")
-	}
-	if uname == "" {
-		uname = "unknown"
-	}
-	hadUserSession := sess.IsUserLoggedIn()
-	clearUserSessionKeys(sess.Data)
-	// 仅当前台是以纯管理员会话登录（无独立教师会话）时，才一并清除管理员会话
-	if !hadUserSession {
-		clearAdminSessionKeys(sess.Data)
-	}
-	if !isNew && deps.Sessions != nil {
-		if _, err := session.Update(ctx, deps.Sessions, sess.ID, func(data map[string]any) (bool, error) {
+	incomingSID := session.ExtractCookieID(r)
+	uname := "unknown"
+	if incomingSID != "" && deps.Sessions != nil {
+		if _, err := session.Update(ctx, deps.Sessions, incomingSID, func(data map[string]any) (bool, error) {
+			u := strings.TrimSpace(config.AsPHPString(data["username"]))
+			if u == "" {
+				u = strings.TrimSpace(config.AsPHPString(data["admin_username"]))
+			}
+			if u != "" {
+				uname = u
+			}
 			had := config.AsPHPBool(data["user_logged_in"])
 			clearUserSessionKeys(data)
+			// 仅当前台是以纯管理员会话登录（无独立教师会话）时，才一并清除管理员会话
 			if !had {
 				clearAdminSessionKeys(data)
 			}
@@ -572,7 +635,14 @@ func handleAuthResetPassword(w http.ResponseWriter, r *http.Request, deps AuthDe
 	}
 
 	ctx := r.Context()
-	sess, isNew := loadAuthSession(r, deps.Sessions)
+	sess, isNew, sessErr := session.LoadOrInit(ctx, r, deps.Sessions)
+	if sessErr != nil {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("数据库连接异常，请稍后重试"), http.StatusInternalServerError)
+		return
+	}
+	if sess.Data == nil {
+		sess.Data = make(map[string]any)
+	}
 	clientIP := httpx.GetClientIP(r)
 	input := readJSONBodyMap(r)
 
@@ -606,10 +676,7 @@ func handleAuthResetPassword(w http.ResponseWriter, r *http.Request, deps AuthDe
 			sessionCaptcha, captchaExpired, consumeErr = consumeFrontCaptcha(ctx, deps, sess)
 		}
 		if captchaInput == "" || consumeErr != nil || captchaExpired || sessionCaptcha == "" || captchaInput != sessionCaptcha {
-			delete(sess.Data, "front_captcha_code")
-			delete(sess.Data, "front_captcha_time")
-			sess.Data["reset_pwd_fail_count"] = sess.IntVal("reset_pwd_fail_count") + 1
-			persistAuthSession(w, r, deps.Sessions, sess, isNew)
+			incrementSessionFailCounter(w, r, deps.Sessions, sess, isNew, "reset_pwd_fail_count")
 			recordRateFailure(ctx, deps.RateLimit, "reset_pwd_ip", clientIP, 5, 600, 600)
 			if username != "" {
 				recordRateFailure(ctx, deps.RateLimit, "reset_pwd_user", username, 5, 600, 600)
@@ -670,9 +737,7 @@ func handleAuthResetPassword(w http.ResponseWriter, r *http.Request, deps AuthDe
 
 	authFailed := user == nil || user.Status != 1 || user.Username == "0" || !auth.VerifyBcrypt(oldPassword, user.PasswordHash)
 	if authFailed {
-		sess.Data["reset_pwd_fail_count"] = sess.IntVal("reset_pwd_fail_count") + 1
-		delete(sess.Data, "front_captcha_code")
-		persistAuthSession(w, r, deps.Sessions, sess, isNew)
+		incrementSessionFailCounter(w, r, deps.Sessions, sess, isNew, "reset_pwd_fail_count")
 		recordRateFailure(ctx, deps.RateLimit, "reset_pwd_ip", clientIP, 5, 600, 600)
 		recordRateFailure(ctx, deps.RateLimit, "reset_pwd_user", username, 5, 600, 600)
 		auditlog.RecordFromRequest(ctx, deps.Audit, r, "warn", "user_auth", "reset_pwd_failed_auth", username, map[string]any{
@@ -698,9 +763,7 @@ func handleAuthResetPassword(w http.ResponseWriter, r *http.Request, deps AuthDe
 		return
 	}
 
-	delete(sess.Data, "reset_pwd_fail_count")
-	delete(sess.Data, "front_captcha_code")
-	persistAuthSession(w, r, deps.Sessions, sess, isNew)
+	clearSessionResetCounters(ctx, deps.Sessions, sess, isNew)
 	clearRateFailure(ctx, deps.RateLimit, "reset_pwd_ip", clientIP)
 	clearRateFailure(ctx, deps.RateLimit, "reset_pwd_user", username)
 

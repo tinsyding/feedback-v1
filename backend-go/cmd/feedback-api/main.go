@@ -93,10 +93,8 @@ func main() {
 	sessStore := session.NewMySQLStore(sqlDB)
 	sessStore.StartCleanupLoop(ctx, 10*time.Minute)
 
-	var rlStore ratelimit.Store
+	rlStore := ratelimit.NewResilientStore(sqlDB)
 	if sqlDB != nil {
-		rlMySQL := ratelimit.NewMySQLStore(sqlDB)
-		rlStore = rlMySQL
 		go func() {
 			ticker := time.NewTicker(30 * time.Minute)
 			defer ticker.Stop()
@@ -106,13 +104,11 @@ func main() {
 					return
 				case <-ticker.C:
 					cleanCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-					_, _ = rlMySQL.CleanupExpired(cleanCtx)
+					_, _ = rlStore.CleanupExpired(cleanCtx)
 					cancel()
 				}
 			}
 		}()
-	} else {
-		rlStore = ratelimit.NewMemoryStore()
 	}
 
 	attestStore := qbankattest.NewMySQLStore(sqlDB, attestSigner, feedbackRoot)

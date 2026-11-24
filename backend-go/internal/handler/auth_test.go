@@ -606,3 +606,50 @@ func jsonNumber(v int64) string {
 	b, _ := json.Marshal(v)
 	return string(b)
 }
+
+func TestAuthStrictSessionCookieAndCaptchaConcurrency(t *testing.T) {
+	sessStore := session.NewMemoryStore()
+	existingSID := "existing_admin_sess_123456"
+	sessStore.Set(existingSID, map[string]any{
+		"admin_logged_in": true,
+		"admin_username":  "boss",
+	})
+
+	h := httpx.Middleware(Auth(AuthDeps{
+		Sessions:  sessStore,
+		RateLimit: ratelimit.NewMemoryStore(),
+		Audit:     auditlog.NoopLogger{},
+	}))
+
+	// 1. Unknown PHPSESSID sent to ?action=captcha must NOT be adopted (strict mode)
+	unknownSID := "attacker_chosen_sess_12345"
+	reqCapUnknown := httptest.NewRequest(http.MethodGet, "/api/auth.php?action=captcha", nil)
+	reqCapUnknown.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: unknownSID})
+	recCapUnknown := httptest.NewRecorder()
+	h.ServeHTTP(recCapUnknown, reqCapUnknown)
+	if recCapUnknown.Code != http.StatusOK {
+		t.Fatalf("captcha status = %d", recCapUnknown.Code)
+	}
+	mintedSID := extractPHPSESSIDFromRecorder(recCapUnknown)
+	if mintedSID == "" || mintedSID == unknownSID {
+		t.Fatalf("expected newly minted PHPSESSID instead of attacker ID %q, got %q", unknownSID, mintedSID)
+	}
+	if _, err := sessStore.Load(context.Background(), unknownSID); err != nil {
+		t.Fatal(err)
+	} else if s, _ := sessStore.Load(context.Background(), unknownSID); s != nil {
+		t.Fatalf("attacker sid %q must not exist in store", unknownSID)
+	}
+
+	// 2. ?action=captcha on existing admin session preserves admin_logged_in via session.Update
+	reqCapExisting := httptest.NewRequest(http.MethodGet, "/api/auth.php?action=captcha", nil)
+	reqCapExisting.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: existingSID})
+	recCapExisting := httptest.NewRecorder()
+	h.ServeHTTP(recCapExisting, reqCapExisting)
+	if recCapExisting.Code != http.StatusOK {
+		t.Fatalf("captcha existing status = %d", recCapExisting.Code)
+	}
+	loaded, _ := sessStore.Load(context.Background(), existingSID)
+	if loaded == nil || !loaded.IsAdminLoggedIn() || loaded.StringVal("front_captcha_code") == "" {
+		t.Fatalf("expected admin_logged_in and front_captcha_code preserved, got %+v", loaded)
+	}
+}

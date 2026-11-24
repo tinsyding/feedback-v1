@@ -111,6 +111,8 @@ type mockSessionDBState struct {
 	expiresAt      int64
 	rowFound       bool
 	deleteAffected int64
+	execErr        error
+	rollbacks      int
 	execs          []mockExecRecord
 }
 
@@ -150,8 +152,13 @@ type mockSessionTx struct {
 	state *mockSessionDBState
 }
 
-func (tx *mockSessionTx) Commit() error   { return nil }
-func (tx *mockSessionTx) Rollback() error { return nil }
+func (tx *mockSessionTx) Commit() error { return nil }
+func (tx *mockSessionTx) Rollback() error {
+	tx.state.mu.Lock()
+	tx.state.rollbacks++
+	tx.state.mu.Unlock()
+	return nil
+}
 
 func (c *mockSessionConn) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	c.state.mu.Lock()
@@ -179,6 +186,9 @@ func (c *mockSessionConn) ExecContext(_ context.Context, query string, args []dr
 	c.state.mu.Lock()
 	defer c.state.mu.Unlock()
 
+	if c.state.execErr != nil {
+		return nil, c.state.execErr
+	}
 	copied := make([]any, len(args))
 	for i, a := range args {
 		copied[i] = a.Value
@@ -503,4 +513,231 @@ func TestMemoryStoreConcurrentUpdate(t *testing.T) {
 	if finalSess.Data["counter"] != workers {
 		t.Fatalf("counter = %v, want %d (lost update!)", finalSess.Data["counter"], workers)
 	}
+}
+
+type nonAtomicTrackingStore struct {
+	mu          sync.Mutex
+	sessions    map[string]map[string]any
+	saveErr     error
+	destroyErr  error
+	calls       []string
+	destroyedID string
+}
+
+func (s *nonAtomicTrackingStore) Load(_ context.Context, sessionID string) (*Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls = append(s.calls, "load:"+sessionID)
+	data, ok := s.sessions[sessionID]
+	if !ok {
+		return nil, nil
+	}
+	return &Session{ID: sessionID, Data: copySessionMap(data)}, nil
+}
+
+func (s *nonAtomicTrackingStore) Save(_ context.Context, sess *Session) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls = append(s.calls, "save:"+sess.ID)
+	if s.saveErr != nil {
+		return s.saveErr
+	}
+	s.sessions[sess.ID] = copySessionMap(sess.Data)
+	return nil
+}
+
+func (s *nonAtomicTrackingStore) Destroy(_ context.Context, sessionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls = append(s.calls, "destroy:"+sessionID)
+	s.destroyedID = sessionID
+	if s.destroyErr != nil {
+		return s.destroyErr
+	}
+	delete(s.sessions, sessionID)
+	return nil
+}
+
+func TestExtractCookieIDAndLoadOrInitStrictMode(t *testing.T) {
+	store := NewMemoryStore()
+	validActiveID := "active_session_1234567890"
+	store.Set(validActiveID, map[string]any{"user_logged_in": true})
+
+	// 1. ExtractCookieID handles nil, missing, invalid, and trimmed valid cookies
+	if got := ExtractCookieID(nil); got != "" {
+		t.Fatalf("ExtractCookieID(nil) = %q, want empty", got)
+	}
+	reqBad := httptest.NewRequest(http.MethodGet, "/", nil)
+	reqBad.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: "bad"})
+	if got := ExtractCookieID(reqBad); got != "" {
+		t.Fatalf("ExtractCookieID(invalid) = %q, want empty", got)
+	}
+	reqTrim := httptest.NewRequest(http.MethodGet, "/", nil)
+	reqTrim.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: "  " + validActiveID + "  "})
+	if got := ExtractCookieID(reqTrim); got != validActiveID {
+		t.Fatalf("ExtractCookieID(trimmed) = %q, want %q", got, validActiveID)
+	}
+
+	// 2. Recognized active session returns existing session with isNew=false
+	sess, isNew, err := LoadOrInit(context.Background(), reqTrim, store)
+	if err != nil || isNew || sess == nil || sess.ID != validActiveID || !sess.IsUserLoggedIn() {
+		t.Fatalf("LoadOrInit(active) = (%+v, %v, %v)", sess, isNew, err)
+	}
+
+	// 3. Unrecognized valid-format PHPSESSID is NOT adopted (strict mode)
+	attackerSID := "attacker_fixed_session_id_1234"
+	reqAttacker := httptest.NewRequest(http.MethodGet, "/", nil)
+	reqAttacker.AddCookie(&http.Cookie{Name: "PHPSESSID", Value: attackerSID})
+	sessUnknown, isNewUnknown, err := LoadOrInit(context.Background(), reqAttacker, store)
+	if err != nil || !isNewUnknown || sessUnknown == nil || sessUnknown.ID == "" || sessUnknown.ID == attackerSID {
+		t.Fatalf("LoadOrInit adopted unknown sid! got=(%+v, %v, %v)", sessUnknown, isNewUnknown, err)
+	}
+
+	// 4. Nil store with client PHPSESSID is NOT adopted (strict mode)
+	sessNilStore, isNewNilStore, err := LoadOrInit(context.Background(), reqAttacker, nil)
+	if err != nil || !isNewNilStore || sessNilStore == nil || sessNilStore.ID == "" || sessNilStore.ID == attackerSID {
+		t.Fatalf("LoadOrInit(nil store) adopted sid! got=(%+v, %v, %v)", sessNilStore, isNewNilStore, err)
+	}
+
+	// 5. Expired MySQL session is NOT adopted (strict mode)
+	fixedNow := time.Unix(1_700_000_000, 0)
+	expiredState := &mockSessionDBState{
+		rowFound:    true,
+		payloadJSON: `{"user_logged_in":true}`,
+		expiresAt:   fixedNow.Unix() - 10,
+	}
+	mysqlStore := NewMySQLStore(openMockSessionDB(t, expiredState))
+	mysqlStore.nowFunc = func() time.Time { return fixedNow }
+	sessExp, isNewExp, err := LoadOrInit(context.Background(), reqAttacker, mysqlStore)
+	if err != nil || !isNewExp || sessExp == nil || sessExp.ID == "" || sessExp.ID == attackerSID {
+		t.Fatalf("LoadOrInit(expired) adopted sid! got=(%+v, %v, %v)", sessExp, isNewExp, err)
+	}
+}
+
+func TestRegenerateAtomicityAndSaveBeforeDestroy(t *testing.T) {
+	t.Run("generic fallback saves newID before destroying oldID and preserves oldID on Save error", func(t *testing.T) {
+		oldID := "old_generic_session_123456"
+		tracking := &nonAtomicTrackingStore{
+			sessions: map[string]map[string]any{
+				oldID: {"admin_logged_in": true, "keep": "yes"},
+			},
+			saveErr: errors.New("mysql write timeout"),
+		}
+		sess := &Session{ID: oldID, Data: map[string]any{"user_logged_in": true}}
+		req := httptest.NewRequest(http.MethodPost, "/api/auth.php?action=login", nil)
+		rec := httptest.NewRecorder()
+
+		err := Regenerate(context.Background(), rec, req, tracking, sess)
+		if err == nil || !strings.Contains(err.Error(), "mysql write timeout") {
+			t.Fatalf("expected save error, got %v", err)
+		}
+		if _, oldStillExists := tracking.sessions[oldID]; !oldStillExists {
+			t.Fatal("oldID must NOT be destroyed when Save(newID) fails")
+		}
+		if tracking.destroyedID != "" {
+			t.Fatalf("expected Destroy not called on Save failure, got %q", tracking.destroyedID)
+		}
+		if sess.ID != oldID {
+			t.Fatalf("sess.ID mutated on Save failure: %q", sess.ID)
+		}
+		if len(rec.Result().Cookies()) != 0 {
+			t.Fatalf("Set-Cookie must not be sent on Save failure")
+		}
+
+		// Now allow Save to succeed: verify Save happens BEFORE Destroy
+		tracking.saveErr = nil
+		tracking.calls = nil
+		rec2 := httptest.NewRecorder()
+		if err := Regenerate(context.Background(), rec2, req, tracking, sess); err != nil {
+			t.Fatalf("Regenerate failed: %v", err)
+		}
+		if len(tracking.calls) != 3 || !strings.HasPrefix(tracking.calls[0], "load:") || !strings.HasPrefix(tracking.calls[1], "save:") || tracking.calls[2] != "destroy:"+oldID {
+			t.Fatalf("unexpected call order (want load -> save(newID) -> destroy(oldID)): %v", tracking.calls)
+		}
+		if sess.ID == oldID || sess.ID == "" {
+			t.Fatalf("expected rotated sess.ID, got %q", sess.ID)
+		}
+		if _, oldStillExists := tracking.sessions[oldID]; oldStillExists {
+			t.Fatal("expected oldID destroyed after Save succeeded")
+		}
+		if got := tracking.sessions[sess.ID]; got["admin_logged_in"] != true || got["user_logged_in"] != true || got["keep"] != "yes" {
+			t.Fatalf("expected merged session payload in newID, got %+v", got)
+		}
+	})
+
+	t.Run("MySQLStore.Regenerate inserts newID before deleting oldID inside tx", func(t *testing.T) {
+		fixedNow := time.Unix(1_700_000_000, 0)
+		oldID := "old_mysql_session_12345678"
+		state := &mockSessionDBState{
+			rowFound:    true,
+			payloadJSON: `{"admin_logged_in":true,"admin_username":"boss"}`,
+			expiresAt:   fixedNow.Unix() + 500,
+		}
+		store := NewMySQLStore(openMockSessionDB(t, state))
+		store.nowFunc = func() time.Time { return fixedNow }
+
+		sess := &Session{ID: oldID, Data: make(map[string]any)}
+		req := httptest.NewRequest(http.MethodPost, "/api/auth.php?action=login", nil)
+		rec := httptest.NewRecorder()
+
+		err := RegenerateWithUpdate(context.Background(), rec, req, store, sess, func(data map[string]any) error {
+			data["user_logged_in"] = true
+			data["username"] = "t101"
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("RegenerateWithUpdate err = %v", err)
+		}
+		if sess.ID == "" || sess.ID == oldID {
+			t.Fatalf("expected new session ID, got %q", sess.ID)
+		}
+		if !sess.IsAdminLoggedIn() || !sess.IsUserLoggedIn() {
+			t.Fatalf("expected merged admin + user session, got %+v", sess.Data)
+		}
+
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		if len(state.execs) != 2 {
+			t.Fatalf("expected 2 execs (INSERT newID then DELETE oldID), got %d: %+v", len(state.execs), state.execs)
+		}
+		if !strings.Contains(state.execs[0].query, "INSERT INTO `app_sessions`") || state.execs[0].args[0] != sess.ID {
+			t.Fatalf("first exec must INSERT newID (%q), got %+v", sess.ID, state.execs[0])
+		}
+		if !strings.Contains(state.execs[1].query, "DELETE FROM `app_sessions`") || state.execs[1].args[0] != oldID {
+			t.Fatalf("second exec must DELETE oldID (%q), got %+v", oldID, state.execs[1])
+		}
+	})
+
+	t.Run("MySQLStore.Regenerate rolls back and skips DELETE when INSERT fails", func(t *testing.T) {
+		fixedNow := time.Unix(1_700_000_000, 0)
+		oldID := "old_mysql_fail_session_12345"
+		state := &mockSessionDBState{
+			rowFound:    true,
+			payloadJSON: `{"admin_logged_in":true}`,
+			expiresAt:   fixedNow.Unix() + 500,
+			execErr:     errors.New("mysql write error"),
+		}
+		store := NewMySQLStore(openMockSessionDB(t, state))
+		store.nowFunc = func() time.Time { return fixedNow }
+
+		sess := &Session{ID: oldID, Data: make(map[string]any)}
+		req := httptest.NewRequest(http.MethodPost, "/api/auth.php?action=login", nil)
+		rec := httptest.NewRecorder()
+
+		err := RegenerateWithUpdate(context.Background(), rec, req, store, sess, func(data map[string]any) error {
+			data["user_logged_in"] = true
+			return nil
+		})
+		if err == nil || !strings.Contains(err.Error(), "mysql write error") {
+			t.Fatalf("expected insert error, got %v", err)
+		}
+		if sess.ID != oldID {
+			t.Fatalf("sess.ID mutated on rollback: %q", sess.ID)
+		}
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		if len(state.execs) != 0 || state.rollbacks == 0 {
+			t.Fatalf("expected 0 recorded execs and >=1 rollback, got execs=%d rollbacks=%d", len(state.execs), state.rollbacks)
+		}
+	})
 }

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestNormalizeKeyMatchesPHP(t *testing.T) {
@@ -304,5 +305,85 @@ func TestMySQLStoreLifecycle(t *testing.T) {
 	}
 	if st.rolls == 0 {
 		t.Fatal("expected tx rollback on exec failure")
+	}
+}
+
+func TestNormalizeKeyUTF8SafeTruncation(t *testing.T) {
+	// 3-byte CJK runes: 15-byte prefix + 65*3 = 210 bytes (>191)
+	cjkKey := NormalizeKey("reset_pwd_user", strings.Repeat("教", 65))
+	if len(cjkKey) > 191 {
+		t.Fatalf("CJK key len = %d, want <= 191", len(cjkKey))
+	}
+	if !utf8.ValidString(cjkKey) {
+		t.Fatalf("CJK key is invalid UTF-8: %q", cjkKey)
+	}
+	if parts := strings.Split(cjkKey, ":"); len(parts) != 3 || len(parts[2]) != 32 {
+		t.Fatalf("expected <scope>:<prefix>:<md5>, got %q", cjkKey)
+	}
+
+	// 4-byte emoji runes
+	emojiKey := NormalizeKey("front_login_user", strings.Repeat("🔒", 50))
+	if len(emojiKey) > 191 || !utf8.ValidString(emojiKey) {
+		t.Fatalf("emoji key invalid: len=%d valid=%v key=%q", len(emojiKey), utf8.ValidString(emojiKey), emojiKey)
+	}
+}
+
+func TestFallbackStoreAndResilientStore(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. Nil DB resilient store falls back directly to MemoryStore
+	nilResilient := NewResilientStore(nil)
+	for i := 1; i <= 4; i++ {
+		st, err := nilResilient.RecordFailure(ctx, "front_login_user", "alice", 5, 600, 300)
+		if err != nil || st.Count != i || st.Locked {
+			t.Fatalf("nil resilient attempt %d unexpected: %+v err=%v", i, st, err)
+		}
+	}
+	stLock, err := nilResilient.RecordFailure(ctx, "front_login_user", "alice", 5, 600, 300)
+	if err != nil || !stLock.Locked || stLock.RemainingSeconds != 300 {
+		t.Fatalf("expected lockout at 5th attempt, got %+v err=%v", stLock, err)
+	}
+	if err := nilResilient.Clear(ctx, "front_login_user", "alice"); err != nil {
+		t.Fatalf("Clear failed: %v", err)
+	}
+	stAfter, err := nilResilient.Status(ctx, "front_login_user", "alice", 600)
+	if err != nil || stAfter.Count != 0 || stAfter.Locked {
+		t.Fatalf("expected cleared status, got %+v err=%v", stAfter, err)
+	}
+
+	// 2. Primary MySQLStore returning runtime error (e.g. unmigrated table / DB outage) falls back seamlessly
+	mockState := &mockRLState{
+		buckets: make(map[string]mockRLRow),
+		execErr: errors.New("Error 1146: Table 'feedback.auth_rate_limits' doesn't exist"),
+	}
+	mysqlPrimary := NewMySQLStore(openMockRLDB(t, mockState))
+	now := time.Unix(1700000000, 0)
+	mysqlPrimary.nowFunc = func() time.Time { return now }
+	memFallback := NewMemoryStore()
+	memFallback.nowFunc = func() time.Time { return now }
+	fb := NewFallbackStore(mysqlPrimary, memFallback)
+
+	for i := 1; i <= 5; i++ {
+		st, recErr := fb.RecordFailure(ctx, "admin_login_user", "127.0.0.1_admin", 5, 600, 600)
+		if recErr != nil {
+			t.Fatalf("fallback RecordFailure(%d) returned error: %v", i, recErr)
+		}
+		if i == 5 && (!st.Locked || st.RemainingSeconds != 600) {
+			t.Fatalf("expected fallback lockout at 5th failure, got %+v", st)
+		}
+	}
+
+	// Even if primary recovers with empty table, Status still honors active fallback lockout until Clear
+	mockState.execErr = nil
+	stRecovered, err := fb.Status(ctx, "admin_login_user", "127.0.0.1_admin", 600)
+	if err != nil || !stRecovered.Locked {
+		t.Fatalf("expected fallback lockout preserved when primary recovers empty, got %+v err=%v", stRecovered, err)
+	}
+	if err := fb.Clear(ctx, "admin_login_user", "127.0.0.1_admin"); err != nil {
+		t.Fatalf("Clear failed: %v", err)
+	}
+	stPostClear, err := fb.Status(ctx, "admin_login_user", "127.0.0.1_admin", 600)
+	if err != nil || stPostClear.Locked || stPostClear.Count != 0 {
+		t.Fatalf("expected cleared after fb.Clear, got %+v err=%v", stPostClear, err)
 	}
 }

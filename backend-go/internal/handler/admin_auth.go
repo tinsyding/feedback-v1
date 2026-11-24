@@ -120,15 +120,24 @@ func handleAdminLogin(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
 		}
 	}
 
-	// Preserve any concurrent foreground user session while regenerating PHPSESSID
-	sess, _ := loadAuthSession(r, deps.Sessions)
-	sess.Data["admin_logged_in"] = true
-	sess.Data["admin_username"] = username
-	sess.Data["admin_realname"] = realName
-	sess.Data["admin_role"] = role
-	sess.Data["login_time"] = deps.now().Unix()
-
-	if err := session.Regenerate(r.Context(), w, r, deps.Sessions, sess); err != nil {
+	// Preserve any concurrent foreground user session while regenerating PHPSESSID atomically.
+	sess, isNew, sessErr := session.LoadOrInit(r.Context(), r, deps.Sessions)
+	if sessErr != nil {
+		httpx.SendResponse(w, false, nil, httpx.StrPtr("会话创建失败，请稍后重试"), http.StatusInternalServerError)
+		return
+	}
+	if isNew {
+		sess.ID = ""
+	}
+	loginUnix := deps.now().Unix()
+	if err := session.RegenerateWithUpdate(r.Context(), w, r, deps.Sessions, sess, func(data map[string]any) error {
+		data["admin_logged_in"] = true
+		data["admin_username"] = username
+		data["admin_realname"] = realName
+		data["admin_role"] = role
+		data["login_time"] = loginUnix
+		return nil
+	}); err != nil {
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("会话创建失败，请稍后重试"), http.StatusInternalServerError)
 		return
 	}
@@ -156,18 +165,18 @@ func handleAdminLogout(w http.ResponseWriter, r *http.Request, deps AdminDeps) {
 		httpx.SendResponse(w, false, nil, httpx.StrPtr("只支持 POST 请求"), http.StatusMethodNotAllowed)
 		return
 	}
-	sess, isNew := loadAuthSession(r, deps.Sessions)
-	if !isNew && sess != nil && deps.Sessions != nil {
+	incomingSID := session.ExtractCookieID(r)
+	if incomingSID != "" && deps.Sessions != nil {
 		var loggedOutAdmin string
 		var auditSess *session.Session
-		if _, err := session.Update(r.Context(), deps.Sessions, sess.ID, func(data map[string]any) (bool, error) {
+		if _, err := session.Update(r.Context(), deps.Sessions, incomingSID, func(data map[string]any) (bool, error) {
 			if config.AsPHPBool(data["admin_logged_in"]) {
 				loggedOutAdmin = strings.TrimSpace(config.AsPHPString(data["admin_username"]))
 				if loggedOutAdmin == "" {
 					loggedOutAdmin = "admin"
 				}
 				auditSess = &session.Session{
-					ID:   sess.ID,
+					ID:   incomingSID,
 					Data: map[string]any{"admin_logged_in": true, "admin_username": loggedOutAdmin},
 				}
 			}

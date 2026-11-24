@@ -6,9 +6,12 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"log"
 	"strings"
 	"sync"
 	"time"
+
+	"feedback-api/internal/textutil"
 )
 
 // Status mirrors PHP getAuthRateLimitStatus / recordAuthRateLimitFailure return shape.
@@ -25,12 +28,13 @@ type Store interface {
 	Clear(ctx context.Context, scope, identifier string) error
 }
 
-// NormalizeKey matches PHP bootstrap.php normalizeAuthRateLimitKey() so PHP and Go share the exact bucket_key.
+// NormalizeKey matches PHP bootstrap.php normalizeAuthRateLimitKey() so PHP and Go share the exact bucket_key,
+// while truncating multi-byte UTF-8 prefixes on rune boundaries to stay <= 191 bytes for MySQL utf8mb4.
 func NormalizeKey(scope, identifier string) string {
 	key := scope + ":" + strings.ToLower(strings.TrimSpace(identifier))
 	if len(key) > 191 {
 		sum := md5.Sum([]byte(key))
-		key = key[:158] + ":" + hex.EncodeToString(sum[:])
+		key = textutil.TruncateUTF8Bytes(key, 158) + ":" + hex.EncodeToString(sum[:])
 	}
 	return key
 }
@@ -320,4 +324,91 @@ func (m *MemoryStore) Clear(_ context.Context, scope, identifier string) error {
 	defer m.mu.Unlock()
 	delete(m.buckets, NormalizeKey(scope, identifier))
 	return nil
+}
+
+// FallbackStore wraps a primary Store (e.g. MySQLStore) and transparently falls back
+// to an in-memory Store whenever primary is nil or returns a runtime error.
+type FallbackStore struct {
+	primary  Store
+	fallback Store
+}
+
+// NewFallbackStore creates a resilient Store using primary with automatic fallback on error.
+func NewFallbackStore(primary, fallback Store) *FallbackStore {
+	if fallback == nil {
+		fallback = NewMemoryStore()
+	}
+	return &FallbackStore{
+		primary:  primary,
+		fallback: fallback,
+	}
+}
+
+// NewResilientStore creates a FallbackStore backed by MySQL when db != nil and an in-memory Store.
+func NewResilientStore(db *sql.DB) *FallbackStore {
+	var primary Store
+	if db != nil {
+		primary = NewMySQLStore(db)
+	}
+	return NewFallbackStore(primary, NewMemoryStore())
+}
+
+// Status returns rate-limit state from primary or falls back to the in-memory Store on error.
+func (f *FallbackStore) Status(ctx context.Context, scope, identifier string, windowSeconds int) (Status, error) {
+	if f == nil {
+		return Status{}, errors.New("rate limit store is nil")
+	}
+	if f.primary != nil {
+		st, err := f.primary.Status(ctx, scope, identifier, windowSeconds)
+		if err == nil {
+			fbSt, fbErr := f.fallback.Status(ctx, scope, identifier, windowSeconds)
+			if fbErr == nil && ((fbSt.Locked && (!st.Locked || fbSt.RemainingSeconds > st.RemainingSeconds)) || (!st.Locked && fbSt.Count > st.Count)) {
+				return fbSt, nil
+			}
+			return st, nil
+		}
+		log.Printf("warning: ratelimit primary Status(%s) failed (%v); falling back to memory store", scope, err)
+	}
+	return f.fallback.Status(ctx, scope, identifier, windowSeconds)
+}
+
+// RecordFailure records a failure in primary or falls back to the in-memory Store on error.
+func (f *FallbackStore) RecordFailure(ctx context.Context, scope, identifier string, maxAttempts, windowSeconds, lockoutSeconds int) (Status, error) {
+	if f == nil {
+		return Status{}, errors.New("rate limit store is nil")
+	}
+	if f.primary != nil {
+		st, err := f.primary.RecordFailure(ctx, scope, identifier, maxAttempts, windowSeconds, lockoutSeconds)
+		if err == nil {
+			return st, nil
+		}
+		log.Printf("warning: ratelimit primary RecordFailure(%s) failed (%v); falling back to memory store", scope, err)
+	}
+	return f.fallback.RecordFailure(ctx, scope, identifier, maxAttempts, windowSeconds, lockoutSeconds)
+}
+
+// Clear removes the bucket from both primary and fallback stores.
+func (f *FallbackStore) Clear(ctx context.Context, scope, identifier string) error {
+	if f == nil {
+		return errors.New("rate limit store is nil")
+	}
+	if f.primary != nil {
+		if err := f.primary.Clear(ctx, scope, identifier); err != nil {
+			log.Printf("warning: ratelimit primary Clear(%s) failed (%v); clearing fallback store", scope, err)
+		}
+	}
+	return f.fallback.Clear(ctx, scope, identifier)
+}
+
+// CleanupExpired forwards periodic DB cleanup when primary supports it.
+func (f *FallbackStore) CleanupExpired(ctx context.Context) (int64, error) {
+	if f == nil || f.primary == nil {
+		return 0, nil
+	}
+	if cleaner, ok := f.primary.(interface {
+		CleanupExpired(context.Context) (int64, error)
+	}); ok {
+		return cleaner.CleanupExpired(ctx)
+	}
+	return 0, nil
 }
