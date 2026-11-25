@@ -44,14 +44,18 @@
             pdfDoc: null,
             pageNum: 1,
             totalPages: 0,
-            items: []
+            items: [],
+            pageTextCache: new Map(),
+            pageTextPromises: new Map()
         },
         answer: {
             file: null,
             pdfDoc: null,
             pageNum: 1,
             totalPages: 0,
-            items: []
+            items: [],
+            pageTextCache: new Map(),
+            pageTextPromises: new Map()
         }
     };
 
@@ -230,8 +234,8 @@
     }
 
     function resetStudioMemoryState() {
-        rgState.exercise = { file: null, pdfDoc: null, pageNum: 1, totalPages: 0, items: [] };
-        rgState.answer = { file: null, pdfDoc: null, pageNum: 1, totalPages: 0, items: [] };
+        rgState.exercise = { file: null, pdfDoc: null, pageNum: 1, totalPages: 0, items: [], pageTextCache: new Map(), pageTextPromises: new Map() };
+        rgState.answer = { file: null, pdfDoc: null, pageNum: 1, totalPages: 0, items: [], pageTextCache: new Map(), pageTextPromises: new Map() };
         rgState.selectedId = null;
         rgState.continueTargetId = null;
         rgState.subMode = null;
@@ -421,6 +425,16 @@
                         if (parentSubq) syncSubqPrimaryFields(parentSubq);
                     }
                     syncAutoStemBoxes(resizedItem);
+                } else if (
+                    resizedItem
+                    && !resizedItem.isBig
+                    && resizedKind === 'region'
+                    && getCurrentBankTypeSafe() === 'preview'
+                    && !String(resizedItem.label || '').trim()
+                    && Array.isArray(resizedItem.regions)
+                    && resizedItem.regions[0] === resizedBoxRef
+                ) {
+                    applyPreviewAutoDetectIfEmpty(rgState.activeTab, resizedItem, resizedBoxRef);
                 }
                 renderAllRg();
                 scheduleDraftSave();
@@ -595,6 +609,278 @@
         }
     }
 
+    function fallbackParseQuestionCandidate(raw, allowBareNumber = true) {
+        if (typeof window.parseQuestionNumberCandidate === 'function') {
+            return window.parseQuestionNumberCandidate(raw, allowBareNumber);
+        }
+        let s = String(raw || '')
+            .replace(/\u00a0/g, ' ')
+            .replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+            .trim();
+        if (!s) return null;
+        for (let i = 0; i < 6; i++) {
+            const prev = s;
+            s = s
+                .replace(/^[★☆◆◇●○■□▲△▶▷•·▪▫➢➤]+\s*/, '')
+                .replace(/^[【\[][^】\]]{1,12}[】\]]\s*/, '')
+                .replace(/^[（(]\s*(?:[A-Ga-g]{1,4}|[√×]|预习|课前|课堂|课后|多选|单选|双选|不定项|选做|必做|选填|填空|解答|计算|实验|探究|难点|易错|拔高|巩固|提升|拓展|变式|典例|例题|例|真题|模拟|原创|改编)?\s*[）)]\s*/, '')
+                .replace(/^(?:典例|例题|例|变式|拓展|预习|课前)[\s:：·\-]*/, '')
+                .trim();
+            if (s === prev) break;
+        }
+        s = s.replace(/\s+/g, '');
+        if (!s || /第\d+页|共\d+页|page\d+/i.test(s) || /^\d{1,3}\/\d{1,3}/.test(s)) return null;
+        const norm = (v) => {
+            const n = parseInt(v, 10);
+            return Number.isInteger(n) && n >= 1 && n <= 300 ? n : null;
+        };
+        let m = s.match(/^第(\d{1,3})题/);
+        if (m) { const n = norm(m[1]); if (n !== null) return { num: n, kind: 'explicit' }; }
+        m = s.match(/^(\d{1,3})(?:[.．、,，:：]|题)(?![0-9])/);
+        if (m) { const n = norm(m[1]); if (n !== null) return { num: n, kind: 'dotted' }; }
+        m = s.match(/^(\d{1,3})[)）](?![0-9])/);
+        if (m) { const n = norm(m[1]); if (n !== null) return { num: n, kind: 'rparen' }; }
+        m = s.match(/^[（(](\d{1,3})[）)](?:[.．、,，:：]|题)?/);
+        if (m) { const n = norm(m[1]); if (n !== null) return { num: n, kind: 'parens' }; }
+        if (allowBareNumber && /^\d{1,3}$/.test(s)) {
+            const n = norm(s);
+            if (n !== null) return { num: n, kind: 'bare' };
+        }
+        return null;
+    }
+
+    function ensurePageTextData(tab, pageNum) {
+        const tabState = getTabState(tab);
+        if (!tabState || !tabState.pdfDoc || !pageNum) return Promise.resolve(null);
+        if (!tabState.pageTextCache) tabState.pageTextCache = new Map();
+        if (!tabState.pageTextPromises) tabState.pageTextPromises = new Map();
+
+        if (tabState.pageTextCache.has(pageNum)) {
+            return Promise.resolve(tabState.pageTextCache.get(pageNum));
+        }
+        if (tabState.pageTextPromises.has(pageNum)) {
+            return tabState.pageTextPromises.get(pageNum);
+        }
+
+        const pdfDocRef = tabState.pdfDoc;
+        const promise = (async () => {
+            try {
+                const page = await pdfDocRef.getPage(pageNum);
+                const viewport = page.getViewport({ scale: 1 });
+                const textContent = await page.getTextContent();
+                const w = Number(viewport.width) || 1;
+                const h = Number(viewport.height) || 1;
+                const utilTransform = (typeof pdfjsLib !== 'undefined' && pdfjsLib && pdfjsLib.Util && typeof pdfjsLib.Util.transform === 'function')
+                    ? pdfjsLib.Util.transform
+                    : null;
+
+                const items = [];
+                const rawItems = (textContent && Array.isArray(textContent.items)) ? textContent.items : [];
+                for (let i = 0; i < rawItems.length; i++) {
+                    const it = rawItems[i];
+                    if (!it || typeof it.str !== 'string' || !it.str.trim() || !Array.isArray(it.transform)) continue;
+                    let vx, vy, fontSize;
+                    if (utilTransform) {
+                        const tr = utilTransform(viewport.transform, it.transform);
+                        vx = Number(tr[4]) || 0;
+                        vy = Number(tr[5]) || 0;
+                        fontSize = Math.hypot(Number(tr[2]) || 0, Number(tr[3]) || 0) || Math.hypot(Number(tr[0]) || 0, Number(tr[1]) || 0) || 0;
+                    } else {
+                        vx = Number(it.transform[4]) || 0;
+                        vy = h - (Number(it.transform[5]) || 0);
+                        fontSize = Math.hypot(Number(it.transform[2]) || 0, Number(it.transform[3]) || 0) || 0;
+                    }
+                    items.push({
+                        text: it.str.trim(),
+                        vx,
+                        vy,
+                        nx: vx / w,
+                        ny: (vy - fontSize * 0.35) / h,
+                        fontSize
+                    });
+                }
+                const data = { width: w, height: h, items };
+                if (tabState.pdfDoc === pdfDocRef) {
+                    tabState.pageTextCache.set(pageNum, data);
+                }
+                return data;
+            } catch (_) {
+                return null;
+            } finally {
+                tabState.pageTextPromises.delete(pageNum);
+            }
+        })();
+
+        tabState.pageTextPromises.set(pageNum, promise);
+        return promise;
+    }
+
+    function detectQuestionNumberInRegion(pageData, rectObj) {
+        if (!pageData || !Array.isArray(pageData.items) || pageData.items.length === 0 || !rectObj) return null;
+        const rx = Number(rectObj.x) || 0;
+        const ry = Number(rectObj.y) || 0;
+        const rw = Math.max(0.01, Number(rectObj.w) || 0);
+        const rh = Math.max(0.01, Number(rectObj.h) || 0);
+
+        const padX = 0.015;
+        const padY = 0.008;
+        const inBox = [];
+        for (let i = 0; i < pageData.items.length; i++) {
+            const it = pageData.items[i];
+            if (it.fontSize > 0 && it.fontSize < 6.5) continue;
+            if (it.nx < rx - padX || it.nx > rx + rw + 0.01) continue;
+            if (it.ny < ry - padY || it.ny > ry + rh + padY) continue;
+            inBox.push(it);
+        }
+        if (inBox.length === 0) return null;
+
+        inBox.sort((a, b) => a.vy - b.vy || a.vx - b.vx);
+
+        const lines = [];
+        for (let i = 0; i < inBox.length; i++) {
+            const it = inBox[i];
+            let line = null;
+            for (let j = lines.length - 1; j >= 0; j--) {
+                const l = lines[j];
+                const tol = Math.max(4, Math.min(it.fontSize || 10, l.fontSize || 10) * 0.45);
+                if (Math.abs(l.vy - it.vy) <= tol) {
+                    line = l;
+                    break;
+                }
+                if (it.vy - l.vy > 20) break;
+            }
+            if (!line) {
+                line = { vy: it.vy, ny: it.ny, fontSize: it.fontSize || 10, items: [] };
+                lines.push(line);
+            }
+            line.items.push(it);
+        }
+
+        let boxMinX = Infinity;
+        for (let i = 0; i < inBox.length; i++) {
+            if (inBox[i].nx < boxMinX) boxMinX = inBox[i].nx;
+        }
+
+        const kindScore = {
+            explicit: 130,
+            dotted: 120,
+            rparen: 105,
+            parens: 85,
+            bare: 70
+        };
+
+        const candidates = [];
+        const maxLines = Math.min(3, lines.length);
+        for (let lineIdx = 0; lineIdx < maxLines; lineIdx++) {
+            const line = lines[lineIdx];
+            line.items.sort((a, b) => a.vx - b.vx);
+            const first = line.items[0];
+            if (!first) continue;
+
+            const lineDeltaY = line.ny - ry;
+            const lineRelY = lineDeltaY / rh;
+            if (lineIdx > 0 && lineRelY > 0.55 && lineDeltaY > 0.08) break;
+
+            const relX = (first.nx - rx) / rw;
+            const nearLeft = relX <= 0.25 || (first.nx - boxMinX) <= 0.06;
+
+            const compact = line.items.map(item => item.text.replace(/\s+/g, '')).join('');
+            const isExplicit = /第\d{1,3}题/.test(compact);
+            if (!nearLeft && !(isExplicit && relX <= 0.45)) continue;
+
+            const allowBare = lineIdx === 0 && nearLeft && relX <= 0.18;
+            let parsed = fallbackParseQuestionCandidate(compact, allowBare);
+
+            // 若整行合并后未命中（例如题号单独数字后紧跟空格和中文题干），尝试行首独立数字
+            if (!parsed && allowBare) {
+                const firstClean = first.text
+                    .replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+                    .trim();
+                if (/^\d{1,3}$/.test(firstClean)) {
+                    const nextItem = line.items[1];
+                    const nextText = nextItem ? nextItem.text.trim() : '';
+                    // 排除紧跟物理/数学单位或运算符号的情况（如 "20 W" / "10 cm" / "3 ="）
+                    const looksLikeUnitOrMath = /^(?:[a-zA-Z]{1,3}\b|[%℃°=+\-×÷/·<>≤≥])/.test(nextText);
+                    if (!looksLikeUnitOrMath) {
+                        parsed = fallbackParseQuestionCandidate(firstClean, true);
+                    }
+                }
+            }
+
+            // 行内文字被拆分且前导标签占多段时，再尝试前几个 item 单独匹配（不允许裸数字）
+            if (!parsed) {
+                for (let k = 0; k < Math.min(6, line.items.length); k++) {
+                    const sub = line.items[k];
+                    if (!isExplicit && (sub.nx - rx) / rw > 0.30 && (sub.nx - boxMinX) > 0.10) break;
+                    const p = fallbackParseQuestionCandidate(sub.text, false);
+                    if (p) {
+                        parsed = p;
+                        break;
+                    }
+                }
+            }
+
+            if (!parsed) continue;
+            // 非首行不采纳括号小问（如“（1）”）和裸数字，避免把正文小问当成大题号
+            if (lineIdx > 0 && (parsed.kind === 'parens' || parsed.kind === 'bare')) continue;
+
+            let score = kindScore[parsed.kind] || 60;
+            if (lineIdx === 0) score += 25;
+            else if (lineIdx === 1) score += 10;
+            if (first.nx - boxMinX <= 0.02) score += 15;
+            if (relX <= 0.15) score += 10;
+            if (first.fontSize >= 9) score += 5;
+
+            candidates.push({ num: parsed.num, score, lineIdx, nx: first.nx });
+        }
+
+        if (candidates.length === 0) return null;
+        candidates.sort((a, b) => b.score - a.score || a.lineIdx - b.lineIdx || a.nx - b.nx);
+        return candidates[0].num;
+    }
+
+    window.rgDetectQuestionNumberInRegion = detectQuestionNumberInRegion;
+
+    function applyPreviewAutoDetectIfEmpty(tab, item, rectObj, opts = {}) {
+        if (!item || !rectObj) return false;
+        const tabState = getTabState(tab);
+        if (!tabState || !tabState.pdfDoc) return false;
+        const pageNum = (parseInt(rectObj.pageOffset, 10) || 0) + 1;
+        const cached = tabState.pageTextCache && tabState.pageTextCache.get(pageNum);
+        if (cached) {
+            const detected = detectQuestionNumberInRegion(cached, rectObj);
+            if (detected !== null && !String(item.label || '').trim()) {
+                item.label = String(detected);
+                item.autoDetected = true;
+                return true;
+            }
+            return false;
+        }
+
+        ensurePageTextData(tab, pageNum).then((pageData) => {
+            if (!pageData) return;
+            const curTabState = getTabState(tab);
+            if (!curTabState || !curTabState.items.includes(item)) return;
+            if (String(item.label || '').trim()) return;
+            const detected = detectQuestionNumberInRegion(pageData, rectObj);
+            if (detected !== null) {
+                item.label = String(detected);
+                item.autoDetected = true;
+                renderAllRg();
+                scheduleDraftSave();
+            } else if (opts.focusOnMiss) {
+                requestAnimationFrame(() => {
+                    const input = document.querySelector(`.rg-card[data-id="${item.id}"] .rg-num-input`);
+                    if (input && !input.value) {
+                        input.focus();
+                        input.select();
+                    }
+                });
+            }
+        });
+        return null; // async pending
+    }
+
     function onBoxDrawn(tab, rectObj) {
         const tabState = getTabState(tab);
 
@@ -662,6 +948,7 @@
         const newItem = {
             id: `${tab}_${rgState.nextSeq++}`,
             label,
+            autoDetected: false,
             targetExId,
             parentNums: [],
             isBig: false,
@@ -671,10 +958,16 @@
         };
         tabState.items.push(newItem);
         rgState.selectedId = newItem.id;
+
+        let previewDetectStatus = false;
+        if (bankType === 'preview' && !newItem.label) {
+            previewDetectStatus = applyPreviewAutoDetectIfEmpty(tab, newItem, rectObj, { focusOnMiss: true });
+        }
+
         renderAllRg();
         scheduleDraftSave();
 
-        if ((bankType === 'preview' && !label) || (bankType === 'variation' && tab === 'answer')) {
+        if ((bankType === 'preview' && !newItem.label && previewDetectStatus === false) || (bankType === 'variation' && tab === 'answer')) {
             requestAnimationFrame(() => {
                 const input = document.querySelector(`.rg-card[data-id="${newItem.id}"] .rg-num-input`);
                 if (input) {
@@ -748,6 +1041,11 @@
         if (nextBtn) nextBtn.disabled = tabState.pageNum >= tabState.totalPages;
 
         renderBoxOverlay();
+
+        // 预习模式预热当前页文字层缓存，拉框释放时可即时同步识别左上角题号
+        if (getCurrentBankTypeSafe() === 'preview') {
+            ensurePageTextData(rgState.activeTab, tabState.pageNum);
+        }
     }
 
     function appendResizeHandles(div, kind, itemId, boxRef) {
@@ -995,7 +1293,7 @@
             if (tab === 'answer') {
                 tipEl.textContent = '答案独立拉框，仅按题号匹配题目；选中框可拖边缘微调';
             } else if (bankType === 'preview') {
-                tipEl.textContent = '预习模式：框完后手动输入跳题题号；选中框可拖边缘微调';
+                tipEl.textContent = '预习模式：拉框后自动识别左上角题号（可随时修改）；选中框可拖边缘微调';
             } else if (bankType === 'variation') {
                 tipEl.textContent = '举一反三模式：框完后勾选对应原题；选中框可拖边缘微调';
             } else {
@@ -1093,11 +1391,13 @@
                 `;
             } else {
                 const placeholder = bankType === 'preview' ? '输题号' : '题号';
+                const autoCls = it.autoDetected ? ' auto-detected' : '';
+                const autoTitle = it.autoDetected ? '已自动识别左上角题号，可直接修改' : '';
                 headerEditorHtml = `
                     <div class="rg-card-top">
                         <div class="rg-card-num-wrap">
                             <span>${it.isBig ? '起始题号' : '题号'}</span>
-                            <input type="text" class="rg-num-input" value="${escapeHtmlRg(it.label)}" placeholder="${placeholder}"
+                            <input type="text" class="rg-num-input${autoCls}" value="${escapeHtmlRg(it.label)}" placeholder="${placeholder}" title="${autoTitle}"
                                 oninput="rgUpdateItemLabel('${it.id}', this.value)" onchange="rgUpdateItemLabel('${it.id}', this.value)" onclick="event.stopPropagation()">
                         </div>
                         <span class="rg-card-meta">${escapeHtmlRg(pages)}</span>
@@ -1468,7 +1768,9 @@
                 pdfDoc: exLoaded.pdfDoc,
                 pageNum: 1,
                 totalPages: exLoaded.pdfDoc.numPages,
-                items: rebuilt.exItems
+                items: rebuilt.exItems,
+                pageTextCache: new Map(),
+                pageTextPromises: new Map()
             };
             const exLbl = document.getElementById('rg-exercise-file-label');
             if (exLbl) exLbl.textContent = `${exLoaded.file.name} (${exLoaded.pdfDoc.numPages} 页)`;
@@ -1479,12 +1781,14 @@
                     pdfDoc: ansLoaded.pdfDoc,
                     pageNum: 1,
                     totalPages: ansLoaded.pdfDoc.numPages,
-                    items: rebuilt.ansItems
+                    items: rebuilt.ansItems,
+                    pageTextCache: new Map(),
+                    pageTextPromises: new Map()
                 };
                 const ansLbl = document.getElementById('rg-answer-file-label');
                 if (ansLbl) ansLbl.textContent = `${ansLoaded.file.name} (${ansLoaded.pdfDoc.numPages} 页)`;
             } else {
-                rgState.answer = { file: null, pdfDoc: null, pageNum: 1, totalPages: 0, items: [] };
+                rgState.answer = { file: null, pdfDoc: null, pageNum: 1, totalPages: 0, items: [], pageTextCache: new Map(), pageTextPromises: new Map() };
             }
 
             rgState.nextSeq = rebuilt.nextSeq;
@@ -1702,6 +2006,8 @@
             tabState.pageNum = 1;
             tabState.totalPages = pdfDoc.numPages;
             tabState.items = [];
+            tabState.pageTextCache = new Map();
+            tabState.pageTextPromises = new Map();
             rgState.continueTargetId = null;
             rgState.subMode = null;
             rgState.focusPageCache.clear();
@@ -1809,6 +2115,14 @@
         const it = tabState.items.find(x => x.id === itemId);
         if (!it) return;
         it.label = String(val || '').trim();
+        if (it.autoDetected) {
+            it.autoDetected = false;
+            const inp = document.querySelector(`.rg-card[data-id="${itemId}"] .rg-num-input`);
+            if (inp) {
+                inp.classList.remove('auto-detected');
+                inp.removeAttribute('title');
+            }
+        }
         if (it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
             const base = parseInt(it.label, 10);
             if (!isNaN(base) && base > 0) {

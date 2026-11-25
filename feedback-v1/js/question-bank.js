@@ -116,32 +116,69 @@ function normalizeQuestionNumber(raw) {
     return Number.isInteger(n) && n >= 1 && n <= 300 ? n : null;
 }
 
-function parseQuestionNumberFromText(raw, allowBareNumber = true) {
-    let s = String(raw || '').replace(/\u00a0/g, ' ').trim();
+function parseQuestionNumberCandidate(raw, allowBareNumber = true) {
+    let s = String(raw || '')
+        .replace(/\u00a0/g, ' ')
+        .replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+        .trim();
     if (!s) return null;
-    // 常见题目前缀，如“典例15．”“例 3.”“变式2”
-    s = s.replace(/^(?:典例|例题|例|变式|拓展|【典例】|【例】)[\s:：]*/, '');
+
+    // 剥离常见前置标签（支持多重叠加，如“【课前】（多选）11．”“★（预习）12.”“典例15．”）
+    for (let i = 0; i < 6; i++) {
+        const prev = s;
+        s = s
+            .replace(/^[★☆◆◇●○■□▲△▶▷•·▪▫➢➤]+\s*/, '')
+            .replace(/^[【\[][^】\]]{1,12}[】\]]\s*/, '')
+            .replace(/^[（(]\s*(?:[A-Ga-g]{1,4}|[√×]|预习|课前|课堂|课后|多选|单选|双选|不定项|选做|必做|选填|填空|解答|计算|实验|探究|难点|易错|拔高|巩固|提升|拓展|变式|典例|例题|例|真题|模拟|原创|改编)?\s*[）)]\s*/, '')
+            .replace(/^(?:典例|例题|例|变式|拓展|预习|课前)[\s:：·\-]*/, '')
+            .trim();
+        if (s === prev) break;
+    }
+
     s = s.replace(/\s+/g, '');
     if (!s) return null;
     // 排除页眉/页脚中的“第1页”“共3页”“Page 1”“1/10”等
     if (/第\d+页|共\d+页|page\d+/i.test(s)) return null;
     if (/^\d{1,3}\/\d{1,3}/.test(s)) return null;
+
     // 第 11 题
     let m = s.match(/^第(\d{1,3})题/);
-    if (m) return normalizeQuestionNumber(m[1]);
-    // ( ) 2. / （ ）2． / (   )13.
-    m = s.match(/^[（(]\s*[）)]\s*(\d{1,3})\s*(?:[.．、,，:：]|题)/);
-    if (m) return normalizeQuestionNumber(m[1]);
+    if (m) {
+        const num = normalizeQuestionNumber(m[1]);
+        if (num !== null) return { num, kind: 'explicit' };
+    }
+    // 6. / 24． / 5、 / 3: / 11题
+    m = s.match(/^(\d{1,3})(?:[.．、,，:：]|题)(?![0-9])/);
+    if (m) {
+        const num = normalizeQuestionNumber(m[1]);
+        if (num !== null) return { num, kind: 'dotted' };
+    }
+    // 6) / 12）
+    m = s.match(/^(\d{1,3})[)）](?![0-9])/);
+    if (m) {
+        const num = normalizeQuestionNumber(m[1]);
+        if (num !== null) return { num, kind: 'rparen' };
+    }
     // （2） / (2).
-    m = s.match(/^[（(]\s*(\d{1,3})\s*[）)]\s*(?:[.．、,，:：]|题)?/);
-    if (m) return normalizeQuestionNumber(m[1]);
-    // 6. / 24． / 5、 / 3: / 第3题
-    m = s.match(/^(\d{1,3})\s*(?:[.．、,，:：]|题)(?![0-9])/);
-    if (m) return normalizeQuestionNumber(m[1]);
+    m = s.match(/^[（(](\d{1,3})[）)](?:[.．、,，:：]|题)?/);
+    if (m) {
+        const num = normalizeQuestionNumber(m[1]);
+        if (num !== null) return { num, kind: 'parens' };
+    }
     // 整行只有一个数字（如题号单独占一行）
-    if (allowBareNumber && /^\d{1,3}$/.test(s)) return normalizeQuestionNumber(s);
+    if (allowBareNumber && /^\d{1,3}$/.test(s)) {
+        const num = normalizeQuestionNumber(s);
+        if (num !== null) return { num, kind: 'bare' };
+    }
     return null;
 }
+
+function parseQuestionNumberFromText(raw, allowBareNumber = true) {
+    const parsed = parseQuestionNumberCandidate(raw, allowBareNumber);
+    return parsed ? parsed.num : null;
+}
+window.parseQuestionNumberCandidate = parseQuestionNumberCandidate;
+window.parseQuestionNumberFromText = parseQuestionNumberFromText;
 
 function detectQuestionNumberFromPageText(items, pageWidth, pageHeight, pageNumber = null) {
     if (!Array.isArray(items) || !items.length || !pageWidth || !pageHeight) return null;

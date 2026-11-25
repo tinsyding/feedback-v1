@@ -4240,6 +4240,11 @@ span.rg-card-num-wrap {
     outline-offset: 1px;
 }
 
+.rg-num-input.auto-detected:not(:focus) {
+    border-color: rgba(59, 130, 246, 0.55);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.18);
+}
+
 .rg-card-meta {
     font-size: var(--text-xs);
     color: var(--text-secondary);
