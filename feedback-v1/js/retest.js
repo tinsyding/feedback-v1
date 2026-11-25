@@ -28,8 +28,15 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
     let pendingDownloadAllWeeks = false;
 
-    // Detect WeChat Webview Environment
-    const isWeChat = /MicroMessenger/i.test(navigator.userAgent);
+    // Detect WeChat & iOS In-App WebView Environments (e.g., Baidu App, QQ, DingTalk)
+    const userAgentStr = navigator.userAgent || '';
+    const isWeChat = /MicroMessenger/i.test(userAgentStr);
+    const isIOS = /iPhone|iPad|iPod/i.test(userAgentStr);
+    const isIOSInAppWebView = isIOS && (
+        /baiduboxapp|QQ\/|MQQBrowser|DingTalk|Weibo|UCBrowser|Quark/i.test(userAgentStr) ||
+        (!/Safari\//i.test(userAgentStr) && /AppleWebKit/i.test(userAgentStr))
+    );
+    const useServerTempDownload = isWeChat || isIOSInAppWebView;
     if (isWeChat) {
         const wechatBar = document.getElementById('wechat-bar');
         if (wechatBar) wechatBar.style.display = 'flex';
@@ -3226,15 +3233,18 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
             }
 
             modalTitle.textContent = '合成完毕';
-            modalDesc.textContent = isWeChat ? '正在准备微信高速下载...' : '正在调起下载，请在弹出窗口中确认保存...';
+            modalDesc.textContent = isWeChat
+                ? '正在准备微信高速下载...'
+                : (useServerTempDownload ? '正在准备下载直链...' : '正在调起下载，请在弹出窗口中确认保存...');
 
             const pdfBytesFinal = await mergedPdf.save({ useObjectStreams: true });
             const blob = new Blob([pdfBytesFinal], { type: 'application/pdf' });
             const fileName = data.s + '_' + data.n + '_' + fileLabel + '.pdf';
 
-            // 微信专属优化：上传至服务端生成真实下载直链，彻底解决微信外跳浏览器 blob: 无法解析导致无反应的问题
-            if (isWeChat) {
-                modalDesc.textContent = '正在生成微信下载直链...';
+            // 微信及 iOS 内置浏览器（如百度 App 等 WKWebView）专属优化：
+            // 上传至服务端生成真实下载直链，彻底解决内置浏览器 blob: 无法解析或被拦截导致无反应的问题
+            if (useServerTempDownload) {
+                modalDesc.textContent = isWeChat ? '正在生成微信下载直链...' : '正在生成下载直链...';
                 try {
                     const formData = new FormData();
                     formData.append('file', blob, fileName);

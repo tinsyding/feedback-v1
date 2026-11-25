@@ -172,20 +172,47 @@
         return cycleMode();
     };
 
-    // 统一原生 <dialog> Top-Layer 管理器（含 closedby="any" 的 Safari 外点与焦点还原降级）
+    // 统一原生 <dialog> Top-Layer 管理器（含 closedby="any" 的 Safari 外点、焦点还原与旧版 Safari/iOS <15.4 降级）
     const dialogRestoreFocus = new WeakMap();
     const dialogOptionsMap = new WeakMap();
     const boundDialogs = new WeakSet();
+    const openFallbackDialogs = [];
+    let fallbackEscBound = false;
 
-    function bindNativeDialog(dialog) {
-        if (!dialog || boundDialogs.has(dialog)) return;
-        boundDialogs.add(dialog);
+    function supportsNativeDialog(dialog) {
+        return Boolean(
+            dialog &&
+            dialog.tagName === 'DIALOG' &&
+            typeof dialog.showModal === 'function' &&
+            typeof dialog.close === 'function'
+        );
+    }
 
+    function ensureFallbackEscListener() {
+        if (fallbackEscBound) return;
+        fallbackEscBound = true;
+        document.addEventListener('keydown', function (e) {
+            if (e.key !== 'Escape' || openFallbackDialogs.length === 0) return;
+            const topDialog = openFallbackDialogs[openFallbackDialogs.length - 1];
+            if (!topDialog) return;
+            const opts = dialogOptionsMap.get(topDialog) || {};
+            if (opts.dismissible === false) {
+                e.preventDefault();
+                return;
+            }
+            e.preventDefault();
+            closeNativeDialog(topDialog, 'cancel');
+        });
+    }
+
+    function bindBackdropClick(dialog) {
         let pointerDownOnBackdrop = false;
-        dialog.addEventListener('pointerdown', function (e) {
+        const downEvent = typeof global.PointerEvent === 'function' ? 'pointerdown' : 'mousedown';
+        const upEvent = typeof global.PointerEvent === 'function' ? 'pointerup' : 'mouseup';
+        dialog.addEventListener(downEvent, function (e) {
             pointerDownOnBackdrop = (e.target === dialog);
         });
-        dialog.addEventListener('pointerup', function (e) {
+        dialog.addEventListener(upEvent, function (e) {
             if (!pointerDownOnBackdrop) return;
             pointerDownOnBackdrop = false;
             if (e.target !== dialog) return;
@@ -193,6 +220,18 @@
             if (opts.dismissible === false) return;
             closeNativeDialog(dialog, 'backdrop');
         });
+    }
+
+    function bindNativeDialog(dialog) {
+        if (!dialog || boundDialogs.has(dialog)) return;
+        boundDialogs.add(dialog);
+
+        bindBackdropClick(dialog);
+
+        if (!supportsNativeDialog(dialog)) {
+            ensureFallbackEscListener();
+            return;
+        }
 
         dialog.addEventListener('cancel', function (e) {
             const opts = dialogOptionsMap.get(dialog) || {};
@@ -231,7 +270,7 @@
         const options = opts || {};
         dialogOptionsMap.set(dialog, options);
 
-        if (dialog.tagName === 'DIALOG' && typeof dialog.showModal === 'function') {
+        if (supportsNativeDialog(dialog)) {
             bindNativeDialog(dialog);
             if (!dialog.open) {
                 if (document.activeElement && document.activeElement !== document.body) {
@@ -244,8 +283,17 @@
                 dialog.classList.add('active');
             }
         } else {
-            dialog.style.display = 'flex';
+            bindNativeDialog(dialog);
+            if (!isNativeDialogOpen(dialog) && document.activeElement && document.activeElement !== document.body) {
+                dialogRestoreFocus.set(dialog, document.activeElement);
+            }
+            dialog.classList.add('native-dialog-fallback');
             dialog.classList.add('active');
+            dialog.setAttribute('open', '');
+            dialog.style.display = 'flex';
+            const existingIdx = openFallbackDialogs.indexOf(dialog);
+            if (existingIdx !== -1) openFallbackDialogs.splice(existingIdx, 1);
+            openFallbackDialogs.push(dialog);
         }
         return dialog;
     }
@@ -257,20 +305,35 @@
         if ((reason === 'backdrop' || reason === 'cancel') && typeof opts.onCancel === 'function') {
             opts.onCancel(reason);
         }
-        if (dialog.tagName === 'DIALOG' && typeof dialog.close === 'function') {
+        if (supportsNativeDialog(dialog)) {
             if (dialog.open) {
                 dialog.close(reason || '');
             } else {
                 dialog.classList.remove('active');
             }
         } else {
+            const wasOpen = dialog.hasAttribute('open') || dialog.classList.contains('active');
+            const idx = openFallbackDialogs.indexOf(dialog);
+            if (idx !== -1) openFallbackDialogs.splice(idx, 1);
             dialog.classList.remove('active');
+            dialog.removeAttribute('open');
             dialog.style.display = 'none';
-            if (opts.onAfterClose) {
-                try { opts.onAfterClose(dialog); } catch (_) {}
-            }
-            if (opts.removeOnClose && dialog.parentNode) {
-                dialog.parentNode.removeChild(dialog);
+            if (wasOpen) {
+                const prev = dialogRestoreFocus.get(dialog);
+                dialogRestoreFocus.delete(dialog);
+                if (typeof opts.onAfterClose === 'function') {
+                    try { opts.onAfterClose(dialog); } catch (_) {}
+                }
+                if (opts.removeOnClose && dialog.parentNode) {
+                    dialog.parentNode.removeChild(dialog);
+                }
+                if (prev && typeof prev.focus === 'function' && document.contains(prev)) {
+                    try {
+                        prev.focus({ preventScroll: true });
+                    } catch (_) {
+                        try { prev.focus(); } catch (__) {}
+                    }
+                }
             }
         }
     }
@@ -278,8 +341,8 @@
     function isNativeDialogOpen(el) {
         const dialog = typeof el === 'string' ? document.getElementById(el) : el;
         if (!dialog) return false;
-        if (dialog.tagName === 'DIALOG') return Boolean(dialog.open);
-        return dialog.classList.contains('active') || (dialog.style.display !== 'none' && dialog.style.display !== '');
+        if (supportsNativeDialog(dialog)) return Boolean(dialog.open);
+        return dialog.hasAttribute('open') || dialog.classList.contains('active') || (dialog.style.display !== 'none' && dialog.style.display !== '');
     }
 
     function promoteToastPopover(container) {
