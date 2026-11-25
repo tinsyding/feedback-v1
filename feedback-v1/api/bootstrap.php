@@ -299,65 +299,8 @@ if (!function_exists('getAuthRateLimitStatus')) {
      * @return array{count:int, locked:bool, remaining_seconds:int}
      */
     function getAuthRateLimitStatus(string $scope, string $identifier, int $windowSeconds = 900): array {
-        $key = normalizeAuthRateLimitKey($scope, $identifier);
-        $now = time();
-
-        $pdo = getAuthRateLimitPdo();
-        if ($pdo) {
-            try {
-                $stmt = $pdo->prepare(
-                    'SELECT `fail_count`, `first_at`, `updated_at`, `lock_until` FROM `auth_rate_limits` WHERE `bucket_key` = ? LIMIT 1'
-                );
-                $stmt->execute([$key]);
-                $row = $stmt->fetch(PDO::FETCH_ASSOC);
-                if (!$row) {
-                    return ['count' => 0, 'locked' => false, 'remaining_seconds' => 0];
-                }
-                $lockUntil = intval($row['lock_until'] ?? 0);
-                if ($lockUntil > $now) {
-                    return [
-                        'count' => intval($row['fail_count'] ?? 0),
-                        'locked' => true,
-                        'remaining_seconds' => $lockUntil - $now
-                    ];
-                }
-                $firstAt = intval($row['first_at'] ?? ($row['updated_at'] ?? 0));
-                if ($windowSeconds > 0 && ($now - $firstAt) > $windowSeconds) {
-                    return ['count' => 0, 'locked' => false, 'remaining_seconds' => 0];
-                }
-                return [
-                    'count' => intval($row['fail_count'] ?? 0),
-                    'locked' => false,
-                    'remaining_seconds' => 0
-                ];
-            } catch (Throwable $e) {
-                error_log('getAuthRateLimitStatus MySQL fallback: ' . $e->getMessage());
-            }
-        }
-
-        return withAuthRateLimitStore(function (array &$store) use ($key, $now, $windowSeconds) {
-            $entry = $store[$key] ?? null;
-            if (!is_array($entry)) {
-                return ['count' => 0, 'locked' => false, 'remaining_seconds' => 0];
-            }
-            $lockUntil = intval($entry['lock_until'] ?? 0);
-            if ($lockUntil > $now) {
-                return [
-                    'count' => intval($entry['count'] ?? 0),
-                    'locked' => true,
-                    'remaining_seconds' => $lockUntil - $now
-                ];
-            }
-            $firstAt = intval($entry['first_at'] ?? ($entry['updated_at'] ?? 0));
-            if ($windowSeconds > 0 && ($now - $firstAt) > $windowSeconds) {
-                return ['count' => 0, 'locked' => false, 'remaining_seconds' => 0];
-            }
-            return [
-                'count' => intval($entry['count'] ?? 0),
-                'locked' => false,
-                'remaining_seconds' => 0
-            ];
-        });
+        // 账号登录/重置密码封禁锁定功能已关闭
+        return ['count' => 0, 'locked' => false, 'remaining_seconds' => 0];
     }
 }
 
@@ -367,109 +310,8 @@ if (!function_exists('recordAuthRateLimitFailure')) {
      * @return array{count:int, locked:bool, remaining_seconds:int}
      */
     function recordAuthRateLimitFailure(string $scope, string $identifier, int $maxAttempts = 5, int $windowSeconds = 900, int $lockoutSeconds = 900): array {
-        $key = normalizeAuthRateLimitKey($scope, $identifier);
-        $now = time();
-
-        $pdo = getAuthRateLimitPdo();
-        if ($pdo) {
-            $inTx = false;
-            try {
-                if (!$pdo->inTransaction()) {
-                    $pdo->beginTransaction();
-                    $inTx = true;
-                }
-                $stmt = $pdo->prepare(
-                    'SELECT `fail_count`, `first_at`, `updated_at`, `lock_until` FROM `auth_rate_limits` WHERE `bucket_key` = ? FOR UPDATE'
-                );
-                $stmt->execute([$key]);
-                $row = $stmt->fetch(PDO::FETCH_ASSOC);
-
-                $count = 0;
-                $firstAt = $now;
-                $lockUntil = 0;
-                if ($row) {
-                    $prevFirst = intval($row['first_at'] ?? 0);
-                    $prevLock = intval($row['lock_until'] ?? 0);
-                    if ($prevLock <= $now && $windowSeconds > 0 && ($now - $prevFirst) > $windowSeconds) {
-                        $count = 0;
-                        $firstAt = $now;
-                        $lockUntil = 0;
-                    } else {
-                        $count = intval($row['fail_count'] ?? 0);
-                        $firstAt = $prevFirst > 0 ? $prevFirst : $now;
-                        $lockUntil = $prevLock;
-                    }
-                }
-                $count++;
-                if ($maxAttempts > 0 && $count >= $maxAttempts && $lockoutSeconds > 0) {
-                    $lockUntil = $now + $lockoutSeconds;
-                }
-
-                $upsert = $pdo->prepare(
-                    'INSERT INTO `auth_rate_limits` (`bucket_key`, `fail_count`, `first_at`, `updated_at`, `lock_until`)
-                     VALUES (?, ?, ?, ?, ?)
-                     ON DUPLICATE KEY UPDATE
-                       `fail_count` = VALUES(`fail_count`),
-                       `first_at` = VALUES(`first_at`),
-                       `updated_at` = VALUES(`updated_at`),
-                       `lock_until` = VALUES(`lock_until`)'
-                );
-                $upsert->execute([$key, $count, $firstAt, $now, $lockUntil]);
-
-                if ($inTx) {
-                    $pdo->commit();
-                    $inTx = false;
-                }
-
-                // 2% 概率清理超过 24 小时的过期桶
-                if (mt_rand(1, 50) === 1) {
-                    try {
-                        $gc = $pdo->prepare('DELETE FROM `auth_rate_limits` WHERE `lock_until` < ? AND `updated_at` < ?');
-                        $gc->execute([$now, $now - 86400]);
-                    } catch (Throwable $ignore) {}
-                }
-
-                $rem = max(0, $lockUntil - $now);
-                return [
-                    'count' => $count,
-                    'locked' => $rem > 0,
-                    'remaining_seconds' => $rem
-                ];
-            } catch (Throwable $e) {
-                if ($inTx && $pdo->inTransaction()) {
-                    try {
-                        $pdo->rollBack();
-                    } catch (Throwable $ignore) {}
-                }
-                error_log('recordAuthRateLimitFailure MySQL fallback: ' . $e->getMessage());
-            }
-        }
-
-        return withAuthRateLimitStore(function (array &$store, bool &$modified = false) use ($key, $now, $maxAttempts, $windowSeconds, $lockoutSeconds) {
-            $modified = true;
-            $entry = $store[$key] ?? null;
-            if (!is_array($entry)) {
-                $entry = ['count' => 0, 'first_at' => $now, 'updated_at' => $now, 'lock_until' => 0];
-            } else {
-                $firstAt = intval($entry['first_at'] ?? 0);
-                $lockUntil = intval($entry['lock_until'] ?? 0);
-                if ($lockUntil <= $now && $windowSeconds > 0 && ($now - $firstAt) > $windowSeconds) {
-                    $entry = ['count' => 0, 'first_at' => $now, 'updated_at' => $now, 'lock_until' => 0];
-                }
-            }
-            $entry['count'] = intval($entry['count'] ?? 0) + 1;
-            $entry['updated_at'] = $now;
-            if ($maxAttempts > 0 && $entry['count'] >= $maxAttempts && $lockoutSeconds > 0) {
-                $entry['lock_until'] = $now + $lockoutSeconds;
-            }
-            $store[$key] = $entry;
-            $rem = max(0, intval($entry['lock_until'] ?? 0) - $now);
-            return [
-                'count' => $entry['count'],
-                'locked' => $rem > 0,
-                'remaining_seconds' => $rem
-            ];
-        });
+        // 账号登录/重置密码封禁锁定功能已关闭
+        return ['count' => 0, 'locked' => false, 'remaining_seconds' => 0];
     }
 }
 
