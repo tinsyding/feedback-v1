@@ -33,7 +33,9 @@ type ParsedQuestionMeta struct {
 	Mode          string
 	GroupNums     []int
 	Box           *Box
+	Boxes         []Box
 	AnswerBox     *Box
+	AnswerBoxes   []Box
 	StemBoxes     []Box
 	Regions       []Box
 	AnswerRegions []Box
@@ -44,6 +46,8 @@ type ParsedQuestionMeta struct {
 func ParseRetestQuestionMeta(rawMeta string, qNum int) ParsedQuestionMeta {
 	empty := ParsedQuestionMeta{
 		GroupNums:     []int{},
+		Boxes:         []Box{},
+		AnswerBoxes:   []Box{},
 		StemBoxes:     []Box{},
 		Regions:       []Box{},
 		AnswerRegions: []Box{},
@@ -110,14 +114,14 @@ func ParseRetestQuestionMeta(rawMeta string, qNum int) ParsedQuestionMeta {
 		return b
 	}
 
-	parseBoxArray := func(raw any) []Box {
+	parseBoxArray := func(raw any, withNum bool) []Box {
 		res := []Box{}
 		arr, ok := raw.([]any)
 		if !ok {
 			return res
 		}
 		for _, item := range arr {
-			if b := parseBox(item, false); b != nil {
+			if b := parseBox(item, withNum); b != nil {
 				res = append(res, *b)
 			}
 		}
@@ -128,14 +132,26 @@ func ParseRetestQuestionMeta(rawMeta string, qNum int) ParsedQuestionMeta {
 	if config.AsPHPString(m["mode"]) == "region_crop" {
 		mode = "region_crop"
 	}
+	box := parseBox(m["box"], true)
+	boxes := parseBoxArray(m["boxes"], true)
+	if len(boxes) == 0 && box != nil {
+		boxes = []Box{*box}
+	}
+	answerBox := parseBox(m["answerBox"], true)
+	answerBoxes := parseBoxArray(m["answerBoxes"], true)
+	if len(answerBoxes) == 0 && answerBox != nil {
+		answerBoxes = []Box{*answerBox}
+	}
 	return ParsedQuestionMeta{
 		Mode:          mode,
 		GroupNums:     groupNums,
-		Box:           parseBox(m["box"], true),
-		AnswerBox:     parseBox(m["answerBox"], true),
-		StemBoxes:     parseBoxArray(m["stemBoxes"]),
-		Regions:       parseBoxArray(m["regions"]),
-		AnswerRegions: parseBoxArray(m["answerRegions"]),
+		Box:           box,
+		Boxes:         boxes,
+		AnswerBox:     answerBox,
+		AnswerBoxes:   answerBoxes,
+		StemBoxes:     parseBoxArray(m["stemBoxes"], false),
+		Regions:       parseBoxArray(m["regions"], false),
+		AnswerRegions: parseBoxArray(m["answerRegions"], false),
 	}
 }
 
@@ -339,11 +355,15 @@ func BuildWeekPDFs(allRows []QbankQuestionRow, bankType, tier string, weekNum in
 				if existIdx, exists := uniqueIdx[uniqueKey]; !exists {
 					newIdx := len(pdfList)
 					errBoxes := []Box{}
-					if meta.Box != nil {
+					if len(meta.Boxes) > 0 {
+						errBoxes = append(errBoxes, meta.Boxes...)
+					} else if meta.Box != nil {
 						errBoxes = append(errBoxes, *meta.Box)
 					}
 					ansErrBoxes := []Box{}
-					if meta.AnswerBox != nil {
+					if len(meta.AnswerBoxes) > 0 {
+						ansErrBoxes = append(ansErrBoxes, meta.AnswerBoxes...)
+					} else if meta.AnswerBox != nil {
 						ansErrBoxes = append(ansErrBoxes, *meta.AnswerBox)
 					}
 					subTopics := map[string]string{}
@@ -398,10 +418,14 @@ func BuildWeekPDFs(allRows []QbankQuestionRow, bankType, tier string, weekNum in
 					if len(meta.AnswerRegions) > 0 {
 						entry["answerRegions"] = appendUniqueBoxes(entry["answerRegions"].([]Box), meta.AnswerRegions)
 					}
-					if meta.Box != nil {
+					if len(meta.Boxes) > 0 {
+						entry["errorBoxes"] = append(entry["errorBoxes"].([]Box), meta.Boxes...)
+					} else if meta.Box != nil {
 						entry["errorBoxes"] = append(entry["errorBoxes"].([]Box), *meta.Box)
 					}
-					if meta.AnswerBox != nil {
+					if len(meta.AnswerBoxes) > 0 {
+						entry["answerErrorBoxes"] = append(entry["answerErrorBoxes"].([]Box), meta.AnswerBoxes...)
+					} else if meta.AnswerBox != nil {
 						entry["answerErrorBoxes"] = append(entry["answerErrorBoxes"].([]Box), *meta.AnswerBox)
 					}
 					if len(entry["stemBoxes"].([]Box)) == 0 && len(meta.StemBoxes) > 0 {
@@ -470,11 +494,15 @@ func BuildWeekPDFs(allRows []QbankQuestionRow, bankType, tier string, weekNum in
 				subNum = 1
 			}
 			errBoxes := []Box{}
-			if vMeta.Box != nil {
+			if len(vMeta.Boxes) > 0 {
+				errBoxes = append(errBoxes, vMeta.Boxes...)
+			} else if vMeta.Box != nil {
 				errBoxes = append(errBoxes, *vMeta.Box)
 			}
 			ansErrBoxes := []Box{}
-			if vMeta.AnswerBox != nil {
+			if len(vMeta.AnswerBoxes) > 0 {
+				ansErrBoxes = append(ansErrBoxes, vMeta.AnswerBoxes...)
+			} else if vMeta.AnswerBox != nil {
 				ansErrBoxes = append(ansErrBoxes, *vMeta.AnswerBox)
 			}
 			var vAnsPtr any

@@ -72,6 +72,29 @@ func TestParseRetestQuestionMetaNullCoords(t *testing.T) {
 	if parsed.AnswerBox == nil || parsed.AnswerBox.Num != 5 || parsed.AnswerBox.X != 0.1 {
 		t.Fatalf("expected valid AnswerBox, got %+v", parsed.AnswerBox)
 	}
+	if len(parsed.AnswerBoxes) != 1 || parsed.AnswerBoxes[0].Num != 5 {
+		t.Fatalf("expected AnswerBoxes fallback from AnswerBox, got %+v", parsed.AnswerBoxes)
+	}
+
+	multi := ParseRetestQuestionMeta(`{
+		"mode":"region_crop",
+		"groupNums":[1,2],
+		"box":{"pageOffset":0,"x":0.03,"y":0.8,"w":0.94,"h":0.15},
+		"boxes":[
+			{"pageOffset":0,"x":0.03,"y":0.8,"w":0.94,"h":0.15},
+			{"pageOffset":1,"x":0.03,"y":0.05,"w":0.94,"h":0.18}
+		],
+		"answerBoxes":[
+			{"pageOffset":0,"x":0.03,"y":0.85,"w":0.94,"h":0.1},
+			{"pageOffset":1,"x":0.03,"y":0.04,"w":0.94,"h":0.12}
+		]
+	}`, 2)
+	if len(multi.Boxes) != 2 || multi.Boxes[0].Num != 2 || multi.Boxes[1].PageOffset != 1 {
+		t.Fatalf("expected 2 multi-page Boxes with num=2, got %+v", multi.Boxes)
+	}
+	if len(multi.AnswerBoxes) != 2 || multi.AnswerBoxes[0].Num != 2 || multi.AnswerBoxes[1].PageOffset != 1 {
+		t.Fatalf("expected 2 multi-page AnswerBoxes with num=2, got %+v", multi.AnswerBoxes)
+	}
 }
 
 func TestBuildWeekPDFsNoOrphanVariationsAndSharedPDF(t *testing.T) {

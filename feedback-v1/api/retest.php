@@ -132,7 +132,7 @@ function unrevokeRetestToken(string $token): bool {
  * 获取指定周次题目的 PDF 列表 (优先从 MySQL qbank_questions 查询，回退到 JSON 文件)
  */
 function parseRetestQuestionMeta($rawMeta, $qNum) {
-    $empty = ['mode' => '', 'groupNums' => [], 'box' => null, 'answerBox' => null, 'stemBoxes' => [], 'regions' => [], 'answerRegions' => []];
+    $empty = ['mode' => '', 'groupNums' => [], 'box' => null, 'boxes' => [], 'answerBox' => null, 'answerBoxes' => [], 'stemBoxes' => [], 'regions' => [], 'answerRegions' => []];
     if (empty($rawMeta)) return $empty;
     if (is_string($rawMeta)) {
         $rawMeta = @json_decode($rawMeta, true);
@@ -161,13 +161,15 @@ function parseRetestQuestionMeta($rawMeta, $qNum) {
         ];
     };
 
-    $parseBoxArray = function($rawArr) use ($parseBox) {
+    $parseBoxArray = function($rawArr, $withNum = false) use ($parseBox) {
         $res = [];
         if (!empty($rawArr) && is_array($rawArr)) {
             foreach ($rawArr as $sb) {
                 $parsed = $parseBox($sb);
                 if ($parsed) {
-                    unset($parsed['num']);
+                    if (!$withNum) {
+                        unset($parsed['num']);
+                    }
                     $res[] = $parsed;
                 }
             }
@@ -175,14 +177,27 @@ function parseRetestQuestionMeta($rawMeta, $qNum) {
         return $res;
     };
 
+    $box = $parseBox($rawMeta['box'] ?? null);
+    $boxes = $parseBoxArray($rawMeta['boxes'] ?? null, true);
+    if (empty($boxes) && $box) {
+        $boxes = [$box];
+    }
+    $answerBox = $parseBox($rawMeta['answerBox'] ?? null);
+    $answerBoxes = $parseBoxArray($rawMeta['answerBoxes'] ?? null, true);
+    if (empty($answerBoxes) && $answerBox) {
+        $answerBoxes = [$answerBox];
+    }
+
     return [
         'mode' => (!empty($rawMeta['mode']) && $rawMeta['mode'] === 'region_crop') ? 'region_crop' : '',
         'groupNums' => $groupNums,
-        'box' => $parseBox($rawMeta['box'] ?? null),
-        'answerBox' => $parseBox($rawMeta['answerBox'] ?? null),
-        'stemBoxes' => $parseBoxArray($rawMeta['stemBoxes'] ?? null),
-        'regions' => $parseBoxArray($rawMeta['regions'] ?? null),
-        'answerRegions' => $parseBoxArray($rawMeta['answerRegions'] ?? null)
+        'box' => $box,
+        'boxes' => $boxes,
+        'answerBox' => $answerBox,
+        'answerBoxes' => $answerBoxes,
+        'stemBoxes' => $parseBoxArray($rawMeta['stemBoxes'] ?? null, false),
+        'regions' => $parseBoxArray($rawMeta['regions'] ?? null, false),
+        'answerRegions' => $parseBoxArray($rawMeta['answerRegions'] ?? null, false)
     ];
 }
 
@@ -452,8 +467,8 @@ function getWeekPdfs($subject, $grade, $tier, $weekNum, $errorNums, $year = null
                                 'mode' => $curMode,
                                 'regions' => $metaParsed['regions'] ?? [],
                                 'answerRegions' => $metaParsed['answerRegions'] ?? [],
-                                'errorBoxes' => $metaParsed['box'] ? [$metaParsed['box']] : [],
-                                'answerErrorBoxes' => $metaParsed['answerBox'] ? [$metaParsed['answerBox']] : [],
+                                'errorBoxes' => !empty($metaParsed['boxes']) ? $metaParsed['boxes'] : ($metaParsed['box'] ? [$metaParsed['box']] : []),
+                                'answerErrorBoxes' => !empty($metaParsed['answerBoxes']) ? $metaParsed['answerBoxes'] : ($metaParsed['answerBox'] ? [$metaParsed['answerBox']] : []),
                                 'stemBoxes' => $metaParsed['stemBoxes'] ?? [],
                                 'subTopics' => $curTopic !== '' ? [$qNum => $curTopic] : [],
                                 'topic' => $curTopic,
@@ -504,10 +519,18 @@ function getWeekPdfs($subject, $grade, $tier, $weekNum, $errorNums, $year = null
                                     }
                                     $pdfList[$existIdx]['answerRegions'] = $existingAnsRegions;
                                 }
-                                if ($metaParsed['box']) {
+                                if (!empty($metaParsed['boxes'])) {
+                                    foreach ($metaParsed['boxes'] as $mb) {
+                                        $pdfList[$existIdx]['errorBoxes'][] = $mb;
+                                    }
+                                } elseif ($metaParsed['box']) {
                                     $pdfList[$existIdx]['errorBoxes'][] = $metaParsed['box'];
                                 }
-                                if ($metaParsed['answerBox']) {
+                                if (!empty($metaParsed['answerBoxes'])) {
+                                    foreach ($metaParsed['answerBoxes'] as $mab) {
+                                        $pdfList[$existIdx]['answerErrorBoxes'][] = $mab;
+                                    }
+                                } elseif ($metaParsed['answerBox']) {
                                     $pdfList[$existIdx]['answerErrorBoxes'][] = $metaParsed['answerBox'];
                                 }
                                 if (empty($pdfList[$existIdx]['stemBoxes']) && !empty($metaParsed['stemBoxes'])) {
@@ -555,8 +578,8 @@ function getWeekPdfs($subject, $grade, $tier, $weekNum, $errorNums, $year = null
                                     'mode' => $vMode,
                                     'regions' => $vMetaParsed['regions'] ?? [],
                                     'answerRegions' => $vMetaParsed['answerRegions'] ?? [],
-                                    'errorBoxes' => $vMetaParsed['box'] ? [$vMetaParsed['box']] : [],
-                                    'answerErrorBoxes' => $vMetaParsed['answerBox'] ? [$vMetaParsed['answerBox']] : [],
+                                    'errorBoxes' => !empty($vMetaParsed['boxes']) ? $vMetaParsed['boxes'] : ($vMetaParsed['box'] ? [$vMetaParsed['box']] : []),
+                                    'answerErrorBoxes' => !empty($vMetaParsed['answerBoxes']) ? $vMetaParsed['answerBoxes'] : ($vMetaParsed['answerBox'] ? [$vMetaParsed['answerBox']] : []),
                                     'stemBoxes' => $vMetaParsed['stemBoxes'] ?? [],
                                     'topic' => $vRow['topic'] ?? '',
                                     'videoUrl' => null,

@@ -79,6 +79,59 @@
         return Number(clamp01(val).toFixed(4));
     }
 
+    function getSubqRegions(qb) {
+        if (!qb) return [];
+        if (!Array.isArray(qb.regions) || qb.regions.length === 0) {
+            if (typeof qb.x === 'number' && typeof qb.y === 'number') {
+                qb.regions = [{
+                    pageOffset: parseInt(qb.pageOffset, 10) || 0,
+                    x: round4(qb.x),
+                    y: round4(qb.y),
+                    w: round4(qb.w),
+                    h: round4(qb.h)
+                }];
+            } else {
+                qb.regions = [];
+            }
+        }
+        return qb.regions;
+    }
+
+    function syncSubqPrimaryFields(qb) {
+        const regs = getSubqRegions(qb);
+        regs.sort((a, b) =>
+            ((parseInt(a.pageOffset, 10) || 0) - (parseInt(b.pageOffset, 10) || 0))
+            || ((Number(a.y) || 0) - (Number(b.y) || 0))
+        );
+        if (regs.length > 0) {
+            qb.pageOffset = regs[0].pageOffset;
+            qb.x = regs[0].x;
+            qb.y = regs[0].y;
+            qb.w = regs[0].w;
+            qb.h = regs[0].h;
+        }
+    }
+
+    function formatSubqPagesLabel(qb) {
+        const regs = getSubqRegions(qb);
+        const pages = Array.from(new Set(regs.map(r => 'P' + ((parseInt(r.pageOffset, 10) || 0) + 1))));
+        return pages.join('~') || 'P1';
+    }
+
+    function filterSignificantStitchRects(rawRects, stitch) {
+        if (!Array.isArray(rawRects) || rawRects.length <= 1 || !stitch) return rawRects || [];
+        const scored = rawRects.map((r) => {
+            const sIdx = findBestSliceForBox(r, stitch.slices);
+            const s = sIdx >= 0 ? stitch.slices[sIdx] : null;
+            const pxH = s ? (r.h / Math.max(0.001, s.crop.h)) * s.logicalH : 0;
+            return { rect: r, pxH };
+        });
+        const significant = scored.filter(x => x.pxH >= 10).map(x => x.rect);
+        if (significant.length > 0) return significant;
+        scored.sort((a, b) => b.pxH - a.pxH);
+        return [scored[0].rect];
+    }
+
     function getNextAutoNumber(tab) {
         const items = getTabState(tab).items;
         let maxNum = 0;
@@ -358,9 +411,17 @@
         const finishPointer = (e) => {
             if (rgState.resize && rgState.resize.pointerId === e.pointerId) {
                 const resizedItemId = rgState.resize.itemId;
+                const resizedKind = rgState.resize.kind;
+                const resizedBoxRef = rgState.resize.boxRef;
                 rgState.resize = null;
                 const resizedItem = getTabState().items.find(x => x.id === resizedItemId);
-                if (resizedItem && resizedItem.isBig) syncAutoStemBoxes(resizedItem);
+                if (resizedItem && resizedItem.isBig) {
+                    if (resizedKind === 'subq' && resizedBoxRef) {
+                        const parentSubq = (resizedItem.subqBoxes || []).find(qb => getSubqRegions(qb).includes(resizedBoxRef));
+                        if (parentSubq) syncSubqPrimaryFields(parentSubq);
+                    }
+                    syncAutoStemBoxes(resizedItem);
+                }
                 renderAllRg();
                 scheduleDraftSave();
                 return;
@@ -550,7 +611,7 @@
             const nextSubNum = parentItem.subqBoxes.length === 0
                 ? baseNum
                 : (Math.max(...parentItem.subqBoxes.map(b => parseInt(b.num, 10) || baseNum)) + 1);
-            parentItem.subqBoxes.push({ ...rectObj, num: nextSubNum, customNum: false });
+            parentItem.subqBoxes.push({ ...rectObj, num: nextSubNum, customNum: false, regions: [{ ...rectObj }] });
             syncAutoStemBoxes(parentItem);
             renderAllRg();
             scheduleDraftSave();
@@ -799,40 +860,43 @@
                     layer.appendChild(div);
                 });
                 (it.subqBoxes || []).forEach((qb, qIdx) => {
-                    if (qb.pageOffset !== pageOffset) return;
-                    const div = document.createElement('div');
-                    div.className = `rg-box subq ${rgState.selectedId === it.id ? 'active' : ''}`;
-                    div.style.left = (qb.x * 100) + '%';
-                    div.style.top = (qb.y * 100) + '%';
-                    div.style.width = (qb.w * 100) + '%';
-                    div.style.height = (qb.h * 100) + '%';
+                    const regs = getSubqRegions(qb);
+                    regs.forEach((rg, sIdx) => {
+                        if (rg.pageOffset !== pageOffset) return;
+                        const div = document.createElement('div');
+                        div.className = `rg-box subq ${rgState.selectedId === it.id ? 'active' : ''}`;
+                        div.style.left = (rg.x * 100) + '%';
+                        div.style.top = (rg.y * 100) + '%';
+                        div.style.width = (rg.w * 100) + '%';
+                        div.style.height = (rg.h * 100) + '%';
 
-                    const tag = document.createElement('span');
-                    tag.className = 'rg-box-tag';
-                    tag.textContent = `${qb.num}`;
-                    div.appendChild(tag);
+                        const tag = document.createElement('span');
+                        tag.className = 'rg-box-tag';
+                        tag.textContent = regs.length > 1 ? `${qb.num} (${sIdx + 1}/${regs.length})` : `${qb.num}`;
+                        div.appendChild(tag);
 
-                    appendResizeHandles(div, 'subq', it.id, qb);
+                        appendResizeHandles(div, 'subq', it.id, rg);
 
-                    const delBtn = document.createElement('button');
-                    delBtn.type = 'button';
-                    delBtn.className = 'rg-box-del';
-                    delBtn.title = '删除此小问框';
-                    delBtn.textContent = '×';
-                    delBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
-                    delBtn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        rgDeleteSubBox(it.id, 'subq', qIdx);
+                        const delBtn = document.createElement('button');
+                        delBtn.type = 'button';
+                        delBtn.className = 'rg-box-del';
+                        delBtn.title = '删除此小问框';
+                        delBtn.textContent = '×';
+                        delBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+                        delBtn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            rgDeleteSubBox(it.id, 'subq', qIdx);
+                        });
+                        div.appendChild(delBtn);
+
+                        div.addEventListener('pointerdown', (e) => e.stopPropagation());
+                        div.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            rgState.selectedId = it.id;
+                            renderAllRg();
+                        });
+                        layer.appendChild(div);
                     });
-                    div.appendChild(delBtn);
-
-                    div.addEventListener('pointerdown', (e) => e.stopPropagation());
-                    div.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        rgState.selectedId = it.id;
-                        renderAllRg();
-                    });
-                    layer.appendChild(div);
                 });
             }
         });
@@ -981,7 +1045,7 @@
                     `;
                 }).join('');
                 const subqChips = (it.subqBoxes || []).map((qb, qIdx) => `
-                    <span class="rg-subq-chip" title="P${qb.pageOffset + 1}">
+                    <span class="rg-subq-chip" title="${escapeHtmlRg(formatSubqPagesLabel(qb))}">
                         <span>#</span>
                         <input type="text" class="rg-subq-num-input" value="${escapeHtmlRg(qb.num)}"
                             onclick="event.stopPropagation()"
@@ -1304,8 +1368,12 @@
                     bigGroups.set(gKey, exItem);
                     exItems.push(exItem);
                 }
-                if (meta.box) {
-                    exItem.subqBoxes.push({ ...meta.box, num: parseInt(q.id, 10) || q.id, customNum: false });
+                const rawExBoxes = (Array.isArray(meta.boxes) && meta.boxes.length > 0)
+                    ? meta.boxes
+                    : (meta.box ? [meta.box] : []);
+                if (rawExBoxes.length > 0) {
+                    const clonedRegs = rawExBoxes.map(b => ({ ...b }));
+                    exItem.subqBoxes.push({ ...clonedRegs[0], num: parseInt(q.id, 10) || q.id, customNum: false, regions: clonedRegs });
                 }
             } else {
                 const pNums = Array.isArray(q.parentQuestionNums) && q.parentQuestionNums.length > 0
@@ -1341,10 +1409,14 @@
                     ansDedup.set(aSig, ansItem);
                     ansItems.push(ansItem);
                 }
-                if (isGroup && meta.answerBox) {
+                const rawAnsBoxes = (Array.isArray(meta.answerBoxes) && meta.answerBoxes.length > 0)
+                    ? meta.answerBoxes
+                    : (meta.answerBox ? [meta.answerBox] : []);
+                if (isGroup && rawAnsBoxes.length > 0) {
                     ansItem.isBig = true;
                     if (!ansItem.label) ansItem.label = String(meta.groupNums[0]);
-                    ansItem.subqBoxes.push({ ...meta.answerBox, num: parseInt(q.id, 10) || q.id, customNum: false });
+                    const clonedAnsRegs = rawAnsBoxes.map(b => ({ ...b }));
+                    ansItem.subqBoxes.push({ ...clonedAnsRegs[0], num: parseInt(q.id, 10) || q.id, customNum: false, regions: clonedAnsRegs });
                 } else if (!isGroup && !ansItem.label && bankType !== 'variation') {
                     ansItem.label = String(q.id || '');
                 }
@@ -1987,7 +2059,15 @@
             ((parseInt(a.pageOffset, 10) || 0) - (parseInt(b.pageOffset, 10) || 0))
             || ((Number(a.y) || 0) - (Number(b.y) || 0))
         );
-        const sortedSubqs = [...subqs].sort((a, b) =>
+        const flatSubqs = [];
+        subqs.forEach(sb => {
+            getSubqRegions(sb).forEach(r => flatSubqs.push(r));
+        });
+        if (flatSubqs.length === 0) {
+            it.stemBoxes = [];
+            return it.stemBoxes;
+        }
+        const sortedSubqs = flatSubqs.sort((a, b) =>
             ((parseInt(a.pageOffset, 10) || 0) - (parseInt(b.pageOffset, 10) || 0))
             || ((Number(a.y) || 0) - (Number(b.y) || 0))
         );
@@ -2198,27 +2278,16 @@
         const rects = splitStitchRangeToRects(y0Px, y1Px, rgState.focusStitch);
         if (rects.length === 0) return;
 
-        // 小问模式：若不慎拖跨页缝，归属垂直交集最大的一页，避免产生重复题号
-        let bestRect = rects[0];
-        if (rects.length > 1) {
-            let bestScore = -1;
-            rects.forEach((r) => {
-                const sIdx = findBestSliceForBox(r, rgState.focusStitch.slices);
-                const s = sIdx >= 0 ? rgState.focusStitch.slices[sIdx] : null;
-                const pxH = s ? (r.h / Math.max(0.001, s.crop.h)) * s.logicalH : r.h;
-                if (pxH > bestScore) {
-                    bestScore = pxH;
-                    bestRect = r;
-                }
-            });
-            showToast('小问已归属占比更大的一页', 'info');
-        }
+        // 支持直接跨页缝拉框：保留所有有效页切片，过滤微小误触残片
+        const chosenRects = filterSignificantStitchRects(rects, rgState.focusStitch).map(r => ({ ...r }));
         it.subqBoxes = it.subqBoxes || [];
         const baseNum = parseInt(it.label, 10) || 1;
         const nextSubNum = it.subqBoxes.length === 0
             ? baseNum
             : (Math.max(...it.subqBoxes.map(b => parseInt(b.num, 10) || baseNum)) + 1);
-        it.subqBoxes.push({ ...bestRect, num: nextSubNum, customNum: false });
+        const newSubq = { ...chosenRects[0], num: nextSubNum, customNum: false, regions: chosenRects };
+        syncSubqPrimaryFields(newSubq);
+        it.subqBoxes.push(newSubq);
         syncAutoStemBoxes(it);
         renderAllRg();
         scheduleDraftSave();
@@ -2417,7 +2486,7 @@
                         oninput="rgUpdateSubqNum('${it.id}', ${qIdx}, this.value)"
                         onchange="rgUpdateSubqNum('${it.id}', ${qIdx}, this.value)">
                 </div>
-                <span class="rg-card-meta">P${(qb.pageOffset || 0) + 1}</span>
+                <span class="rg-card-meta">${escapeHtmlRg(formatSubqPagesLabel(qb))}</span>
                 <button type="button" class="rg-subq-del-btn" onclick="rgDeleteSubBox('${it.id}', 'subq', ${qIdx})" title="删除此小问框" aria-label="删除此小问框"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
             </div>
         `).join('');
@@ -2594,9 +2663,14 @@
         });
 
         (it.subqBoxes || []).forEach((qb, qIdx) => {
-            const sp = boxToStitchSpan(qb);
-            if (!sp) return;
-            renderStitchedBox(sp.topPx, sp.botPx, 'subq', [qb], qIdx, `${qb.num}`);
+            const regs = getSubqRegions(qb);
+            const spans = regs.map(boxToStitchSpan).filter(Boolean);
+            if (spans.length === 0) return;
+            const topPx = Math.min(...spans.map(sp => sp.topPx));
+            const botPx = Math.max(...spans.map(sp => sp.botPx));
+            const pLabels = formatSubqPagesLabel(qb);
+            const suffix = regs.length > 1 ? ` (跨${pLabels})` : '';
+            renderStitchedBox(topPx, botPx, 'subq', [qb], qIdx, `${qb.num}${suffix}`);
         });
     }
 
@@ -3012,20 +3086,9 @@
                     } else {
                         const rects = splitStitchRangeToRects(rz.curTopPx, rz.curBotPx, rz.stitch);
                         if (rects.length > 0 && rz.groupBoxes[0]) {
-                            let bestRect = rects[0];
-                            if (rects.length > 1) {
-                                let bestScore = -1;
-                                rects.forEach((r) => {
-                                    const sIdx = findBestSliceForBox(r, rz.stitch.slices);
-                                    const s = sIdx >= 0 ? rz.stitch.slices[sIdx] : null;
-                                    const pxH = s ? (r.h / Math.max(0.001, s.crop.h)) * s.logicalH : r.h;
-                                    if (pxH > bestScore) {
-                                        bestScore = pxH;
-                                        bestRect = r;
-                                    }
-                                });
-                            }
-                            Object.assign(rz.groupBoxes[0], bestRect);
+                            const chosenRects = filterSignificantStitchRects(rects, rz.stitch).map(r => ({ ...r }));
+                            rz.groupBoxes[0].regions = chosenRects;
+                            syncSubqPrimaryFields(rz.groupBoxes[0]);
                             syncAutoStemBoxes(it);
                         }
                     }
@@ -3439,8 +3502,15 @@
                 aIt.subqBoxes.forEach(sb => {
                     const sn = String(sb.num || '').trim();
                     if (sn) {
+                        syncSubqPrimaryFields(sb);
                         ansByNum.set(sn, aIt);
-                        ansSubByNum.set(sn, sb);
+                        ansSubByNum.set(sn, getSubqRegions(sb).map(r => ({
+                            pageOffset: r.pageOffset,
+                            x: r.x,
+                            y: r.y,
+                            w: r.w,
+                            h: r.h
+                        })));
                     }
                 });
             }
@@ -3546,25 +3616,40 @@
                 if (it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
                     const groupNums = it.subqBoxes.map(sb => parseInt(sb.num, 10)).filter(n => !isNaN(n)).sort((a, b) => a - b);
                     for (const sb of it.subqBoxes) {
+                        syncSubqPrimaryFields(sb);
                         const qKey = String(sb.num).trim();
                         const matchedAns = findMatchedAns(it, qKey, null);
-                        const matchedAnsSub = ansSubByNum.get(qKey) || null;
+                        const matchedAnsSubRegs = ansSubByNum.get(qKey) || [];
+                        const exBoxes = getSubqRegions(sb).map(r => ({
+                            pageOffset: r.pageOffset,
+                            x: r.x,
+                            y: r.y,
+                            w: r.w,
+                            h: r.h
+                        }));
                         const prev = prevFields.byId.get(qKey);
+                        const qMeta = {
+                            mode: 'region_crop',
+                            groupNums,
+                            stemBoxes: it.stemBoxes || [],
+                            box: exBoxes[0] || null,
+                            answerBox: matchedAnsSubRegs[0] || null,
+                            regions: it.regions,
+                            answerRegions: matchedAns ? matchedAns.regions : []
+                        };
+                        if (exBoxes.length > 1) {
+                            qMeta.boxes = exBoxes;
+                        }
+                        if (matchedAnsSubRegs.length > 1) {
+                            qMeta.answerBoxes = matchedAnsSubRegs;
+                        }
                         imported.push({
                             id: qKey,
                             topic: prev ? prev.topic : '',
                             videoUrl: prev ? prev.videoUrl : '',
                             exercisePdf: { ...exPdfObj },
                             answerPdf: matchedAns && ansPdfObj ? { ...ansPdfObj } : null,
-                            questionMeta: {
-                                mode: 'region_crop',
-                                groupNums,
-                                stemBoxes: it.stemBoxes || [],
-                                box: sb,
-                                answerBox: matchedAnsSub || null,
-                                regions: it.regions,
-                                answerRegions: matchedAns ? matchedAns.regions : []
-                            }
+                            questionMeta: qMeta
                         });
                     }
                     continue;

@@ -4825,6 +4825,9 @@ function applyStep4BigQuestionBoxes() {
         if (prevMember && prevMember.questionMeta && prevMember.questionMeta.answerBox) {
             qMeta.answerBox = { ...prevMember.questionMeta.answerBox };
         }
+        if (prevMember && prevMember.questionMeta && Array.isArray(prevMember.questionMeta.answerBoxes) && prevMember.questionMeta.answerBoxes.length > 0) {
+            qMeta.answerBoxes = prevMember.questionMeta.answerBoxes.map(b => ({ ...b }));
+        }
         return {
             id: item.qNum,
             parentQuestionNum: null,
@@ -8200,17 +8203,25 @@ function collectBigGroupOverlayBoxes(idx, kind) {
     memberIndices.forEach(mIdx => {
         const mq = currentQuestions[mIdx];
         if (!mq || !mq.questionMeta) return;
-        const box = kind === 'answer' ? mq.questionMeta.answerBox : mq.questionMeta.box;
-        if (box && typeof box.x === 'number' && typeof box.y === 'number' && typeof box.w === 'number' && typeof box.h === 'number') {
-            subBoxes.push({
-                pageOffset: Math.max(0, parseInt(box.pageOffset, 10) || 0),
-                x: box.x,
-                y: box.y,
-                w: box.w,
-                h: box.h,
-                label: `第 ${mq.id} 题`
-            });
-        }
+        const rawBoxes = kind === 'answer'
+            ? (Array.isArray(mq.questionMeta.answerBoxes) && mq.questionMeta.answerBoxes.length > 0
+                ? mq.questionMeta.answerBoxes
+                : (mq.questionMeta.answerBox ? [mq.questionMeta.answerBox] : []))
+            : (Array.isArray(mq.questionMeta.boxes) && mq.questionMeta.boxes.length > 0
+                ? mq.questionMeta.boxes
+                : (mq.questionMeta.box ? [mq.questionMeta.box] : []));
+        rawBoxes.forEach((box, bIdx) => {
+            if (box && typeof box.x === 'number' && typeof box.y === 'number' && typeof box.w === 'number' && typeof box.h === 'number') {
+                subBoxes.push({
+                    pageOffset: Math.max(0, parseInt(box.pageOffset, 10) || 0),
+                    x: box.x,
+                    y: box.y,
+                    w: box.w,
+                    h: box.h,
+                    label: rawBoxes.length > 1 ? `第 ${mq.id} 题 (${bIdx + 1}/${rawBoxes.length})` : `第 ${mq.id} 题`
+                });
+            }
+        });
     });
 
     return { stemBoxes, subBoxes };

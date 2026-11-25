@@ -174,7 +174,7 @@ func SanitizeQuestionMeta(raw any) map[string]any {
 		clean["mode"] = "region_crop"
 	}
 
-	for _, arrKey := range []string{"stemBoxes", "regions", "answerRegions"} {
+	for _, arrKey := range []string{"stemBoxes", "regions", "answerRegions", "boxes", "answerBoxes"} {
 		if rawList, ok := m[arrKey].([]any); ok && len(rawList) > 0 {
 			cleanList := make([]map[string]any, 0, len(rawList))
 			for _, item := range rawList {
