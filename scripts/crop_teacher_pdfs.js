@@ -12,9 +12,51 @@
 
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
 const PDFLib = require('../feedback-v1/js/libs/pdf-lib.min.js');
 const pdfjs = require('../feedback-v1/js/libs/pdfjs/pdf.min.js');
 pdfjs.GlobalWorkerOptions.workerSrc = path.resolve(__dirname, '../feedback-v1/js/libs/pdfjs/pdf.worker.min.js');
+
+/**
+ * 查询数据库中已被 question_meta 坐标引用的 PDF 文件名集合。
+ * 直接裁剪这些 PDF 会改变页面高度，导致已保存的归一化切题框 (y, h) 上下错位。
+ */
+function loadCoordReferencedPdfs() {
+    const referenced = new Set();
+    try {
+        const sql = "SELECT DISTINCT exercise_pdf FROM qbank_questions WHERE question_meta IS NOT NULL AND question_meta != '' AND question_meta != '{}' AND exercise_pdf != '' UNION SELECT DISTINCT answer_pdf FROM qbank_questions WHERE question_meta IS NOT NULL AND question_meta != '' AND question_meta != '{}' AND answer_pdf != '';";
+        let args = ['--default-character-set=utf8mb4', '-N', '-B', 'feedback', '-e', sql];
+        let env = { ...process.env };
+
+        if (fs.existsSync('/root/.my.cnf')) {
+            args = ['--defaults-extra-file=/root/.my.cnf', ...args];
+        } else {
+            const cfgPath = path.resolve(__dirname, '../feedback-v1/api/db.local.php');
+            if (!fs.existsSync(cfgPath)) return { referenced, checked: false };
+            const cfgText = fs.readFileSync(cfgPath, 'utf8');
+            const getVal = (k, def = '') => {
+                const m = cfgText.match(new RegExp(`['"]${k}['"]\\s*=>\\s*(?:['"]([^'"]*)['"]|(\\d+))`));
+                return m ? (m[1] !== undefined ? m[1] : m[2]) : def;
+            };
+            const host = getVal('host', '127.0.0.1');
+            const port = getVal('port', '3306');
+            const user = getVal('username', 'tinsy');
+            const pass = getVal('password', '');
+            const dbname = getVal('dbname', 'feedback');
+            if (pass) env.MYSQL_PWD = pass;
+            args = [`-h${host}`, `-P${port}`, `-u${user}`, '--default-character-set=utf8mb4', '-N', '-B', dbname, '-e', sql];
+        }
+
+        const out = execFileSync('mysql', args, { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+        for (const line of out.split(/\r?\n/)) {
+            const base = path.basename(line.trim());
+            if (base) referenced.add(base);
+        }
+        return { referenced, checked: true };
+    } catch (_) {
+        return { referenced, checked: false };
+    }
+}
 
 const FOOTER_SCAN_MAX_Y = 62;
 const BANNER_REGEX = /(?:内部资料|请勿外传|严禁外传|极方：|每一份托付|极致方法)/;
@@ -270,9 +312,10 @@ async function processPdf(filePath, options = {}) {
 }
 
 function parseArgs(argv) {
-    const args = { dryRun: false, listFile: null, dirs: [] };
+    const args = { dryRun: false, allowReferenced: false, listFile: null, dirs: [] };
     for (let i = 2; i < argv.length; i++) {
         if (argv[i] === '--dry-run') args.dryRun = true;
+        else if (argv[i] === '--allow-referenced') args.allowReferenced = true;
         else if (argv[i] === '--list' && argv[i + 1]) args.listFile = argv[++i];
         else if (argv[i] === '--dir' && argv[i + 1]) args.dirs.push(argv[++i]);
     }
@@ -281,6 +324,10 @@ function parseArgs(argv) {
 
 async function run() {
     const args = parseArgs(process.argv);
+    const { referenced: coordReferencedPdfs, checked: dbChecked } = args.allowReferenced
+        ? { referenced: new Set(), checked: false }
+        : loadCoordReferencedPdfs();
+
     const targetDirs = args.dirs.length
         ? args.dirs.map(d => path.resolve(d))
         : [
@@ -311,8 +358,22 @@ async function run() {
         }
     }
 
+    const excludedCount = args.allowReferenced
+        ? 0
+        : allFiles.filter(f => coordReferencedPdfs.has(path.basename(f))).length;
+    if (!args.allowReferenced && excludedCount > 0) {
+        allFiles = allFiles.filter(f => !coordReferencedPdfs.has(path.basename(f)));
+    }
+
     console.log(`=======================================================`);
     console.log(`开始扫描服务器中的老师上传 PDF 文件 (共 ${allFiles.length} 份)${args.dryRun ? ' [DRY-RUN]' : ''}...`);
+    if (!args.allowReferenced) {
+        if (dbChecked) {
+            console.log(`🛡️  已自动排除 ${excludedCount} 份不分页/框题方案 PDF（库中登记 ${coordReferencedPdfs.size} 份，无需去页脚裁剪）`);
+        } else {
+            console.log(`⚠️  未能连接数据库核查 question_meta 引用；若目录中包含不分页/框题 PDF 请谨慎操作`);
+        }
+    }
     console.log(`=======================================================\n`);
 
     const results = [];

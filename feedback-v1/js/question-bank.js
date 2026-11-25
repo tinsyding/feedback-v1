@@ -4164,14 +4164,38 @@ function removeQuestion(index) {
         showToast('助教账号仅拥有查看权限，无法删除题目', 'warn');
         return;
     }
-    currentQuestions.splice(index, 1);
+    const q = currentQuestions[index];
+    if (!q) return;
+
+    let qDesc = `第 ${q.id} 题`;
     if (getBankType() === 'variation') {
-        recalcVariationSubNums(currentQuestions);
+        const pNums = Array.isArray(q.parentQuestionNums) && q.parentQuestionNums.length > 0
+            ? q.parentQuestionNums
+            : (q.parentQuestionNum ? [Number(q.parentQuestionNum)] : []);
+        const pLabel = pNums.length > 0 ? pNums.join('、') : (q.id || '');
+        qDesc = `课后第 ${pLabel} 题 · 变式 ${q.subNum || 1}`;
     }
-    // Do not re-number automatically to preserve merged groups
-    isDirty = true;
-    renderQuestionList();
-    updateStatus();
+
+    showCustomDialog({
+        title: '确认删除题目',
+        body: `确定要删除「${escapeHtml(qDesc)}」吗？`,
+        confirmText: '确认删除',
+        danger: true,
+        onConfirm: () => {
+            const targetIdx = currentQuestions.indexOf(q);
+            const removeIdx = targetIdx >= 0 ? targetIdx : index;
+            if (removeIdx < 0 || removeIdx >= currentQuestions.length) return;
+            currentQuestions.splice(removeIdx, 1);
+            if (getBankType() === 'variation') {
+                recalcVariationSubNums(currentQuestions);
+            }
+            // Do not re-number automatically to preserve merged groups
+            isDirty = true;
+            renderQuestionList();
+            updateStatus();
+            showToast(`已删除「${qDesc}」`);
+        }
+    });
 }
 
 function clearAllQuestions() {
@@ -6031,10 +6055,12 @@ function renderPdfBtn(q, index, type) {
     const iconUploading = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" class="spin-icon"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></svg>`;
 
     if (!data || (!data.url && data.status !== 'uploading')) {
+        const isRegionCropMode = typeof window.isRegionCropModeActive === 'function' && window.isRegionCropModeActive();
         const requiredCls = ' required-empty';
-        const statusText = '未上传 (必传)';
+        const statusText = isRegionCropMode ? '去框选 (必传)' : '未上传 (必传)';
+        const titleText = isRegionCropMode ? `点击前往工作台框选${label} (必传)` : `点击上传${label} PDF (必传)`;
         return `
-            <div class="q-pdf-thumb-card empty${requiredCls}" onclick="triggerPdfUpload(${index}, '${type}')" title="点击上传${label} PDF (必传)">
+            <div class="q-pdf-thumb-card empty${requiredCls}" onclick="triggerPdfUpload(${index}, '${type}')" title="${titleText}">
                 <div class="q-pdf-mini-thumb empty-thumb-wrap">
                     ${iconEmpty}
                 </div>
@@ -6086,13 +6112,21 @@ function renderPdfBtn(q, index, type) {
 }
 
 function openPdfManageDialog(index, type) {
-    const data = type === 'exercise' ? currentQuestions[index].exercisePdf : currentQuestions[index].answerPdf;
+    const q = currentQuestions[index];
+    if (!q) return;
+    const data = type === 'exercise' ? q.exercisePdf : q.answerPdf;
     const label = type === 'exercise' ? '题目' : '答案';
+    const isRegionCropMode = typeof window.isRegionCropModeActive === 'function' && window.isRegionCropModeActive();
+    const hasRegionCrop = Boolean(
+        q.questionMeta && q.questionMeta.mode === 'region_crop' &&
+        Array.isArray(type === 'answer' ? q.questionMeta.answerRegions : q.questionMeta.regions) &&
+        (type === 'answer' ? q.questionMeta.answerRegions : q.questionMeta.regions).length > 0
+    );
 
     showCustomDialog({
         title: `管理${label} PDF`,
         body: `<p style="margin-bottom:12px; font-size:0.9rem; color:var(--text-secondary);">当前已上传文件：<br><b style="color:var(--text-primary); word-break:break-all;">${escapeHtml(data.name)}</b></p>
-               <p style="font-size:0.85rem; color:var(--text-muted);">可预览、重新上传覆盖，或删除该附件。</p>`,
+               <p style="font-size:0.85rem; color:var(--text-muted);">可预览、${isRegionCropMode ? '前往工作台重新框选' : '重新上传覆盖'}，或删除该附件。</p>`,
         confirmText: '删除附件',
         cancelText: '关闭',
         danger: true,
@@ -6101,7 +6135,7 @@ function openPdfManageDialog(index, type) {
         }
     });
 
-    // Add 预览 / 重新上传 buttons to the dialog footer
+    // Add 预览 / 重新上传(或重新框选) buttons to the dialog footer
     setTimeout(() => {
         const footer = document.querySelector('#custom-dialog .dialog-footer');
         if (!footer) return;
@@ -6116,13 +6150,17 @@ function openPdfManageDialog(index, type) {
         previewBtn.textContent = '预览';
         previewBtn.onclick = () => {
             closeNativeDialog('custom-dialog');
-            previewPdf(data.url, data.name || `${label} PDF`);
+            if (hasRegionCrop) {
+                previewRegionCropQuestion(index, type);
+            } else {
+                previewPdf(data.url, data.name || `${label} PDF`);
+            }
         };
 
         const reuploadBtn = document.createElement('button');
         reuploadBtn.type = 'button';
         reuploadBtn.className = 'btn secondary';
-        reuploadBtn.textContent = '重新上传';
+        reuploadBtn.textContent = isRegionCropMode ? '重新框选' : '重新上传';
         reuploadBtn.onclick = () => {
             closeNativeDialog('custom-dialog');
             triggerPdfUpload(index, type);
@@ -6135,6 +6173,14 @@ function openPdfManageDialog(index, type) {
 }
 
 function triggerPdfUpload(index, type) {
+    if (window.currentUser && window.currentUser.role === 'assistant') {
+        showToast('助教账号仅拥有查看权限，无法上传或框选题目', 'warn');
+        return;
+    }
+    if (typeof window.isRegionCropModeActive === 'function' && window.isRegionCropModeActive() && typeof window.rgCropSingleQuestionFromStep4 === 'function') {
+        window.rgCropSingleQuestionFromStep4(index, type);
+        return;
+    }
     let input = document.getElementById('global-pdf-uploader');
     if (!input) {
         input = document.createElement('input');

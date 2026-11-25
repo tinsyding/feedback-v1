@@ -33,6 +33,7 @@
         focusRenderSeq: 0,
         presetNextLabel: null,
         presetNextTargetExId: null,
+        singleCropTask: null, // { questionIndex, questionRef, type: 'exercise'|'answer', questionId, targetItemId }
         drag: null,
         resize: null,
         nextSeq: 1,
@@ -42,6 +43,7 @@
         exercise: {
             file: null,
             pdfDoc: null,
+            uploadedPdf: null,
             pageNum: 1,
             totalPages: 0,
             items: [],
@@ -51,6 +53,7 @@
         answer: {
             file: null,
             pdfDoc: null,
+            uploadedPdf: null,
             pageNum: 1,
             totalPages: 0,
             items: [],
@@ -234,8 +237,8 @@
     }
 
     function resetStudioMemoryState() {
-        rgState.exercise = { file: null, pdfDoc: null, pageNum: 1, totalPages: 0, items: [], pageTextCache: new Map(), pageTextPromises: new Map() };
-        rgState.answer = { file: null, pdfDoc: null, pageNum: 1, totalPages: 0, items: [], pageTextCache: new Map(), pageTextPromises: new Map() };
+        rgState.exercise = { file: null, pdfDoc: null, uploadedPdf: null, pageNum: 1, totalPages: 0, items: [], pageTextCache: new Map(), pageTextPromises: new Map() };
+        rgState.answer = { file: null, pdfDoc: null, uploadedPdf: null, pageNum: 1, totalPages: 0, items: [], pageTextCache: new Map(), pageTextPromises: new Map() };
         rgState.selectedId = null;
         rgState.continueTargetId = null;
         rgState.subMode = null;
@@ -249,6 +252,7 @@
         rgState.twoTapStart = null;
         rgState.presetNextLabel = null;
         rgState.presetNextTargetExId = null;
+        rgState.singleCropTask = null;
         rgState.stage = 'upload';
         rgState.activeTab = 'exercise';
         rgState.nextSeq = 1;
@@ -920,9 +924,31 @@
 
         // 3. 新建一题 / 一条答案框
         const bankType = getCurrentBankTypeSafe();
+        const isSingleTask = Boolean(rgState.singleCropTask && rgState.singleCropTask.type === tab);
         let label = '';
         let targetExId = null;
-        if (tab === 'answer' && rgState.presetNextLabel) {
+        let initialParentNums = [];
+        if (isSingleTask) {
+            const taskQ = rgState.singleCropTask.questionRef;
+            if (bankType === 'variation') {
+                if (tab === 'exercise') {
+                    initialParentNums = Array.isArray(taskQ && taskQ.parentQuestionNums) && taskQ.parentQuestionNums.length > 0
+                        ? [...taskQ.parentQuestionNums]
+                        : (taskQ && taskQ.parentQuestionNum ? [Number(taskQ.parentQuestionNum)] : []);
+                } else {
+                    if (rgState.presetNextTargetExId) {
+                        targetExId = rgState.presetNextTargetExId;
+                        rgState.presetNextTargetExId = null;
+                    } else if (taskQ) {
+                        const matchedEx = findRgItemForQuestion(taskQ, 'exercise');
+                        targetExId = matchedEx ? matchedEx.id : null;
+                    }
+                }
+            } else {
+                label = rgState.singleCropTask.questionId || getNextAutoNumber(tab);
+                rgState.presetNextLabel = null;
+            }
+        } else if (tab === 'answer' && rgState.presetNextLabel) {
             label = rgState.presetNextLabel;
             rgState.presetNextLabel = null;
         } else if (bankType === 'homework') {
@@ -950,7 +976,7 @@
             label,
             autoDetected: false,
             targetExId,
-            parentNums: [],
+            parentNums: initialParentNums,
             isBig: false,
             regions: [rectObj],
             stemBoxes: [],
@@ -958,16 +984,19 @@
         };
         tabState.items.push(newItem);
         rgState.selectedId = newItem.id;
+        if (isSingleTask) {
+            rgState.singleCropTask.targetItemId = newItem.id;
+        }
 
         let previewDetectStatus = false;
-        if (bankType === 'preview' && !newItem.label) {
+        if (!isSingleTask && bankType === 'preview' && !newItem.label) {
             previewDetectStatus = applyPreviewAutoDetectIfEmpty(tab, newItem, rectObj, { focusOnMiss: true });
         }
 
         renderAllRg();
         scheduleDraftSave();
 
-        if ((bankType === 'preview' && !newItem.label && previewDetectStatus === false) || (bankType === 'variation' && tab === 'answer')) {
+        if (!isSingleTask && ((bankType === 'preview' && !newItem.label && previewDetectStatus === false) || (bankType === 'variation' && tab === 'answer'))) {
             requestAnimationFrame(() => {
                 const input = document.querySelector(`.rg-card[data-id="${newItem.id}"] .rg-num-input`);
                 if (input) {
@@ -1301,20 +1330,38 @@
             }
         }
         if (finishBtn) {
-            finishBtn.disabled = rgState.exercise.items.length === 0;
+            if (rgState.singleCropTask) {
+                finishBtn.disabled = !getSingleCropTargetItem();
+            } else {
+                finishBtn.disabled = rgState.exercise.items.length === 0;
+            }
         }
 
         renderMissingAnswerBar();
 
         const viewportEl = document.getElementById('rg-viewport');
         if (contBanner && contText) {
+            const cancelActions = contBanner.querySelector('.rg-continue-banner-actions');
             if (rgState.continueTargetId) {
                 const target = tabState.items.find(it => it.id === rgState.continueTargetId);
                 contBanner.style.display = 'flex';
+                if (cancelActions) cancelActions.style.display = '';
                 contText.textContent = `正在为「${target ? formatItemTitle(target, tab) : '当前题'}」追加跨页区域：请翻页后拉框`;
                 if (viewportEl) viewportEl.classList.add('continue-active');
+            } else if (rgState.singleCropTask && rgState.stage === rgState.singleCropTask.type) {
+                const task = rgState.singleCropTask;
+                const qLabel = formatSingleCropQuestionLabel(task.questionRef);
+                const typeLabel = task.type === 'answer' ? '答案' : '题目';
+                const targetIt = getSingleCropTargetItem();
+                contBanner.style.display = 'flex';
+                if (cancelActions) cancelActions.style.display = 'none';
+                contText.textContent = targetIt
+                    ? `已框选「${qLabel}」的${typeLabel}（可拖拽边缘微调或跨页续框），完成后请点击「完成框选并返回」`
+                    : `正在为「${qLabel}」框选${typeLabel}：请在原卷画布上拖拽拉框，完成后点击「完成框选并返回」`;
+                if (viewportEl) viewportEl.classList.remove('continue-active');
             } else {
                 contBanner.style.display = 'none';
+                if (cancelActions) cancelActions.style.display = '';
                 if (viewportEl) viewportEl.classList.remove('continue-active');
             }
         }
@@ -1551,12 +1598,39 @@
 
     function hasSavedRegionCropInCurrentQuestions() {
         return Array.isArray(currentQuestions) && currentQuestions.some(q =>
-            q && q.questionMeta && q.questionMeta.mode === 'region_crop' && q.exercisePdf && q.exercisePdf.url
+            q && q.questionMeta && q.questionMeta.mode === 'region_crop' &&
+            ((q.exercisePdf && q.exercisePdf.url) || (q.answerPdf && q.answerPdf.url))
         );
+    }
+
+    window.isRegionCropModeActive = function () {
+        return Boolean(window.rgImportedActive || hasSavedRegionCropInCurrentQuestions());
+    };
+
+    function getSingleCropTargetItem() {
+        const task = rgState.singleCropTask;
+        if (!task || !task.targetItemId) return null;
+        const tabState = getTabState(task.type);
+        const it = tabState.items.find(x => x.id === task.targetItemId);
+        if (!it || !Array.isArray(it.regions) || it.regions.length === 0) return null;
+        return it;
+    }
+
+    function formatSingleCropQuestionLabel(q) {
+        if (!q) return '当前题';
+        if (getCurrentBankTypeSafe() === 'variation') {
+            const pNums = Array.isArray(q.parentQuestionNums) && q.parentQuestionNums.length > 0
+                ? q.parentQuestionNums
+                : (q.parentQuestionNum ? [Number(q.parentQuestionNum)] : []);
+            const pLabel = pNums.length > 0 ? pNums.join('、') : (q.id || '');
+            return `课后第 ${pLabel} 题 · 变式 ${q.subNum || 1}`;
+        }
+        return `第 ${q.id} 题`;
     }
 
     function syncStageUi() {
         const st = rgState.stage;
+        const task = rgState.singleCropTask;
         const gate = document.getElementById('rg-upload-gate');
         const ws = document.getElementById('rg-workspace');
         const pillUp = document.getElementById('rg-step-pill-upload');
@@ -1569,6 +1643,18 @@
         const uploadFooter = document.getElementById('rg-upload-gate-footer');
         const exBox = document.getElementById('rg-exercise-upload-box');
         const ansBox = document.getElementById('rg-answer-upload-box');
+        const backHomeBtn = document.querySelector('#step-debug .rg-back-home-btn');
+
+        if (backHomeBtn) {
+            const backSpan = backHomeBtn.querySelector('span');
+            if (task) {
+                if (backSpan) backSpan.textContent = '返回知识点列表';
+                backHomeBtn.title = '返回第 4 步知识点配置';
+            } else {
+                if (backSpan) backSpan.textContent = '返回首页';
+                backHomeBtn.title = '返回第 1 步配置';
+            }
+        }
 
         if (exBox) exBox.classList.toggle('uploaded', Boolean(rgState.exercise.pdfDoc));
         if (ansBox) ansBox.classList.toggle('uploaded', Boolean(rgState.answer.pdfDoc));
@@ -1576,7 +1662,7 @@
         if (gate) gate.style.display = st === 'upload' ? 'block' : 'none';
         if (ws) ws.style.display = st === 'upload' ? 'none' : 'grid';
 
-        const showLoadExist = hasRegionDebugPermission() && st === 'upload' && hasSavedRegionCropInCurrentQuestions();
+        const showLoadExist = !task && hasRegionDebugPermission() && st === 'upload' && hasSavedRegionCropInCurrentQuestions();
         if (loadExistBtn) {
             loadExistBtn.style.display = showLoadExist ? 'inline-flex' : 'none';
         }
@@ -1594,6 +1680,31 @@
         }
         if (pillAn) {
             pillAn.classList.toggle('active', st === 'answer');
+        }
+
+        if (task) {
+            if (prevBtn) {
+                prevBtn.style.display = 'none';
+            }
+            if (nextBtn) {
+                if (st === 'upload') {
+                    nextBtn.style.display = 'inline-flex';
+                    setBtnLabel(nextBtn, `开始框选${task.type === 'answer' ? '答案' : '题目'} PDF`);
+                    nextBtn.disabled = !rgState[task.type].pdfDoc;
+                } else {
+                    nextBtn.style.display = 'none';
+                }
+            }
+            if (finishBtn) {
+                if (st === task.type) {
+                    finishBtn.style.display = 'inline-flex';
+                    setBtnLabel(finishBtn, '完成框选并返回');
+                    finishBtn.disabled = !getSingleCropTargetItem();
+                } else {
+                    finishBtn.style.display = 'none';
+                }
+            }
+            return;
         }
 
         if (prevBtn) {
@@ -1624,6 +1735,7 @@
 
         if (finishBtn) {
             finishBtn.style.display = st === 'answer' ? 'inline-flex' : 'none';
+            setBtnLabel(finishBtn, '完成框选并导入第 4 步');
             finishBtn.disabled = rgState.answer.items.length === 0;
         }
     }
@@ -1650,8 +1762,9 @@
             if (!meta || meta.mode !== 'region_crop') return;
 
             const isGroup = bankType !== 'variation' && Array.isArray(meta.groupNums) && meta.groupNums.length > 1;
+            const hasExRegions = Array.isArray(meta.regions) && meta.regions.length > 0;
             let exItem = null;
-            if (isGroup) {
+            if (isGroup && hasExRegions) {
                 const gKey = meta.groupNums.join(',');
                 exItem = bigGroups.get(gKey);
                 if (!exItem) {
@@ -1675,7 +1788,7 @@
                     const clonedRegs = rawExBoxes.map(b => ({ ...b }));
                     exItem.subqBoxes.push({ ...clonedRegs[0], num: parseInt(q.id, 10) || q.id, customNum: false, regions: clonedRegs });
                 }
-            } else {
+            } else if (hasExRegions) {
                 const pNums = Array.isArray(q.parentQuestionNums) && q.parentQuestionNums.length > 0
                     ? q.parentQuestionNums
                     : (q.parentQuestionNum ? [Number(q.parentQuestionNum)] : []);
@@ -1693,13 +1806,13 @@
             }
 
             if (Array.isArray(meta.answerRegions) && meta.answerRegions.length > 0) {
-                const aSig = bankType === 'variation' ? `var_${exItem.id}` : regSig(meta.answerRegions);
+                const aSig = bankType === 'variation' ? (exItem ? `var_${exItem.id}` : `var_q_${q.id}_${regSig(meta.answerRegions)}`) : regSig(meta.answerRegions);
                 let ansItem = ansDedup.get(aSig);
                 if (!ansItem) {
                     ansItem = {
                         id: `answer_${seq++}`,
                         label: (bankType === 'variation' || isGroup) ? '' : String(q.id || ''),
-                        targetExId: bankType === 'variation' ? exItem.id : null,
+                        targetExId: (bankType === 'variation' && exItem) ? exItem.id : null,
                         parentNums: [],
                         isBig: Boolean(isGroup && meta.answerBox),
                         regions: meta.answerRegions.map(r => ({ ...r })),
@@ -1766,6 +1879,11 @@
             rgState.exercise = {
                 file: exLoaded.file,
                 pdfDoc: exLoaded.pdfDoc,
+                uploadedPdf: {
+                    url: firstRegionQ.exercisePdf.url,
+                    name: firstRegionQ.exercisePdf.name || exLoaded.file.name,
+                    status: 'uploaded'
+                },
                 pageNum: 1,
                 totalPages: exLoaded.pdfDoc.numPages,
                 items: rebuilt.exItems,
@@ -1779,6 +1897,11 @@
                 rgState.answer = {
                     file: ansLoaded.file,
                     pdfDoc: ansLoaded.pdfDoc,
+                    uploadedPdf: {
+                        url: firstAnsQ.answerPdf.url,
+                        name: firstAnsQ.answerPdf.name || ansLoaded.file.name,
+                        status: 'uploaded'
+                    },
                     pageNum: 1,
                     totalPages: ansLoaded.pdfDoc.numPages,
                     items: rebuilt.ansItems,
@@ -1788,7 +1911,7 @@
                 const ansLbl = document.getElementById('rg-answer-file-label');
                 if (ansLbl) ansLbl.textContent = `${ansLoaded.file.name} (${ansLoaded.pdfDoc.numPages} 页)`;
             } else {
-                rgState.answer = { file: null, pdfDoc: null, pageNum: 1, totalPages: 0, items: [], pageTextCache: new Map(), pageTextPromises: new Map() };
+                rgState.answer = { file: null, pdfDoc: null, uploadedPdf: null, pageNum: 1, totalPages: 0, items: [], pageTextCache: new Map(), pageTextPromises: new Map() };
             }
 
             rgState.nextSeq = rebuilt.nextSeq;
@@ -1796,9 +1919,10 @@
             rgState.activeTab = 'exercise';
             rgState.continueTargetId = null;
             rgState.subMode = null;
+            rgState.singleCropTask = null;
 
             if (focusQuestion) {
-                const target = findRgItemForQuestion(focusQuestion);
+                const target = findRgItemForQuestion(focusQuestion, 'exercise');
                 if (target) {
                     rgState.selectedId = target.id;
                     if (target.regions && target.regions.length > 0) {
@@ -1818,18 +1942,25 @@
         }
     };
 
-    function findRgItemForQuestion(q) {
+    function findRgItemForQuestion(q, tab = 'exercise') {
         if (!q) return null;
-        const qIdStr = String(q.id || '').trim();
-        const bankType = getCurrentBankTypeSafe();
-        if (bankType === 'variation') {
-            const qRegions = (q.questionMeta && Array.isArray(q.questionMeta.regions)) ? q.questionMeta.regions : [];
+        const tabState = getTabState(tab);
+        const items = tabState ? tabState.items : [];
+        const qRegions = q.questionMeta
+            ? (tab === 'answer' ? q.questionMeta.answerRegions : q.questionMeta.regions)
+            : null;
+        if (Array.isArray(qRegions) && qRegions.length > 0) {
             const sig = qRegions.map(r => `${r.pageOffset}:${r.x}:${r.y}:${r.w}:${r.h}`).join(';');
-            return rgState.exercise.items.find(it =>
+            const bySig = items.find(it =>
                 (it.regions || []).map(r => `${r.pageOffset}:${r.x}:${r.y}:${r.w}:${r.h}`).join(';') === sig
-            ) || null;
+            );
+            if (bySig) return bySig;
         }
-        return rgState.exercise.items.find(it => {
+        const bankType = getCurrentBankTypeSafe();
+        if (bankType === 'variation') return null;
+        const qIdStr = String(q.id || '').trim();
+        if (!qIdStr) return null;
+        return items.find(it => {
             if (String(it.label || '').trim() === qIdStr) return true;
             if (it.isBig && Array.isArray(it.subqBoxes)) {
                 return it.subqBoxes.some(sb => String(sb.num || '').trim() === qIdStr);
@@ -1859,6 +1990,7 @@
             resetStudioMemoryState();
         }
         rgState.contextKey = newContextKey;
+        rgState.singleCropTask = null;
 
         const ctxEl = document.getElementById('rg-context-line');
         if (ctxEl) {
@@ -1880,7 +2012,7 @@
             if (rgState.exercise.pdfDoc) {
                 rgState.stage = 'exercise';
                 rgState.activeTab = 'exercise';
-                const target = findRgItemForQuestion(opts.focusQuestion);
+                const target = findRgItemForQuestion(opts.focusQuestion, 'exercise');
                 if (target) {
                     rgState.selectedId = target.id;
                     if (target.regions && target.regions.length > 0) {
@@ -1897,6 +2029,163 @@
         await renderPdfPage();
     };
 
+    window.rgCropSingleQuestionFromStep4 = async function (index, type) {
+        if (!hasRegionDebugPermission()) {
+            showToast('助教账号仅具备查看权限，无法录入或上传题目', 'warn');
+            return;
+        }
+        const q = Array.isArray(currentQuestions) ? currentQuestions[index] : null;
+        if (!q) return;
+        const tab = type === 'answer' ? 'answer' : 'exercise';
+        const typeLabel = tab === 'answer' ? '答案' : '题目';
+
+        if (!subjectSelect || !subjectSelect.value || !gradeSelect || !gradeSelect.value || !tierSelect || !tierSelect.value || !weekSelect || !weekSelect.value) {
+            showToast('请先选齐学科、年级、班层与专题', 'warn');
+            return;
+        }
+        if (getCurrentBankTypeSafe() === 'variation' && typeof loadHomeworkQuestionsForVariation === 'function') {
+            await loadHomeworkQuestionsForVariation();
+        }
+
+        const newContextKey = buildContextKeyFromSelectors();
+        if (rgState.contextKey && rgState.contextKey !== newContextKey) {
+            resetStudioMemoryState();
+        }
+        rgState.contextKey = newContextKey;
+
+        const ctxEl = document.getElementById('rg-context-line');
+        if (ctxEl) {
+            const bankLabel = typeof getBankTypeLabel === 'function' ? getBankTypeLabel(getCurrentBankTypeSafe()) : getCurrentBankTypeSafe();
+            const topicLabel = typeof getTopicLabel === 'function' ? getTopicLabel(weekSelect.value) : weekSelect.value;
+            ctxEl.textContent = `${bankLabel} · ${subjectSelect.value} · ${gradeSelect.value} · ${tierSelect.value} · ${topicLabel}`;
+        }
+
+        bindCanvasEventsOnce();
+        try {
+            if (typeof indexedDB !== 'undefined') indexedDB.deleteDatabase(DRAFT_DB_NAME);
+        } catch (_) {}
+
+        const firstExQ = currentQuestions.find(item =>
+            item && item.questionMeta && item.questionMeta.mode === 'region_crop' && item.exercisePdf && item.exercisePdf.url
+        );
+        const firstAnsQ = currentQuestions.find(item =>
+            item && item.questionMeta && item.questionMeta.mode === 'region_crop' && item.answerPdf && item.answerPdf.url
+        );
+
+        const needLoadEx = !rgState.exercise.pdfDoc && firstExQ;
+        const needLoadAns = !rgState.answer.pdfDoc && firstAnsQ;
+        if ((tab === 'exercise' && needLoadEx) || (tab === 'answer' && needLoadAns)) {
+            showToast(`正在载入${typeLabel}原卷 PDF...`, 'info');
+        }
+
+        try {
+            if (needLoadEx && (tab === 'exercise' || !rgState.exercise.pdfDoc)) {
+                const exLoaded = await loadPdfFromUrlToFile(firstExQ.exercisePdf.url, firstExQ.exercisePdf.name || '题目原卷.pdf');
+                rgState.exercise.file = exLoaded.file;
+                rgState.exercise.pdfDoc = exLoaded.pdfDoc;
+                rgState.exercise.uploadedPdf = {
+                    url: firstExQ.exercisePdf.url,
+                    name: firstExQ.exercisePdf.name || exLoaded.file.name,
+                    status: 'uploaded'
+                };
+                rgState.exercise.pageNum = 1;
+                rgState.exercise.totalPages = exLoaded.pdfDoc.numPages;
+                rgState.exercise.pageTextCache = new Map();
+                rgState.exercise.pageTextPromises = new Map();
+                const exLbl = document.getElementById('rg-exercise-file-label');
+                if (exLbl) exLbl.textContent = `${exLoaded.file.name} (${exLoaded.pdfDoc.numPages} 页)`;
+            } else if (firstExQ && !rgState.exercise.uploadedPdf) {
+                rgState.exercise.uploadedPdf = {
+                    url: firstExQ.exercisePdf.url,
+                    name: firstExQ.exercisePdf.name || '题目原卷.pdf',
+                    status: 'uploaded'
+                };
+            }
+
+            if (needLoadAns && (tab === 'answer' || !rgState.answer.pdfDoc)) {
+                const ansLoaded = await loadPdfFromUrlToFile(firstAnsQ.answerPdf.url, firstAnsQ.answerPdf.name || '答案原卷.pdf');
+                rgState.answer.file = ansLoaded.file;
+                rgState.answer.pdfDoc = ansLoaded.pdfDoc;
+                rgState.answer.uploadedPdf = {
+                    url: firstAnsQ.answerPdf.url,
+                    name: firstAnsQ.answerPdf.name || ansLoaded.file.name,
+                    status: 'uploaded'
+                };
+                rgState.answer.pageNum = 1;
+                rgState.answer.totalPages = ansLoaded.pdfDoc.numPages;
+                rgState.answer.pageTextCache = new Map();
+                rgState.answer.pageTextPromises = new Map();
+                const ansLbl = document.getElementById('rg-answer-file-label');
+                if (ansLbl) ansLbl.textContent = `${ansLoaded.file.name} (${ansLoaded.pdfDoc.numPages} 页)`;
+            } else if (firstAnsQ && !rgState.answer.uploadedPdf) {
+                rgState.answer.uploadedPdf = {
+                    url: firstAnsQ.answerPdf.url,
+                    name: firstAnsQ.answerPdf.name || '答案原卷.pdf',
+                    status: 'uploaded'
+                };
+            }
+        } catch (err) {
+            console.error('Load PDF for single question crop failed:', err);
+            showToast(`载入${typeLabel}原卷失败：` + (err.message || '网络异常'), 'error');
+            return;
+        }
+
+        const rebuilt = reconstructRgItemsFromQuestions(currentQuestions);
+        rgState.exercise.items = rebuilt.exItems;
+        rgState.answer.items = rebuilt.ansItems;
+        rgState.nextSeq = Math.max(rgState.nextSeq, rebuilt.nextSeq);
+
+        rgState.continueTargetId = null;
+        rgState.subMode = null;
+        rgState.continueFocus = null;
+        closeFocusDialogSafe();
+        rgState.twoTapStart = null;
+        rgState.selectedId = null;
+        rgState.presetNextLabel = null;
+        rgState.presetNextTargetExId = null;
+
+        const qIdStr = String(q.id ?? '').trim();
+        rgState.singleCropTask = {
+            questionIndex: index,
+            questionRef: q,
+            type: tab,
+            questionId: qIdStr,
+            targetItemId: null
+        };
+
+        const existingTarget = findRgItemForQuestion(q, tab);
+        if (existingTarget) {
+            rgState.singleCropTask.targetItemId = existingTarget.id;
+            rgState.selectedId = existingTarget.id;
+            if (existingTarget.regions && existingTarget.regions.length > 0 && rgState[tab].totalPages > 0) {
+                rgState[tab].pageNum = Math.min(rgState[tab].totalPages, Math.max(1, (existingTarget.regions[0].pageOffset || 0) + 1));
+            }
+        } else {
+            if (getCurrentBankTypeSafe() !== 'variation') {
+                rgState.presetNextLabel = qIdStr;
+            } else if (tab === 'answer') {
+                const matchedEx = findRgItemForQuestion(q, 'exercise');
+                if (matchedEx) rgState.presetNextTargetExId = matchedEx.id;
+            }
+        }
+
+        rgState.activeTab = tab;
+        rgState.stage = rgState[tab].pdfDoc ? tab : 'upload';
+
+        goToStep('debug');
+        renderAllRg();
+        await renderPdfPage();
+
+        const qLabel = formatSingleCropQuestionLabel(q);
+        if (!rgState[tab].pdfDoc) {
+            showToast(`请先上传${typeLabel}原卷 PDF，再为「${qLabel}」框选${typeLabel}`, 'info');
+        } else if (existingTarget) {
+            showToast(`已定位「${qLabel}」的${typeLabel}区域，可微调或删除后重框`, 'info');
+        } else {
+            showToast(`请在${typeLabel}原卷上框选「${qLabel}」，完成后点击「完成框选并返回」`, 'info');
+        }
+    };
+
     window.rgEditQuestionRegionFromStep4 = async function (index) {
         if (!hasRegionDebugPermission()) {
             showToast('助教账号仅具备查看权限，无法录入或上传题目', 'warn');
@@ -1908,13 +2197,34 @@
     };
 
     window.exitRegionDebugStudio = function () {
+        const wasSingleTask = Boolean(rgState.singleCropTask);
+        rgState.singleCropTask = null;
         rgState.subMode = null;
         rgState.continueTargetId = null;
-        goToStep(1);
+        rgState.presetNextLabel = null;
+        rgState.presetNextTargetExId = null;
+        goToStep(wasSingleTask ? 4 : 1);
     };
 
     window.rgGoNextStage = async function () {
         if (rgState.stage === 'upload') {
+            if (rgState.singleCropTask) {
+                const targetTab = rgState.singleCropTask.type;
+                if (!rgState[targetTab].pdfDoc) {
+                    showToast(`请先上传${targetTab === 'answer' ? '答案' : '题目'} PDF`, 'warn');
+                    return;
+                }
+                rgState.stage = targetTab;
+                rgState.activeTab = targetTab;
+                rgState.continueTargetId = null;
+                rgState.subMode = null;
+                rgState.focusPageCache.clear();
+                closeFocusDialogSafe();
+                rgState.twoTapStart = null;
+                renderAllRg();
+                await renderPdfPage();
+                return;
+            }
             if (!rgState.exercise.pdfDoc || !rgState.answer.pdfDoc) {
                 showToast('请先上传题目 PDF 和答案 PDF', 'warn');
                 return;
@@ -2003,6 +2313,7 @@
             const tabState = getTabState(tab);
             tabState.file = file;
             tabState.pdfDoc = pdfDoc;
+            tabState.uploadedPdf = null;
             tabState.pageNum = 1;
             tabState.totalPages = pdfDoc.numPages;
             tabState.items = [];
@@ -2088,6 +2399,12 @@
             last.regions.pop();
         } else {
             tabState.items.pop();
+            if (rgState.singleCropTask && rgState.singleCropTask.targetItemId === last.id) {
+                rgState.singleCropTask.targetItemId = null;
+                if (getCurrentBankTypeSafe() !== 'variation') {
+                    rgState.presetNextLabel = rgState.singleCropTask.questionId;
+                }
+            }
         }
         renderAllRg();
         scheduleDraftSave();
@@ -3737,6 +4054,12 @@
         tabState.items = tabState.items.filter(x => x.id !== itemId);
         if (rgState.selectedId === itemId) rgState.selectedId = null;
         if (rgState.continueTargetId === itemId) rgState.continueTargetId = null;
+        if (rgState.singleCropTask && rgState.singleCropTask.targetItemId === itemId) {
+            rgState.singleCropTask.targetItemId = null;
+            if (getCurrentBankTypeSafe() !== 'variation') {
+                rgState.presetNextLabel = rgState.singleCropTask.questionId;
+            }
+        }
         if ((rgState.subMode && rgState.subMode.itemId === itemId) || (rgState.continueFocus && rgState.continueFocus.itemId === itemId)) {
             rgState.subMode = null;
             rgState.continueFocus = null;
@@ -3770,9 +4093,112 @@
         return { byId, byVarSig };
     }
 
+    async function finishSingleCropTask() {
+        const task = rgState.singleCropTask;
+        if (!task) return;
+        const tab = task.type;
+        const typeLabel = tab === 'answer' ? '答案' : '题目';
+        const targetItem = getSingleCropTargetItem();
+        if (!targetItem) {
+            showToast(`请先在原卷上拉框框选本题的${typeLabel}区域`, 'warn');
+            return;
+        }
+        const tabState = getTabState(tab);
+        const finishBtn = document.getElementById('rg-finish-btn');
+        if (finishBtn) {
+            finishBtn.disabled = true;
+            setBtnLabel(finishBtn, '正在应用框选...');
+        }
+
+        try {
+            let pdfObj = tabState.uploadedPdf && tabState.uploadedPdf.url ? { ...tabState.uploadedPdf } : null;
+            if (!pdfObj) {
+                const refQ = Array.isArray(currentQuestions) ? currentQuestions.find(item =>
+                    item && item.questionMeta && item.questionMeta.mode === 'region_crop' &&
+                    (tab === 'answer' ? (item.answerPdf && item.answerPdf.url) : (item.exercisePdf && item.exercisePdf.url))
+                ) : null;
+                if (refQ) {
+                    const src = tab === 'answer' ? refQ.answerPdf : refQ.exercisePdf;
+                    pdfObj = { url: src.url, name: src.name || `${typeLabel}原卷.pdf`, status: 'uploaded' };
+                    tabState.uploadedPdf = { ...pdfObj };
+                }
+            }
+            if (!pdfObj) {
+                if (!tabState.file) {
+                    showToast(`请先上传${typeLabel}原卷 PDF`, 'warn');
+                    return;
+                }
+                const up = await uploadPdfBlob(tabState.file);
+                pdfObj = {
+                    url: up.url,
+                    name: up.originalName || tabState.file.name,
+                    status: 'uploaded'
+                };
+                tabState.uploadedPdf = { ...pdfObj };
+            }
+
+            const q = task.questionRef || (Array.isArray(currentQuestions) ? currentQuestions[task.questionIndex] : null);
+            if (!q) {
+                showToast('目标题目不存在，无法写入框选区域', 'error');
+                return;
+            }
+            if (!q.questionMeta || typeof q.questionMeta !== 'object') {
+                q.questionMeta = {};
+            }
+            q.questionMeta.mode = 'region_crop';
+            const clonedRegions = targetItem.regions.map(r => ({
+                pageOffset: r.pageOffset,
+                x: r.x,
+                y: r.y,
+                w: r.w,
+                h: r.h
+            }));
+            if (tab === 'exercise') {
+                q.exercisePdf = { ...pdfObj };
+                q.questionMeta.regions = clonedRegions;
+                if (targetItem.isBig && Array.isArray(targetItem.stemBoxes)) {
+                    q.questionMeta.stemBoxes = targetItem.stemBoxes.map(sb => ({ ...sb }));
+                }
+            } else {
+                q.answerPdf = { ...pdfObj };
+                q.questionMeta.answerRegions = clonedRegions;
+            }
+
+            const qLabel = formatSingleCropQuestionLabel(q);
+            window.rgImportedActive = true;
+            isDirty = true;
+            rgState.singleCropTask = null;
+            rgState.subMode = null;
+            rgState.continueTargetId = null;
+            rgState.presetNextLabel = null;
+            rgState.presetNextTargetExId = null;
+
+            if (typeof renderQuestionList === 'function') renderQuestionList();
+            if (typeof updateStatus === 'function') updateStatus();
+            goToStep(4);
+            showToast(`已完成「${qLabel}」的${typeLabel}框选`);
+        } catch (err) {
+            if (err && err.unauthorized && typeof handleUnauthorized === 'function') {
+                handleUnauthorized();
+                return;
+            }
+            console.error('Single question crop apply error:', err);
+            showToast('应用框选失败：' + (err.message || '网络异常'), 'error');
+        } finally {
+            if (finishBtn) {
+                finishBtn.disabled = false;
+                setBtnLabel(finishBtn, rgState.singleCropTask ? '完成框选并返回' : '完成框选并导入第 4 步');
+            }
+        }
+    }
+
     window.rgFinishAndImport = async function () {
         if (!hasRegionDebugPermission()) {
             showToast('助教账号仅具备查看权限，无法录入或上传题目', 'warn');
+            return;
+        }
+        if (rgState.singleCropTask) {
+            await finishSingleCropTask();
             return;
         }
         const exItems = rgState.exercise.items;
@@ -3880,6 +4306,7 @@
                 name: exUpload.originalName || rgState.exercise.file.name,
                 status: 'uploaded'
             };
+            rgState.exercise.uploadedPdf = { ...exPdfObj };
 
             let ansPdfObj = null;
             if (rgState.answer.file && rgState.answer.items.length > 0) {
@@ -3889,6 +4316,7 @@
                     name: ansUpload.originalName || rgState.answer.file.name,
                     status: 'uploaded'
                 };
+                rgState.answer.uploadedPdf = { ...ansPdfObj };
             }
 
             const imported = [];
