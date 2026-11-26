@@ -896,7 +896,7 @@ body.upload-page {
 
 .focus-comment-field .modern-input:focus {
     border-color: var(--accent-primary);
-    box-shadow: 0 0 0 3px rgba(99, 101, 255, 0.15);
+    box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 .modern-input {
@@ -2075,7 +2075,7 @@ select.modern-input option {
 
 .preview-cell-input:focus {
     border-color: var(--accent-primary);
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+    box-shadow: 0 0 0 2px var(--accent-glow);
     background: var(--bg-card-elevated, #232a3b);
 }
 
@@ -2096,7 +2096,7 @@ select.modern-input option {
 
 .preview-status-select:focus {
     border-color: var(--accent-primary);
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+    box-shadow: 0 0 0 2px var(--accent-glow);
     background: var(--bg-card-elevated, #232a3b);
 }
 
@@ -2230,8 +2230,8 @@ select.modern-input option {
 
 [data-theme="light"] .preview-search-input:focus {
     background: #ffffff;
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    border-color: var(--accent, #0a84ff);
+    box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 [data-theme="light"] .preview-search-icon {

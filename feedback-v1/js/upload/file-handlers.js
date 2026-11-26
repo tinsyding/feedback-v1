@@ -947,14 +947,14 @@
         if (offsetInfo) {
             if (focusScoreOffset > 0) {
                 offsetInfo.textContent = `+${focusScoreOffset}`;
-                offsetInfo.style.background = 'linear-gradient(135deg, #22c55e20, #16a34a20)';
+                offsetInfo.style.background = 'rgba(34, 197, 94, 0.12)';
                 offsetInfo.style.color = '#16a34a';
-                offsetInfo.style.border = '1px solid #22c55e44';
+                offsetInfo.style.border = '1px solid rgba(34, 197, 94, 0.28)';
             } else if (focusScoreOffset < 0) {
                 offsetInfo.textContent = `${focusScoreOffset}`;
-                offsetInfo.style.background = 'linear-gradient(135deg, #ef444420, #dc262620)';
+                offsetInfo.style.background = 'rgba(239, 68, 68, 0.12)';
                 offsetInfo.style.color = '#dc2626';
-                offsetInfo.style.border = '1px solid #ef444444';
+                offsetInfo.style.border = '1px solid rgba(239, 68, 68, 0.28)';
             } else {
                 offsetInfo.textContent = '';
                 offsetInfo.style.background = '';
@@ -1276,7 +1276,7 @@
             let sectionHtml = `<div style="margin-bottom: 12px;"><span style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);">${escapeHtml(title)}</span></div>`;
             names.forEach(name => {
                 sectionHtml += `<div style="display:flex; align-items:center; gap:10px; margin-bottom:6px; padding:8px 12px; background:var(--ui-fill-weak); border:1px solid var(--border-light); border-radius:var(--radius-sm);">
-                    <span style="color: #ef4444;">✕</span>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--error, #ef4444)" stroke-width="2.2" style="flex-shrink:0;"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                     <span style="font-size:0.85rem; color:var(--text-primary);">${escapeHtml(name)}</span>
                 </div>`;
             });

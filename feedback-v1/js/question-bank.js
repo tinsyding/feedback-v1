@@ -7549,13 +7549,15 @@ function openTierSyncSummaryModal(data, sourceTier, syncResults) {
         scopeEl.innerHTML = `同步范围：<strong>${escapeHtml(String(data.year))}年 ${escapeHtml(data.season)}季 · ${escapeHtml(getBankTypeLabel(data.bankType))} · ${escapeHtml(data.subject)} · ${escapeHtml(data.grade)} · ${escapeHtml(topicLabel)}</strong>（来源：${escapeHtml(sourceTier)}班）`;
     }
     if (listEl) {
+        const okIconSvg = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--success, #30d158)" stroke-width="2.2" style="vertical-align:-2px;margin-right:4px;"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+        const errIconSvg = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--error, #ff453a)" stroke-width="2.2" style="vertical-align:-2px;margin-right:4px;"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
         listEl.innerHTML = results.map((r, idx) => {
             if (r.success) {
                 const hasCode = Boolean(r.receiptCode);
                 return `
                     <div class="qb-sync-summary-row is-ok">
                         <div class="qb-sync-summary-row-info">
-                            <span class="qb-sync-summary-tier">✅ ${escapeHtml(r.tier)}班</span>
+                            <span class="qb-sync-summary-tier">${okIconSvg}${escapeHtml(r.tier)}班</span>
                             ${hasCode
                                 ? `<span class="qb-sync-summary-code">${escapeHtml(r.receiptCode)}</span>`
                                 : `<span style="font-size:0.8rem; color:var(--text-secondary);">同步成功（未签发回执编号）</span>`}
@@ -7572,7 +7574,7 @@ function openTierSyncSummaryModal(data, sourceTier, syncResults) {
             return `
                 <div class="qb-sync-summary-row is-err">
                     <div class="qb-sync-summary-row-info">
-                        <span class="qb-sync-summary-tier">❌ ${escapeHtml(r.tier)}班</span>
+                        <span class="qb-sync-summary-tier">${errIconSvg}${escapeHtml(r.tier)}班</span>
                         <span class="qb-sync-summary-err">${escapeHtml(r.error || '同步失败')}</span>
                     </div>
                 </div>
@@ -7599,12 +7601,12 @@ async function copyAllSyncSummaryReceipts() {
     results.forEach(r => {
         if (r.success) {
             if (r.receiptCode) {
-                lines.push(`✅ ${r.tier}班：${r.receiptCode}（核验：${buildVerifyUrl(r.receiptCode)}）`);
+                lines.push(`[成功] ${r.tier}班：${r.receiptCode}（核验：${buildVerifyUrl(r.receiptCode)}）`);
             } else {
-                lines.push(`✅ ${r.tier}班：同步成功`);
+                lines.push(`[成功] ${r.tier}班：同步成功`);
             }
         } else {
-            lines.push(`❌ ${r.tier}班：${r.error || '同步失败'}`);
+            lines.push(`[失败] ${r.tier}班：${r.error || '同步失败'}`);
         }
     });
     const ok = await copyTextToClipboard(lines.join('\n'));

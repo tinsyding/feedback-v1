@@ -169,7 +169,7 @@
     .chip-del {
       color: #94a3b8;
       cursor: pointer;
-      font-weight: bold;
+      font-weight: 600;
     }
     .chip-del:hover { color: var(--danger); }
     /* 工具栏卡片 */
@@ -195,7 +195,7 @@
       width: 220px;
       outline: none;
     }
-    .search-input:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(37,99,235,0.12); }
+    .search-input:focus { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-soft, rgba(10, 132, 255, 0.14)); }
     select.filter-select {
       padding: 6px 10px;
       border-radius: 6px;
@@ -460,7 +460,7 @@
       align-items: center;
       background: #f8fafc;
     }
-    .modal-header h3 { font-size: 16px; font-weight: 700; color: #1e293b; }
+    .modal-header h3 { font-size: 16px; font-weight: 600; color: #1e293b; }
     .modal-close {
       font-size: 20px;
       cursor: pointer;
@@ -632,7 +632,7 @@
     .calib-step-item.active .calib-step-badge {
       background: #2563eb;
       color: #fff;
-      box-shadow: 0 0 0 3px rgba(37,99,235,0.2);
+      box-shadow: 0 0 0 3px var(--primary-soft, rgba(10, 132, 255, 0.14));
     }
     .calib-step-item.done .calib-step-badge {
       background: #16a34a;
@@ -1450,9 +1450,9 @@
         <div class="calib-ring-outer"></div>
         <div class="calib-ring" id="calibRing"></div>
         <div class="calib-pulse-bg"></div>
-        <div class="calib-center-icon" id="calibCenterIcon" style="font-size:16px; font-weight:700; color:#2563eb;">AI</div>
+        <div class="calib-center-icon" id="calibCenterIcon" style="font-size:16px; font-weight: 600; color:#2563eb;">AI</div>
       </div>
-      <div id="calibTitle" style="font-size:16px; font-weight:700; color:#0f172a; margin-bottom:6px;">正在智能校准企业微信视窗...</div>
+      <div id="calibTitle" style="font-size:16px; font-weight: 600; color:#0f172a; margin-bottom:6px;">正在智能校准企业微信视窗...</div>
       <div id="calibStatusText" style="font-size:13px; color:#2563eb; font-weight:500; min-height:18px;">正在激活企微窗口并检测尺寸...</div>
       
       <div class="calib-track">
@@ -1489,8 +1489,8 @@
     <div class="modal-card" style="max-width:1120px; width:95vw;">
       <div class="modal-header" style="background:#0f172a; color:#fff; border-top-left-radius:var(--radius-lg); border-top-right-radius:var(--radius-lg); padding:16px 20px;">
         <div style="display:flex; align-items:center; gap:10px;">
-          <span style="background:#2563eb; color:#fff; padding:3px 8px; border-radius:6px; font-size:12px; font-weight:700;">实验室功能</span>
-          <h3 style="margin:0; font-size:16px; font-weight:700; color:#fff;">多引擎识别基准评测 (Benchmark Dry-Run)</h3>
+          <span style="background:#2563eb; color:#fff; padding:3px 8px; border-radius:6px; font-size:12px; font-weight: 600;">实验室功能</span>
+          <h3 style="margin:0; font-size:16px; font-weight: 600; color:#fff;">多引擎识别基准评测 (Benchmark Dry-Run)</h3>
         </div>
         <button class="modal-close" style="color:#94a3b8;" onclick="closeModal('benchmarkModal')">&times;</button>
       </div>
@@ -1508,22 +1508,22 @@
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px; margin-bottom:14px;">
           <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px;">
             <div style="font-size:11px; color:#64748b; font-weight:600;">评测样本总数</div>
-            <div id="bmTotalCount" style="font-size:20px; font-weight:700; color:#0f172a; margin-top:2px;">0 人</div>
+            <div id="bmTotalCount" style="font-size:20px; font-weight: 600; color:#0f172a; margin-top:2px;">0 人</div>
             <div id="bmDiscCount" style="font-size:11px; color:#f59e0b; margin-top:2px;">存在分歧: 0 例</div>
           </div>
           <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px;">
             <div style="font-size:11px; color:#7c3aed; font-weight:600;">第 1 层：winocr (WinRT直调)</div>
-            <div id="bmWinocrRate" style="font-size:20px; font-weight:700; color:#7c3aed; margin-top:2px;">-</div>
+            <div id="bmWinocrRate" style="font-size:20px; font-weight: 600; color:#7c3aed; margin-top:2px;">-</div>
             <div id="bmWinocrLat" style="font-size:11px; color:#64748b; margin-top:2px;">平均耗时: - ms</div>
           </div>
           <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px;">
             <div style="font-size:11px; color:#0d9488; font-weight:600;">第 2 层：RapidOCR (全流程 Det+Rec)</div>
-            <div id="bmRapidFullRate" style="font-size:20px; font-weight:700; color:#0d9488; margin-top:2px;">-</div>
+            <div id="bmRapidFullRate" style="font-size:20px; font-weight: 600; color:#0d9488; margin-top:2px;">-</div>
             <div id="bmRapidFullLat" style="font-size:11px; color:#64748b; margin-top:2px;">平均耗时: - ms</div>
           </div>
           <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px;">
             <div style="font-size:11px; color:#2563eb; font-weight:600;">第 3 层：Qwen3.8-Flash (云端兜底)</div>
-            <div id="bmQwenRate" style="font-size:20px; font-weight:700; color:#2563eb; margin-top:2px;">-</div>
+            <div id="bmQwenRate" style="font-size:20px; font-weight: 600; color:#2563eb; margin-top:2px;">-</div>
             <div id="bmQwenLat" style="font-size:11px; color:#64748b; margin-top:2px;">平均耗时: - ms</div>
           </div>
         </div>
@@ -1616,7 +1616,7 @@
           <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px 16px; display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:12px;">
             <div>
               <div style="font-size:11px; color:#64748b; font-weight:600;">目标学员 (Target)</div>
-              <div id="debugTargetStudent" style="font-size:15px; font-weight:700; color:#0f172a; margin-top:2px;">-</div>
+              <div id="debugTargetStudent" style="font-size:15px; font-weight: 600; color:#0f172a; margin-top:2px;">-</div>
             </div>
             <div>
               <div style="font-size:11px; color:#64748b; font-weight:600;">候选轮次 / 拍摄时间</div>
@@ -1624,7 +1624,7 @@
             </div>
             <div>
               <div style="font-size:11px; color:#64748b; font-weight:600;">本地 OCR 识别原文</div>
-              <div id="debugOcrText" style="font-size:14px; font-weight:700; color:#2563eb; margin-top:2px; word-break:break-all;">-</div>
+              <div id="debugOcrText" style="font-size:14px; font-weight: 600; color:#2563eb; margin-top:2px; word-break:break-all;">-</div>
             </div>
             <div>
               <div style="font-size:11px; color:#64748b; font-weight:600;">综合核验结论</div>
@@ -1637,7 +1637,7 @@
             <!-- 标题栏裁切图 -->
             <div style="border:1px solid #e2e8f0; border-radius:10px; padding:12px; background:#fff;">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                <span style="font-weight:700; font-size:13px; color:#1e293b;">标题栏实际裁切区域 (OCR 输入图)</span>
+                <span style="font-weight: 600; font-size:13px; color:#1e293b;">标题栏实际裁切区域 (OCR 输入图)</span>
                 <span id="debugTitleDim" style="font-size:11px; color:#64748b;">-</span>
               </div>
               <div style="background:#f1f5f9; border-radius:6px; padding:8px; text-align:center; min-height:80px; display:flex; align-items:center; justify-content:center; overflow:hidden;">
@@ -1651,11 +1651,11 @@
             <!-- 全窗 ROI 标注图 -->
             <div style="border:1px solid #e2e8f0; border-radius:10px; padding:12px; background:#fff;">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                <span style="font-weight:700; font-size:13px; color:#1e293b;">企业微信视窗全景与 ROI 框标注</span>
+                <span style="font-weight: 600; font-size:13px; color:#1e293b;">企业微信视窗全景与 ROI 框标注</span>
                 <span style="font-size:11px; color:#64748b;">
-                  <span style="color:#2563eb; font-weight:700;">■ 蓝框:标题栏</span> &nbsp;
-                  <span style="color:#dc2626; font-weight:700;">■ 红框:输入框</span> &nbsp;
-                  <span style="color:#16a34a; font-weight:700;">■ 绿框:聊天区</span>
+                  <span style="color:#2563eb; font-weight: 600;">■ 蓝框:标题栏</span> &nbsp;
+                  <span style="color:#dc2626; font-weight: 600;">■ 红框:输入框</span> &nbsp;
+                  <span style="color:#16a34a; font-weight: 600;">■ 绿框:聊天区</span>
                 </span>
               </div>
               <div style="background:#0f172a; border-radius:6px; padding:6px; text-align:center; overflow:hidden; cursor:pointer;" onclick="viewFullAnnotatedImg()">
@@ -2017,7 +2017,7 @@
             return `
               <div style="font-family:monospace; line-height:1.3;">
                 <div style="display:flex; align-items:center; gap:4px; margin-bottom:2px;">
-                  <span style="background:rgba(100,116,139,0.12); color:#475569; font-weight:700; padding:1px 5px; border-radius:3px; font-size:10px;">⏸ 已停用</span>
+                  <span style="background:rgba(100,116,139,0.12); color:#475569; font-weight: 600; padding:1px 5px; border-radius:3px; font-size:10px;">⏸ 已停用</span>
                 </div>
                 <div style="font-size:11px; color:#64748b; word-break:break-all;">${escapeHtml(e.text || '已关闭')}</div>
               </div>
@@ -2032,7 +2032,7 @@
           return `
             <div style="font-family:monospace; line-height:1.3;">
               <div style="display:flex; align-items:center; gap:4px; margin-bottom:2px;">
-                <span style="background:${bg}; color:${clr}; font-weight:700; padding:1px 5px; border-radius:3px; font-size:10px;">${icon} ${matched ? '匹配' : '未匹配'}</span>
+                <span style="background:${bg}; color:${clr}; font-weight: 600; padding:1px 5px; border-radius:3px; font-size:10px;">${icon} ${matched ? '匹配' : '未匹配'}</span>
                 <span style="font-size:10px; color:#64748b;">${lat}</span>
               </div>
               <div style="font-size:11px; color:#334155; word-break:break-all;">${escapeHtml(text)}</div>
@@ -2041,7 +2041,7 @@
         };
 
         const discTag = r.has_discrepancy
-          ? `<span style="background:#fef3c7; color:#b45309; font-weight:700; padding:2px 6px; border-radius:4px; font-size:11px; white-space:nowrap;">有分歧</span>`
+          ? `<span style="background:#fef3c7; color:#b45309; font-weight: 600; padding:2px 6px; border-radius:4px; font-size:11px; white-space:nowrap;">有分歧</span>`
           : `<span style="background:#f0fdf4; color:#15803d; font-weight:600; padding:2px 6px; border-radius:4px; font-size:11px; white-space:nowrap;">一致</span>`;
 
         html += `
@@ -2489,24 +2489,24 @@
 
       if (pol.senderServiceEnabled === false) {
         level = "block";
-        lines.push(`<strong>⛔ 发送服务已由管理员暂停：</strong>${escapeHtmlInline(gate.block_reason || "当前处于云控维护锁定状态，暂停新建发送任务。")}`);
+        lines.push(`<strong>发送服务已由管理员暂停：</strong>${escapeHtmlInline(gate.block_reason || "当前处于云控维护锁定状态，暂停新建发送任务。")}`);
       } else if (gate.allowed === false && gate.block_reason) {
         level = "block";
-        lines.push(`<strong>⛔ 版本受限：</strong>${escapeHtmlInline(gate.block_reason).replace(/\n+/g, "<br>")}`);
+        lines.push(`<strong>版本受限：</strong>${escapeHtmlInline(gate.block_reason).replace(/\n+/g, "<br>")}`);
       } else if (gate.warning) {
         level = "warn";
-        lines.push(`<strong>⚠ 版本提示：</strong>${escapeHtmlInline(gate.warning)}`);
+        lines.push(`<strong>版本提示：</strong>${escapeHtmlInline(gate.warning)}`);
       }
 
       const notice = (pol.noticeMessage || "").trim();
       if (notice) {
         if (level === "info") level = "warn";
-        lines.push(`<strong>📢 管理员公告：</strong>${escapeHtmlInline(notice).replace(/\n/g, "<br>")}`);
+        lines.push(`<strong>管理员公告：</strong>${escapeHtmlInline(notice).replace(/\n/g, "<br>")}`);
       }
 
       if (gate.update_url) {
         const safeUrl = escapeHtmlInline(gate.update_url);
-        lines.push(`<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color:inherit; font-weight:700; text-decoration:underline;">点击下载新版程序 &rarr;</a>`);
+        lines.push(`<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color:inherit; font-weight: 600; text-decoration:underline;">点击下载新版程序 &rarr;</a>`);
       }
 
       if (lines.length === 0) {
@@ -3257,7 +3257,7 @@
         await fetch("/api/shutdown", { method: "POST" });
         document.body.innerHTML = `
           <div style="display:flex; height:100vh; align-items:center; justify-content:center; flex-direction:column; color:#475569;">
-            <div style="font-size:20px; font-weight:bold; margin-bottom:8px;">程序已安全退出</div>
+            <div style="font-size:20px; font-weight: 600; margin-bottom:8px;">程序已安全退出</div>
             <div style="font-size:13px; color:#94a3b8;">您可以直接关闭本浏览器标签页</div>
           </div>
         `;
@@ -3601,9 +3601,9 @@
       const verdictEl = document.getElementById("debugVerdict");
       if (verdictEl) {
         if (matched === true) {
-          verdictEl.innerHTML = `<span style="color:#16a34a; font-weight:700;">核验匹配成功</span>`;
+          verdictEl.innerHTML = `<span style="color:#16a34a; font-weight: 600;">核验匹配成功</span>`;
         } else if (matched === false) {
-          verdictEl.innerHTML = `<span style="color:#dc2626; font-weight:700;">核验未通过 (${judgment.reason || diag.reason || "不匹配"})</span>`;
+          verdictEl.innerHTML = `<span style="color:#dc2626; font-weight: 600;">核验未通过 (${judgment.reason || diag.reason || "不匹配"})</span>`;
         } else {
           verdictEl.innerHTML = `<span style="color:#64748b;">${judgment.reason || diag.reason || "已记录现场"}</span>`;
         }

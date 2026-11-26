@@ -27,10 +27,11 @@ count_metric "colored glow / shadow" "box-shadow:[^;]*rgba\((99|102|124|139|79|5
 count_metric "font-weight: 700|800|900" "font-weight:\s*(700|800|900|bold)" "${TARGET_FILES[@]}"
 count_metric "text-transform: uppercase" "text-transform:\s*uppercase" "${TARGET_FILES[@]}"
 count_metric "transition: all" "transition:\s*all" "${TARGET_FILES[@]}"
+count_metric "JS inline linear-gradient" "linear-gradient" js/*.js js/admin/*.js js/upload/*.js
 count_metric "loop/shimmer animations" "(emptyFloat|focusDotPulse|qbPulseDot|qbShimmer|bounceGuide|orbit|pulse-optional)" "${TARGET_FILES[@]}"
-count_metric "hover scale / translate" "scale\(1\.0[2-9]|scale\(1\.1|translateY\(-[2-9]" "${TARGET_FILES[@]}"
+count_metric "hover scale / translate" "scale\(1\.0[2-9]|scale\(1\.1|translateY\(-[2-9]px" "${TARGET_FILES[@]}"
 
-EMOJI_COUNT=$(grep -rohP '[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}\x{2B50}]' "${HTML_FILES[@]}" js/*.js js/admin/*.js tools/sender_py/web_ui.html 2>/dev/null | wc -l || echo 0)
+EMOJI_COUNT=$(grep -rohP '[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}\x{2B50}]' "${HTML_FILES[@]}" js/*.js js/admin/*.js js/upload/*.js tools/sender_py/web_ui.html 2>/dev/null | wc -l || echo 0)
 printf "%-32s : %5d\n" "Emoji count (symbols)" "$EMOJI_COUNT"
 
 EXCLAMATION_COUNT=$(grep -roP '[！]|[^=!]![\x27"`<]' "${HTML_FILES[@]}" js/*.js js/admin/*.js tools/sender_py/web_ui.html 2>/dev/null | wc -l || echo 0)

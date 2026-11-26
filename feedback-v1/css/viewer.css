@@ -542,8 +542,8 @@ body.viewer-page {
 }
 
 [data-theme="light"] .reminder-textarea:focus {
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+    border-color: var(--accent, #0a84ff);
+    box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 /* Quick Templates */

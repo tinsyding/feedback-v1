@@ -1087,7 +1087,7 @@ function showChangelogContentModal(logData, onCloseParams = null) {
     <!-- Update Modal -->
     <div id="global-update-modal" style="display: flex; position: fixed; inset: 0; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 10000; opacity: 0; transition: opacity 0.3s; backdrop-filter: blur(4px);">
         <div style="background: var(--bg-primary, #fff); width: 440px; max-width: 90%; max-height: 85vh; border-radius: 12px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04); display: flex; flex-direction: column; overflow: hidden; transform: translateY(20px); transition: transform 0.3s;">
-            <div style="padding: 20px 24px; border-bottom: 1px solid var(--border-color, #e5e7eb); display: flex; align-items: center; justify-content: space-between; background: linear-gradient(135deg, rgba(59,130,246,0.1), rgba(147,197,253,0.05)); flex-shrink: 0;">
+            <div style="padding: 20px 24px; border-bottom: 1px solid var(--border-color, #e5e7eb); display: flex; align-items: center; justify-content: space-between; background: var(--bg-elevated, var(--bg-secondary)); flex-shrink: 0;">
                 <div style="display: flex; align-items: center; gap: 12px;">
                     <div style="width: 32px; height: 32px; border-radius: 8px; background: #3b82f6; color: white; display: flex; align-items: center; justify-content: center;">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">

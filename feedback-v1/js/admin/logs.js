@@ -518,7 +518,7 @@
                 <!-- 重档 · 单机云控与远程指令工具栏 -->
                 <div style="padding:10px 18px; border-bottom:1px solid var(--border-color); background:rgba(99,102,241,0.05); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
                     <div style="font-size:0.79rem; color:var(--text-secondary); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                        <span style="font-weight:600; color:#818cf8;">☁ 单机云控:</span>
+                        <span style="font-weight:600; color:var(--accent);">单机云控:</span>
                         <span style="font-family:var(--font-mono); color:var(--text-primary);">${escapeHtml(overrideSummaryText)}</span>
                         ${recentCmds.slice(0, 2).map(cmd => {
                             const done = Boolean(cmd.acked_at);
@@ -531,13 +531,13 @@
                     </div>
                     <div style="display:flex; gap:6px; flex-wrap:wrap;">
                         <button class="btn danger-subtle" onclick="sendSenderRemoteCommand('${escapeInlineJs(client.client_slug)}', 'stop_batch')" style="padding:5px 10px; font-size:0.79rem;" title="向该电脑下发远程急停指令（最多2~12秒内送达，安全停下并保留断点）">
-                            ⏹ 远程急停
+                            远程急停
                         </button>
                         <button class="btn secondary" onclick="openSenderClientOverrideModal('${escapeInlineJs(client.client_slug)}', '${escapeInlineJs(displayName)}')" style="padding:5px 10px; font-size:0.79rem;">
-                            ⚙ 单机策略覆盖
+                            单机策略覆盖
                         </button>
                         <button class="btn secondary" onclick="sendSenderRemoteCommand('${escapeInlineJs(client.client_slug)}', 'refresh_policy')" style="padding:5px 10px; font-size:0.79rem;" title="通知客户端立即刷新云控策略">
-                            ↻ 同步策略
+                            同步策略
                         </button>
                         <button class="btn secondary" onclick="sendSenderRemoteCommand('${escapeInlineJs(client.client_slug)}', 'clear_roi')" style="padding:5px 10px; font-size:0.79rem;" title="重置该电脑保存的企微窗口 ROI 校准坐标">
                             清空视野ROI
