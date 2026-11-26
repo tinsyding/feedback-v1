@@ -438,7 +438,7 @@
                     && Array.isArray(resizedItem.regions)
                     && resizedItem.regions[0] === resizedBoxRef
                 ) {
-                    applyPreviewAutoDetectIfEmpty(rgState.activeTab, resizedItem, resizedBoxRef);
+                    applyRegionAutoDetect(rgState.activeTab, resizedItem, resizedBoxRef);
                 }
                 renderAllRg();
                 scheduleDraftSave();
@@ -775,21 +775,24 @@
 
         const candidates = [];
         const maxLines = Math.min(3, lines.length);
+        const firstTextY = lines[0] ? lines[0].ny : ry;
         for (let lineIdx = 0; lineIdx < maxLines; lineIdx++) {
             const line = lines[lineIdx];
             line.items.sort((a, b) => a.vx - b.vx);
             const first = line.items[0];
             if (!first) continue;
 
-            const lineDeltaY = line.ny - ry;
-            const lineRelY = lineDeltaY / rh;
-            if (lineIdx > 0 && lineRelY > 0.55 && lineDeltaY > 0.08) break;
+            const deltaFromFirstLine = line.ny - firstTextY;
+            if (lineIdx > 0 && deltaFromFirstLine > Math.max(0.08, rh * 0.45)) break;
 
             const relX = (first.nx - rx) / rw;
             const nearLeft = relX <= 0.25 || (first.nx - boxMinX) <= 0.06;
 
             const compact = line.items.map(item => item.text.replace(/\s+/g, '')).join('');
-            const isExplicit = /第\d{1,3}题/.test(compact);
+            const explicitMatches = compact.match(/第\d{1,3}题/g) || [];
+            // 排除并排图注行（如“第 2 题   第 3 题”）
+            if (explicitMatches.length > 1) continue;
+            const isExplicit = explicitMatches.length === 1;
             if (!nearLeft && !(isExplicit && relX <= 0.45)) continue;
 
             const allowBare = lineIdx === 0 && nearLeft && relX <= 0.18;
@@ -845,15 +848,22 @@
 
     window.rgDetectQuestionNumberInRegion = detectQuestionNumberInRegion;
 
-    function applyPreviewAutoDetectIfEmpty(tab, item, rectObj, opts = {}) {
+    function applyRegionAutoDetect(tab, item, rectObj, opts = {}) {
         if (!item || !rectObj) return false;
         const tabState = getTabState(tab);
         if (!tabState || !tabState.pdfDoc) return false;
         const pageNum = (parseInt(rectObj.pageOffset, 10) || 0) + 1;
+        const fallbackLabel = opts.fallbackLabel !== undefined ? String(opts.fallbackLabel || '') : '';
+        const canOverwrite = () => {
+            const cur = String(item.label || '').trim();
+            if (!cur) return true;
+            return Boolean(fallbackLabel && !item.manualEdited && cur === fallbackLabel);
+        };
+
         const cached = tabState.pageTextCache && tabState.pageTextCache.get(pageNum);
         if (cached) {
             const detected = detectQuestionNumberInRegion(cached, rectObj);
-            if (detected !== null && !String(item.label || '').trim()) {
+            if (detected !== null && canOverwrite()) {
                 item.label = String(detected);
                 item.autoDetected = true;
                 return true;
@@ -865,14 +875,14 @@
             if (!pageData) return;
             const curTabState = getTabState(tab);
             if (!curTabState || !curTabState.items.includes(item)) return;
-            if (String(item.label || '').trim()) return;
+            if (!canOverwrite()) return;
             const detected = detectQuestionNumberInRegion(pageData, rectObj);
             if (detected !== null) {
                 item.label = String(detected);
                 item.autoDetected = true;
                 renderAllRg();
                 scheduleDraftSave();
-            } else if (opts.focusOnMiss) {
+            } else if (opts.focusOnMiss && !String(item.label || '').trim()) {
                 requestAnimationFrame(() => {
                     const input = document.querySelector(`.rg-card[data-id="${item.id}"] .rg-num-input`);
                     if (input && !input.value) {
@@ -928,6 +938,8 @@
         let label = '';
         let targetExId = null;
         let initialParentNums = [];
+        let usedPreset = false;
+        let homeworkFallbackLabel = '';
         if (isSingleTask) {
             const taskQ = rgState.singleCropTask.questionRef;
             if (bankType === 'variation') {
@@ -951,8 +963,10 @@
         } else if (tab === 'answer' && rgState.presetNextLabel) {
             label = rgState.presetNextLabel;
             rgState.presetNextLabel = null;
+            usedPreset = true;
         } else if (bankType === 'homework') {
-            label = getNextAutoNumber(tab);
+            homeworkFallbackLabel = getNextAutoNumber(tab);
+            label = homeworkFallbackLabel;
         } else if (bankType === 'variation') {
             if (tab === 'answer') {
                 if (rgState.presetNextTargetExId) {
@@ -967,7 +981,7 @@
                 }
             }
         } else {
-            // preview：不自动标号，手动输入跳题题号（除非点了缺失答案胶囊预设）
+            // preview：自动识别左上角题号，未识别时留空手动输入（除非点了缺失答案胶囊预设）
             label = '';
         }
 
@@ -975,6 +989,7 @@
             id: `${tab}_${rgState.nextSeq++}`,
             label,
             autoDetected: false,
+            manualEdited: false,
             targetExId,
             parentNums: initialParentNums,
             isBig: false,
@@ -988,15 +1003,17 @@
             rgState.singleCropTask.targetItemId = newItem.id;
         }
 
-        let previewDetectStatus = false;
-        if (!isSingleTask && bankType === 'preview' && !newItem.label) {
-            previewDetectStatus = applyPreviewAutoDetectIfEmpty(tab, newItem, rectObj, { focusOnMiss: true });
+        let detectStatus = false;
+        if (!isSingleTask && !usedPreset && bankType === 'preview' && !newItem.label) {
+            detectStatus = applyRegionAutoDetect(tab, newItem, rectObj, { focusOnMiss: true });
+        } else if (!isSingleTask && !usedPreset && bankType === 'homework') {
+            detectStatus = applyRegionAutoDetect(tab, newItem, rectObj, { fallbackLabel: homeworkFallbackLabel });
         }
 
         renderAllRg();
         scheduleDraftSave();
 
-        if (!isSingleTask && ((bankType === 'preview' && !newItem.label && previewDetectStatus === false) || (bankType === 'variation' && tab === 'answer'))) {
+        if (!isSingleTask && ((bankType === 'preview' && !newItem.label && detectStatus === false) || (bankType === 'variation' && tab === 'answer'))) {
             requestAnimationFrame(() => {
                 const input = document.querySelector(`.rg-card[data-id="${newItem.id}"] .rg-num-input`);
                 if (input) {
@@ -1071,8 +1088,9 @@
 
         renderBoxOverlay();
 
-        // 预习模式预热当前页文字层缓存，拉框释放时可即时同步识别左上角题号
-        if (getCurrentBankTypeSafe() === 'preview') {
+        // 预习与课后巩固模式预热当前页文字层缓存，拉框释放时可即时同步识别左上角题号
+        const curBankType = getCurrentBankTypeSafe();
+        if (curBankType === 'preview' || curBankType === 'homework') {
             ensurePageTextData(rgState.activeTab, tabState.pageNum);
         }
     }
@@ -1326,7 +1344,7 @@
             } else if (bankType === 'variation') {
                 tipEl.textContent = '举一反三模式：框完后勾选对应原题；选中框可拖边缘微调';
             } else {
-                tipEl.textContent = '课后巩固：自动递增题号，支持大题与选中框边缘拖拽微调';
+                tipEl.textContent = '课后巩固：自动识别左上角题号（未识别时顺延递增），支持大题与边缘微调';
             }
         }
         if (finishBtn) {
@@ -2432,6 +2450,7 @@
         const it = tabState.items.find(x => x.id === itemId);
         if (!it) return;
         it.label = String(val || '').trim();
+        it.manualEdited = true;
         if (it.autoDetected) {
             it.autoDetected = false;
             const inp = document.querySelector(`.rg-card[data-id="${itemId}"] .rg-num-input`);
