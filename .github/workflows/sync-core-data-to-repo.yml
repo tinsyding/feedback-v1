@@ -1,0 +1,323 @@
+name: Sync Core Data to GitHub Repo
+
+# 每日定时从生产服务器拉取核心业务数据，以确定性单行 SQL 形式提交到本仓库的孤立分支 `data-backup`
+# 覆盖范围：
+#   1. 题库配置与存证 (qbank/)：
+#      - qbank_weeks, qbank_questions
+#      - qbank_revisions, qbank_attestation_keys, qbank_attestation_anchors
+#   2. 学生错题与学情历史 (students/)：
+#      - class_batches, student_records, generation_batches
+#      - student_record_history
+#
+# 安全保护：
+#   - 执行前强制校验当前仓库必须为 Private（私有仓库），若仍为 Public 则立即中止，绝不泄露学生隐私数据。
+#   - 数据仅提交到与 main 完全隔离的孤立分支 `data-backup`，不污染代码历史，也不触发生产部署。
+#
+# 运行方式：
+#   - 定时触发：每天北京时间凌晨 04:00 自动执行（20:00 UTC，与 03:30 的 Google Drive 全量备份错峰）
+#   - 手动触发：GitHub Actions 网页端支持一键立即同步 (workflow_dispatch)
+#
+# 所需 Secrets（完全复用现有配置，无需新增）：
+#   - DEPLOY_HOST, DEPLOY_PORT, DEPLOY_USER, DEPLOY_SSH_KEY
+
+on:
+  schedule:
+    # 每天北京时间 04:00 执行 (对应 UTC 20:00)
+    - cron: '0 20 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-core-data-to-repo
+  cancel-in-progress: false
+
+jobs:
+  sync-data:
+    name: Pull QBank & Student Records to data-backup Branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Security guard - Ensure repository is Private
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          IS_PRIVATE=$(gh api "repos/${REPO}" --jq '.private')
+          if [ "$IS_PRIVATE" != "true" ]; then
+            echo "::error::安全拦截：当前仓库 ${REPO} 仍为公开仓库 (Public)！"
+            echo "学生错题与学情数据包含真实姓名、学号及错题本 Token，禁止写入公开仓库。"
+            echo "请先前往 GitHub 仓库 Settings → General → Danger Zone → Change repository visibility 改为 Private 后再运行本工作流。"
+            exit 1
+          fi
+          echo "✅ 安全校验通过：仓库 ${REPO} 为私有仓库 (Private)"
+
+      - name: Preflight check secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          missing=""
+          [ -z "$DEPLOY_HOST" ] && missing="$missing DEPLOY_HOST"
+          [ -z "$DEPLOY_PORT" ] && missing="$missing DEPLOY_PORT"
+          [ -z "$DEPLOY_USER" ] && missing="$missing DEPLOY_USER"
+          [ -z "$DEPLOY_SSH_KEY" ] && missing="$missing DEPLOY_SSH_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::缺少服务器 SSH Secrets:$missing"
+            exit 1
+          fi
+          if ! echo "$DEPLOY_PORT" | grep -Eq '^[0-9]+$'; then
+            echo "::error::DEPLOY_PORT 必须是纯数字端口"
+            exit 1
+          fi
+          echo "✅ SSH Secrets 校验通过"
+
+      - name: Set up SSH key
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      - name: Dump core tables from production MySQL via SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          mkdir -p ./staging_dump
+          SYNC_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S %z')
+          SYNC_DATE=$(TZ='Asia/Shanghai' date +'%Y-%m-%d')
+          echo "SYNC_TIME=${SYNC_TIME}" >> "$GITHUB_ENV"
+          echo "SYNC_DATE=${SYNC_DATE}" >> "$GITHUB_ENV"
+
+          echo "🚀 正在通过 SSH 从生产服务器导出题库配置与学生错题核心表..."
+          SSH="ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 $DEPLOY_USER@$DEPLOY_HOST"
+
+          $SSH 'bash -s' << 'REMOTE_EOF' > ./staging_dump/core_tables.tar.gz
+            set -euo pipefail
+            PHP_BIN=$(if [ -x /www/server/php/82/bin/php ]; then echo /www/server/php/82/bin/php; else command -v php; fi)
+            MYSQL_BIN=$(if [ -x /www/server/mysql/bin/mysql ]; then echo /www/server/mysql/bin/mysql; else command -v mysql; fi)
+            MYSQLDUMP=$(if [ -x /www/server/mysql/bin/mysqldump ]; then echo /www/server/mysql/bin/mysqldump; else command -v mysqldump; fi)
+
+            DB_HOST=$($PHP_BIN -r '$c = @include "/www/wwwroot/JF/feedback-git/feedback-v1/api/db.local.php"; echo is_array($c) ? ($c["host"] ?? "127.0.0.1") : "127.0.0.1";')
+            DB_PORT=$($PHP_BIN -r '$c = @include "/www/wwwroot/JF/feedback-git/feedback-v1/api/db.local.php"; echo is_array($c) ? ($c["port"] ?? "3306") : "3306";')
+            DB_USER=$($PHP_BIN -r '$c = @include "/www/wwwroot/JF/feedback-git/feedback-v1/api/db.local.php"; echo is_array($c) ? ($c["username"] ?? "root") : "root";')
+            DB_PASS=$($PHP_BIN -r '$c = @include "/www/wwwroot/JF/feedback-git/feedback-v1/api/db.local.php"; echo is_array($c) ? ($c["password"] ?? "") : "";')
+            DB_NAME=$($PHP_BIN -r '$c = @include "/www/wwwroot/JF/feedback-git/feedback-v1/api/db.local.php"; echo is_array($c) ? ($c["dbname"] ?? "feedback") : "feedback";')
+
+            TMP_DIR=$(mktemp -d /tmp/feedback_core_sync_XXXXXX)
+            trap 'rm -rf "$TMP_DIR"' EXIT
+            mkdir -p "$TMP_DIR/qbank" "$TMP_DIR/students"
+
+            CONN_ARGS=(-h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER")
+            DUMP_ARGS=(
+              --single-transaction
+              --quick
+              --skip-dump-date
+              --skip-comments
+              --skip-extended-insert
+              --order-by-primary
+              --default-character-set=utf8mb4
+              --no-tablespaces
+            )
+
+            table_exists() {
+              local tbl="$1"
+              local count
+              count=$(MYSQL_PWD="$DB_PASS" "$MYSQL_BIN" "${CONN_ARGS[@]}" -N -B -e \
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${DB_NAME}' AND table_name='${tbl}';")
+              [ "$count" -eq 1 ]
+            }
+
+            dump_table() {
+              local dir="$1"
+              local tbl="$2"
+              local required="$3"
+              if ! table_exists "$tbl"; then
+                if [ "$required" = "1" ]; then
+                  echo "❌ 核心表不存在: ${tbl}" >&2
+                  exit 1
+                else
+                  echo "⚠️ 可选表不存在，已跳过: ${tbl}" >&2
+                  return 0
+                fi
+              fi
+              MYSQL_PWD="$DB_PASS" "$MYSQLDUMP" "${CONN_ARGS[@]}" "${DUMP_ARGS[@]}" "$DB_NAME" "$tbl" \
+                > "$TMP_DIR/${dir}/${tbl}.sql"
+            }
+
+            # 1. 题库配置与不可变存证账本
+            dump_table "qbank" "qbank_weeks" 1
+            dump_table "qbank" "qbank_questions" 1
+            dump_table "qbank" "qbank_revisions" 0
+            dump_table "qbank" "qbank_attestation_keys" 0
+            dump_table "qbank" "qbank_attestation_anchors" 0
+
+            # 2. 学生错题与学情历史
+            dump_table "students" "class_batches" 1
+            dump_table "students" "student_records" 1
+            dump_table "students" "generation_batches" 1
+            dump_table "students" "student_record_history" 0
+
+            tar -czf - -C "$TMP_DIR" qbank students
+          REMOTE_EOF
+
+          tar -tzf ./staging_dump/core_tables.tar.gz >/dev/null
+          mkdir -p ./staging_dump/extracted
+          tar -xzf ./staging_dump/core_tables.tar.gz -C ./staging_dump/extracted
+
+          # 校验关键导出文件完整性与体积
+          for f in \
+            qbank/qbank_weeks.sql \
+            qbank/qbank_questions.sql \
+            students/class_batches.sql \
+            students/student_records.sql \
+            students/generation_batches.sql; do
+            path="./staging_dump/extracted/${f}"
+            if [ ! -s "$path" ] || ! grep -q "CREATE TABLE" "$path"; then
+              echo "::error::导出文件校验失败（为空或缺少表结构）: ${f}"
+              exit 1
+            fi
+          done
+
+          # 检查是否有单文件接近 GitHub 100MB 限制
+          while IFS= read -r -d '' sql_file; do
+            size_bytes=$(wc -c < "$sql_file")
+            size_mb=$((size_bytes / 1024 / 1024))
+            echo "  - ${sql_file#./staging_dump/extracted/}: ${size_bytes} bytes (~${size_mb} MB)"
+            if [ "$size_mb" -ge 95 ]; then
+              echo "::error::文件 ${sql_file} 已达 ${size_mb} MB，接近 GitHub 单文件 100MB 上限，请拆分归档后再推送！"
+              exit 1
+            elif [ "$size_mb" -ge 50 ]; then
+              echo "::warning::文件 ${sql_file} 体积已达 ${size_mb} MB，请注意后续 GitHub 单文件 100MB 限制。"
+            fi
+          done < <(find ./staging_dump/extracted -type f -name '*.sql' -print0 | sort -z)
+
+          echo "✅ 生产核心数据导出与校验完成"
+
+      - name: Commit and push to orphan branch data-backup
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TARGET_BRANCH: data-backup
+        run: |
+          set -euo pipefail
+          REMOTE_URL="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+
+          # 检出或初始化孤立分支 data-backup
+          if git ls-remote --exit-code --heads "$REMOTE_URL" "$TARGET_BRANCH" >/dev/null 2>&1; then
+            echo "📥 检出已存在的备份分支: ${TARGET_BRANCH}"
+            git clone --branch "$TARGET_BRANCH" --single-branch --depth 1 "$REMOTE_URL" ./backup_repo
+          else
+            echo "🌱 首次运行，初始化孤立备份分支: ${TARGET_BRANCH}"
+            mkdir -p ./backup_repo
+            git -C ./backup_repo init -b "$TARGET_BRANCH"
+            git -C ./backup_repo remote add origin "$REMOTE_URL"
+          fi
+
+          git -C ./backup_repo config user.name "github-actions[bot]"
+          git -C ./backup_repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # 同步本次导出的 SQL 文件
+          rm -rf ./backup_repo/qbank ./backup_repo/students
+          cp -r ./staging_dump/extracted/qbank ./backup_repo/qbank
+          cp -r ./staging_dump/extracted/students ./backup_repo/students
+
+          # 写入分支说明文件
+          cat << 'README_EOF' > ./backup_repo/README.md
+          # Feedback-V1 核心业务数据备份分支 (`data-backup`)
+
+          本分支为与代码主分支 `main` 完全隔离的孤立分支，由 GitHub Actions（`.github/workflows/sync-core-data-to-repo.yml`）每天北京时间 `04:00` 自动从生产 MySQL 拉取并增量提交。
+
+          ## 目录结构
+
+          - `qbank/`：题库配置与不可变存证账本
+            - `qbank_weeks.sql`：题库专题主表
+            - `qbank_questions.sql`：题库题目、考点、框选坐标与 PDF 路径映射
+            - `qbank_revisions.sql`：题库配置不可变存证修订账本
+            - `qbank_attestation_keys.sql`：题库存证 Ed25519 公钥注册表
+            - `qbank_attestation_anchors.sql`：题库存证 Merkle 外部可信时间锚定表
+          - `students/`：学生错题与学情历史
+            - `class_batches.sql`：班级教学期次表
+            - `student_records.sql`：学生当前学情与错题记录表
+            - `generation_batches.sql`：学情生成批次汇总表
+            - `student_record_history.sql`：学生学情修改/覆盖历史版本表
+          - `metadata.json`：最近一次有数据变更时的同步时间、各表记录估算及 SHA-256 校验信息
+
+          ## 单表/全量恢复示例
+
+          ```bash
+          # 恢复单张表（示例：恢复题库题目表）
+          mysql -u<user> -p feedback < qbank/qbank_questions.sql
+
+          # 按外键依赖顺序恢复学生错题核心表
+          mysql -u<user> -p feedback < students/class_batches.sql
+          mysql -u<user> -p feedback < students/generation_batches.sql
+          mysql -u<user> -p feedback < students/student_records.sql
+          mysql -u<user> -p feedback < students/student_record_history.sql
+          ```
+
+          > ⚠️ 本分支包含真实学生姓名、学号及错题本 Token，仅限私有仓库内保存与授权人员访问。
+          README_EOF
+
+          # 仅在核心 SQL 文件有实际内容变化（或首次初始化）时才更新 metadata.json 并提交
+          SQL_CHANGES=$(git -C ./backup_repo status --porcelain qbank students)
+          if [ -z "$SQL_CHANGES" ] && [ -f ./backup_repo/metadata.json ]; then
+            echo "ℹ️ 本次拉取的题库与学生错题数据与上次备份完全一致，跳过提交。"
+            exit 0
+          fi
+
+          # 生成 metadata.json
+          python3 - << 'PY_EOF'
+          import hashlib, json, os, re
+          from pathlib import Path
+
+          root = Path('./backup_repo')
+          tables = {}
+          for folder in ('qbank', 'students'):
+              dir_path = root / folder
+              if not dir_path.exists():
+                  continue
+              for sql_file in sorted(dir_path.glob('*.sql')):
+                  content = sql_file.read_bytes()
+                  sha256 = hashlib.sha256(content).hexdigest()
+                  insert_count = len(re.findall(rb'^INSERT INTO ', content, flags=re.MULTILINE))
+                  rel = f'{folder}/{sql_file.name}'
+                  tables[rel] = {
+                      'bytes': len(content),
+                      'rows': insert_count,
+                      'sha256': sha256,
+                  }
+
+          meta = {
+              'synced_at': os.environ['SYNC_TIME'],
+              'branch': os.environ['TARGET_BRANCH'],
+              'tables': tables,
+          }
+          (root / 'metadata.json').write_text(
+              json.dumps(meta, ensure_ascii=False, indent=2) + '\n',
+              encoding='utf-8',
+          )
+          PY_EOF
+
+          git -C ./backup_repo add -A
+          CHANGED_FILES=$(git -C ./backup_repo diff --cached --name-only qbank students | tr '\n' ' ' | sed 's/ $//')
+          git -C ./backup_repo commit -m "backup(data): sync core tables (${SYNC_DATE})" -m "Synced at: ${SYNC_TIME}" -m "Changed: ${CHANGED_FILES:-initial snapshot}"
+          git -C ./backup_repo push origin "$TARGET_BRANCH"
+          echo "✅ 核心数据已成功提交并推送至分支 ${TARGET_BRANCH}"
+
+      - name: Cleanup temporary credentials & staging
+        if: always()
+        run: |
+          rm -f ~/.ssh/deploy_key
+          rm -rf ./staging_dump ./backup_repo
+          echo "🧹 临时凭证与导出缓存已清理完毕"
