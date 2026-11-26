@@ -10,20 +10,20 @@
     <meta http-equiv="Expires" content="0">
     <title>题库管理</title>
     <meta name="description" content="管理每次作业中每道题的知识点描述，用于生成针对性巩固建议">
-    <script src="js/theme-boot.js?v=20261126-172433"></script>
-    <link rel="stylesheet" href="css/common.css?v=20261126-172433">
-    <link rel="stylesheet" href="css/upload.css?v=20261126-172433">
-    <link rel="stylesheet" href="css/question-bank.css?v=20261126-172433">
-    <link rel="stylesheet" href="css/auth.css?v=20261126-172433">
-    <link rel="stylesheet" href="css/tokens.css?v=20261126-172433">
+    <script src="js/theme-boot.js?v=20261126-172922"></script>
+    <link rel="stylesheet" href="css/common.css?v=20261126-172922">
+    <link rel="stylesheet" href="css/upload.css?v=20261126-172922">
+    <link rel="stylesheet" href="css/question-bank.css?v=20261126-172922">
+    <link rel="stylesheet" href="css/auth.css?v=20261126-172922">
+    <link rel="stylesheet" href="css/tokens.css?v=20261126-172922">
     <!-- PDF 核心库（PDF-Lib / PDF.js）改为按需及空闲懒加载，避免阻塞首屏与返回交互 -->
     <script defer src="js/libs/polyfill-at.js"></script>
     <script defer src="js/libs/qrcode.min.js"></script>
-    <script defer src="js/logger.js?v=20261126-172433"></script>
-    <script defer src="js/common.js?v=20261126-172433"></script>
-    <script defer src="js/auth.js?v=20261126-172433"></script>
-    <script defer src="js/question-bank.js?v=20261126-172433"></script>
-    <script defer src="js/region-debug.js?v=20261126-172433"></script>
+    <script defer src="js/logger.js?v=20261126-172922"></script>
+    <script defer src="js/common.js?v=20261126-172922"></script>
+    <script defer src="js/auth.js?v=20261126-172922"></script>
+    <script defer src="js/question-bank.js?v=20261126-172922"></script>
+    <script defer src="js/region-debug.js?v=20261126-172922"></script>
 </head>
 
 <body class="upload-page">
@@ -879,6 +879,7 @@
                 </div>
                 <div class="rg-focus-controls">
                     <button type="button" class="btn sm secondary rg-mode-btn" id="rg-focus-twotap-btn" title="开启后只需点击两次（上边界 + 下边界）即可快速成框">两点定框: 关</button>
+                    <button type="button" class="btn sm secondary" id="rg-focus-answerlines-btn" style="display: none;" title="适用于英语文内挖空大题，一键在原文下方生成每行2空的作答横线">一键作答横线</button>
                     <div class="rg-focus-zoom-group">
                         <button type="button" class="btn sm secondary" id="rg-focus-zoom-out" title="缩小" aria-label="缩小">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
