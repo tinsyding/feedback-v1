@@ -1652,14 +1652,15 @@
                 `;
             }
 
-            const showAnswerLinesBtn = (tab === 'exercise' && bankType !== 'variation' && (isEnglishSubjectSelected() || isAnswerLinesItem(it)));
+            const bigBtnLabel = isAnswerLinesItem(it)
+                ? `编辑横线(${it.answerLineNums.length}空)`
+                : (it.isBig ? '继续切分' : '设为大题');
             return `
                 <div class="rg-card ${isActive ? 'active' : ''}${isDupCard ? ' rg-card-dup' : ''}" data-id="${it.id}" onclick="rgSelectItem('${it.id}')">
                     ${headerEditorHtml}
                     <div class="rg-card-actions" onclick="event.stopPropagation()">
                         <button type="button" class="btn sm secondary" onclick="rgStartContinue('${it.id}')">+ 跨页续框</button>
-                        ${bankType === 'variation' ? '' : `<button type="button" class="btn sm secondary" onclick="rgEnterSubMode('${it.id}')">${(it.isBig && !isAnswerLinesItem(it)) ? '继续切分' : '设为大题'}</button>`}
-                        ${showAnswerLinesBtn ? `<button type="button" class="btn sm ${isAnswerLinesItem(it) ? 'primary' : 'secondary'}" onclick="rgConfigureAnswerLines('${it.id}')">${isAnswerLinesItem(it) ? `横线(${it.answerLineNums.length}空)` : '一键作答横线'}</button>` : ''}
+                        ${bankType === 'variation' ? '' : `<button type="button" class="btn sm ${isAnswerLinesItem(it) ? 'primary' : 'secondary'}" onclick="rgEnterSubMode('${it.id}')">${bigBtnLabel}</button>`}
                         <button type="button" class="btn sm secondary" onclick="rgDeleteItem('${it.id}')">删除</button>
                     </div>
                 </div>
@@ -4239,112 +4240,151 @@
         window.rgExitSubMode();
     }
 
-    window.rgConfigureAnswerLines = function (itemId) {
-        const tabState = getTabState('exercise');
-        const it = tabState.items.find(x => x.id === itemId);
-        if (!it) return;
-
-        const isEditing = isAnswerLinesItem(it);
+    function promptEnglishBigQuestionSetup(it) {
+        const isEditingAL = isAnswerLinesItem(it);
         const curStart = /^\d+$/.test(String(it.label || '').trim())
             ? parseInt(it.label, 10)
             : (parseInt(getNextAutoNumber('exercise'), 10) || 1);
-        const curCount = isEditing ? it.answerLineNums.length : 10;
+        const curCount = isEditingAL ? it.answerLineNums.length : 10;
+        const defaultMode = isEditingAL ? 'answer_lines' : 'subq';
 
-        const applyConfig = (startNum, countNum) => {
-            const s = Math.max(1, Math.min(500, parseInt(startNum, 10) || 1));
-            const c = Math.max(2, Math.min(30, parseInt(countNum, 10) || 10));
-            it.isBig = true;
-            it.answerLines = true;
-            it.label = String(s);
-            it.answerLineNums = Array.from({ length: c }, (_, idx) => s + idx);
-            it.subqBoxes = [];
-            it.stemBoxes = [];
-            rgState.selectedId = it.id;
-            renderAllRg();
-            showToast(`已生成第 ${s}~${s + c - 1} 题作答横线区（共 ${c} 空，每行 2 空）`);
-        };
-
-        if (typeof showCustomDialog === 'function') {
+        return new Promise((resolve) => {
+            if (typeof showCustomDialog !== 'function') {
+                resolve({ mode: 'subq', startNum: curStart });
+                return;
+            }
             const bodyHtml = `
                 <div style="display:flex;flex-direction:column;gap:12px;font-size:0.9rem;">
-                    <div style="color:var(--text-secondary);line-height:1.5;">
-                        适用于原文内挖空、文后无答题横线的英语大题（如阅读填空 / 语法填空 / 七选五）。错题本导出时将自动在原文下方绘制<strong>每行 2 空</strong>的整齐横线（精简模式仅画错题空）。
+                    <div style="display:flex;gap:8px;">
+                        <label style="flex:1;display:flex;align-items:flex-start;gap:8px;padding:10px;border:1px solid var(--border-color,#cbd5e1);border-radius:8px;cursor:pointer;">
+                            <input type="radio" name="rg-en-big-mode" value="subq" ${defaultMode === 'subq' ? 'checked' : ''} style="margin-top:3px;"
+                                onchange="document.getElementById('rg-al-extra-wrap').style.display='none'">
+                            <div>
+                                <div style="font-weight:600;">切分小问</div>
+                                <div style="font-size:0.78rem;color:var(--text-secondary);margin-top:2px;">阅读理解 / 完形等文后有小问区，逐个拉框</div>
+                            </div>
+                        </label>
+                        <label style="flex:1;display:flex;align-items:flex-start;gap:8px;padding:10px;border:1px solid var(--border-color,#cbd5e1);border-radius:8px;cursor:pointer;">
+                            <input type="radio" name="rg-en-big-mode" value="answer_lines" ${defaultMode === 'answer_lines' ? 'checked' : ''} style="margin-top:3px;"
+                                onchange="document.getElementById('rg-al-extra-wrap').style.display='flex'">
+                            <div>
+                                <div style="font-weight:600;">一键作答横线</div>
+                                <div style="font-size:0.78rem;color:var(--text-secondary);margin-top:2px;">文内挖空无横线，自动生成每行2空作答区</div>
+                            </div>
+                        </label>
                     </div>
                     <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
                         <label style="display:flex;align-items:center;gap:6px;">
                             <span>起始题号：</span>
-                            <input id="rg-al-start" type="number" min="1" max="500" value="${curStart}" class="qb-input" style="width:84px;padding:6px 8px;">
-                        </label>
-                        <label style="display:flex;align-items:center;gap:6px;">
-                            <span>作答空数：</span>
-                            <input id="rg-al-count" type="number" min="2" max="30" value="${curCount}" class="qb-input" style="width:84px;padding:6px 8px;">
+                            <input id="rg-en-big-start" type="number" min="1" max="500" value="${curStart}" class="qb-input" style="width:88px;padding:6px 8px;">
                         </label>
                     </div>
-                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-                        <span style="color:var(--text-secondary);font-size:0.82rem;">快捷空数：</span>
-                        <button type="button" class="btn sm secondary" onclick="document.getElementById('rg-al-count').value=5">5 空</button>
-                        <button type="button" class="btn sm secondary" onclick="document.getElementById('rg-al-count').value=10">10 空</button>
-                        <button type="button" class="btn sm secondary" onclick="document.getElementById('rg-al-count').value=15">15 空</button>
+                    <div id="rg-al-extra-wrap" style="display:${defaultMode === 'answer_lines' ? 'flex' : 'none'};flex-direction:column;gap:8px;padding:10px;background:var(--bg-subtle,rgba(148,163,184,0.1));border-radius:8px;">
+                        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+                            <label style="display:flex;align-items:center;gap:6px;">
+                                <span>作答空数：</span>
+                                <input id="rg-al-count" type="number" min="2" max="30" value="${curCount}" class="qb-input" style="width:84px;padding:6px 8px;">
+                            </label>
+                            <div style="display:flex;gap:6px;align-items:center;">
+                                <button type="button" class="btn sm secondary" onclick="document.getElementById('rg-al-count').value=5">5 空</button>
+                                <button type="button" class="btn sm secondary" onclick="document.getElementById('rg-al-count').value=10">10 空</button>
+                                <button type="button" class="btn sm secondary" onclick="document.getElementById('rg-al-count').value=15">15 空</button>
+                            </div>
+                        </div>
+                        <div style="font-size:0.78rem;color:var(--text-secondary);">
+                            错题本导出时将在原文下方自动绘制每行 2 空的作答横线（精简模式仅画做错的空）。
+                        </div>
                     </div>
                 </div>
             `;
             showCustomDialog({
-                title: isEditing ? '编辑一键作答横线大题' : '一键生成作答横线大题',
+                title: isEditingAL ? '编辑英语大题设置' : '设为大题（英语）',
                 body: bodyHtml,
-                confirmText: '确认生成',
-                cancelText: isEditing ? '取消作答横线' : '取消',
+                confirmText: '确认',
+                cancelText: isEditingAL ? '取消大题' : '取消',
                 onConfirm: () => {
-                    const startInp = document.getElementById('rg-al-start');
-                    const countInp = document.getElementById('rg-al-count');
+                    const checked = document.querySelector('input[name="rg-en-big-mode"]:checked');
+                    const mode = checked ? checked.value : 'subq';
+                    const startInp = document.getElementById('rg-en-big-start');
                     const s = parseInt(startInp ? startInp.value : curStart, 10);
-                    const c = parseInt(countInp ? countInp.value : curCount, 10);
                     if (isNaN(s) || s < 1 || s > 500) {
                         showToast('请输入有效的起始题号（1~500）', 'warn');
+                        resolve(null);
                         return;
                     }
-                    if (isNaN(c) || c < 2 || c > 30) {
-                        showToast('作答空数需在 2~30 之间', 'warn');
-                        return;
+                    if (mode === 'answer_lines') {
+                        const countInp = document.getElementById('rg-al-count');
+                        const c = parseInt(countInp ? countInp.value : curCount, 10);
+                        if (isNaN(c) || c < 2 || c > 30) {
+                            showToast('作答空数需在 2~30 之间', 'warn');
+                            resolve(null);
+                            return;
+                        }
+                        resolve({ mode: 'answer_lines', startNum: s, count: c });
+                    } else {
+                        resolve({ mode: 'subq', startNum: s });
                     }
-                    applyConfig(s, c);
                 },
                 onCancel: () => {
-                    if (isEditing) {
-                        it.isBig = false;
-                        it.answerLines = false;
-                        it.answerLineNums = [];
-                        it.stemBoxes = [];
-                        renderAllRg();
-                        showToast('已取消作答横线大题设置');
-                    }
+                    resolve(isEditingAL ? { mode: 'clear' } : null);
                 }
             });
             setTimeout(() => {
-                const countInp = document.getElementById('rg-al-count');
-                if (countInp) {
-                    countInp.focus();
-                    countInp.select();
+                const startInp = document.getElementById('rg-en-big-start');
+                if (startInp) {
+                    startInp.focus();
+                    startInp.select();
                 }
             }, 30);
-            return;
-        }
-
-        const rawCount = window.prompt(`请输入作答横线空数（起始题号 ${curStart}，2~30）：`, String(curCount));
-        if (rawCount === null) return;
-        const c = parseInt(rawCount, 10);
-        if (!isNaN(c) && c >= 2 && c <= 30) {
-            applyConfig(curStart, c);
-        }
-    };
+        });
+    }
 
     window.rgEnterSubMode = async function (itemId) {
         const tab = rgState.activeTab;
         const tabState = getTabState(tab);
         const it = tabState.items.find(x => x.id === itemId);
         if (!it) return;
-        if (isAnswerLinesItem(it)) {
+
+        const bankType = getCurrentBankTypeSafe();
+        const useEnglishSetup = (
+            tab === 'exercise' &&
+            bankType !== 'variation' &&
+            (isEnglishSubjectSelected() || isAnswerLinesItem(it)) &&
+            (!it.isBig || isAnswerLinesItem(it))
+        );
+
+        if (useEnglishSetup) {
+            const choice = await promptEnglishBigQuestionSetup(it);
+            if (!choice) return;
+            if (choice.mode === 'clear') {
+                it.isBig = false;
+                it.answerLines = false;
+                it.answerLineNums = [];
+                it.stemBoxes = [];
+                renderAllRg();
+                showToast('已取消作答横线大题设置');
+                return;
+            }
+            if (choice.mode === 'answer_lines') {
+                const s = Math.max(1, Math.min(500, choice.startNum));
+                const c = Math.max(2, Math.min(30, choice.count));
+                it.isBig = true;
+                it.answerLines = true;
+                it.label = String(s);
+                it.answerLineNums = Array.from({ length: c }, (_, idx) => s + idx);
+                it.subqBoxes = [];
+                it.stemBoxes = [];
+                rgState.selectedId = it.id;
+                renderAllRg();
+                showToast(`已生成第 ${s}~${s + c - 1} 题作答横线区（共 ${c} 空，每行 2 空）`);
+                return;
+            }
+            // 选择了切分小问模式
             it.answerLines = false;
             it.answerLineNums = [];
+            it.label = String(choice.startNum);
+            await openFocusSubMode(itemId);
+            return;
         }
 
         const existingLabel = String(it.label || '').trim();
