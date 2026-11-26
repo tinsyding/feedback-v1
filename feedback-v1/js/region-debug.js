@@ -205,6 +205,53 @@
         });
     }
 
+    function getItemEffectiveNums(it) {
+        if (!it) return [];
+        if (it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
+            return it.subqBoxes.map(sb => String(sb.num || '').trim()).filter(Boolean);
+        }
+        const lbl = String(it.label || '').trim();
+        return lbl ? [lbl] : [];
+    }
+
+    function findDuplicateQuestionNumbers(items) {
+        const numToIds = new Map();
+        const duplicateNums = new Set();
+        const duplicateItemIds = new Set();
+        let firstDupNum = null;
+        let firstDupItemId = null;
+
+        if (!Array.isArray(items)) {
+            return { duplicateNums, duplicateItemIds, firstDupNum, firstDupItemId };
+        }
+        for (let i = 0; i < items.length; i++) {
+            const it = items[i];
+            const nums = getItemEffectiveNums(it);
+            for (let j = 0; j < nums.length; j++) {
+                const n = nums[j];
+                if (!numToIds.has(n)) {
+                    numToIds.set(n, [it.id]);
+                } else {
+                    const arr = numToIds.get(n);
+                    arr.push(it.id);
+                    duplicateNums.add(n);
+                    arr.forEach(id => duplicateItemIds.add(id));
+                    if (firstDupNum === null) {
+                        firstDupNum = n;
+                        firstDupItemId = it.id;
+                    }
+                }
+            }
+        }
+        return { duplicateNums, duplicateItemIds, firstDupNum, firstDupItemId };
+    }
+
+    function formatDupNumsList(dupSet) {
+        return Array.from(dupSet || [])
+            .sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0))
+            .join('、');
+    }
+
     function getNextAutoNumber(tab) {
         const items = getTabState(tab).items;
         let maxNum = 0;
@@ -948,6 +995,12 @@
                 item.autoDetected = true;
                 renderAllRg();
                 scheduleDraftSave();
+                if (getCurrentBankTypeSafe() !== 'variation') {
+                    const dup = findDuplicateQuestionNumbers(curTabState.items);
+                    if (dup.duplicateNums.has(String(detected))) {
+                        showToast(`题号 ${detected} 重复，请修改或删除多余框（跨页同一题请用「+ 跨页续框」）`, 'warn');
+                    }
+                }
             } else if (opts.focusOnMiss && !String(item.label || '').trim()) {
                 requestAnimationFrame(() => {
                     const input = document.querySelector(`.rg-card[data-id="${item.id}"] .rg-num-input`);
@@ -1078,6 +1131,13 @@
 
         renderAllRg();
         scheduleDraftSave();
+
+        if (!isSingleTask && bankType !== 'variation' && newItem.label) {
+            const dup = findDuplicateQuestionNumbers(tabState.items);
+            if (dup.duplicateNums.has(String(newItem.label).trim())) {
+                showToast(`题号 ${newItem.label} 重复，请修改或删除多余框（跨页同一题请用「+ 跨页续框」）`, 'warn');
+            }
+        }
 
         if (!isSingleTask && ((bankType === 'preview' && !newItem.label && detectStatus === false) || (bankType === 'variation' && tab === 'answer'))) {
             requestAnimationFrame(() => {
@@ -1464,10 +1524,12 @@
             ? getSortedItemsForDisplay(rgState.exercise.items, 'exercise', bankType)
             : null;
         const displayItems = getSortedItemsForDisplay(tabState.items, tab, bankType);
+        const dupInfo = bankType !== 'variation' ? findDuplicateQuestionNumbers(tabState.items) : null;
 
         listEl.innerHTML = displayItems.map((it) => {
             const pages = Array.from(new Set(it.regions.map(r => 'P' + (r.pageOffset + 1)))).join(', ');
             const isActive = rgState.selectedId === it.id;
+            const isDupCard = Boolean(dupInfo && dupInfo.duplicateItemIds.has(it.id));
 
             let bigDetailHtml = '';
             if (it.isBig) {
@@ -1480,8 +1542,10 @@
                         </span>
                     `;
                 }).join('');
-                const subqChips = (it.subqBoxes || []).map((qb, qIdx) => `
-                    <span class="rg-subq-chip" title="${escapeHtmlRg(formatSubqPagesLabel(qb))}">
+                const subqChips = (it.subqBoxes || []).map((qb, qIdx) => {
+                    const isSubDup = Boolean(dupInfo && dupInfo.duplicateNums.has(String(qb.num || '').trim()));
+                    return `
+                    <span class="rg-subq-chip${isSubDup ? ' rg-subq-dup' : ''}" title="${escapeHtmlRg(formatSubqPagesLabel(qb))}${isSubDup ? ' · 题号重复' : ''}">
                         <span>#</span>
                         <input type="text" class="rg-subq-num-input" value="${escapeHtmlRg(qb.num)}"
                             onclick="event.stopPropagation()"
@@ -1489,7 +1553,8 @@
                             onchange="rgUpdateSubqNum('${it.id}', ${qIdx}, this.value)">
                         <button type="button" class="rg-subq-del-btn" onclick="event.stopPropagation(); rgDeleteSubBox('${it.id}', 'subq', ${qIdx})" title="删除小问框" aria-label="删除小问框"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
                     </span>
-                `).join('');
+                `;
+                }).join('');
                 bigDetailHtml = `
                     <div class="rg-card-submeta">大题 · ${stemGroups.length > 0 ? '自动原文 · ' : ''}小问 ${(it.subqBoxes || []).length}</div>
                     ${(stemChips || subqChips) ? `<div class="rg-subq-list">${stemChips}${subqChips}</div>` : ''}
@@ -1531,12 +1596,14 @@
                 const placeholder = bankType === 'preview' ? '输题号' : '题号';
                 const autoCls = it.autoDetected ? ' auto-detected' : '';
                 const autoTitle = it.autoDetected ? '已自动识别左上角题号，可直接修改' : '';
+                const dupBadgeHtml = isDupCard ? '<span class="rg-dup-badge" title="存在相同题号，请修改或删除多余框">重复</span>' : '';
                 headerEditorHtml = `
                     <div class="rg-card-top">
                         <div class="rg-card-num-wrap">
                             <span>${it.isBig ? '起始题号' : '题号'}</span>
                             <input type="text" class="rg-num-input${autoCls}" value="${escapeHtmlRg(it.label)}" placeholder="${placeholder}" title="${autoTitle}"
                                 oninput="rgUpdateItemLabel('${it.id}', this.value)" onchange="rgUpdateItemLabel('${it.id}', this.value)" onblur="rgReorderSidebarAfterEdit('${it.id}')" onkeydown="if(event.key==='Enter'){this.blur();}" onclick="event.stopPropagation()">
+                            ${dupBadgeHtml}
                         </div>
                         <span class="rg-card-meta">${escapeHtmlRg(pages)}</span>
                     </div>
@@ -1545,7 +1612,7 @@
             }
 
             return `
-                <div class="rg-card ${isActive ? 'active' : ''}" data-id="${it.id}" onclick="rgSelectItem('${it.id}')">
+                <div class="rg-card ${isActive ? 'active' : ''}${isDupCard ? ' rg-card-dup' : ''}" data-id="${it.id}" onclick="rgSelectItem('${it.id}')">
                     ${headerEditorHtml}
                     <div class="rg-card-actions" onclick="event.stopPropagation()">
                         <button type="button" class="btn sm secondary" onclick="rgStartContinue('${it.id}')">+ 跨页续框</button>
@@ -2339,14 +2406,24 @@
                 return;
             }
             const bankType = getCurrentBankTypeSafe();
-            if (bankType === 'preview') {
+            if (bankType !== 'variation') {
                 const missing = exItems.find(it =>
                     !(it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0)
                     && !String(it.label || '').trim()
                 );
                 if (missing) {
-                    showToast('预习模式请先为每道框选题目输入题号', 'warn');
+                    showToast('请先为每道框选题目输入有效题号', 'warn');
                     rgSelectItem(missing.id);
+                    scrollSidebarCardIntoView(missing.id);
+                    return;
+                }
+                const dup = findDuplicateQuestionNumbers(exItems);
+                if (dup.duplicateNums.size > 0) {
+                    showToast(`存在重复题号（第 ${formatDupNumsList(dup.duplicateNums)} 题），请先修改或删除多余框`, 'warn');
+                    if (dup.firstDupItemId) {
+                        rgSelectItem(dup.firstDupItemId);
+                        scrollSidebarCardIntoView(dup.firstDupItemId);
+                    }
                     return;
                 }
             }
@@ -2565,6 +2642,17 @@
     window.rgReorderSidebarAfterEdit = function (itemId) {
         renderSidebar();
         scrollSidebarCardIntoView(itemId);
+        if (getCurrentBankTypeSafe() !== 'variation') {
+            const tabState = getTabState();
+            const it = tabState.items.find(x => x.id === itemId);
+            const lbl = it ? String(it.label || '').trim() : '';
+            if (lbl) {
+                const dup = findDuplicateQuestionNumbers(tabState.items);
+                if (dup.duplicateNums.has(lbl)) {
+                    showToast(`第 ${lbl} 题号重复，请修改或删除多余框`, 'warn');
+                }
+            }
+        }
     };
 
     window.rgUpdateSubqNum = function (itemId, subIdx, val) {
@@ -4309,14 +4397,42 @@
         }
         const bankType = getCurrentBankTypeSafe();
 
-        if (bankType === 'preview') {
-            const missing = exItems.find(it =>
+        if (bankType !== 'variation') {
+            const missingEx = exItems.find(it =>
                 !(it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0)
                 && !String(it.label || '').trim()
             );
-            if (missing) {
-                showToast('预习模式请先为每道框选题目手动输入题号', 'warn');
-                rgSelectItem(missing.id);
+            if (missingEx) {
+                showToast('请先为每道框选题目输入有效题号', 'warn');
+                rgState.stage = 'exercise';
+                rgState.activeTab = 'exercise';
+                await renderPdfPage();
+                rgSelectItem(missingEx.id);
+                scrollSidebarCardIntoView(missingEx.id);
+                return;
+            }
+            const exDup = findDuplicateQuestionNumbers(exItems);
+            if (exDup.duplicateNums.size > 0) {
+                showToast(`题目存在重复题号（第 ${formatDupNumsList(exDup.duplicateNums)} 题），请先修改或删除多余框`, 'warn');
+                rgState.stage = 'exercise';
+                rgState.activeTab = 'exercise';
+                await renderPdfPage();
+                if (exDup.firstDupItemId) {
+                    rgSelectItem(exDup.firstDupItemId);
+                    scrollSidebarCardIntoView(exDup.firstDupItemId);
+                }
+                return;
+            }
+            const ansDup = findDuplicateQuestionNumbers(rgState.answer.items);
+            if (ansDup.duplicateNums.size > 0) {
+                showToast(`答案存在重复题号（第 ${formatDupNumsList(ansDup.duplicateNums)} 题），请先修改或删除多余框`, 'warn');
+                rgState.stage = 'answer';
+                rgState.activeTab = 'answer';
+                await renderPdfPage();
+                if (ansDup.firstDupItemId) {
+                    rgSelectItem(ansDup.firstDupItemId);
+                    scrollSidebarCardIntoView(ansDup.firstDupItemId);
+                }
                 return;
             }
         }
