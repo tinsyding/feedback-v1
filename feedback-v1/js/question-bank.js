@@ -5875,7 +5875,7 @@ function applySavedDataFilter() {
         const typeBadge = itemBankType === 'preview'
             ? '<span class="saved-badge badge-preview">预习</span>'
             : (itemBankType === 'variation'
-                ? '<span class="saved-badge badge-variation" style="background:#ecfdf5;color:#059669;border-color:#a7f3d0;">举一反三</span>'
+                ? '<span class="saved-badge badge-variation">举一反三</span>'
                 : '<span class="saved-badge badge-homework">课后巩固</span>');
         const latestReceiptCode = String(item.latestReceiptCode || item.latest_receipt_code || '').trim();
         const operatorDisplay = String(item.updatedByName || item.updated_by_name || item.updatedBy || item.updated_by || '').trim();
@@ -5898,22 +5898,12 @@ function applySavedDataFilter() {
                 <div class="saved-card-tags">
                     ${typeBadge}
                     <span class="saved-badge ${subjectClass}">${escapeHtml(item.subject)}</span>
-                    <span class="saved-season-tag">${escapeHtml(String(itemYear))}${escapeHtml(itemSeason)}</span>
                 </div>
                 <span class="saved-grade-tag">${escapeHtml(itemGrade)} · ${escapeHtml(item.tier)}层</span>
             </div>
             <div class="saved-card-body">
                 <h4 class="saved-card-title">${escapeHtml(topicName)}</h4>
-                <div class="saved-card-subinfo">
-                    <span class="saved-question-count">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                            <polyline points="14 2 14 8 20 8"></polyline>
-                        </svg>
-                        共 ${item.questionCount} 道题
-                    </span>
-                    ${operatorDisplay ? `<span class="saved-card-operator" title="最后修改教师">修改人：${escapeHtml(operatorDisplay)}</span>` : ''}
-                </div>
+                ${operatorDisplay ? `<span class="saved-card-operator" title="最后修改教师：${escapeHtml(operatorDisplay)}">修改人：${escapeHtml(operatorDisplay)}</span>` : ''}
             </div>
             <div class="saved-card-actions">
                 <div class="saved-card-actions-left">
