@@ -71,6 +71,10 @@ function sanitizeQuestionMeta($rawMeta) {
         $clean['mode'] = 'region_crop';
     }
 
+    if (!empty($rawMeta['answerLines'])) {
+        $clean['answerLines'] = true;
+    }
+
     foreach (['stemBoxes', 'regions', 'answerRegions', 'boxes', 'answerBoxes'] as $arrKey) {
         if (!empty($rawMeta[$arrKey]) && is_array($rawMeta[$arrKey])) {
             $cleanList = [];

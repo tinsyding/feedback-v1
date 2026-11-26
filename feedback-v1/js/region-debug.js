@@ -78,6 +78,15 @@
         return typeof getBankType === 'function' ? getBankType() : 'homework';
     }
 
+    function isEnglishSubjectSelected() {
+        const subj = (typeof subjectSelect !== 'undefined' && subjectSelect) ? String(subjectSelect.value || '').trim() : '';
+        return subj.includes('英语') || subj.toLowerCase().includes('eng');
+    }
+
+    function isAnswerLinesItem(it) {
+        return Boolean(it && it.isBig && it.answerLines && Array.isArray(it.answerLineNums) && it.answerLineNums.length > 1);
+    }
+
     function clamp01(val) {
         return Math.max(0, Math.min(1, Number(val) || 0));
     }
@@ -168,6 +177,10 @@
             const valid = pNums.map(n => parseInt(n, 10)).filter(n => Number.isFinite(n) && n > 0);
             return valid.length > 0 ? Math.min(...valid) : null;
         }
+        if (isAnswerLinesItem(it)) {
+            const lineNums = it.answerLineNums.map(n => parseInt(n, 10)).filter(n => Number.isFinite(n) && n > 0);
+            if (lineNums.length > 0) return Math.min(...lineNums);
+        }
         if (it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
             const subNums = it.subqBoxes.map(sb => parseInt(sb.num, 10)).filter(n => Number.isFinite(n) && n > 0);
             if (subNums.length > 0) return Math.min(...subNums);
@@ -207,6 +220,9 @@
 
     function getItemEffectiveNums(it) {
         if (!it) return [];
+        if (isAnswerLinesItem(it)) {
+            return it.answerLineNums.map(n => String(n).trim()).filter(Boolean);
+        }
         if (it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
             return it.subqBoxes.map(sb => String(sb.num || '').trim()).filter(Boolean);
         }
@@ -264,6 +280,12 @@
                     if (!isNaN(sn) && sn > maxNum) maxNum = sn;
                 });
             }
+            if (isAnswerLinesItem(it)) {
+                it.answerLineNums.forEach(n => {
+                    const sn = parseInt(n, 10);
+                    if (!isNaN(sn) && sn > maxNum) maxNum = sn;
+                });
+            }
         });
         return String(maxNum + 1);
     }
@@ -309,6 +331,10 @@
                 return '原题' + compact + ' · 举一反三';
             }
             return '举一反三（未选原题）';
+        }
+        if (isAnswerLinesItem(it)) {
+            const nums = it.answerLineNums.map(n => parseInt(n, 10)).filter(n => !isNaN(n)).sort((a, b) => a - b);
+            if (nums.length > 1) return `第 ${nums[0]}~${nums[nums.length - 1]} 题（作答横线·${nums.length}空）`;
         }
         if (it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
             const nums = it.subqBoxes.map(b => parseInt(b.num, 10)).filter(n => !isNaN(n)).sort((a, b) => a - b);
@@ -1421,7 +1447,12 @@
 
         const expectedNums = [];
         getSortedItemsForDisplay(rgState.exercise.items, 'exercise', bankType).forEach(it => {
-            if (it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
+            if (isAnswerLinesItem(it)) {
+                it.answerLineNums.forEach(n => {
+                    const sn = String(n).trim();
+                    if (sn && !expectedNums.includes(sn)) expectedNums.push(sn);
+                });
+            } else if (it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
                 it.subqBoxes.forEach(sb => {
                     const sn = String(sb.num || '').trim();
                     if (sn && !expectedNums.includes(sn)) expectedNums.push(sn);
@@ -1532,7 +1563,17 @@
             const isDupCard = Boolean(dupInfo && dupInfo.duplicateItemIds.has(it.id));
 
             let bigDetailHtml = '';
-            if (it.isBig) {
+            if (isAnswerLinesItem(it)) {
+                const lineNums = [...it.answerLineNums].sort((a, b) => a - b);
+                const lineChips = lineNums.map((n) => {
+                    const isSubDup = Boolean(dupInfo && dupInfo.duplicateNums.has(String(n)));
+                    return `<span class="rg-subq-chip${isSubDup ? ' rg-subq-dup' : ''}" title="自动生成作答横线 #${n}${isSubDup ? ' · 题号重复' : ''}"><span>#${n}</span></span>`;
+                }).join('');
+                bigDetailHtml = `
+                    <div class="rg-card-submeta">作答横线大题 · 共 ${lineNums.length} 空（每行2空，精简模式仅画错题空）</div>
+                    <div class="rg-subq-list">${lineChips}</div>
+                `;
+            } else if (it.isBig) {
                 const stemGroups = groupStemBoxes(it.stemBoxes);
                 const stemChips = stemGroups.map((sg) => {
                     const pLabels = Array.from(new Set(sg.boxes.map(b => 'P' + ((b.pageOffset || 0) + 1)))).join('~');
@@ -1611,12 +1652,14 @@
                 `;
             }
 
+            const showAnswerLinesBtn = (tab === 'exercise' && bankType !== 'variation' && (isEnglishSubjectSelected() || isAnswerLinesItem(it)));
             return `
                 <div class="rg-card ${isActive ? 'active' : ''}${isDupCard ? ' rg-card-dup' : ''}" data-id="${it.id}" onclick="rgSelectItem('${it.id}')">
                     ${headerEditorHtml}
                     <div class="rg-card-actions" onclick="event.stopPropagation()">
                         <button type="button" class="btn sm secondary" onclick="rgStartContinue('${it.id}')">+ 跨页续框</button>
-                        ${bankType === 'variation' ? '' : `<button type="button" class="btn sm secondary" onclick="rgEnterSubMode('${it.id}')">${it.isBig ? '继续切分' : '设为大题'}</button>`}
+                        ${bankType === 'variation' ? '' : `<button type="button" class="btn sm secondary" onclick="rgEnterSubMode('${it.id}')">${(it.isBig && !isAnswerLinesItem(it)) ? '继续切分' : '设为大题'}</button>`}
+                        ${showAnswerLinesBtn ? `<button type="button" class="btn sm ${isAnswerLinesItem(it) ? 'primary' : 'secondary'}" onclick="rgConfigureAnswerLines('${it.id}')">${isAnswerLinesItem(it) ? `横线(${it.answerLineNums.length}空)` : '一键作答横线'}</button>` : ''}
                         <button type="button" class="btn sm secondary" onclick="rgDeleteItem('${it.id}')">删除</button>
                     </div>
                 </div>
@@ -1932,6 +1975,8 @@
                         targetExId: null,
                         parentNums: [],
                         isBig: true,
+                        answerLines: Boolean(meta.answerLines),
+                        answerLineNums: meta.answerLines ? [...meta.groupNums] : [],
                         regions: (meta.regions || []).map(r => ({ ...r })),
                         stemBoxes: (meta.stemBoxes || []).map(sb => ({ ...sb })),
                         subqBoxes: []
@@ -1939,10 +1984,14 @@
                     bigGroups.set(gKey, exItem);
                     exItems.push(exItem);
                 }
+                if (meta.answerLines) {
+                    exItem.answerLines = true;
+                    exItem.answerLineNums = [...meta.groupNums];
+                }
                 const rawExBoxes = (Array.isArray(meta.boxes) && meta.boxes.length > 0)
                     ? meta.boxes
                     : (meta.box ? [meta.box] : []);
-                if (rawExBoxes.length > 0) {
+                if (!meta.answerLines && rawExBoxes.length > 0) {
                     const clonedRegs = rawExBoxes.map(b => ({ ...b }));
                     exItem.subqBoxes.push({ ...clonedRegs[0], num: parseInt(q.id, 10) || q.id, customNum: false, regions: clonedRegs });
                 }
@@ -2609,7 +2658,14 @@
                 inp.removeAttribute('title');
             }
         }
-        if (it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
+        if (isAnswerLinesItem(it)) {
+            const base = parseInt(it.label, 10);
+            if (!isNaN(base) && base > 0) {
+                const count = it.answerLineNums.length;
+                it.answerLineNums = Array.from({ length: count }, (_, idx) => base + idx);
+                renderList();
+            }
+        } else if (it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
             const base = parseInt(it.label, 10);
             if (!isNaN(base) && base > 0) {
                 let cursor = base;
@@ -2865,6 +2921,10 @@
 
     function syncAutoStemBoxes(it) {
         if (!it || !it.isBig) return [];
+        if (isAnswerLinesItem(it)) {
+            it.stemBoxes = [];
+            return it.stemBoxes;
+        }
         const regions = Array.isArray(it.regions) ? it.regions : [];
         const subqs = Array.isArray(it.subqBoxes) ? it.subqBoxes : [];
         if (regions.length === 0 || subqs.length === 0) {
@@ -4179,11 +4239,113 @@
         window.rgExitSubMode();
     }
 
+    window.rgConfigureAnswerLines = function (itemId) {
+        const tabState = getTabState('exercise');
+        const it = tabState.items.find(x => x.id === itemId);
+        if (!it) return;
+
+        const isEditing = isAnswerLinesItem(it);
+        const curStart = /^\d+$/.test(String(it.label || '').trim())
+            ? parseInt(it.label, 10)
+            : (parseInt(getNextAutoNumber('exercise'), 10) || 1);
+        const curCount = isEditing ? it.answerLineNums.length : 10;
+
+        const applyConfig = (startNum, countNum) => {
+            const s = Math.max(1, Math.min(500, parseInt(startNum, 10) || 1));
+            const c = Math.max(2, Math.min(30, parseInt(countNum, 10) || 10));
+            it.isBig = true;
+            it.answerLines = true;
+            it.label = String(s);
+            it.answerLineNums = Array.from({ length: c }, (_, idx) => s + idx);
+            it.subqBoxes = [];
+            it.stemBoxes = [];
+            rgState.selectedId = it.id;
+            renderAllRg();
+            showToast(`已生成第 ${s}~${s + c - 1} 题作答横线区（共 ${c} 空，每行 2 空）`);
+        };
+
+        if (typeof showCustomDialog === 'function') {
+            const bodyHtml = `
+                <div style="display:flex;flex-direction:column;gap:12px;font-size:0.9rem;">
+                    <div style="color:var(--text-secondary);line-height:1.5;">
+                        适用于原文内挖空、文后无答题横线的英语大题（如阅读填空 / 语法填空 / 七选五）。错题本导出时将自动在原文下方绘制<strong>每行 2 空</strong>的整齐横线（精简模式仅画错题空）。
+                    </div>
+                    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+                        <label style="display:flex;align-items:center;gap:6px;">
+                            <span>起始题号：</span>
+                            <input id="rg-al-start" type="number" min="1" max="500" value="${curStart}" class="qb-input" style="width:84px;padding:6px 8px;">
+                        </label>
+                        <label style="display:flex;align-items:center;gap:6px;">
+                            <span>作答空数：</span>
+                            <input id="rg-al-count" type="number" min="2" max="30" value="${curCount}" class="qb-input" style="width:84px;padding:6px 8px;">
+                        </label>
+                    </div>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <span style="color:var(--text-secondary);font-size:0.82rem;">快捷空数：</span>
+                        <button type="button" class="btn sm secondary" onclick="document.getElementById('rg-al-count').value=5">5 空</button>
+                        <button type="button" class="btn sm secondary" onclick="document.getElementById('rg-al-count').value=10">10 空</button>
+                        <button type="button" class="btn sm secondary" onclick="document.getElementById('rg-al-count').value=15">15 空</button>
+                    </div>
+                </div>
+            `;
+            showCustomDialog({
+                title: isEditing ? '编辑一键作答横线大题' : '一键生成作答横线大题',
+                body: bodyHtml,
+                confirmText: '确认生成',
+                cancelText: isEditing ? '取消作答横线' : '取消',
+                onConfirm: () => {
+                    const startInp = document.getElementById('rg-al-start');
+                    const countInp = document.getElementById('rg-al-count');
+                    const s = parseInt(startInp ? startInp.value : curStart, 10);
+                    const c = parseInt(countInp ? countInp.value : curCount, 10);
+                    if (isNaN(s) || s < 1 || s > 500) {
+                        showToast('请输入有效的起始题号（1~500）', 'warn');
+                        return;
+                    }
+                    if (isNaN(c) || c < 2 || c > 30) {
+                        showToast('作答空数需在 2~30 之间', 'warn');
+                        return;
+                    }
+                    applyConfig(s, c);
+                },
+                onCancel: () => {
+                    if (isEditing) {
+                        it.isBig = false;
+                        it.answerLines = false;
+                        it.answerLineNums = [];
+                        it.stemBoxes = [];
+                        renderAllRg();
+                        showToast('已取消作答横线大题设置');
+                    }
+                }
+            });
+            setTimeout(() => {
+                const countInp = document.getElementById('rg-al-count');
+                if (countInp) {
+                    countInp.focus();
+                    countInp.select();
+                }
+            }, 30);
+            return;
+        }
+
+        const rawCount = window.prompt(`请输入作答横线空数（起始题号 ${curStart}，2~30）：`, String(curCount));
+        if (rawCount === null) return;
+        const c = parseInt(rawCount, 10);
+        if (!isNaN(c) && c >= 2 && c <= 30) {
+            applyConfig(curStart, c);
+        }
+    };
+
     window.rgEnterSubMode = async function (itemId) {
         const tab = rgState.activeTab;
         const tabState = getTabState(tab);
         const it = tabState.items.find(x => x.id === itemId);
         if (!it) return;
+        if (isAnswerLinesItem(it)) {
+            it.answerLines = false;
+            it.answerLineNums = [];
+        }
 
         const existingLabel = String(it.label || '').trim();
         const hasValidStartNum = /^\d+$/.test(existingLabel) && parseInt(existingLabel, 10) > 0;
@@ -4399,7 +4561,8 @@
 
         if (bankType !== 'variation') {
             const missingEx = exItems.find(it =>
-                !(it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0)
+                !isAnswerLinesItem(it)
+                && !(it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0)
                 && !String(it.label || '').trim()
             );
             if (missingEx) {
@@ -4488,6 +4651,14 @@
                     showToast(`对应原题第 ${pNums.join(',')} 题的变式尚未匹配到答案框，请在“答案原卷”补充或绑定答案框后再导入`, 'warn');
                     return;
                 }
+            } else if (isAnswerLinesItem(it)) {
+                for (const num of it.answerLineNums) {
+                    const qKey = String(num).trim();
+                    if (!qKey || !findMatchedAns(it, qKey, null)) {
+                        showToast(`第 ${qKey || '?'} 题尚未匹配到答案框，请在“答案原卷”补充对应题号答案框后再导入`, 'warn');
+                        return;
+                    }
+                }
             } else if (it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
                 for (const sb of it.subqBoxes) {
                     const qKey = String(sb.num || '').trim();
@@ -4566,6 +4737,36 @@
                             stemBoxes: it.isBig ? (it.stemBoxes || []) : []
                         }
                     });
+                    continue;
+                }
+
+                if (isAnswerLinesItem(it)) {
+                    const groupNums = it.answerLineNums.map(n => parseInt(n, 10)).filter(n => !isNaN(n) && n > 0).sort((a, b) => a - b);
+                    for (const num of groupNums) {
+                        const qKey = String(num);
+                        const matchedAns = findMatchedAns(it, qKey, null);
+                        const matchedAnsSubRegs = ansSubByNum.get(qKey) || [];
+                        const prev = prevFields.byId.get(qKey);
+                        const qMeta = {
+                            mode: 'region_crop',
+                            groupNums,
+                            answerLines: true,
+                            answerBox: matchedAnsSubRegs[0] || null,
+                            regions: it.regions,
+                            answerRegions: matchedAns ? matchedAns.regions : []
+                        };
+                        if (matchedAnsSubRegs.length > 1) {
+                            qMeta.answerBoxes = matchedAnsSubRegs;
+                        }
+                        imported.push({
+                            id: qKey,
+                            topic: prev ? prev.topic : '',
+                            videoUrl: prev ? prev.videoUrl : '',
+                            exercisePdf: { ...exPdfObj },
+                            answerPdf: matchedAns && ansPdfObj ? { ...ansPdfObj } : null,
+                            questionMeta: qMeta
+                        });
+                    }
                     continue;
                 }
 

@@ -132,7 +132,7 @@ function unrevokeRetestToken(string $token): bool {
  * 获取指定周次题目的 PDF 列表 (优先从 MySQL qbank_questions 查询，回退到 JSON 文件)
  */
 function parseRetestQuestionMeta($rawMeta, $qNum) {
-    $empty = ['mode' => '', 'groupNums' => [], 'box' => null, 'boxes' => [], 'answerBox' => null, 'answerBoxes' => [], 'stemBoxes' => [], 'regions' => [], 'answerRegions' => []];
+    $empty = ['mode' => '', 'answerLines' => false, 'groupNums' => [], 'box' => null, 'boxes' => [], 'answerBox' => null, 'answerBoxes' => [], 'stemBoxes' => [], 'regions' => [], 'answerRegions' => []];
     if (empty($rawMeta)) return $empty;
     if (is_string($rawMeta)) {
         $rawMeta = @json_decode($rawMeta, true);
@@ -190,6 +190,7 @@ function parseRetestQuestionMeta($rawMeta, $qNum) {
 
     return [
         'mode' => (!empty($rawMeta['mode']) && $rawMeta['mode'] === 'region_crop') ? 'region_crop' : '',
+        'answerLines' => !empty($rawMeta['answerLines']),
         'groupNums' => $groupNums,
         'box' => $box,
         'boxes' => $boxes,
@@ -465,6 +466,7 @@ function getWeekPdfs($subject, $grade, $tier, $weekNum, $errorNums, $year = null
                                 'errorNums' => [$qNum],
                                 'groupNums' => $inferredGroup,
                                 'mode' => $curMode,
+                                'answerLines' => !empty($metaParsed['answerLines']),
                                 'regions' => $metaParsed['regions'] ?? [],
                                 'answerRegions' => $metaParsed['answerRegions'] ?? [],
                                 'errorBoxes' => !empty($metaParsed['boxes']) ? $metaParsed['boxes'] : ($metaParsed['box'] ? [$metaParsed['box']] : []),
@@ -490,6 +492,9 @@ function getWeekPdfs($subject, $grade, $tier, $weekNum, $errorNums, $year = null
                                 $pdfList[$existIdx]['groupNums'] = $mergedGroup;
                                 if ($curMode && empty($pdfList[$existIdx]['mode'])) {
                                     $pdfList[$existIdx]['mode'] = $curMode;
+                                }
+                                if (!empty($metaParsed['answerLines'])) {
+                                    $pdfList[$existIdx]['answerLines'] = true;
                                 }
                                 if (!empty($metaParsed['regions'])) {
                                     $existingRegions = $pdfList[$existIdx]['regions'] ?? [];
@@ -576,6 +581,7 @@ function getWeekPdfs($subject, $grade, $tier, $weekNum, $errorNums, $year = null
                                     'matchedParentNums' => $vRow['matched_parent_nums'] ?? [$qNum],
                                     'subNum' => intval($vRow['sub_num'] ?? 1),
                                     'mode' => $vMode,
+                                    'answerLines' => !empty($vMetaParsed['answerLines']),
                                     'regions' => $vMetaParsed['regions'] ?? [],
                                     'answerRegions' => $vMetaParsed['answerRegions'] ?? [],
                                     'errorBoxes' => !empty($vMetaParsed['boxes']) ? $vMetaParsed['boxes'] : ($vMetaParsed['box'] ? [$vMetaParsed['box']] : []),

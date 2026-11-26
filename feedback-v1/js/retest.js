@@ -1503,6 +1503,94 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
         return badge ? badge.dataUrl : null;
     }
 
+    // 英语文内挖空大题自动作答横线区渲染（每行 2 空，高清 3x Canvas，黑白打印友好）
+    function generateAnswerLinesPng({ nums, errorNums, widthPt, isCompact }) {
+        const validNums = Array.isArray(nums) ? nums.map(n => parseInt(n, 10)).filter(n => n > 0) : [];
+        if (validNums.length === 0) return null;
+        try {
+            const K = 3;
+            const cols = 2;
+            const rows = Math.ceil(validNums.length / cols);
+            const padX = 6;
+            const headerH = 14;
+            const rowH = 24;
+            const padBottom = 6;
+            const colGap = 22;
+            const hPt = headerH + rows * rowH + padBottom;
+            const wPt = Math.max(180, Math.round(widthPt));
+
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.round(wPt * K);
+            canvas.height = Math.round(hPt * K);
+            const ctx = canvas.getContext('2d');
+
+            const fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+            const errSet = new Set((Array.isArray(errorNums) ? errorNums : []).map(n => parseInt(n, 10)).filter(n => n > 0));
+
+            // 顶部提示语
+            const headerText = isCompact
+                ? `作答区（仅显示错题，共 ${validNums.length} 空）`
+                : `作答区（共 ${validNums.length} 空${errSet.size > 0 ? '，黑底题号为错题' : ''}）`;
+            ctx.font = `500 ${Math.round(7.6 * K)}px ${fontFamily}`;
+            ctx.fillStyle = '#475569';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(headerText, padX * K, (headerH / 2) * K);
+
+            const colW = (wPt - padX * 2 - colGap * (cols - 1)) / cols;
+            for (let i = 0; i < validNums.length; i++) {
+                const qNum = validNums[i];
+                const r = Math.floor(i / cols);
+                const c = i % cols;
+                const cellX = padX + c * (colW + colGap);
+                const cellTopY = headerH + r * rowH;
+                const baselineY = cellTopY + rowH - 5.5;
+                const isErr = !isCompact && errSet.has(qNum);
+
+                let lineStartX = cellX + 24;
+                if (isErr) {
+                    const pillW = qNum >= 100 ? 24 : 20;
+                    const pillH = 12.5;
+                    const pillY = baselineY - pillH + 2;
+                    questionTopicBadgeRoundRect(ctx, cellX * K, pillY * K, pillW * K, pillH * K, 3 * K);
+                    ctx.fillStyle = '#1e293b';
+                    ctx.fill();
+                    ctx.font = `600 ${Math.round(8.2 * K)}px ${fontFamily}`;
+                    ctx.fillStyle = '#ffffff';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(String(qNum), (cellX + pillW / 2) * K, (pillY + pillH / 2 + 0.3) * K);
+                    lineStartX = cellX + pillW + 5;
+                } else {
+                    const numText = `${qNum}.`;
+                    ctx.font = `${isCompact ? 600 : 500} ${Math.round(9.2 * K)}px ${fontFamily}`;
+                    ctx.fillStyle = isCompact ? '#0f172a' : '#334155';
+                    ctx.textAlign = 'left';
+                    ctx.textBaseline = 'alphabetic';
+                    ctx.fillText(numText, cellX * K, baselineY * K);
+                    const measuredPt = ctx.measureText(numText).width / K;
+                    lineStartX = cellX + Math.max(18, Math.ceil(measuredPt) + 5);
+                }
+
+                const lineEndX = cellX + colW;
+                ctx.beginPath();
+                ctx.moveTo(lineStartX * K, (baselineY + 1.2) * K);
+                ctx.lineTo(lineEndX * K, (baselineY + 1.2) * K);
+                ctx.lineWidth = (isErr || isCompact ? 0.95 : 0.75) * K;
+                ctx.strokeStyle = (isErr || isCompact) ? '#1e293b' : '#64748b';
+                ctx.stroke();
+            }
+
+            const dataUrl = canvas.toDataURL('image/png');
+            canvas.width = 0;
+            canvas.height = 0;
+            return { dataUrl, widthPt: wPt, heightPt: hPt };
+        } catch (e) {
+            console.warn('generateAnswerLinesPng failed:', e);
+            return null;
+        }
+    }
+
     // 考点聚合大导读栏缓存（相同考点与宽度复用）
     const topicGroupBannerCache = {};
 
@@ -1799,6 +1887,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             errorNums: errorNums,
                             groupNums: groupNums,
                             mode: p.mode || null,
+                            answerLines: Boolean(p.answerLines),
                             regions: Array.isArray(p.regions) ? p.regions : [],
                             answerRegions: Array.isArray(p.answerRegions) ? p.answerRegions : [],
                             errorBoxes: errorBoxes,
@@ -2713,6 +2802,31 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                         const bannerX = boxX + 8;
                         const innerContentW = boxW - 12;
 
+                        const useAnswerLines = (
+                            type === 'exercise' &&
+                            typeof qItem === 'object' &&
+                            Boolean(qItem.answerLines) &&
+                            !qIsVariation
+                        );
+                        if (useAnswerLines) {
+                            const isCompactAL = (window.retestBigQuestionMode === 'compact');
+                            const itemErrList = Array.isArray(qItem.errorNums) && qItem.errorNums.length > 0
+                                ? qItem.errorNums.map(n => parseInt(n, 10)).filter(n => n > 0).sort((a, b) => a - b)
+                                : (parseInt(qItem.errorNum, 10) > 0 ? [parseInt(qItem.errorNum, 10)] : []);
+                            const alNums = isCompactAL
+                                ? (itemErrList.length > 0 ? itemErrList : itemGroupNums)
+                                : (itemGroupNums.length > 0 ? itemGroupNums : itemErrList);
+                            const alSpec = generateAnswerLinesPng({
+                                nums: alNums,
+                                errorNums: itemErrList,
+                                widthPt: innerContentW,
+                                isCompact: isCompactAL
+                            });
+                            if (alSpec) {
+                                rawSlices.push({ kind: 'answerLines', answerLinesSpec: alSpec });
+                            }
+                        }
+
                         const rawErrBoxes = type === 'answer'
                             ? (Array.isArray(qItem.answerErrorBoxes) ? qItem.answerErrorBoxes : [])
                             : (Array.isArray(qItem.errorBoxes) ? qItem.errorBoxes : []);
@@ -2731,6 +2845,20 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
 
                         // 1) 预处理每个切片坐标、左侧小问角标留槽与单页高度上限缩放
                         const preparedSlices = rawSlices.map((sl, idx) => {
+                            const isFirst = (idx === 0);
+                            const isLast = (idx === rawSlices.length - 1);
+                            if (sl.kind === 'answerLines' && sl.answerLinesSpec) {
+                                return {
+                                    kind: 'answerLines',
+                                    answerLinesSpec: sl.answerLinesSpec,
+                                    drawW: sl.answerLinesSpec.widthPt,
+                                    drawH: sl.answerLinesSpec.heightPt,
+                                    realDrawX: boxX + 6,
+                                    tagSpec: null,
+                                    isFirst,
+                                    isLast
+                                };
+                            }
                             const b = sl.box || {};
                             const pOff = Math.min(pageCount - 1, Math.max(0, parseInt(b.pageOffset, 10) || 0));
                             const srcPage = sourceDoc.getPage(pOff);
@@ -2758,8 +2886,6 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                             const tagGutter = tagSpec ? (tagSpec.widthPt + 5) : 0;
                             const availSliceW = Math.max(60, innerContentW - tagGutter);
 
-                            const isFirst = (idx === 0);
-                            const isLast = (idx === rawSlices.length - 1);
                             const sliceHeaderBlock = isFirst ? firstHeaderBlock : runningHeaderBlock;
                             const sliceGroupBlock = isFirst ? groupBannerBlock : 0;
                             const sliceAnswerH = isLast ? qrLayout.effectiveAnswerH : 0;
@@ -2829,7 +2955,7 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                                 curChunk.items.push({ slice: sl, sepGap: 0, drawSeparatorLine: false });
                             } else {
                                 const prevKind = curChunk.items[curChunk.items.length - 1].slice.kind;
-                                const drawSepLine = (useCompactBigQ && prevKind === 'stem' && sl.kind === 'subq');
+                                const drawSepLine = (useCompactBigQ && prevKind === 'stem' && sl.kind === 'subq') || (sl.kind === 'answerLines');
                                 const sepGap = drawSepLine ? 10 : 4;
                                 const candidateContentH = curChunk.contentH + sepGap + sl.drawH;
                                 const candidateTotalH = (curChunk.needGroupBanner ? groupBannerBlock : 0) + candidateContentH + answerHIfLast + BOX_PAD_BOTTOM;
@@ -2930,6 +3056,19 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                                 }
 
                                 const sliceBottomY = cursorY - sl.drawH;
+                                if (sl.kind === 'answerLines' && sl.answerLinesSpec && sl.answerLinesSpec.dataUrl) {
+                                    const alImg = await embedPngCached(sl.answerLinesSpec.dataUrl);
+                                    if (alImg) {
+                                        currentPage.drawImage(alImg, {
+                                            x: sl.realDrawX,
+                                            y: sliceBottomY,
+                                            width: sl.drawW,
+                                            height: sl.drawH
+                                        });
+                                    }
+                                    cursorY = sliceBottomY;
+                                    continue;
+                                }
                                 await drawClippedEmbeddedSlice(
                                     currentPage, targetUrl, sl.pOff, sl.srcPage, sl.viewBox,
                                     sl.leftPt, sl.topPt, sl.rightPt, sl.bottomPt,

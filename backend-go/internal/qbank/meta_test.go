@@ -22,6 +22,7 @@ func TestCleanTopicAndSanitizeMeta(t *testing.T) {
 			{"x": 0.03, "y": 0.04, "w": 0.94, "h": 0.18, "pageOffset": 1}
 		],
 		"mode": "region_crop",
+		"answerLines": true,
 		"regions": [{"x": 0.1, "y": 0.2, "w": 0.3, "h": 0.4, "pageOffset": 1}]
 	}`)
 	if meta == nil {
@@ -42,6 +43,9 @@ func TestCleanTopicAndSanitizeMeta(t *testing.T) {
 	}
 	if meta["mode"] != "region_crop" {
 		t.Fatalf("mode = %v", meta["mode"])
+	}
+	if meta["answerLines"] != true {
+		t.Fatalf("answerLines = %v", meta["answerLines"])
 	}
 }
 

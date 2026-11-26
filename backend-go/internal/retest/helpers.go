@@ -31,6 +31,7 @@ type Box struct {
 // ParsedQuestionMeta mirrors PHP parseRetestQuestionMeta().
 type ParsedQuestionMeta struct {
 	Mode          string
+	AnswerLines   bool
 	GroupNums     []int
 	Box           *Box
 	Boxes         []Box
@@ -144,6 +145,7 @@ func ParseRetestQuestionMeta(rawMeta string, qNum int) ParsedQuestionMeta {
 	}
 	return ParsedQuestionMeta{
 		Mode:          mode,
+		AnswerLines:   config.AsPHPBool(m["answerLines"]),
 		GroupNums:     groupNums,
 		Box:           box,
 		Boxes:         boxes,
@@ -387,6 +389,7 @@ func BuildWeekPDFs(allRows []QbankQuestionRow, bankType, tier string, weekNum in
 						"errorNums":        []int{qNum},
 						"groupNums":        inferredGroup,
 						"mode":             modeVal,
+						"answerLines":      meta.AnswerLines,
 						"regions":          meta.Regions,
 						"answerRegions":    meta.AnswerRegions,
 						"errorBoxes":       errBoxes,
@@ -411,6 +414,9 @@ func BuildWeekPDFs(allRows []QbankQuestionRow, bankType, tier string, weekNum in
 					entry["groupNums"] = mergeSortedUniqueInts(entry["groupNums"].([]int), inferredGroup)
 					if meta.Mode != "" && config.AsPHPString(entry["mode"]) == "" {
 						entry["mode"] = meta.Mode
+					}
+					if meta.AnswerLines {
+						entry["answerLines"] = true
 					}
 					if len(meta.Regions) > 0 {
 						entry["regions"] = appendUniqueBoxes(entry["regions"].([]Box), meta.Regions)
@@ -516,6 +522,7 @@ func BuildWeekPDFs(allRows []QbankQuestionRow, bankType, tier string, weekNum in
 				"matchedParentNums": vItem.matchedParentNums,
 				"subNum":            subNum,
 				"mode":              vMeta.Mode,
+				"answerLines":       vMeta.AnswerLines,
 				"regions":           vMeta.Regions,
 				"answerRegions":     vMeta.AnswerRegions,
 				"errorBoxes":        errBoxes,
