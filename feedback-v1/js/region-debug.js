@@ -139,6 +139,72 @@
         return [scored[0].rect];
     }
 
+    function getItemFirstRegionPos(it) {
+        const regs = Array.isArray(it && it.regions) ? it.regions : [];
+        if (regs.length === 0) return { page: Number.MAX_SAFE_INTEGER, y: Number.MAX_SAFE_INTEGER };
+        let bestPage = Number.MAX_SAFE_INTEGER;
+        let bestY = Number.MAX_SAFE_INTEGER;
+        for (let i = 0; i < regs.length; i++) {
+            const p = parseInt(regs[i].pageOffset, 10) || 0;
+            const y = Number(regs[i].y) || 0;
+            if (p < bestPage || (p === bestPage && y < bestY)) {
+                bestPage = p;
+                bestY = y;
+            }
+        }
+        return { page: bestPage, y: bestY };
+    }
+
+    function getItemSortPrimaryNum(it, tab, bankType) {
+        if (!it) return null;
+        if (bankType === 'variation') {
+            let pNums = [];
+            if (tab === 'answer') {
+                const exItem = rgState.exercise.items.find(x => x.id === it.targetExId);
+                pNums = exItem && Array.isArray(exItem.parentNums) ? exItem.parentNums : [];
+            } else {
+                pNums = Array.isArray(it.parentNums) ? it.parentNums : [];
+            }
+            const valid = pNums.map(n => parseInt(n, 10)).filter(n => Number.isFinite(n) && n > 0);
+            return valid.length > 0 ? Math.min(...valid) : null;
+        }
+        if (it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
+            const subNums = it.subqBoxes.map(sb => parseInt(sb.num, 10)).filter(n => Number.isFinite(n) && n > 0);
+            if (subNums.length > 0) return Math.min(...subNums);
+        }
+        const n = parseInt(it.label, 10);
+        return Number.isFinite(n) && n > 0 ? n : null;
+    }
+
+    // 返回按题号（变式按原题号）升序排列的浅拷贝，不修改原数组顺序（确保 Ctrl+Z 始终撤销最新画出的那一框）
+    function getSortedItemsForDisplay(items, tab, bankType = getCurrentBankTypeSafe()) {
+        if (!Array.isArray(items) || items.length <= 1) return Array.isArray(items) ? [...items] : [];
+        return items
+            .map((it, origIdx) => {
+                const num = getItemSortPrimaryNum(it, tab, bankType);
+                const pos = getItemFirstRegionPos(it);
+                return { it, origIdx, hasNum: num !== null, num: num !== null ? num : Number.MAX_SAFE_INTEGER, page: pos.page, y: pos.y };
+            })
+            .sort((a, b) => {
+                if (a.hasNum !== b.hasNum) return a.hasNum ? -1 : 1;
+                if (a.num !== b.num) return a.num - b.num;
+                if (a.page !== b.page) return a.page - b.page;
+                if (Math.abs(a.y - b.y) > 0.0005) return a.y - b.y;
+                return a.origIdx - b.origIdx;
+            })
+            .map(entry => entry.it);
+    }
+
+    function scrollSidebarCardIntoView(itemId) {
+        if (!itemId) return;
+        requestAnimationFrame(() => {
+            const card = document.querySelector(`.rg-card[data-id="${itemId}"]`);
+            if (card && typeof card.scrollIntoView === 'function') {
+                card.scrollIntoView({ block: 'nearest' });
+            }
+        });
+    }
+
     function getNextAutoNumber(tab) {
         const items = getTabState(tab).items;
         let maxNum = 0;
@@ -1021,6 +1087,8 @@
                     input.select();
                 }
             });
+        } else {
+            scrollSidebarCardIntoView(newItem.id);
         }
     }
 
@@ -1274,7 +1342,8 @@
 
         if (bankType === 'variation') {
             const boundIds = new Set(rgState.answer.items.map(a => a.targetExId).filter(Boolean));
-            const missingEx = rgState.exercise.items.filter(ex => !boundIds.has(ex.id));
+            const sortedEx = getSortedItemsForDisplay(rgState.exercise.items, 'exercise', bankType);
+            const missingEx = sortedEx.filter(ex => !boundIds.has(ex.id));
             if (missingEx.length === 0) {
                 bar.innerHTML = `<span class="rg-missing-done">所有变式题（共 ${rgState.exercise.items.length} 道）均已绑定答案框</span>`;
                 return;
@@ -1291,7 +1360,7 @@
         }
 
         const expectedNums = [];
-        rgState.exercise.items.forEach(it => {
+        getSortedItemsForDisplay(rgState.exercise.items, 'exercise', bankType).forEach(it => {
             if (it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
                 it.subqBoxes.forEach(sb => {
                     const sn = String(sb.num || '').trim();
@@ -1391,8 +1460,12 @@
         }
 
         const varOptions = (bankType === 'variation' && tab === 'exercise') ? getVariationParentOptions() : [];
+        const sortedExForAnswer = (bankType === 'variation' && tab === 'answer')
+            ? getSortedItemsForDisplay(rgState.exercise.items, 'exercise', bankType)
+            : null;
+        const displayItems = getSortedItemsForDisplay(tabState.items, tab, bankType);
 
-        listEl.innerHTML = tabState.items.map((it) => {
+        listEl.innerHTML = displayItems.map((it) => {
             const pages = Array.from(new Set(it.regions.map(r => 'P' + (r.pageOffset + 1)))).join(', ');
             const isActive = rgState.selectedId === it.id;
 
@@ -1440,7 +1513,7 @@
                     <div class="rg-var-parents">${chipsHtml}</div>
                 `;
             } else if (bankType === 'variation' && tab === 'answer') {
-                const exChips = rgState.exercise.items.map((ex, idx) => {
+                const exChips = sortedExForAnswer.map((ex, idx) => {
                     const compact = typeof formatCompactNumList === 'function'
                         ? formatCompactNumList(ex.parentNums)
                         : (ex.parentNums || []).join('、');
@@ -1463,7 +1536,7 @@
                         <div class="rg-card-num-wrap">
                             <span>${it.isBig ? '起始题号' : '题号'}</span>
                             <input type="text" class="rg-num-input${autoCls}" value="${escapeHtmlRg(it.label)}" placeholder="${placeholder}" title="${autoTitle}"
-                                oninput="rgUpdateItemLabel('${it.id}', this.value)" onchange="rgUpdateItemLabel('${it.id}', this.value)" onclick="event.stopPropagation()">
+                                oninput="rgUpdateItemLabel('${it.id}', this.value)" onchange="rgUpdateItemLabel('${it.id}', this.value)" onblur="rgReorderSidebarAfterEdit('${it.id}')" onkeydown="if(event.key==='Enter'){this.blur();}" onclick="event.stopPropagation()">
                         </div>
                         <span class="rg-card-meta">${escapeHtmlRg(pages)}</span>
                     </div>
@@ -2487,6 +2560,11 @@
         renderMissingAnswerBar();
         syncStageUi();
         scheduleDraftSave();
+    };
+
+    window.rgReorderSidebarAfterEdit = function (itemId) {
+        renderSidebar();
+        scrollSidebarCardIntoView(itemId);
     };
 
     window.rgUpdateSubqNum = function (itemId, subIdx, val) {
@@ -4340,8 +4418,9 @@
 
             const imported = [];
             const varSubCounter = new Map();
+            const orderedExItems = getSortedItemsForDisplay(exItems, 'exercise', bankType);
 
-            for (const it of exItems) {
+            for (const it of orderedExItems) {
                 if (it.isBig) syncAutoStemBoxes(it);
 
                 if (bankType === 'variation') {
@@ -4435,6 +4514,13 @@
 
             if (bankType === 'variation' && typeof recalcVariationSubNums === 'function') {
                 recalcVariationSubNums(imported);
+            } else if (bankType !== 'variation') {
+                imported.sort((a, b) => {
+                    const na = parseInt(a.id, 10);
+                    const nb = parseInt(b.id, 10);
+                    if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb;
+                    return String(a.id || '').localeCompare(String(b.id || ''), 'zh-CN', { numeric: true });
+                });
             }
 
             currentQuestions = imported;
