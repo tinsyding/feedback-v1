@@ -20,7 +20,7 @@ import (
 	"feedback-api/internal/session"
 )
 
-const maxTempPDFSize = 25 * 1024 * 1024
+const maxTempPDFSize = 50 * 1024 * 1024
 
 var (
 	reTempFileKey     = regexp.MustCompile(`^[a-f0-9]{32}$`)
@@ -78,7 +78,7 @@ func handleRetestCreateTempDownload(w http.ResponseWriter, r *http.Request, deps
 		if err := r.ParseMultipartForm(1 << 20); err != nil {
 			var maxErr *http.MaxBytesError
 			if errors.As(err, &maxErr) {
-				writeRawJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"success": false, "error": "文件大小超出限制（最大 25MB）"})
+				writeRawJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"success": false, "error": "文件大小超出限制（最大 50MB）"})
 				return
 			}
 		}
@@ -123,7 +123,7 @@ func handleRetestCreateTempDownload(w http.ResponseWriter, r *http.Request, deps
 		if err == nil {
 			defer func() { _ = f.Close() }()
 			if fh.Size > maxTempPDFSize {
-				writeRawJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"success": false, "error": "文件大小超出限制（最大 25MB）"})
+				writeRawJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"success": false, "error": "文件大小超出限制（最大 50MB）"})
 				return
 			}
 			data, readErr := io.ReadAll(io.LimitReader(f, maxTempPDFSize+1))
@@ -141,7 +141,7 @@ func handleRetestCreateTempDownload(w http.ResponseWriter, r *http.Request, deps
 		if err != nil {
 			var maxErr *http.MaxBytesError
 			if errors.As(err, &maxErr) {
-				writeRawJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"success": false, "error": "文件大小超出限制（最大 25MB）"})
+				writeRawJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"success": false, "error": "文件大小超出限制（最大 50MB）"})
 				return
 			}
 		} else if len(data) > 10 {
@@ -157,7 +157,7 @@ func handleRetestCreateTempDownload(w http.ResponseWriter, r *http.Request, deps
 		return
 	}
 	if len(pdfBytes) > maxTempPDFSize {
-		writeRawJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"success": false, "error": "文件大小超出限制（最大 25MB）"})
+		writeRawJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"success": false, "error": "文件大小超出限制（最大 50MB）"})
 		return
 	}
 	if len(pdfBytes) < 4 || string(pdfBytes[:4]) != "%PDF" {

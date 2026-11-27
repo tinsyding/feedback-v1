@@ -12,10 +12,13 @@ function hideViewerLoadingScreen() {
 
 // ========== Spring/Autumn Semester Viewer Logic ==========
 window.defaultSeason = 'autumn';
-fetch('api/public_config.php').then(r=>r.json()).then(c=>{ 
-    if(c.defaultSeason !== undefined) window.defaultSeason = c.defaultSeason; 
+fetch('api/public_config.php').then(r => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+}).then(c => {
+    if(c.defaultSeason !== undefined) window.defaultSeason = c.defaultSeason;
     if(c.semesterYear !== undefined) window.semesterYear = c.semesterYear;
-});
+}).catch(() => {});
 function isVacationSeason(season) {
     return season === 0 || season === 'summer' || season === 'winter' || season === '暑' || season === '寒';
 }

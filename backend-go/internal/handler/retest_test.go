@@ -619,7 +619,7 @@ func TestRetestCreateTempDownloadMaxBytesAndStream(t *testing.T) {
 	_ = sessions.Save(context.Background(), tSess)
 	ck := &http.Cookie{Name: "PHPSESSID", Value: tSess.ID}
 
-	// 1. Multipart > 27 MiB => 413
+	// 1. Multipart > 52 MiB => 413
 	var bigBuf bytes.Buffer
 	mwBig := multipart.NewWriter(&bigBuf)
 	fwBig, err := mwBig.CreateFormFile("file", "oversize.pdf")
@@ -627,7 +627,7 @@ func TestRetestCreateTempDownloadMaxBytesAndStream(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _ = fwBig.Write([]byte("%PDF-1.4\n"))
-	_, _ = fwBig.Write(bytes.Repeat([]byte("A"), (27<<20)+4096))
+	_, _ = fwBig.Write(bytes.Repeat([]byte("A"), (52<<20)+4096))
 	_ = mwBig.Close()
 
 	reqBig := httptest.NewRequest(http.MethodPost, "http://feedback.wxjifang.cn/api/retest.php?action=create_temp_download", &bigBuf)
@@ -636,7 +636,7 @@ func TestRetestCreateTempDownloadMaxBytesAndStream(t *testing.T) {
 	recBig := httptest.NewRecorder()
 	h.ServeHTTP(recBig, reqBig)
 	if recBig.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("expected 413 for >27MiB multipart PDF, got %d (%s)", recBig.Code, recBig.Body.String())
+		t.Fatalf("expected 413 for >52MiB multipart PDF, got %d (%s)", recBig.Code, recBig.Body.String())
 	}
 
 	// 2. Valid multipart PDF upload + download_file streams exact bytes & Content-Length

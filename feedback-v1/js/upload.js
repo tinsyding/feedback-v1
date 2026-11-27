@@ -33,7 +33,10 @@ function getUploadHomeworkLabelFull() {
 function getUploadLessonUnit() {
     return isVacationSeason(window.defaultSeason) ? '次' : '周';
 }
-fetch('api/public_config.php').then(r=>r.json()).then(c=>{
+fetch('api/public_config.php').then(r => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+}).then(c => {
     if(c.defaultSeason !== undefined) window.defaultSeason = c.defaultSeason;
     if(c.semesterYear !== undefined) window.semesterYear = c.semesterYear;
     if(c.forceIntegerScores !== undefined) window.forceIntegerScores = !!c.forceIntegerScores;
@@ -63,7 +66,7 @@ fetch('api/public_config.php').then(r=>r.json()).then(c=>{
     const sName = seasonNameMap[window.defaultSeason] || (isVacation ? '寒暑季' : '春秋季');
     const yrStr = window.semesterYear ? `${window.semesterYear}年` : '';
     document.title = `反馈生成器 - ${yrStr}${sName} - 上传`;
-});
+}).catch(() => {});
 
 let homeworkData = null;
 let rawHomeworkFiles = [];

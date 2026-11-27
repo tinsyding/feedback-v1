@@ -3392,10 +3392,21 @@ if (window.location && (window.location.search.includes('debug=1') || window.loc
                     const sName = (retestData && retestData.data && retestData.data.n) || '';
                     if (sName) formData.append('studentName', sName);
 
-                    const uploadRes = await fetch('api/retest.php?action=create_temp_download', {
+                    const rawUploadRes = await fetch('api/retest.php?action=create_temp_download', {
                         method: 'POST',
                         body: formData
-                    }).then(r => r.json());
+                    });
+                    let uploadRes = null;
+                    try {
+                        uploadRes = await rawUploadRes.json();
+                    } catch (_) {}
+
+                    if (rawUploadRes.status === 413) {
+                        const sizeMb = (blob.size / (1024 * 1024)).toFixed(1);
+                        modal.style.display = 'none';
+                        showToast(`PDF 体积过大（${sizeMb}MB），超出直链上限，请按周分批下载或用外部浏览器打开`);
+                        return;
+                    }
 
                     if (uploadRes && uploadRes.success && uploadRes.downloadUrl) {
                         currentTempDownloadUrl = uploadRes.downloadUrl;

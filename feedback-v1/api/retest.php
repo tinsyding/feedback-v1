@@ -2326,11 +2326,11 @@ if ($action === 'create_temp_download') {
         exit;
     }
 
-    // 3. 文件体积安全限制：单文件严禁超过 25MB
-    if (filesize($uploadedFile) > 25 * 1024 * 1024) {
+    // 3. 文件体积安全限制：单文件严禁超过 50MB
+    if (filesize($uploadedFile) > 50 * 1024 * 1024) {
         @unlink($uploadedFile);
         http_response_code(413);
-        echo json_encode(['success' => false, 'error' => '文件大小超出限制（最大 25MB）'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => '文件大小超出限制（最大 50MB）'], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
