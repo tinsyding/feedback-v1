@@ -287,7 +287,13 @@
     window.getAllowedSubjects = function (user) {
         const u = user || currentUser || window.currentUser;
         if (!u) return { all: true, subjects: ['*'] };
-        if (u.is_admin || u.role === 'admin' || u.role === 'super_admin' || u.all_subjects === true) {
+        if (typeof u.all_subjects === 'boolean') {
+            if (u.all_subjects) return { all: true, subjects: ['*'] };
+            if (Array.isArray(u.allowed_subjects)) {
+                return { all: false, subjects: u.allowed_subjects.filter(Boolean) };
+            }
+        }
+        if (u.role === 'admin' || u.role === 'super_admin') {
             return { all: true, subjects: ['*'] };
         }
         if (Array.isArray(u.allowed_subjects)) {
@@ -295,7 +301,7 @@
             return { all: false, subjects: u.allowed_subjects.filter(Boolean) };
         }
         const raw = String(u.subject || '').trim();
-        if (!raw) return { all: false, subjects: [] };
+        if (!raw) return u.is_admin ? { all: true, subjects: ['*'] } : { all: false, subjects: [] };
         if (raw === '*' || raw.toLowerCase() === 'all') return { all: true, subjects: ['*'] };
         const list = raw.split(/[,，、;；\/|]+/).map(s => s.trim()).filter(Boolean);
         return { all: false, subjects: Array.from(new Set(list)) };

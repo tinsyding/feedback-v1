@@ -100,4 +100,25 @@ func TestRequireSubjectAccess(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", rec.Code)
 	}
+
+	// 5. Teacher logged in alongside a DIFFERENT admin session in the same browser must follow teacher's subject
+	mixedSess := &Session{ID: "s5", Data: map[string]any{
+		"user_logged_in":  true,
+		"username":        "9999",
+		"user_role":       "teacher",
+		"user_subject":    "物理",
+		"admin_logged_in": true,
+		"admin_username":  "JF060",
+	}}
+	rec = httptest.NewRecorder()
+	if _, ok := RequireSubjectAccess(ctx, rec, mixedSess, nil, "物理", "查看题库"); !ok {
+		t.Fatalf("expected 9999 allowed for 物理, got status %d", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	if _, ok := RequireSubjectAccess(ctx, rec, mixedSess, nil, "数学", "查看题库"); ok {
+		t.Fatalf("expected 9999 denied for 数学 even when JF060 admin session coexists")
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rec.Code)
+	}
 }

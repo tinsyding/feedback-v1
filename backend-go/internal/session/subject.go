@@ -135,16 +135,24 @@ func ResolveSubjectScope(ctx context.Context, sess *Session, db *sql.DB) Subject
 		return SubjectScope{All: false, Subjects: []string{}, Raw: "", Enforced: true}
 	}
 	uRole := sess.UserRole()
-	if sess.IsAdminLoggedIn() || uRole == "admin" || uRole == "super_admin" {
-		return SubjectScope{All: true, Subjects: []string{"*"}, Raw: "*", Enforced: true}
-	}
-	if !sess.IsUserLoggedIn() {
+	isFrontUser := sess.IsUserLoggedIn()
+	isAdmin := sess.IsAdminLoggedIn()
+
+	if !isFrontUser {
+		if isAdmin {
+			return SubjectScope{All: true, Subjects: []string{"*"}, Raw: "*", Enforced: true}
+		}
 		return SubjectScope{All: false, Subjects: []string{}, Raw: "", Enforced: true}
+	}
+
+	username := strings.TrimSpace(sess.Username())
+	adminUsername := strings.TrimSpace(sess.AdminUsername())
+	if uRole == "admin" || uRole == "super_admin" || (isAdmin && adminUsername != "" && username == adminUsername) {
+		return SubjectScope{All: true, Subjects: []string{"*"}, Raw: "*", Enforced: true}
 	}
 
 	if db != nil {
 		userID := int64(sess.IntVal("user_id"))
-		username := sess.Username()
 		teacherID := int64(sess.IntVal("user_teacher_id"))
 		createdBy := sess.StringVal("user_created_by")
 		if rawSubj, ok := ResolveUserSubjectFromDB(ctx, db, userID, username, uRole, teacherID, createdBy); ok {

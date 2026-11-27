@@ -297,14 +297,24 @@ if (!function_exists('resolveUserSubjectFromDb')) {
 if (!function_exists('getCurrentUserSubjectScope')) {
     function getCurrentUserSubjectScope(): array {
         $uRole = (string)($_SESSION['user_role'] ?? ($_SESSION['role'] ?? ''));
-        if (isAdminLoggedIn() || in_array($uRole, ['admin', 'super_admin'], true)) {
-            return ['all' => true, 'subjects' => ['*'], 'raw' => '*'];
-        }
-        if (!isUserLoggedIn()) {
+        $isFrontUser = isUserLoggedIn();
+        $isAdmin = isAdminLoggedIn();
+
+        // 纯管理员会话，或前台账号本身为管理员角色，或前台账号与后台管理员为同一账号时，享有全学科权限
+        if (!$isFrontUser) {
+            if ($isAdmin) {
+                return ['all' => true, 'subjects' => ['*'], 'raw' => '*'];
+            }
             return ['all' => false, 'subjects' => [], 'raw' => ''];
         }
-        $userId = (int)($_SESSION['user_id'] ?? 0);
+
         $username = trim((string)($_SESSION['username'] ?? ''));
+        $adminUsername = trim((string)($_SESSION['admin_username'] ?? ''));
+        if (in_array($uRole, ['admin', 'super_admin'], true) || ($isAdmin && $adminUsername !== '' && $username === $adminUsername)) {
+            return ['all' => true, 'subjects' => ['*'], 'raw' => '*'];
+        }
+
+        $userId = (int)($_SESSION['user_id'] ?? 0);
         $teacherId = (int)($_SESSION['user_teacher_id'] ?? 0);
         $createdBy = trim((string)($_SESSION['user_created_by'] ?? ''));
 
