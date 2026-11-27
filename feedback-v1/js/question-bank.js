@@ -8456,6 +8456,31 @@ async function renderPreviewPdfSlot(slotEl, sessionId) {
 
                 frag.appendChild(canvas);
             }
+            if (kind !== 'answer' && q.questionMeta && q.questionMeta.answerLines) {
+                const alNums = Array.isArray(q.questionMeta.groupNums) && q.questionMeta.groupNums.length > 0
+                    ? [...q.questionMeta.groupNums].map(n => parseInt(n, 10)).filter(n => n > 0).sort((a, b) => a - b)
+                    : [parseInt(q.id, 10)].filter(n => n > 0);
+                if (alNums.length > 0) {
+                    const alBox = document.createElement('div');
+                    alBox.style.cssText = 'width:100%;background:#ffffff;color:#1e293b;padding:14px 18px 18px;border-top:1.5px dashed #94a3b8;box-sizing:border-box;border-radius:0 0 6px 6px;';
+                    const cellsHtml = alNums.map(n => `
+                        <div style="display:flex;align-items:flex-end;gap:6px;min-height:28px;">
+                            <span style="font-size:13px;font-weight:600;color:#1e293b;min-width:22px;line-height:1.2;">${n}.</span>
+                            <span style="flex:1;border-bottom:1.5px solid #334155;height:1px;margin-bottom:2px;"></span>
+                        </div>
+                    `).join('');
+                    alBox.innerHTML = `
+                        <div style="font-size:12px;color:#64748b;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                            <span>自动作答区（共 ${alNums.length} 空，每行 2 空 · 错题本精简模式仅显示错题空）</span>
+                            <span style="font-size:11px;color:#0f766e;background:#f0fdfa;border:1px solid #99f6e4;border-radius:4px;padding:1px 6px;white-space:nowrap;">导出 PDF 自动绘制</span>
+                        </div>
+                        <div style="display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));column-gap:28px;row-gap:6px;">
+                            ${cellsHtml}
+                        </div>
+                    `;
+                    frag.appendChild(alBox);
+                }
+            }
         } else {
             for (let p = 1; p <= pdf.numPages; p++) {
                 if (sessionId !== previewRenderSessionId) return;

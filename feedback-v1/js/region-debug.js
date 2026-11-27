@@ -87,6 +87,58 @@
         return Boolean(it && it.isBig && it.answerLines && Array.isArray(it.answerLineNums) && it.answerLineNums.length > 1);
     }
 
+    function buildAnswerLinesPreviewHtml(nums, options = {}) {
+        const list = (Array.isArray(nums) ? nums : [])
+            .map(n => parseInt(n, 10))
+            .filter(n => !isNaN(n) && n > 0)
+            .sort((a, b) => a - b);
+        if (list.length === 0) return '';
+        const compact = Boolean(options.compact);
+        const cells = list.map((n) => `
+            <div style="display:flex;align-items:flex-end;gap:6px;min-height:${compact ? 22 : 28}px;">
+                <span style="font-size:${compact ? '12px' : '13px'};font-weight:600;color:#1e293b;min-width:22px;line-height:1.2;">${n}.</span>
+                <span style="flex:1;border-bottom:1.5px solid #334155;height:1px;margin-bottom:2px;"></span>
+            </div>
+        `).join('');
+        const titleText = options.title || `自动作答区预览（共 ${list.length} 空，每行 2 空 · 错题本精简模式仅显示错题空）`;
+        return `
+            <div style="background:#ffffff;color:#1e293b;padding:${compact ? '10px 12px' : '14px 18px 18px'};border-top:1.5px dashed #94a3b8;box-sizing:border-box;">
+                <div style="font-size:${compact ? '11px' : '12px'};color:#64748b;margin-bottom:${compact ? '6px' : '10px'};display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                    <span>${escapeHtmlRg(titleText)}</span>
+                    <span style="font-size:11px;color:#0f766e;background:#f0fdfa;border:1px solid #99f6e4;border-radius:4px;padding:1px 6px;white-space:nowrap;">导出 PDF 自动绘制</span>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));column-gap:${compact ? '18px' : '28px'};row-gap:${compact ? '4px' : '6px'};">
+                    ${cells}
+                </div>
+            </div>
+        `;
+    }
+
+    function syncFocusAnswerLinesPreview() {
+        const container = document.getElementById('rg-focus-slices');
+        if (!container) return;
+        const existing = document.getElementById('rg-focus-answerlines-preview');
+        const it = getFocusActiveItem();
+        const focusMode = getActiveFocusMode();
+        const stitch = rgState.focusStitch;
+        if (focusMode !== 'bigq' || !isAnswerLinesItem(it) || !stitch) {
+            if (existing) existing.remove();
+            return;
+        }
+        let previewEl = existing;
+        if (!previewEl) {
+            previewEl = document.createElement('div');
+            previewEl.id = 'rg-focus-answerlines-preview';
+            previewEl.style.marginTop = '0px';
+            previewEl.style.borderRadius = '0 0 8px 8px';
+            previewEl.style.overflow = 'hidden';
+            previewEl.style.boxShadow = '0 2px 10px rgba(15, 23, 42, 0.08)';
+            container.appendChild(previewEl);
+        }
+        previewEl.style.width = stitch.width + 'px';
+        previewEl.innerHTML = buildAnswerLinesPreviewHtml(it.answerLineNums);
+    }
+
     function clamp01(val) {
         return Math.max(0, Math.min(1, Number(val) || 0));
     }
@@ -2683,6 +2735,7 @@
                 renderList();
                 if (rgState.subMode && rgState.subMode.itemId === itemId) {
                     renderFocusSidebar();
+                    syncFocusAnswerLinesPreview();
                 }
             }
         } else if (it.isBig && Array.isArray(it.subqBoxes) && it.subqBoxes.length > 0) {
@@ -3418,7 +3471,10 @@
         const it = getFocusActiveItem();
         const stitch = rgState.focusStitch;
         const focusMode = getActiveFocusMode();
-        if (!it || !focusMode || !stitch || !stitch.layerEl || !Array.isArray(stitch.slices) || stitch.slices.length === 0) return;
+        if (!it || !focusMode || !stitch || !stitch.layerEl || !Array.isArray(stitch.slices) || stitch.slices.length === 0) {
+            syncFocusAnswerLinesPreview();
+            return;
+        }
 
         const { layerEl, totalH, slices, width } = stitch;
         layerEl.innerHTML = '';
@@ -3589,6 +3645,7 @@
             const suffix = regs.length > 1 ? ` (跨${pLabels})` : '';
             renderStitchedBox(topPx, botPx, 'subq', [qb], qIdx, `${qb.num}${suffix}`);
         });
+        syncFocusAnswerLinesPreview();
     }
 
     function buildContinueSlicePlans(it, candidatePages) {
@@ -4318,6 +4375,7 @@
         };
 
         if (typeof showCustomDialog === 'function') {
+            const initPreviewNums = Array.from({ length: curCount }, (_, idx) => curStart + idx);
             const bodyHtml = `
                 <div style="display:flex;flex-direction:column;gap:12px;font-size:0.9rem;">
                     <div style="color:var(--text-secondary);line-height:1.5;">
@@ -4335,9 +4393,12 @@
                     </div>
                     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                         <span style="color:var(--text-secondary);font-size:0.82rem;">快捷空数：</span>
-                        <button type="button" class="btn sm secondary" onclick="document.getElementById('rg-al-count').value=5">5 空</button>
-                        <button type="button" class="btn sm secondary" onclick="document.getElementById('rg-al-count').value=10">10 空</button>
-                        <button type="button" class="btn sm secondary" onclick="document.getElementById('rg-al-count').value=15">15 空</button>
+                        <button type="button" class="btn sm secondary rg-al-quick-btn" data-count="5">5 空</button>
+                        <button type="button" class="btn sm secondary rg-al-quick-btn" data-count="10">10 空</button>
+                        <button type="button" class="btn sm secondary rg-al-quick-btn" data-count="15">15 空</button>
+                    </div>
+                    <div id="rg-al-live-preview" style="border:1px solid var(--border-color,#cbd5e1);border-radius:8px;overflow:hidden;max-height:210px;overflow-y:auto;">
+                        ${buildAnswerLinesPreviewHtml(initPreviewNums, { compact: true, title: `效果预览（第 ${curStart}~${curStart + curCount - 1} 题，每行 2 空）` })}
                     </div>
                 </div>
             `;
@@ -4372,11 +4433,28 @@
                 }
             });
             setTimeout(() => {
+                const startInp = document.getElementById('rg-al-start');
                 const countInp = document.getElementById('rg-al-count');
+                const previewBox = document.getElementById('rg-al-live-preview');
+                const refreshLivePreview = () => {
+                    if (!previewBox) return;
+                    const s = Math.max(1, Math.min(500, parseInt(startInp ? startInp.value : curStart, 10) || curStart));
+                    const c = Math.max(2, Math.min(30, parseInt(countInp ? countInp.value : curCount, 10) || curCount));
+                    const nums = Array.from({ length: c }, (_, idx) => s + idx);
+                    previewBox.innerHTML = buildAnswerLinesPreviewHtml(nums, { compact: true, title: `效果预览（第 ${s}~${s + c - 1} 题，每行 2 空）` });
+                };
+                if (startInp) startInp.addEventListener('input', refreshLivePreview);
                 if (countInp) {
+                    countInp.addEventListener('input', refreshLivePreview);
                     countInp.focus();
                     countInp.select();
                 }
+                document.querySelectorAll('.rg-al-quick-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        if (countInp) countInp.value = btn.getAttribute('data-count') || '10';
+                        refreshLivePreview();
+                    });
+                });
             }, 30);
             return;
         }
