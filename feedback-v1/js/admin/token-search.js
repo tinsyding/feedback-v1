@@ -270,7 +270,7 @@
                         <!-- Header -->
                         <div style="padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); background: rgba(59, 130, 246, 0.06);">
                             <div style="display: flex; align-items: center; gap: 12px;">
-                                <div style="width: 42px; height: 42px; border-radius: 50%; background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: #fff; font-weight: 700; font-size: 1.15rem; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(59,130,246,0.3); flex-shrink: 0;">
+                                <div style="width: 42px; height: 42px; border-radius: 50%; background: var(--accent, #0a84ff); color: #fff; font-weight: 600; font-size: 1.15rem; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
                                     ${escapeHtml(initial)}
                                 </div>
                                 <div>

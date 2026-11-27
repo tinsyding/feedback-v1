@@ -896,7 +896,7 @@ body.upload-page {
 
 .focus-comment-field .modern-input:focus {
     border-color: var(--accent-primary);
-    box-shadow: 0 0 0 3px rgba(99, 101, 255, 0.15);
+    box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 .modern-input {
@@ -1640,6 +1640,48 @@ select.modern-input option {
     height: 13px;
 }
 
+.file-action-btn.file-export-img-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    font-size: 0.76rem;
+    font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
+    color: #f59e0b;
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: color var(--transition-fast), background-color var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.file-action-btn.file-export-img-btn:hover {
+    background: #d97706;
+    color: #ffffff;
+    border-color: #d97706;
+    box-shadow: var(--shadow-sm);
+}
+
+.file-action-btn.file-export-img-btn svg {
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+}
+
+[data-theme="light"] .file-action-btn.file-export-img-btn {
+    color: #b45309;
+    background: #fffbeb;
+    border-color: #fcd34d;
+}
+
+[data-theme="light"] .file-action-btn.file-export-img-btn:hover {
+    background: #d97706;
+    color: #ffffff;
+    border-color: #d97706;
+}
+
 /* --- File Preview Modal（dialog-box 的宽版变体） --- */
 .preview-modal-card {
     max-width: 900px;
@@ -2033,7 +2075,7 @@ select.modern-input option {
 
 .preview-cell-input:focus {
     border-color: var(--accent-primary);
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+    box-shadow: 0 0 0 2px var(--accent-glow);
     background: var(--bg-card-elevated, #232a3b);
 }
 
@@ -2054,7 +2096,7 @@ select.modern-input option {
 
 .preview-status-select:focus {
     border-color: var(--accent-primary);
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+    box-shadow: 0 0 0 2px var(--accent-glow);
     background: var(--bg-card-elevated, #232a3b);
 }
 
@@ -2188,8 +2230,8 @@ select.modern-input option {
 
 [data-theme="light"] .preview-search-input:focus {
     background: #ffffff;
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    border-color: var(--accent, #0a84ff);
+    box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 [data-theme="light"] .preview-search-icon {

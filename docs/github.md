@@ -59,6 +59,15 @@
 - **触发条件**：Push 到 `main` 分支时触发，或手动触发。
 - **执行步骤**：检出完整仓库并通过 rclone 增量同步至 Google Drive 备份归档目录。
 
+### 6. 核心业务数据定时拉取至仓库独立分支：[`sync-core-data-to-repo.yml`](../.github/workflows/sync-core-data-to-repo.yml)
+- **触发条件**：每天北京时间凌晨 `04:00`（UTC `20:00`）定时执行，或手动一键触发（`workflow_dispatch`）。
+- **目标分支**：与 `main` 完全隔离的孤立分支 `data-backup`（不污染代码历史、不触发生产部署）。
+- **安全门禁**：拉取前强制通过 GitHub API 检查仓库是否为 **Private（私有仓库）**，若仍为 Public 则直接中止，杜绝学生隐私泄露。
+- **同步范围**（单表确定性单行 SQL，便于 Git 增量 diff 与一键恢复）：
+  1. `qbank/`：`qbank_weeks`、`qbank_questions`、`qbank_revisions`（题库存证账本）、`qbank_attestation_keys`、`qbank_attestation_anchors`；
+  2. `students/`：`class_batches`、`student_records`、`generation_batches`、`student_record_history`（学情修改历史）；
+  3. `metadata.json`：最近一次有变更时的同步时间、各表记录数与 SHA-256（数据无变化时自动跳过提交）。
+
 ---
 
 ## 三、仓库 Secrets 配置清单
@@ -67,7 +76,7 @@
 
 | Secret 键名 | 用途 | 适用工作流 | 示例/说明 |
 | :--- | :--- | :--- | :--- |
-| `DEPLOY_HOST` | 服务器公网 IP | `deploy.yml`, `apply-nginx-hardening.yml`, `backup-production-to-gdrive.yml` | `43.142.104.218`（主站生产机，本地别名 `jf`；备机 `106.14.62.196` 别名 `jf-backup`） |
+| `DEPLOY_HOST` | 服务器公网 IP | `deploy.yml`, `apply-nginx-hardening.yml`, `backup-production-to-gdrive.yml`, `sync-core-data-to-repo.yml` | `43.142.104.218`（主站生产机，本地别名 `jf`；备机 `106.14.62.196` 别名 `jf-backup`） |
 | `DEPLOY_PORT` | SSH 端口 | 同上 | `28964`（须为纯数字） |
 | `DEPLOY_USER` | SSH 登录用户 | 同上 | `root` |
 | `DEPLOY_SSH_KEY` | 自动化部署私钥 | 同上 | `id_github_actions` 私钥完整文本（含 BEGIN/END 行） |

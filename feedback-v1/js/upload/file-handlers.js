@@ -43,7 +43,7 @@
         }).join(',')).join('\n');
     }
 
-    function buildFileItemHtml({ iconSvg, fileName, countText, previewType, index, removeCall }) {
+    function buildFileItemHtml({ iconSvg, fileName, countText, previewType, index, removeCall, extraActionsHtml = '' }) {
         const safeName = escapeHtml(fileName);
         const safeAttrName = escapeAttr(fileName);
         return `
@@ -61,6 +61,7 @@
                     </svg>
                     <span>预览</span>
                 </button>
+                ${extraActionsHtml}
                 <div class="file-remove" onclick="${removeCall}" title="移除此文件">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -561,14 +562,276 @@
             countText = `β1: ${beta1Count}条 / 共${reportData.length - 1}条`;
         }
 
+        const exportImgBtnHtml = `
+            <button type="button" class="file-action-btn file-export-img-btn" onclick="if(event)event.stopPropagation(); exportLowFocusReportImage(event)" title="导出4分及以下专注度情况表格图片">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                    <polyline points="21 15 16 10 5 21"></polyline>
+                </svg>
+                <span>导出图片</span>
+            </button>`;
+
         list.innerHTML = `<div class="file-item">${buildFileItemHtml({
             iconSvg: '<rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M3 9h18"></path><path d="M9 3v18"></path>',
             fileName: reportFileName,
             countText,
             previewType: 'report',
             index: 0,
-            removeCall: 'clearReportFile()'
+            removeCall: 'clearReportFile()',
+            extraActionsHtml: exportImgBtnHtml
         })}</div>`;
+    }
+
+    const COMPOUND_SURNAMES = new Set([
+        '欧阳', '司马', '上官', '诸葛', '东方', '皇甫', '尉迟', '公孙',
+        '慕容', '长孙', '宇文', '司徒', '司空', '夏侯', '端木', '南宫',
+        '百里', '东郭', '西门', '独孤', '令狐', '轩辕', '呼延', '太史',
+        '申屠', '公冶', '宗政', '濮阳', '淳于', '单于', '公叔', '仲孙',
+        '鲜于', '闾丘', '子车', '亓官', '钟离', '澹台', '公羊', '赫连',
+        '拓跋', '闻人'
+    ]);
+
+    function maskStudentNameForFocusTable(rawName) {
+        const clean = String(rawName || '').replace(/^\d+/, '').trim();
+        if (!clean) return '-';
+        const chars = Array.from(clean);
+        if (chars.length <= 1) return chars[0];
+        if (chars.length >= 3) {
+            const firstTwo = chars[0] + chars[1];
+            if (COMPOUND_SURNAMES.has(firstTwo)) {
+                return firstTwo + '*'.repeat(chars.length - 2);
+            }
+        }
+        return chars[0] + '*'.repeat(chars.length - 1);
+    }
+
+    function collectLowFocusRows(data, scoreOffset = 0) {
+        if (!data || data.length < 2) return [];
+        const header = data[0].map(h => String(h || '').trim());
+        const rows = data.slice(1);
+
+        const rewardIdx = header.findIndex(h => h.includes('奖励积分') || h.includes('专注度积分') || h.includes('专注度') || h.includes('课堂积分') || h === '积分');
+        if (rewardIdx < 0) return [];
+
+        const classIdx = header.findIndex(h => h.includes('班级'));
+        let idIdx = header.findIndex(h => h === '学号' || h === '学生学号' || h === '学员编号' || h === '学生编号' || h === '编号' || h === '卡号');
+        if (idIdx < 0) idIdx = header.findIndex(h => h.includes('学号') || h.includes('编号') || h.includes('卡号'));
+
+        let nameIdx = header.findIndex(h => h === '姓名' || h === '学生姓名' || h === '学员姓名');
+        if (nameIdx < 0) nameIdx = header.findIndex(h => h.includes('姓名'));
+
+        const attIdx = header.findIndex(h =>
+            (h.includes('是否有效出勤') || h.includes('有效出勤') || h.includes('出勤状态') || h === '出勤' || h.includes('是否出勤')) &&
+            !h.includes('时长') && !h.includes('率')
+        );
+
+        const offset = Number.isFinite(scoreOffset) ? scoreOffset : 0;
+        const result = [];
+
+        rows.forEach(row => {
+            if (!row || row.length === 0) return;
+
+            if (attIdx >= 0) {
+                const att = String(row[attIdx] || '').trim();
+                if (att.includes('缺勤')) return;
+            }
+
+            const rawReward = String(row[rewardIdx] ?? '').trim();
+            if (!rawReward || rawReward === '-') return;
+            const rawVal = parseFloat(rawReward);
+            if (!Number.isFinite(rawVal)) return;
+
+            if (classIdx >= 0) {
+                const cName = String(row[classIdx] || '').trim();
+                const isBeta1 = cName.includes('β1');
+                // 仅保留 β1 学员，以及非 β1 但实际有专注度积分（>0）的学员
+                if (!isBeta1 && rawVal <= 0) return;
+            }
+
+            const adjustedScore = Math.max(0, Math.round((rawVal + offset) * 10) / 10);
+            if (adjustedScore > 4) return;
+
+            const rawNameCell = nameIdx >= 0 ? String(row[nameIdx] || '').trim() : '';
+            let studentId = idIdx >= 0 ? String(row[idIdx] || '').trim() : '';
+            if (!studentId && rawNameCell) {
+                const prefixDigits = rawNameCell.match(/^(\d+)/);
+                if (prefixDigits) studentId = prefixDigits[1];
+            }
+
+            const maskedName = maskStudentNameForFocusTable(rawNameCell);
+            const scoreText = Number.isInteger(adjustedScore) ? String(adjustedScore) : String(adjustedScore);
+
+            result.push({
+                id: studentId || '-',
+                maskedName,
+                score: adjustedScore,
+                scoreText
+            });
+        });
+
+        result.sort((a, b) => {
+            if (a.score !== b.score) return a.score - b.score;
+            return a.id.localeCompare(b.id, 'zh-CN', { numeric: true });
+        });
+
+        return result;
+    }
+
+    function renderLowFocusTableCanvas(rows) {
+        const scale = 2;
+        const outerPad = 28;
+        const titleBlockHeight = 64;
+        const headerRowHeight = 42;
+        const dataRowHeight = 40;
+        const fontFamily = '"PingFang SC", "Noto Sans SC", "Hiragino Sans GB", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif';
+
+        const measureCanvas = document.createElement('canvas');
+        const mctx = measureCanvas.getContext('2d');
+        mctx.font = `500 14px ${fontFamily}`;
+
+        let maxIdWidth = mctx.measureText('学号').width;
+        let maxNameWidth = mctx.measureText('姓名').width;
+        rows.forEach(r => {
+            maxIdWidth = Math.max(maxIdWidth, mctx.measureText(r.id).width);
+            maxNameWidth = Math.max(maxNameWidth, mctx.measureText(r.maskedName).width);
+        });
+
+        const colIdWidth = Math.max(150, Math.ceil(maxIdWidth) + 40);
+        const colNameWidth = Math.max(120, Math.ceil(maxNameWidth) + 40);
+        const colScoreWidth = 104;
+        const tableWidth = colIdWidth + colNameWidth + colScoreWidth;
+        const tableHeight = headerRowHeight + rows.length * dataRowHeight;
+
+        const width = outerPad * 2 + tableWidth;
+        const height = outerPad * 2 + titleBlockHeight + tableHeight;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width * scale;
+        canvas.height = height * scale;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(scale, scale);
+
+        // Background
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, width, height);
+
+        // Title block
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#0f172a';
+        ctx.font = `600 19px ${fontFamily}`;
+        ctx.fillText('4分及以下专注度情况', width / 2, outerPad + 18);
+
+        ctx.fillStyle = '#64748b';
+        ctx.font = `400 12px ${fontFamily}`;
+        ctx.fillText(`共 ${rows.length} 人`, width / 2, outerPad + 42);
+
+        const tableX = outerPad;
+        const tableY = outerPad + titleBlockHeight;
+
+        // Table header background
+        ctx.fillStyle = '#f1f5f9';
+        ctx.fillRect(tableX, tableY, tableWidth, headerRowHeight);
+
+        const col1Center = tableX + colIdWidth / 2;
+        const col2Center = tableX + colIdWidth + colNameWidth / 2;
+        const col3Center = tableX + colIdWidth + colNameWidth + colScoreWidth / 2;
+
+        ctx.fillStyle = '#334155';
+        ctx.font = `600 14px ${fontFamily}`;
+        ctx.fillText('学号', col1Center, tableY + headerRowHeight / 2);
+        ctx.fillText('姓名', col2Center, tableY + headerRowHeight / 2);
+        ctx.fillText('积分', col3Center, tableY + headerRowHeight / 2);
+
+        // Data rows
+        rows.forEach((row, idx) => {
+            const y = tableY + headerRowHeight + idx * dataRowHeight;
+            ctx.fillStyle = idx % 2 === 1 ? '#f8fafc' : '#ffffff';
+            ctx.fillRect(tableX, y, tableWidth, dataRowHeight);
+
+            const cy = y + dataRowHeight / 2;
+
+            ctx.fillStyle = '#334155';
+            ctx.font = `400 14px ${fontFamily}`;
+            ctx.fillText(row.id, col1Center, cy);
+
+            ctx.fillStyle = '#0f172a';
+            ctx.font = `500 14px ${fontFamily}`;
+            ctx.fillText(row.maskedName, col2Center, cy);
+
+            ctx.fillStyle = row.score <= 2 ? '#dc2626' : '#d97706';
+            ctx.font = `600 14px ${fontFamily}`;
+            ctx.fillText(row.scoreText, col3Center, cy);
+
+            // Row top divider
+            ctx.strokeStyle = '#e2e8f0';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(tableX, y + 0.5);
+            ctx.lineTo(tableX + tableWidth, y + 0.5);
+            ctx.stroke();
+        });
+
+        // Vertical column dividers
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 1;
+        const sep1X = tableX + colIdWidth + 0.5;
+        const sep2X = tableX + colIdWidth + colNameWidth + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(sep1X, tableY);
+        ctx.lineTo(sep1X, tableY + tableHeight);
+        ctx.moveTo(sep2X, tableY);
+        ctx.lineTo(sep2X, tableY + tableHeight);
+        ctx.stroke();
+
+        // Outer table border
+        ctx.strokeStyle = '#cbd5e1';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(tableX + 0.5, tableY + 0.5, tableWidth - 1, tableHeight - 1);
+
+        return canvas;
+    }
+
+    function exportLowFocusReportImage(event) {
+        if (event) event.stopPropagation();
+        if (!reportData || reportData.length < 2) {
+            showToast('请先上传专注度文件（统计报告）');
+            return;
+        }
+
+        const offset = typeof focusScoreOffset === 'number' ? focusScoreOffset : 0;
+        const rows = collectLowFocusRows(reportData, offset);
+        if (rows.length === 0) {
+            showToast('当前没有4分及以下的专注度记录');
+            return;
+        }
+
+        const canvas = renderLowFocusTableCanvas(rows);
+        const now = new Date();
+        const dateTag = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        const fileName = `4分及以下专注度情况_${dateTag}.png`;
+
+        canvas.toBlob(async (blob) => {
+            if (!blob) {
+                showToast('图片生成失败');
+                return;
+            }
+            if (typeof saveFileWithDialog === 'function') {
+                const saved = await saveFileWithDialog(blob, fileName, 'PNG Image', 'png', 'image/png');
+                if (saved) showToast(`已导出图片（共 ${rows.length} 人）`);
+            } else {
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.download = fileName;
+                link.href = url;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+                showToast(`已导出图片（共 ${rows.length} 人）`);
+            }
+        }, 'image/png');
     }
 
     function clearReportFile() {
@@ -684,14 +947,14 @@
         if (offsetInfo) {
             if (focusScoreOffset > 0) {
                 offsetInfo.textContent = `+${focusScoreOffset}`;
-                offsetInfo.style.background = 'linear-gradient(135deg, #22c55e20, #16a34a20)';
+                offsetInfo.style.background = 'rgba(34, 197, 94, 0.12)';
                 offsetInfo.style.color = '#16a34a';
-                offsetInfo.style.border = '1px solid #22c55e44';
+                offsetInfo.style.border = '1px solid rgba(34, 197, 94, 0.28)';
             } else if (focusScoreOffset < 0) {
                 offsetInfo.textContent = `${focusScoreOffset}`;
-                offsetInfo.style.background = 'linear-gradient(135deg, #ef444420, #dc262620)';
+                offsetInfo.style.background = 'rgba(239, 68, 68, 0.12)';
                 offsetInfo.style.color = '#dc2626';
-                offsetInfo.style.border = '1px solid #ef444444';
+                offsetInfo.style.border = '1px solid rgba(239, 68, 68, 0.28)';
             } else {
                 offsetInfo.textContent = '';
                 offsetInfo.style.background = '';
@@ -1013,7 +1276,7 @@
             let sectionHtml = `<div style="margin-bottom: 12px;"><span style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);">${escapeHtml(title)}</span></div>`;
             names.forEach(name => {
                 sectionHtml += `<div style="display:flex; align-items:center; gap:10px; margin-bottom:6px; padding:8px 12px; background:var(--ui-fill-weak); border:1px solid var(--border-light); border-radius:var(--radius-sm);">
-                    <span style="color: #ef4444;">✕</span>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--error, #ef4444)" stroke-width="2.2" style="flex-shrink:0;"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                     <span style="font-size:0.85rem; color:var(--text-primary);">${escapeHtml(name)}</span>
                 </div>`;
             });
@@ -1147,6 +1410,10 @@
         clearClassTestFiles,
         handleReportFile,
         renderReportFileList,
+        exportLowFocusReportImage,
+        collectLowFocusRows,
+        maskStudentNameForFocusTable,
+        renderLowFocusTableCanvas,
         clearReportFile,
         detectAndSetFocusMaxScore,
         updateFocusScoreState,
