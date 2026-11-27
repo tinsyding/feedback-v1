@@ -215,6 +215,145 @@ if (!function_exists('requireAdmin')) {
     }
 }
 
+/**
+ * 解析学科权限字符串（如 "数学"、"数学,物理"、"*"）
+ * @return array{all:bool, subjects:string[], raw:string}
+ */
+if (!function_exists('parseSubjectScope')) {
+    function parseSubjectScope(string $rawSubject): array {
+        $raw = trim($rawSubject);
+        if ($raw === '') {
+            return ['all' => false, 'subjects' => [], 'raw' => ''];
+        }
+        $parts = preg_split('/[,，、;；\/|]+/u', $raw) ?: [];
+        $subjects = [];
+        foreach ($parts as $p) {
+            $t = trim($p);
+            if ($t === '') continue;
+            $lower = strtolower($t);
+            if ($t === '*' || $lower === 'all' || $t === '全部' || $t === '所有学科' || $t === '全学科') {
+                return ['all' => true, 'subjects' => ['*'], 'raw' => '*'];
+            }
+            if (!in_array($t, $subjects, true)) {
+                $subjects[] = $t;
+            }
+        }
+        return ['all' => false, 'subjects' => $subjects, 'raw' => implode(',', $subjects)];
+    }
+}
+
+/**
+ * 从数据库实时解析账号的有效学科（助教自动继承所属主教师的学科）
+ */
+if (!function_exists('resolveUserSubjectFromDb')) {
+    function resolveUserSubjectFromDb(int $userId = 0, string $username = '', string $role = '', int $teacherId = 0, string $createdBy = ''): ?string {
+        $dbFile = __DIR__ . '/db.php';
+        if (!is_file($dbFile)) {
+            return null;
+        }
+        require_once $dbFile;
+        if (!class_exists('DB')) {
+            return null;
+        }
+        try {
+            $row = null;
+            if ($userId > 0) {
+                $row = DB::fetchOne("SELECT `subject`, `role`, `teacher_id`, `created_by` FROM `users` WHERE `id` = ? LIMIT 1", [$userId]);
+            } elseif ($username !== '') {
+                $row = DB::fetchOne("SELECT `subject`, `role`, `teacher_id`, `created_by` FROM `users` WHERE `username` = ? LIMIT 1", [$username]);
+            }
+            if (DB::getLastError() !== null) {
+                return null;
+            }
+            if (!$row) {
+                return null;
+            }
+            $effectiveRole = (string)($row['role'] ?? $role);
+            if ($effectiveRole === 'assistant') {
+                $parentId = (int)($row['teacher_id'] ?? $teacherId);
+                $parentUser = trim((string)($row['created_by'] ?? $createdBy));
+                $parent = null;
+                if ($parentId > 0) {
+                    $parent = DB::fetchOne("SELECT `subject` FROM `users` WHERE `id` = ? LIMIT 1", [$parentId]);
+                }
+                if (!$parent && $parentUser !== '') {
+                    $parent = DB::fetchOne("SELECT `subject` FROM `users` WHERE `username` = ? LIMIT 1", [$parentUser]);
+                }
+                if ($parent && isset($parent['subject'])) {
+                    return trim((string)$parent['subject']);
+                }
+            }
+            return trim((string)($row['subject'] ?? ''));
+        } catch (Throwable $e) {
+            return null;
+        }
+    }
+}
+
+/**
+ * 获取当前登录用户的有效学科权限范围
+ * @return array{all:bool, subjects:string[], raw:string}
+ */
+if (!function_exists('getCurrentUserSubjectScope')) {
+    function getCurrentUserSubjectScope(): array {
+        $uRole = (string)($_SESSION['user_role'] ?? ($_SESSION['role'] ?? ''));
+        if (isAdminLoggedIn() || in_array($uRole, ['admin', 'super_admin'], true)) {
+            return ['all' => true, 'subjects' => ['*'], 'raw' => '*'];
+        }
+        if (!isUserLoggedIn()) {
+            return ['all' => false, 'subjects' => [], 'raw' => ''];
+        }
+        $userId = (int)($_SESSION['user_id'] ?? 0);
+        $username = trim((string)($_SESSION['username'] ?? ''));
+        $teacherId = (int)($_SESSION['user_teacher_id'] ?? 0);
+        $createdBy = trim((string)($_SESSION['user_created_by'] ?? ''));
+
+        $dbSubject = resolveUserSubjectFromDb($userId, $username, $uRole, $teacherId, $createdBy);
+        if ($dbSubject !== null) {
+            return parseSubjectScope($dbSubject);
+        }
+        return parseSubjectScope((string)($_SESSION['user_subject'] ?? ''));
+    }
+}
+
+/**
+ * 判断指定学科是否在当前用户权限内
+ */
+if (!function_exists('isSubjectAllowed')) {
+    function isSubjectAllowed(string $subject, ?array $scope = null): bool {
+        $scope = $scope ?? getCurrentUserSubjectScope();
+        if (!empty($scope['all'])) {
+            return true;
+        }
+        $subject = trim($subject);
+        if ($subject === '') {
+            return false;
+        }
+        return in_array($subject, $scope['subjects'] ?? [], true);
+    }
+}
+
+/**
+ * 强校验当前用户对指定学科的访问权限，越权直接返回 403
+ * @return array{all:bool, subjects:string[], raw:string}
+ */
+if (!function_exists('requireSubjectAccess')) {
+    function requireSubjectAccess(string $subject, string $actionDesc = '访问该学科数据'): array {
+        $scope = getCurrentUserSubjectScope();
+        if (!empty($scope['all'])) {
+            return $scope;
+        }
+        if (empty($scope['subjects'])) {
+            sendResponse(false, null, '当前账号尚未分配所属学科，请联系管理员配置', 403);
+        }
+        if (!isSubjectAllowed($subject, $scope)) {
+            $allowedText = implode('、', $scope['subjects']);
+            sendResponse(false, null, "无权{$actionDesc}（当前账号仅限学科：{$allowedText}）", 403);
+        }
+        return $scope;
+    }
+}
+
 // 7. 持久化服务端认证防爆破限频器（优先 MySQL auth_rate_limits 共享表，DB 离线/未迁移时自动回退本地文件）
 if (!function_exists('getAuthRateLimitFilePath')) {
     function getAuthRateLimitFilePath(): string {

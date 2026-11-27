@@ -198,6 +198,7 @@ func main() {
 		Sessions:  sessStore,
 		RateLimit: rlStore,
 		Audit:     auditLogger,
+		DB:        sqlDB,
 	}))
 	mux.HandleFunc("/api/qbank.php", handler.QBank(handler.QBankDeps{
 		Repo:         qbankRepo,
@@ -232,6 +233,7 @@ func main() {
 		RateLimit:    rlStore,
 		ConfigLoader: loader,
 		Audit:        auditLogger,
+		DB:           sqlDB,
 		FeedbackRoot: feedbackRoot,
 	}))
 

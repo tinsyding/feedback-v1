@@ -961,7 +961,63 @@ function getPhysicsPreviewSource() {
     return physicsPreviewSource;
 }
 
+function applySubjectPermissionToUpload(user) {
+    if (typeof window.getAllowedSubjects !== 'function') return;
+    const scope = window.getAllowedSubjects(user);
+    const group = document.getElementById('feedback-subject-group');
+    if (!group) return;
+    const pills = Array.from(group.querySelectorAll('.ui-pill[data-subject]'));
+    if (scope.all) {
+        pills.forEach(p => {
+            p.style.display = '';
+            p.disabled = false;
+            p.title = '';
+        });
+        return;
+    }
+    let firstAllowedBtn = null;
+    pills.forEach(p => {
+        const sub = p.dataset.subject || '';
+        const ok = scope.subjects.includes(sub);
+        if (ok) {
+            p.style.display = '';
+            p.disabled = false;
+            if (!firstAllowedBtn) firstAllowedBtn = p;
+        } else {
+            p.style.display = 'none';
+            p.disabled = true;
+            p.classList.remove('active');
+        }
+    });
+    if (scope.subjects.length === 1 && firstAllowedBtn) {
+        if (selectedSubject !== scope.subjects[0]) {
+            selectFeedbackSubject(firstAllowedBtn, scope.subjects[0]);
+        }
+    } else if (selectedSubject && !scope.subjects.includes(selectedSubject)) {
+        selectedSubject = null;
+        if (firstAllowedBtn) {
+            selectFeedbackSubject(firstAllowedBtn, firstAllowedBtn.dataset.subject);
+        }
+    }
+}
+
+window.addEventListener('authChecked', (e) => {
+    applySubjectPermissionToUpload(e.detail);
+});
+if (window.currentUser) {
+    applySubjectPermissionToUpload(window.currentUser);
+}
+
 function selectFeedbackSubject(btn, subject) {
+    if (typeof window.getAllowedSubjects === 'function') {
+        const scope = window.getAllowedSubjects();
+        if (!scope.all && !scope.subjects.includes(subject)) {
+            if (typeof showToast === 'function') {
+                showToast(`当前账号仅限操作学科：${scope.subjects.join('、') || '未分配'}`, 'warn');
+            }
+            return;
+        }
+    }
     selectedSubject = subject;
     Logger.action('subject_selected', { subject });
     Logger.setContext({ subject });

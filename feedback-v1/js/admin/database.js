@@ -1943,6 +1943,20 @@
                             <span class="field-hint">${isTest ? '测试账号 (0) 为系统保留账号，不支持修改或重置密码' : (isEdit ? '如无需修改密码直接留空；若输入新密码，后台将自动进行 BCrypt 哈希存储' : '必填，长度至少 6 位；后台将自动采用安全 BCrypt 哈希加密存储')}</span>
                         </div>
                         <div class="form-field">
+                            <label>所属学科 (Subject) *</label>
+                            <select id="field-subject" class="custom-select" required>
+                                <option value="" ${!recordData.subject ? 'selected' : ''}>请选择所属学科...</option>
+                                <option value="数学" ${recordData.subject === '数学' ? 'selected' : ''}>数学</option>
+                                <option value="物理" ${recordData.subject === '物理' ? 'selected' : ''}>物理</option>
+                                <option value="英语" ${recordData.subject === '英语' ? 'selected' : ''}>英语</option>
+                                <option value="化学" ${recordData.subject === '化学' ? 'selected' : ''}>化学</option>
+                                <option value="语文" ${recordData.subject === '语文' ? 'selected' : ''}>语文</option>
+                                <option value="*" ${recordData.subject === '*' ? 'selected' : ''}>所有学科 (*)</option>
+                                ${recordData.subject && !['数学','物理','英语','化学','语文','*'].includes(recordData.subject) ? `<option value="${escapeHtml(recordData.subject)}" selected>${escapeHtml(recordData.subject)} (自定义多学科)</option>` : ''}
+                            </select>
+                            <span class="field-hint">必填，控制该教师及名下助教可访问与操作的学科范围；选择「所有学科 (*)」可操作全部学科</span>
+                        </div>
+                        <div class="form-field">
                             <label>账号状态 (Status) *</label>
                             <select id="field-status" class="custom-select" required>
                                 <option value="1" ${recordData.status === undefined || parseInt(recordData.status, 10) === 1 ? 'selected' : ''}>启用 (允许登录)</option>
@@ -2126,11 +2140,17 @@
             } else if (activeTable === 'users') {
                 const username = document.getElementById('field-username')?.value.trim();
                 const realName = document.getElementById('field-real_name')?.value.trim();
+                const subject = document.getElementById('field-subject')?.value.trim() ?? '';
                 const status = document.getElementById('field-status')?.value;
                 const password = document.getElementById('field-password')?.value.trim() || '';
 
                 if (!username) {
                     showToast('教师账号不能为空', 'warn');
+                    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存数据记录'; }
+                    return;
+                }
+                if (!subject) {
+                    showToast('请选择该教师所属学科', 'warn');
                     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存数据记录'; }
                     return;
                 }
@@ -2146,6 +2166,7 @@
                 }
                 data.username = username;
                 data.real_name = realName || username;
+                data.subject = subject;
                 data.status = parseInt(status, 10) === 0 ? 0 : 1;
                 if (password && username !== '0') {
                     data.password = password;
@@ -2932,6 +2953,18 @@
                                 <div style="background: var(--bg-subtle); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
                                     <div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 3px;">教师姓名 / 备注</div>
                                     <div style="font-size: 1.05rem; font-weight: 600; color: var(--text-primary);">${escapeHtml(record.real_name || '-')}</div>
+                                </div>
+                                <div style="background: var(--bg-subtle); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+                                    <div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 3px;">所属学科</div>
+                                    <div style="margin-top: 2px;">
+                                        ${(record.subject === '*' || String(record.subject || '').toLowerCase() === 'all') ? `
+                                            <span style="font-size: 0.8rem; padding: 2px 9px; border-radius: 999px; background: rgba(16,185,129,0.14); color: #10b981; border: 1px solid rgba(16,185,129,0.3); font-weight: 600;">所有学科</span>
+                                        ` : (record.subject ? `
+                                            <span style="font-size: 0.8rem; padding: 2px 9px; border-radius: 999px; background: rgba(139,92,246,0.14); color: #a78bfa; border: 1px solid rgba(139,92,246,0.3); font-weight: 600;">${escapeHtml(record.subject)}</span>
+                                        ` : `
+                                            <span style="font-size: 0.82rem; color: var(--text-muted);">未分配</span>
+                                        `)}
+                                    </div>
                                 </div>
                                 <div style="background: var(--bg-subtle); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
                                     <div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 3px;">账号状态</div>

@@ -487,9 +487,48 @@ function applyAssistantReadOnlyModeIfNeed(user) {
     }
 }
 
+function applySubjectPermissionToQBank(user) {
+    if (typeof window.getAllowedSubjects !== 'function') return;
+    const scope = window.getAllowedSubjects(user);
+    if (subjectSelect) {
+        Array.from(subjectSelect.options).forEach(opt => {
+            if (!opt.value) return;
+            const ok = scope.all || scope.subjects.includes(opt.value);
+            opt.hidden = !ok;
+            opt.disabled = !ok;
+        });
+        if (!scope.all && scope.subjects.length === 1) {
+            const onlySubj = scope.subjects[0];
+            if (subjectSelect.value !== onlySubj) {
+                subjectSelect.value = onlySubj;
+                subjectSelect.dispatchEvent(new Event('change'));
+            }
+            subjectSelect.disabled = true;
+            subjectSelect.title = `当前账号仅限操作学科：${onlySubj}`;
+        } else if (!scope.all && scope.subjects.length > 0) {
+            subjectSelect.disabled = false;
+            subjectSelect.title = '';
+            if (subjectSelect.value && !scope.subjects.includes(subjectSelect.value)) {
+                subjectSelect.value = scope.subjects[0];
+                subjectSelect.dispatchEvent(new Event('change'));
+            }
+        } else if (scope.all) {
+            subjectSelect.disabled = false;
+            subjectSelect.title = '';
+        }
+    }
+    if (!scope.all && scope.subjects.length === 1 && typeof savedSubjectFilter !== 'undefined') {
+        savedSubjectFilter = scope.subjects[0];
+    }
+    if (typeof renderSavedSubjectTabs === 'function') {
+        renderSavedSubjectTabs();
+    }
+}
+
 window.addEventListener('authChecked', (e) => {
     applyAssistantReadOnlyModeIfNeed(e.detail);
     applyRegionDebugVisibility(e.detail);
+    applySubjectPermissionToQBank(e.detail);
     if (typeof applySavedDataFilter === 'function' && allSavedDataList.length > 0) {
         applySavedDataFilter();
     }
@@ -5528,9 +5567,13 @@ function renderSavedSubjectTabs() {
     const tabsContainer = document.getElementById('saved-subject-tabs');
     if (!tabsContainer) return;
 
+    const scope = typeof window.getAllowedSubjects === 'function' ? window.getAllowedSubjects() : { all: true, subjects: ['*'] };
     const predefinedSubjects = subjectSelect ? Array.from(subjectSelect.options).map(o => o.value) : [];
     const subjectsFromData = allSavedDataList.map(item => item.subject);
-    const allSubjects = Array.from(new Set([...predefinedSubjects, ...subjectsFromData])).filter(Boolean);
+    let allSubjects = Array.from(new Set([...predefinedSubjects, ...subjectsFromData])).filter(Boolean);
+    if (!scope.all) {
+        allSubjects = allSubjects.filter(s => scope.subjects.includes(s));
+    }
 
     const counts = {};
     allSubjects.forEach(s => { counts[s] = 0; });
@@ -5549,11 +5592,14 @@ function renderSavedSubjectTabs() {
         }
     });
 
-    let html = `
+    let html = '';
+    if (scope.all || scope.subjects.length > 1) {
+        html += `
         <button type="button" class="ui-pill ${savedSubjectFilter === 'all' ? 'active' : ''}" onclick="setSavedSubjectFilter('all')">
             全部学科 <span class="pill-count">${totalMatching}</span>
         </button>
     `;
+    }
 
     allSubjects.forEach(sub => {
         const count = counts[sub] || 0;

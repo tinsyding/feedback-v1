@@ -700,6 +700,7 @@ if ($action === 'check_existing_batch') {
         echo json_encode(['success' => true, 'exists' => false, 'hasDiff' => false, 'modifiedStudents' => []], JSON_UNESCAPED_UNICODE);
         exit;
     }
+    requireSubjectAccess($subject, '查询该学科历史批次');
 
     try {
         $db = Database::getInstance();
@@ -991,6 +992,7 @@ if ($action === 'get_student_week_record') {
         echo json_encode(['success' => true, 'students' => [], 'record' => null], JSON_UNESCAPED_UNICODE);
         exit;
     }
+    requireSubjectAccess($subject, '查询该学科学员错题记录');
 
     $studentsRoster = [];
     $recordData = null;
@@ -1223,7 +1225,8 @@ if ($action === 'encrypt_batch') {
         exit;
     }
 
-    $subject = $input['subject'] ?? '';
+    $subject = trim((string)($input['subject'] ?? ''));
+    requireSubjectAccess($subject, '上传或生成该学科学情数据');
     $grade = $input['grade'] ?? '';
     $tier = $input['tier'] ?? '';
     $week = intval($input['week'] ?? 0);
@@ -2497,13 +2500,24 @@ if ($action === 'revoke_token' || $action === 'unrevoke_token') {
 
     // 仅允许操作数据库中真实存在的 Token（student_records 或已在吊销表中的记录），防止黑名单被垃圾填满
     $exists = false;
+    $tokenSubject = '';
     try {
         $db = Database::getInstance();
-        $row = $db->fetchOne("SELECT id FROM student_records WHERE retest_token = ? LIMIT 1", [$token]);
+        $row = $db->fetchOne(
+            "SELECT sr.id, cb.subject
+             FROM student_records sr
+             LEFT JOIN class_batches cb ON sr.batch_id = cb.id
+             WHERE sr.retest_token = ?
+             LIMIT 1",
+            [$token]
+        );
         if (DB::getLastError() !== null) {
             throw new RuntimeException(DB::getLastError());
         }
         $exists = !empty($row);
+        if ($exists && !empty($row['subject'])) {
+            $tokenSubject = trim((string)$row['subject']);
+        }
         if (!$exists && $action === 'unrevoke_token') {
             $exists = isTokenRevoked($token);
         }
@@ -2516,6 +2530,9 @@ if ($action === 'revoke_token' || $action === 'unrevoke_token') {
         http_response_code(404);
         echo json_encode(['success' => false, 'error' => '未找到该 Token 对应的错题本记录'], JSON_UNESCAPED_UNICODE);
         exit;
+    }
+    if ($tokenSubject !== '') {
+        requireSubjectAccess($tokenSubject, '作废或恢复该学科错题本链接');
     }
 
     $operator = trim($_SESSION['username'] ?? 'unknown');

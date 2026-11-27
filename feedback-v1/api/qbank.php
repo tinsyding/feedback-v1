@@ -267,6 +267,20 @@ try {
                 $bankTypeFilter = !empty($_GET['bankType']) && $_GET['bankType'] !== 'all' ? normalizeBankType($_GET['bankType']) : null;
                 $searchFilter = !empty($_GET['search']) ? trim($_GET['search']) : null;
 
+                $subjectScope = getCurrentUserSubjectScope();
+                if (empty($subjectScope['all'])) {
+                    if (empty($subjectScope['subjects'])) {
+                        echo json_encode(['success' => true, 'data' => []], JSON_UNESCAPED_UNICODE);
+                        exit;
+                    }
+                    if ($subjectFilter !== null && !in_array($subjectFilter, $subjectScope['subjects'], true)) {
+                        $allowedText = implode('、', $subjectScope['subjects']);
+                        http_response_code(403);
+                        echo json_encode(['success' => false, 'error' => "无权查看该学科题库（当前账号仅限学科：{$allowedText}）"], JSON_UNESCAPED_UNICODE);
+                        exit;
+                    }
+                }
+
                 $dbItems = [];
                 $dbSuccess = false;
 
@@ -284,6 +298,12 @@ try {
                     if ($subjectFilter !== null) {
                         $where[] = "`subject` = ?";
                         $params[] = $subjectFilter;
+                    } elseif (empty($subjectScope['all'])) {
+                        $subPlaceholders = implode(',', array_fill(0, count($subjectScope['subjects']), '?'));
+                        $where[] = "`subject` IN ({$subPlaceholders})";
+                        foreach ($subjectScope['subjects'] as $allowedSubj) {
+                            $params[] = $allowedSubj;
+                        }
                     }
                     if ($gradeFilter !== null) {
                         $where[] = "`grade` = ?";
@@ -336,6 +356,7 @@ try {
                     echo json_encode(['success' => false, 'error' => '缺少必要参数: subject, grade, tier, week'], JSON_UNESCAPED_UNICODE);
                     exit;
                 }
+                requireSubjectAccess($subject, '查看该学科题库');
 
                 // 1. 优先从 MySQL 数据库精准查询
                 try {
@@ -512,6 +533,7 @@ try {
                 echo json_encode(['success' => false, 'error' => '缺少必要字段: subject, grade, tier, week'], JSON_UNESCAPED_UNICODE);
                 exit;
             }
+            requireSubjectAccess($subject, '保存或修改该学科题库');
 
             if (!is_array($questions) || empty($questions)) {
                 http_response_code(400);
@@ -762,6 +784,7 @@ try {
                 echo json_encode(['success' => false, 'error' => '缺少必要参数: subject, grade, tier, week'], JSON_UNESCAPED_UNICODE);
                 exit;
             }
+            requireSubjectAccess($subject, '删除该学科题库');
 
             // 1. 从 MySQL 级联删除并清理不再被任何题库引用的孤儿 PDF
             $deletedPdfCandidates = [];

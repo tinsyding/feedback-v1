@@ -21,6 +21,7 @@ type User struct {
 	PasswordHash string
 	RealName     string
 	Role         string
+	Subject      string
 	TeacherID    int64
 	CreatedBy    string
 	Status       int
@@ -129,12 +130,12 @@ func (r *MySQLRepository) FindUserByUsername(ctx context.Context, username strin
 		return nil, err
 	}
 	var u User
-	var role, createdBy, realName sql.NullString
+	var role, subject, createdBy, realName sql.NullString
 	err = db.QueryRowContext(
 		ctx,
-		"SELECT `id`, `username`, `password_hash`, `real_name`, `role`, `teacher_id`, `created_by`, `status` FROM `users` WHERE `username` = ? LIMIT 1",
+		"SELECT `id`, `username`, `password_hash`, `real_name`, `role`, `subject`, `teacher_id`, `created_by`, `status` FROM `users` WHERE `username` = ? LIMIT 1",
 		username,
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &realName, &role, &u.TeacherID, &createdBy, &u.Status)
+	).Scan(&u.ID, &u.Username, &u.PasswordHash, &realName, &role, &subject, &u.TeacherID, &createdBy, &u.Status)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -143,6 +144,7 @@ func (r *MySQLRepository) FindUserByUsername(ctx context.Context, username strin
 	}
 	u.RealName = realName.String
 	u.Role = role.String
+	u.Subject = subject.String
 	u.CreatedBy = createdBy.String
 	return &u, nil
 }

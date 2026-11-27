@@ -283,6 +283,24 @@
             .replace(/'/g, '&#039;');
     }
 
+    // 解析用户允许访问的学科范围
+    window.getAllowedSubjects = function (user) {
+        const u = user || currentUser || window.currentUser;
+        if (!u) return { all: true, subjects: ['*'] };
+        if (u.is_admin || u.role === 'admin' || u.role === 'super_admin' || u.all_subjects === true) {
+            return { all: true, subjects: ['*'] };
+        }
+        if (Array.isArray(u.allowed_subjects)) {
+            if (u.allowed_subjects.includes('*')) return { all: true, subjects: ['*'] };
+            return { all: false, subjects: u.allowed_subjects.filter(Boolean) };
+        }
+        const raw = String(u.subject || '').trim();
+        if (!raw) return { all: false, subjects: [] };
+        if (raw === '*' || raw.toLowerCase() === 'all') return { all: true, subjects: ['*'] };
+        const list = raw.split(/[,，、;；\/|]+/).map(s => s.trim()).filter(Boolean);
+        return { all: false, subjects: Array.from(new Set(list)) };
+    };
+
     // 更新导航栏用户信息
     function renderNavUser(user) {
         if (!user) return;
@@ -301,6 +319,18 @@
             roleBadgeHtml = `<span class="badge-role-teacher" title="管理员账号">管理员</span>`;
         } else if (!isTestAccount) {
             roleBadgeHtml = `<span class="badge-role-teacher">教师</span>`;
+        }
+
+        // 学科标签（非纯管理员且已配置学科时展示）
+        let subjectBadgeHtml = '';
+        if (!isPureAdmin && !isTestAccount) {
+            const scope = window.getAllowedSubjects(user);
+            if (scope.all) {
+                subjectBadgeHtml = `<span class="badge-role-teacher" style="background:rgba(16,185,129,0.14);color:#10b981;border-color:rgba(16,185,129,0.3);" title="拥有所有学科权限">全学科</span>`;
+            } else if (scope.subjects.length > 0) {
+                const subText = scope.subjects.join('/');
+                subjectBadgeHtml = `<span class="badge-role-teacher" style="background:rgba(139,92,246,0.14);color:#a78bfa;border-color:rgba(139,92,246,0.3);" title="所属学科权限：${escapeHtml(subText)}">${escapeHtml(subText)}</span>`;
+            }
         }
 
         // 操作按钮集合
@@ -329,6 +359,7 @@
                     <circle cx="12" cy="7" r="4"></circle>
                 </svg>
                 ${roleBadgeHtml}
+                ${subjectBadgeHtml}
                 <span class="nav-user-name">${escapeHtml(displayName)}</span>
             </span>
             <span class="nav-user-ops">${actionBtnsHtml}</span>

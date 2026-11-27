@@ -83,11 +83,11 @@ func (c *mockAuthConn) QueryContext(_ context.Context, query string, args []driv
 	switch {
 	case strings.Contains(query, "FROM `users` WHERE `username` = ?"):
 		if !st.userFound {
-			return &mockAuthRows{cols: []string{"id", "username", "password_hash", "real_name", "role", "teacher_id", "created_by", "status"}}, nil
+			return &mockAuthRows{cols: []string{"id", "username", "password_hash", "real_name", "role", "subject", "teacher_id", "created_by", "status"}}, nil
 		}
 		return &mockAuthRows{
-			cols: []string{"id", "username", "password_hash", "real_name", "role", "teacher_id", "created_by", "status"},
-			rows: [][]driver.Value{{int64(7), "t101", "$2y$hash", "张老师", nil, int64(0), nil, int64(1)}},
+			cols: []string{"id", "username", "password_hash", "real_name", "role", "subject", "teacher_id", "created_by", "status"},
+			rows: [][]driver.Value{{int64(7), "t101", "$2y$hash", "张老师", nil, "数学", int64(0), nil, int64(1)}},
 		}, nil
 	case strings.Contains(query, "FROM `admin_users` WHERE `username` = ?"):
 		if !st.adminFound {

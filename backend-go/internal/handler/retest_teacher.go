@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -79,13 +80,19 @@ func firstParam(input map[string]any, r *http.Request, keys ...string) string {
 }
 
 func handleRetestCheckExistingBatch(w http.ResponseWriter, r *http.Request, deps RetestDeps) {
-	if _, ok := session.RequireAuth(w, r, deps.Sessions); !ok {
+	sess, ok := session.RequireAuth(w, r, deps.Sessions)
+	if !ok {
 		return
 	}
 	input, cleanup := decodeRetestInputOrForm(w, r, 4<<20)
 	defer cleanup()
 
 	subject := firstParam(input, r, "subject")
+	if subject != "" {
+		if _, allowed := session.RequireSubjectAccess(r.Context(), w, sess, deps.DB, subject, "查询该学科历史批次"); !allowed {
+			return
+		}
+	}
 	grade := firstParam(input, r, "grade")
 	tier := firstParam(input, r, "tier")
 	week := config.AsPHPInt(firstParam(input, r, "week"))
@@ -135,7 +142,8 @@ func handleRetestCheckExistingBatch(w http.ResponseWriter, r *http.Request, deps
 }
 
 func handleRetestGetStudentWeekRecord(w http.ResponseWriter, r *http.Request, deps RetestDeps, secretKey string) {
-	if _, ok := session.RequireAuth(w, r, deps.Sessions); !ok {
+	sess, ok := session.RequireAuth(w, r, deps.Sessions)
+	if !ok {
 		return
 	}
 	input, cleanup := decodeRetestInputOrForm(w, r, 4<<20)
@@ -165,6 +173,11 @@ func handleRetestGetStudentWeekRecord(w http.ResponseWriter, r *http.Request, de
 		StudentName: firstParam(input, r, "student_name", "studentName"),
 		WithRoster:  withRoster,
 		SecretKey:   secretKey,
+	}
+	if q.Subject != "" {
+		if _, allowed := session.RequireSubjectAccess(r.Context(), w, sess, deps.DB, q.Subject, "查询该学科学员错题记录"); !allowed {
+			return
+		}
 	}
 
 	if deps.Repo == nil {
@@ -201,6 +214,10 @@ func handleRetestEncryptBatch(w http.ResponseWriter, r *http.Request, deps Retes
 	rawStudents, hasStudents := input["students"].([]any)
 	if !hasStudents {
 		writeRawJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "Invalid payload"})
+		return
+	}
+	reqSubject := strings.TrimSpace(config.AsPHPString(input["subject"]))
+	if _, allowed := session.RequireSubjectAccess(r.Context(), w, sess, deps.DB, reqSubject, "上传或生成该学科学情数据"); !allowed {
 		return
 	}
 
@@ -437,6 +454,19 @@ func handleRetestRevokeToggle(w http.ResponseWriter, r *http.Request, deps Retes
 	if !exists {
 		writeRawJSON(w, http.StatusNotFound, map[string]any{"success": false, "error": "未找到该 Token 对应的错题本记录"})
 		return
+	}
+	if deps.DB != nil {
+		var tokenSubj sql.NullString
+		err := deps.DB.QueryRowContext(
+			r.Context(),
+			"SELECT cb.subject FROM student_records sr LEFT JOIN class_batches cb ON sr.batch_id = cb.id WHERE sr.retest_token = ? LIMIT 1",
+			token,
+		).Scan(&tokenSubj)
+		if err == nil && strings.TrimSpace(tokenSubj.String) != "" {
+			if _, allowed := session.RequireSubjectAccess(r.Context(), w, sess, deps.DB, strings.TrimSpace(tokenSubj.String), "作废或恢复该学科错题本链接"); !allowed {
+				return
+			}
+		}
 	}
 
 	operator := strings.TrimSpace(sess.Username())

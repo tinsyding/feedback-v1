@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,6 +33,7 @@ type AuthDeps struct {
 	Sessions  session.Store
 	RateLimit ratelimit.Store
 	Audit     auditlog.Logger
+	DB        *sql.DB
 	NowFunc   func() time.Time
 }
 
@@ -234,16 +236,20 @@ func handleAuthCheck(w http.ResponseWriter, r *http.Request, deps AuthDeps) {
 		if v, ok := sess.Data["user_id"]; ok && v != nil {
 			userID = v
 		}
+		subjScope := session.ResolveSubjectScope(r.Context(), sess, deps.DB)
 		httpx.SendResponse(w, true, map[string]any{
 			"loggedIn":        true,
 			"require_captcha": requireCaptcha,
 			"user": map[string]any{
-				"id":         userID,
-				"username":   sess.StringVal("username"),
-				"real_name":  sess.StringVal("real_name"),
-				"role":       uRole,
-				"is_admin":   hasAdminSession || uRole == "admin" || uRole == "super_admin",
-				"created_by": sess.StringVal("user_created_by"),
+				"id":               userID,
+				"username":         sess.StringVal("username"),
+				"real_name":        sess.StringVal("real_name"),
+				"role":             uRole,
+				"subject":          subjScope.Raw,
+				"allowed_subjects": subjScope.Subjects,
+				"all_subjects":     subjScope.All,
+				"is_admin":         hasAdminSession || uRole == "admin" || uRole == "super_admin",
+				"created_by":       sess.StringVal("user_created_by"),
 			},
 		}, nil, http.StatusOK)
 		return
@@ -266,12 +272,15 @@ func handleAuthCheck(w http.ResponseWriter, r *http.Request, deps AuthDeps) {
 			"loggedIn":        true,
 			"require_captcha": requireCaptcha,
 			"user": map[string]any{
-				"id":         nil,
-				"username":   adminUser,
-				"real_name":  adminReal,
-				"role":       adminRole,
-				"is_admin":   true,
-				"created_by": "",
+				"id":               nil,
+				"username":         adminUser,
+				"real_name":        adminReal,
+				"role":             adminRole,
+				"subject":          "*",
+				"allowed_subjects": []string{"*"},
+				"all_subjects":     true,
+				"is_admin":         true,
+				"created_by":       "",
 			},
 		}, nil, http.StatusOK)
 		return
@@ -436,11 +445,18 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request, deps AuthDeps) {
 			if uRole == "" {
 				uRole = "teacher"
 			}
+			effectiveSubject := strings.TrimSpace(user.Subject)
+			if uRole == "assistant" && deps.DB != nil {
+				if parentSubj, ok := session.ResolveUserSubjectFromDB(ctx, deps.DB, user.ID, user.Username, uRole, user.TeacherID, user.CreatedBy); ok {
+					effectiveSubject = parentSubj
+				}
+			}
 			data["user_logged_in"] = true
 			data["user_id"] = user.ID
 			data["username"] = user.Username
 			data["real_name"] = user.RealName
 			data["user_role"] = uRole
+			data["user_subject"] = effectiveSubject
 			data["user_teacher_id"] = user.TeacherID
 			data["user_created_by"] = user.CreatedBy
 			data["user_login_time"] = nowTs
@@ -504,13 +520,17 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request, deps AuthDeps) {
 			uRole = "teacher"
 		}
 		hasAdminSession := adminValid || sess.IsAdminLoggedIn()
+		subjScope := session.ResolveSubjectScope(ctx, sess, deps.DB)
 		httpx.SendResponse(w, true, map[string]any{
-			"username":   user.Username,
-			"real_name":  user.RealName,
-			"role":       uRole,
-			"is_admin":   hasAdminSession || uRole == "admin" || uRole == "super_admin",
-			"created_by": user.CreatedBy,
-			"message":    "登录成功",
+			"username":         user.Username,
+			"real_name":        user.RealName,
+			"role":             uRole,
+			"subject":          subjScope.Raw,
+			"allowed_subjects": subjScope.Subjects,
+			"all_subjects":     subjScope.All,
+			"is_admin":         hasAdminSession || uRole == "admin" || uRole == "super_admin",
+			"created_by":       user.CreatedBy,
+			"message":          "登录成功",
 		}, nil, http.StatusOK)
 		return
 	}
@@ -524,12 +544,15 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request, deps AuthDeps) {
 		aRole = "super_admin"
 	}
 	httpx.SendResponse(w, true, map[string]any{
-		"username":   adminUser.Username,
-		"real_name":  aReal,
-		"role":       aRole,
-		"is_admin":   true,
-		"created_by": "",
-		"message":    "登录成功",
+		"username":         adminUser.Username,
+		"real_name":        aReal,
+		"role":             aRole,
+		"subject":          "*",
+		"allowed_subjects": []string{"*"},
+		"all_subjects":     true,
+		"is_admin":         true,
+		"created_by":       "",
+		"message":          "登录成功",
 	}, nil, http.StatusOK)
 }
 
@@ -539,6 +562,7 @@ func clearUserSessionKeys(data map[string]any) {
 	delete(data, "username")
 	delete(data, "real_name")
 	delete(data, "user_role")
+	delete(data, "user_subject")
 	delete(data, "user_teacher_id")
 	delete(data, "user_created_by")
 	delete(data, "user_login_time")

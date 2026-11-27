@@ -10,9 +10,9 @@
     <meta http-equiv="Expires" content="0">
     <title>管理控制台 - JF反馈系统</title>
     <meta name="description" content="JF反馈系统管理员控制台">
-    <script src="js/theme-boot.js?v=d7ec43fa"></script>
-    <link rel="stylesheet" href="css/admin.css?v=a57e03fc">
-    <link rel="stylesheet" href="css/tokens.css?v=c8d90435">
+    <script src="js/theme-boot.js?v=20261127-140417"></script>
+    <link rel="stylesheet" href="css/admin.css?v=20261127-140417">
+    <link rel="stylesheet" href="css/tokens.css?v=20261127-140417">
 </head>
 
 <body class="admin-body page-ready ready">
@@ -1132,6 +1132,16 @@
                                 <input type="text" id="teacher-search-input" placeholder="搜索账号、教师姓名、初始密码..." data-input="debounce-teachers">
                             </div>
 
+                            <select id="teacher-subject-filter" class="custom-select" data-change="reload-teachers-p1">
+                                <option value="">全部学科</option>
+                                <option value="数学">数学</option>
+                                <option value="物理">物理</option>
+                                <option value="英语">英语</option>
+                                <option value="化学">化学</option>
+                                <option value="语文">语文</option>
+                                <option value="*">所有学科 (*)</option>
+                            </select>
+
                             <select id="teacher-status-filter" class="custom-select" data-change="reload-teachers-p1">
                                 <option value="">全部状态</option>
                                 <option value="1">正常 (允许登录)</option>
@@ -1720,7 +1730,7 @@
     </div>
 
     <!-- JAVASCRIPT APPLICATION LOGIC -->
-    <script defer src="js/admin.js?v=789af44c"></script>
+    <script defer src="js/admin.js?v=20261127-140417"></script>
 </body>
 
 </html>

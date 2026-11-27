@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `initial_password` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
   `real_name` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
   `role` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'teacher',
+  `subject` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT '所属学科（数学/物理/英语/化学/语文，多科逗号分隔，*表示所有学科）',
   `teacher_id` int(11) NOT NULL DEFAULT '0' COMMENT '所属教师用户ID',
   `created_by` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT '创建该账号的教师账号名',
   `status` tinyint(4) NOT NULL DEFAULT '1',
@@ -30,6 +31,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uniq_username` (`username`),
+  KEY `idx_subject` (`subject`),
   KEY `idx_teacher_id` (`teacher_id`),
   KEY `idx_created_by` (`created_by`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

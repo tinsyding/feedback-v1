@@ -135,16 +135,20 @@ switch ($action) {
         $hasAdminSession = function_exists('isAdminLoggedIn') ? isAdminLoggedIn() : !empty($_SESSION['admin_logged_in']);
         if (!empty($_SESSION['user_logged_in']) && $_SESSION['user_logged_in'] === true) {
             $uRole = $_SESSION['user_role'] ?? 'teacher';
+            $subjectScope = getCurrentUserSubjectScope();
             sendAuthResponse(true, [
                 'loggedIn'        => true,
                 'require_captcha' => $requireCaptcha,
                 'user'            => [
-                    'id'         => $_SESSION['user_id'] ?? null,
-                    'username'   => $_SESSION['username'] ?? '',
-                    'real_name'  => $_SESSION['real_name'] ?? '',
-                    'role'       => $uRole,
-                    'is_admin'   => $hasAdminSession || in_array($uRole, ['admin', 'super_admin'], true),
-                    'created_by' => $_SESSION['user_created_by'] ?? ''
+                    'id'               => $_SESSION['user_id'] ?? null,
+                    'username'         => $_SESSION['username'] ?? '',
+                    'real_name'        => $_SESSION['real_name'] ?? '',
+                    'role'             => $uRole,
+                    'subject'          => $subjectScope['raw'],
+                    'allowed_subjects' => $subjectScope['subjects'],
+                    'all_subjects'     => $subjectScope['all'],
+                    'is_admin'         => $hasAdminSession || in_array($uRole, ['admin', 'super_admin'], true),
+                    'created_by'       => $_SESSION['user_created_by'] ?? ''
                 ]
             ]);
         } elseif ($hasAdminSession) {
@@ -152,12 +156,15 @@ switch ($action) {
                 'loggedIn'        => true,
                 'require_captcha' => $requireCaptcha,
                 'user'            => [
-                    'id'         => null,
-                    'username'   => $_SESSION['admin_username'] ?? 'admin',
-                    'real_name'  => $_SESSION['admin_realname'] ?? '超级管理员',
-                    'role'       => $_SESSION['admin_role'] ?? 'super_admin',
-                    'is_admin'   => true,
-                    'created_by' => ''
+                    'id'               => null,
+                    'username'         => $_SESSION['admin_username'] ?? 'admin',
+                    'real_name'        => $_SESSION['admin_realname'] ?? '超级管理员',
+                    'role'             => $_SESSION['admin_role'] ?? 'super_admin',
+                    'subject'          => '*',
+                    'allowed_subjects' => ['*'],
+                    'all_subjects'     => true,
+                    'is_admin'         => true,
+                    'created_by'       => ''
                 ]
             ]);
         } else {
@@ -299,11 +306,26 @@ switch ($action) {
         session_regenerate_id(true);
 
         if ($userValid) {
+            $uRole = $user['role'] ?: 'teacher';
+            $effectiveSubject = trim((string)($user['subject'] ?? ''));
+            if ($uRole === 'assistant') {
+                $resolvedParentSubj = resolveUserSubjectFromDb(
+                    (int)$user['id'],
+                    (string)$user['username'],
+                    $uRole,
+                    (int)($user['teacher_id'] ?? 0),
+                    (string)($user['created_by'] ?? '')
+                );
+                if ($resolvedParentSubj !== null) {
+                    $effectiveSubject = $resolvedParentSubj;
+                }
+            }
             $_SESSION['user_logged_in'] = true;
             $_SESSION['user_id'] = $user['id'];
             $_SESSION['username'] = $user['username'];
             $_SESSION['real_name'] = $user['real_name'];
-            $_SESSION['user_role'] = $user['role'] ?: 'teacher';
+            $_SESSION['user_role'] = $uRole;
+            $_SESSION['user_subject'] = $effectiveSubject;
             $_SESSION['user_teacher_id'] = (int)($user['teacher_id'] ?? 0);
             $_SESSION['user_created_by'] = $user['created_by'] ?? '';
             $_SESSION['user_login_time'] = time();
@@ -318,6 +340,7 @@ switch ($action) {
                 $_SESSION['username'],
                 $_SESSION['real_name'],
                 $_SESSION['user_role'],
+                $_SESSION['user_subject'],
                 $_SESSION['user_teacher_id'],
                 $_SESSION['user_created_by'],
                 $_SESSION['user_login_time']
@@ -350,24 +373,31 @@ switch ($action) {
         if ($userValid) {
             $uRole = $user['role'] ?: 'teacher';
             $hasAdminSession = $adminValid || (function_exists('isAdminLoggedIn') ? isAdminLoggedIn() : !empty($_SESSION['admin_logged_in']));
+            $subjectScope = getCurrentUserSubjectScope();
             sendAuthResponse(true, [
-                'username'   => $user['username'],
-                'real_name'  => $user['real_name'],
-                'role'       => $uRole,
-                'is_admin'   => $hasAdminSession || in_array($uRole, ['admin', 'super_admin'], true),
-                'created_by' => $user['created_by'] ?? '',
-                'message'    => '登录成功'
+                'username'         => $user['username'],
+                'real_name'        => $user['real_name'],
+                'role'             => $uRole,
+                'subject'          => $subjectScope['raw'],
+                'allowed_subjects' => $subjectScope['subjects'],
+                'all_subjects'     => $subjectScope['all'],
+                'is_admin'         => $hasAdminSession || in_array($uRole, ['admin', 'super_admin'], true),
+                'created_by'       => $user['created_by'] ?? '',
+                'message'          => '登录成功'
             ]);
         }
 
         $aRole = $adminUser['role'] ?: 'super_admin';
         sendAuthResponse(true, [
-            'username'   => $adminUser['username'],
-            'real_name'  => $adminUser['real_name'] ?? '管理员',
-            'role'       => $aRole,
-            'is_admin'   => true,
-            'created_by' => '',
-            'message'    => '登录成功'
+            'username'         => $adminUser['username'],
+            'real_name'        => $adminUser['real_name'] ?? '管理员',
+            'role'             => $aRole,
+            'subject'          => '*',
+            'allowed_subjects' => ['*'],
+            'all_subjects'     => true,
+            'is_admin'         => true,
+            'created_by'       => '',
+            'message'          => '登录成功'
         ]);
         break;
 
@@ -380,6 +410,7 @@ switch ($action) {
             $_SESSION['username'],
             $_SESSION['real_name'],
             $_SESSION['user_role'],
+            $_SESSION['user_subject'],
             $_SESSION['user_teacher_id'],
             $_SESSION['user_created_by'],
             $_SESSION['user_login_time']

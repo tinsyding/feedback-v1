@@ -61,7 +61,23 @@
         const pageSubject = getSelectedSubject();
         const savedSubject = localStorage.getItem('jf_see_subject');
         if (subjectEl) {
-            subjectEl.value = pageSubject || savedSubject || '数学';
+            const scope = typeof window.getAllowedSubjects === 'function' ? window.getAllowedSubjects() : { all: true, subjects: ['*'] };
+            Array.from(subjectEl.options).forEach(opt => {
+                if (!opt.value) return;
+                const ok = scope.all || scope.subjects.includes(opt.value);
+                opt.hidden = !ok;
+                opt.disabled = !ok;
+            });
+            if (!scope.all && scope.subjects.length === 1) {
+                subjectEl.value = scope.subjects[0];
+                subjectEl.disabled = true;
+                subjectEl.title = `当前账号已锁定学科：${scope.subjects[0]}`;
+            } else {
+                subjectEl.disabled = false;
+                subjectEl.title = '';
+                const candidate = pageSubject || savedSubject || (scope.all ? '数学' : (scope.subjects[0] || ''));
+                subjectEl.value = (scope.all || scope.subjects.includes(candidate)) ? candidate : (scope.subjects[0] || '');
+            }
         }
 
         const detectedInfo = typeof getUploadClassInfo === 'function' ? getUploadClassInfo() : {};

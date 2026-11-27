@@ -3,6 +3,7 @@ package handler
 import (
 	"crypto/md5"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -28,6 +29,7 @@ type RetestDeps struct {
 	RateLimit    ratelimit.Store
 	ConfigLoader *config.Loader
 	Audit        auditlog.Logger
+	DB           *sql.DB
 	FeedbackRoot string
 	NowFunc      func() time.Time
 }

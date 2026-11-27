@@ -34,7 +34,8 @@
                     </th>
                     ${teacherSortTh('id', 'ID', '点击切换按ID正序/倒序', 'width: 80px;')}
                     ${teacherSortTh('username', '登录账号', '点击切换按账号正序/倒序', 'width: 140px;')}
-                    ${teacherSortTh('real_name', '教师姓名', '点击切换按姓名正序/倒序', 'width: 170px;')}
+                    ${teacherSortTh('real_name', '教师姓名', '点击切换按姓名正序/倒序', 'width: 160px;')}
+                    ${teacherSortTh('subject', '所属学科', '点击切换按学科正序/倒序', 'width: 120px;')}
                     ${teacherSortTh('status', '账号状态', '点击切换按状态正序/倒序', 'width: 110px;')}
                     ${teacherSortTh('assistant_count', '助教数量', '点击切换按助教数量正序/倒序', 'width: 110px; text-align: center;')}
                     <th style="width: 80px; text-align: right;">快捷操作</th>
@@ -78,7 +79,7 @@
 
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="7" style="text-align: center; padding: 48px; color: var(--text-muted);">
+                    <td colspan="8" style="text-align: center; padding: 48px; color: var(--text-muted);">
                         <div class="db-empty-state">
                             <div class="spinner" style="margin: 0 auto 12px auto; width: 28px; height: 28px;"></div>
                             <span>正在载入教师账号数据...</span>
@@ -89,15 +90,17 @@
 
             try {
                 const statusVal = document.getElementById('teacher-status-filter')?.value || '';
+                const subjectVal = document.getElementById('teacher-subject-filter')?.value || '';
                 let url = `${API_BASE}?action=db_list&table=users&page=${page}&page_size=${teacherPerPage}&per_page=${teacherPerPage}&sort=${teacherSortField}&order=${teacherSortOrder}&sort_field=${teacherSortField}&sort_order=${teacherSortOrder}`;
                 if (teacherSearchQuery) url += `&search=${encodeURIComponent(teacherSearchQuery)}`;
                 if (statusVal !== '') url += `&status=${encodeURIComponent(statusVal)}`;
+                if (subjectVal !== '') url += `&subject=${encodeURIComponent(subjectVal)}`;
 
                 const res = await fetch(url);
                 const json = await res.json();
 
                 if (!json.success) {
-                    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--error); padding: 30px;">载入失败: ${escapeHtml(json.error || '未知错误')}</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--error); padding: 30px;">载入失败: ${escapeHtml(json.error || '未知错误')}</td></tr>`;
                     return;
                 }
 
@@ -119,7 +122,7 @@
                 if (records.length === 0) {
                     tbody.innerHTML = `
                         <tr>
-                            <td colspan="7" style="text-align: center; padding: 48px; color: var(--text-muted);">
+                            <td colspan="8" style="text-align: center; padding: 48px; color: var(--text-muted);">
                                 <div class="db-empty-state">
                                     <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity: 0.4; margin-bottom: 8px;"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
                                     <div>未找到符合条件的教师账号</div>
@@ -149,6 +152,15 @@
                             </td>
                             <td>
                                 <span style="font-weight: 600; color: var(--text-primary);">${escapeHtml(r.real_name || '-')}</span>
+                            </td>
+                            <td>
+                                ${(r.subject === '*' || String(r.subject || '').toLowerCase() === 'all') ? `
+                                    <span style="font-size: 0.76rem; padding: 2px 8px; border-radius: 999px; background: rgba(16,185,129,0.14); color: #10b981; border: 1px solid rgba(16,185,129,0.3); font-weight: 600;">所有学科</span>
+                                ` : (r.subject ? `
+                                    <span style="font-size: 0.76rem; padding: 2px 8px; border-radius: 999px; background: rgba(139,92,246,0.14); color: #a78bfa; border: 1px solid rgba(139,92,246,0.3); font-weight: 600;">${escapeHtml(r.subject)}</span>
+                                ` : `
+                                    <span style="font-size: 0.75rem; color: var(--text-muted);">未分配</span>
+                                `)}
                             </td>
                             <td>
                                 ${isEnabled ? `
@@ -183,7 +195,7 @@
 
             } catch (e) {
                 console.error('Failed to load teachers', e);
-                tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--error); padding: 30px;">网络请求异常: ${escapeHtml(e.message)}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--error); padding: 30px;">网络请求异常: ${escapeHtml(e.message)}</td></tr>`;
             }
         }
 

@@ -56,12 +56,13 @@ type WeekScope struct {
 
 // ListFilter holds optional filter criteria for GET ?action=list.
 type ListFilter struct {
-	Year     *int
-	Season   string
-	Subject  string
-	Grade    string
-	BankType string
-	Search   string
+	Year            *int
+	Season          string
+	Subject         string
+	AllowedSubjects []string
+	Grade           string
+	BankType        string
+	Search          string
 }
 
 // WeekListItem matches a row returned by GET ?action=list.
@@ -302,6 +303,13 @@ func (r *MySQLRepository) ListWeeks(ctx context.Context, filter ListFilter) ([]W
 	if filter.Subject != "" {
 		where = append(where, "`subject` = ?")
 		params = append(params, filter.Subject)
+	} else if len(filter.AllowedSubjects) > 0 {
+		placeholders := make([]string, len(filter.AllowedSubjects))
+		for i, subj := range filter.AllowedSubjects {
+			placeholders[i] = "?"
+			params = append(params, subj)
+		}
+		where = append(where, "`subject` IN ("+strings.Join(placeholders, ",")+")")
 	}
 	if filter.Grade != "" {
 		where = append(where, "`grade` = ?")

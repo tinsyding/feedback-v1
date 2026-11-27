@@ -213,6 +213,10 @@ switch ($action) {
                     $whereParts[] = "`status` = ?";
                     $params[] = (int)$_GET['status'];
                 }
+                if (isset($_GET['subject']) && trim((string)$_GET['subject']) !== '' && isset($cols['subject'])) {
+                    $whereParts[] = "`subject` = ?";
+                    $params[] = trim((string)$_GET['subject']);
+                }
             }
 
             if ($search !== '') {
@@ -251,7 +255,8 @@ switch ($action) {
                 } else {
                     $orderClause = "`{$sort}` {$order}";
                 }
-                $rows = DB::fetchAll("SELECT `id`, `username`, '' AS `initial_password`, `real_name`, `role`, `status`, `last_login_at`, `last_login_ip`, `created_at`, `updated_at` FROM `{$table}` {$whereSql} ORDER BY {$orderClause} LIMIT {$offset}, {$pageSize}", $params);
+                $subjectSelect = isset($cols['subject']) ? "`subject`, " : "'' AS `subject`, ";
+                $rows = DB::fetchAll("SELECT `id`, `username`, '' AS `initial_password`, `real_name`, `role`, {$subjectSelect}`status`, `last_login_at`, `last_login_ip`, `created_at`, `updated_at` FROM `{$table}` {$whereSql} ORDER BY {$orderClause} LIMIT {$offset}, {$pageSize}", $params);
             } else {
                 $rows = DB::fetchAll("SELECT * FROM `{$table}` {$whereSql} ORDER BY `{$sort}` {$order} LIMIT {$offset}, {$pageSize}", $params);
             }

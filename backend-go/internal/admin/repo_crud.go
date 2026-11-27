@@ -295,6 +295,10 @@ func (r *MySQLRepository) ListRecords(ctx context.Context, q ListQuery) (ListRes
 			whereParts = append(whereParts, "`status` = ?")
 			params = append(params, config.AsPHPInt(q.Status))
 		}
+		if q.Subject != "" && hasCol("subject") {
+			whereParts = append(whereParts, "`subject` = ?")
+			params = append(params, q.Subject)
+		}
 	}
 
 	search := strings.TrimSpace(q.Search)
@@ -346,9 +350,13 @@ func (r *MySQLRepository) ListRecords(ctx context.Context, q ListQuery) (ListRes
 		if sortCol == "assistant_count" {
 			orderClause = fmt.Sprintf("(SELECT COUNT(*) FROM `users` `u_ast` WHERE `u_ast`.`role` = 'assistant' AND (`u_ast`.`teacher_id` = `users`.`id` OR `u_ast`.`created_by` = `users`.`username`)) %s, `users`.`id` ASC", order)
 		}
+		subjectSelect := ""
+		if hasCol("subject") {
+			subjectSelect = "`subject`, "
+		}
 		querySQL = fmt.Sprintf(
-			"SELECT `id`, `username`, '' AS `initial_password`, `real_name`, `role`, `status`, `last_login_at`, `last_login_ip`, `created_at`, `updated_at` FROM `%s` %s ORDER BY %s LIMIT %d, %d",
-			table, whereSQL, orderClause, offset, pageSize,
+			"SELECT `id`, `username`, '' AS `initial_password`, `real_name`, `role`, %s`status`, `last_login_at`, `last_login_ip`, `created_at`, `updated_at` FROM `%s` %s ORDER BY %s LIMIT %d, %d",
+			subjectSelect, table, whereSQL, orderClause, offset, pageSize,
 		)
 	default:
 		querySQL = fmt.Sprintf(

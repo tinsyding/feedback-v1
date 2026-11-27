@@ -78,7 +78,8 @@ func QBank(deps QBankDeps) http.HandlerFunc {
 }
 
 func handleQBankGet(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
-	if _, ok := session.RequireAuth(w, r, deps.Sessions); !ok {
+	sess, ok := session.RequireAuth(w, r, deps.Sessions)
+	if !ok {
 		return
 	}
 	q := r.URL.Query()
@@ -108,6 +109,28 @@ func handleQBankGet(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 		}
 		if rawSearch := strings.TrimSpace(q.Get("search")); rawSearch != "" {
 			filter.Search = rawSearch
+		}
+
+		subjScope := session.ResolveSubjectScope(r.Context(), sess, deps.DB)
+		if !subjScope.All {
+			if len(subjScope.Subjects) == 0 {
+				httpx.SendJSON(w, http.StatusOK, map[string]any{
+					"success": true,
+					"data":    []qbank.WeekListItem{},
+				})
+				return
+			}
+			if filter.Subject != "" {
+				if !subjScope.Allows(filter.Subject) {
+					httpx.SendJSON(w, http.StatusForbidden, map[string]any{
+						"success": false,
+						"error":   "无权查看该学科题库（当前账号仅限学科：" + strings.Join(subjScope.Subjects, "、") + "）",
+					})
+					return
+				}
+			} else {
+				filter.AllowedSubjects = subjScope.Subjects
+			}
 		}
 
 		if deps.Repo == nil {
@@ -153,6 +176,9 @@ func handleQBankGet(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 				"success": false,
 				"error":   "缺少必要参数: subject, grade, tier, week",
 			})
+			return
+		}
+		if _, allowed := session.RequireSubjectAccess(r.Context(), w, sess, deps.DB, subject, "查看该学科题库"); !allowed {
 			return
 		}
 		if deps.Repo == nil {
@@ -210,6 +236,27 @@ func handleQBankGet(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 		if subj := strings.TrimSpace(q.Get("subject")); subj != "" && subj != "all" {
 			filter.Subject = subj
 		}
+		subjScope := session.ResolveSubjectScope(r.Context(), sess, deps.DB)
+		if !subjScope.All {
+			if len(subjScope.Subjects) == 0 {
+				httpx.SendJSON(w, http.StatusOK, map[string]any{
+					"success": true,
+					"data":    []qbankattest.RevisionItem{},
+				})
+				return
+			}
+			if filter.Subject != "" {
+				if !subjScope.Allows(filter.Subject) {
+					httpx.SendJSON(w, http.StatusForbidden, map[string]any{
+						"success": false,
+						"error":   "无权查看该学科题库存证记录（当前账号仅限学科：" + strings.Join(subjScope.Subjects, "、") + "）",
+					})
+					return
+				}
+			} else if len(subjScope.Subjects) == 1 {
+				filter.Subject = subjScope.Subjects[0]
+			}
+		}
 		if grade := strings.TrimSpace(q.Get("grade")); grade != "" && grade != "all" {
 			filter.Grade = grade
 		}
@@ -234,6 +281,15 @@ func handleQBankGet(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 		}
 		if items == nil {
 			items = []qbankattest.RevisionItem{}
+		}
+		if !subjScope.All && len(items) > 0 {
+			filtered := make([]qbankattest.RevisionItem, 0, len(items))
+			for _, it := range items {
+				if subjScope.Allows(it.Subject) {
+					filtered = append(filtered, it)
+				}
+			}
+			items = filtered
 		}
 		httpx.SendJSON(w, http.StatusOK, map[string]any{
 			"success": true,
@@ -324,6 +380,10 @@ func handleQBankPost(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 			"success": false,
 			"error":   "缺少必要字段: subject, grade, tier, week",
 		})
+		return
+	}
+	if _, allowed := session.RequireSubjectAccess(r.Context(), w, sess, deps.DB, subject, "保存或修改该学科题库"); !allowed {
+		recordQBankAttemptBestEffort(r.Context(), deps, r, qbankattest.EventSaveRejected, scope, currentTeacher, operatorName, "跨学科保存题库被拦截: "+subject, nil)
 		return
 	}
 
@@ -714,6 +774,9 @@ func handleQBankDelete(w http.ResponseWriter, r *http.Request, deps QBankDeps) {
 			"success": false,
 			"error":   "缺少必要参数: subject, grade, tier, week",
 		})
+		return
+	}
+	if _, allowed := session.RequireSubjectAccess(r.Context(), w, sess, deps.DB, subject, "删除该学科题库"); !allowed {
 		return
 	}
 
