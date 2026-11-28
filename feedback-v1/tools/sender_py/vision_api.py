@@ -220,23 +220,33 @@ def identify_reply(chat_tail_img, target_id: str, target_name: str,
     return map_response(payload.get("data"))
 
 
-def calibrate_roi(base_image, server: str, token=None, timeout: int = 50) -> dict | None:
+def calibrate_roi(base_image, server: str, token=None, timeout: int = 50,
+                  retries: int = 1, error_out: list = None) -> dict | None:
     """调用服务端 Qwen3.8-Max 多模态模型自动框选企业微信窗口区域。
 
     成功返回相对比例 dict: {"title": tuple, "input": tuple, "chat": tuple, "reason": str}
-    识别失败、网络超时或校验未通过时返回 None（供调用方优雅回退至手动框选）。
+    识别失败、网络超时或校验未通过时返回 None（供调用方优雅回退至手动框选），
+    若传入 error_out 列表则将最近一次失败原因追加其中，便于日志诊断。
     """
+    def _record_err(msg: str):
+        if isinstance(error_out, list):
+            error_out.append(msg)
+
     if base_image is None:
+        _record_err("整窗截图为空")
         return None
     try:
         import io
+        import time
         from PIL import Image  # noqa: F401
         import requests
-    except Exception:
+    except Exception as e:
+        _record_err(f"缺少依赖: {e}")
         return None
 
     server = (server or "").strip().rstrip("/")
     if not server.startswith(("http://", "https://")):
+        _record_err("服务器地址无效")
         return None
     tok = load_token(token) or DEFAULT_SENDER_TOKEN
 
@@ -250,34 +260,65 @@ def calibrate_roi(base_image, server: str, token=None, timeout: int = 50) -> dic
             img_to_send = base_image.resize(new_size, Image.LANCZOS)
         img_to_send.save(buf, format="PNG")
         raw_bytes = buf.getvalue()
-
-        resp = requests.post(
-            server + CALIBRATE_ROI_PATH,
-            data={"token": tok},
-            files={"image": ("window.png", raw_bytes, "image/png")},
-            timeout=timeout,
-        )
-        if resp.status_code != 200:
-            return None
-        payload = resp.json()
-        if not isinstance(payload, dict) or not payload.get("success"):
-            return None
-        data = payload.get("data")
-        if not isinstance(data, dict):
-            return None
-        t = tuple(float(x) for x in data.get("title", []))
-        i = tuple(float(x) for x in data.get("input", []))
-        c = tuple(float(x) for x in data.get("chat", []))
-        if len(t) != 4 or len(i) != 4 or len(c) != 4:
-            return None
-        return {
-            "title": t,
-            "input": i,
-            "chat": c,
-            "reason": str(data.get("reason") or "Qwen3.8-Max 自动框选成功"),
-        }
-    except Exception:
+    except Exception as e:
+        _record_err(f"截图编码失败: {e}")
         return None
+
+    max_attempts = max(1, int(retries) + 1)
+    for attempt in range(max_attempts):
+        retryable = False
+        try:
+            resp = requests.post(
+                server + CALIBRATE_ROI_PATH,
+                data={"token": tok},
+                files={"image": ("window.png", raw_bytes, "image/png")},
+                timeout=timeout,
+            )
+            if resp.status_code != 200:
+                snippet = (resp.text or "").strip().replace("\n", " ")[:120]
+                _record_err(f"HTTP {resp.status_code}" + (f": {snippet}" if snippet else ""))
+                retryable = resp.status_code in (429, 500, 502, 503, 504)
+            else:
+                try:
+                    payload = resp.json()
+                except Exception:
+                    _record_err("服务端返回非 JSON")
+                    retryable = True
+                    payload = None
+                if isinstance(payload, dict):
+                    if not payload.get("success"):
+                        err_msg = str(payload.get("error") or payload.get("message") or "未返回 success")
+                        _record_err(err_msg)
+                        # 模型返回非 JSON / 上游限流等临时性错误可重试 1 次
+                        retryable = any(k in err_msg for k in ("非 JSON", "超时", "限流", "繁忙", "429", "502", "503", "504"))
+                    else:
+                        data = payload.get("data")
+                        if not isinstance(data, dict):
+                            _record_err("返回 data 为空")
+                        else:
+                            t = tuple(float(x) for x in data.get("title", []))
+                            i = tuple(float(x) for x in data.get("input", []))
+                            c = tuple(float(x) for x in data.get("chat", []))
+                            if len(t) == 4 and len(i) == 4 and len(c) == 4:
+                                return {
+                                    "title": t,
+                                    "input": i,
+                                    "chat": c,
+                                    "reason": str(data.get("reason") or "Qwen3.8-Max 自动框选成功"),
+                                }
+                            reason_msg = str(data.get("reason") or "未识别到完整的标题栏/输入框/聊天区坐标")
+                            _record_err(reason_msg)
+                elif payload is not None:
+                    _record_err("服务端返回格式异常")
+        except Exception as e:
+            _record_err(f"请求异常: {e}")
+            retryable = True
+
+        if retryable and attempt + 1 < max_attempts:
+            time.sleep(1.5)
+            continue
+        break
+    return None
 
 
 def detect_sidebar(window_img, server: str, token=None, target_id: str = "",

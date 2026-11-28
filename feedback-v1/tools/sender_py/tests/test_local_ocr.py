@@ -241,6 +241,59 @@ class LocalOcrTest(unittest.TestCase):
             self.assertIsNone(judgment)
             self.assertIn("network down", err)
 
+    def test_ensure_roi_worker_thread_uses_calibration_runner_and_never_creates_tk(self):
+        """后台线程中 AI 定位失败时，优先走主线程 calibration_runner；无调度器时禁止在子线程调用 run_calibration(None)。"""
+        import threading
+        from PIL import Image
+        from sender_py import sender
+
+        fake_img = Image.new("RGB", (986, 650), (255, 255, 255))
+        fake_roi = {
+            "title": (0.3, 0.0, 0.7, 0.1),
+            "input": (0.3, 0.7, 0.7, 0.3),
+            "chat": (0.3, 0.1, 0.7, 0.6),
+        }
+        logs = []
+        out = {}
+
+        def _worker_no_runner():
+            out["no_runner"] = sender.ensure_roi(
+                None, (0, 0, 986, 650), 1.0, server="https://feedback.wxjifang.cn",
+                token="t", log=logs.append, skip_sample_chat=True,
+            )
+
+        def _worker_with_runner():
+            runner_calls = []
+
+            def _runner(img, initial_roi=None, should_stop=None):
+                runner_calls.append((img.size, initial_roi))
+                return fake_roi
+
+            out["with_runner"] = sender.ensure_roi(
+                None, (0, 0, 986, 650), 1.0, server="https://feedback.wxjifang.cn",
+                token="t", log=logs.append, skip_sample_chat=True,
+                calibration_runner=_runner,
+            )
+            out["runner_calls"] = runner_calls
+
+        with patch("sender_py.capture.capture_wecom_window", return_value=fake_img), \
+             patch("sender_py.vision_api.calibrate_roi", return_value=None), \
+             patch("sender_py.roi_calibrator.run_calibration") as mock_tk_cal, \
+             patch("sender_py.sender.save_roi"):
+            t1 = threading.Thread(target=_worker_no_runner)
+            t1.start()
+            t1.join(timeout=5)
+            self.assertIsNone(out.get("no_runner"))
+            mock_tk_cal.assert_not_called()
+            self.assertTrue(any("跨线程死锁" in line for line in logs))
+
+            t2 = threading.Thread(target=_worker_with_runner)
+            t2.start()
+            t2.join(timeout=5)
+            self.assertEqual(out.get("with_runner"), fake_roi)
+            self.assertEqual(len(out.get("runner_calls", [])), 1)
+            mock_tk_cal.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

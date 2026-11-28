@@ -1,11 +1,14 @@
 name: Build sender_py (Windows)
 
-# 触发机制（分层构建，杜绝重复耗时打包）：
+# 触发机制（分层并行构建 + 两阶段极速发布 Release）：
 #   1) 推送 sender_py 改动到 main / feat/** 或提交 PR 时：
-#      仅在 Linux 运行纯函数单测与 compileall（~25 秒快速校验，默认跳过 40 分钟的 Windows 打包）；
+#      仅在 Linux 运行纯函数单测与 compileall（~25 秒快速校验，默认跳过 Windows 打包）；
 #      若某次提交确需提前在分支上打包验证，在 commit message 中包含 [build-windows] 即可放行。
 #   2) 推送 sender-* tag 时（或手动在 Actions 页面触发 workflow_dispatch）：
-#      全量执行 Windows 打包（普通压缩包 + Nuitka 单文件版），并直接发布到 GitHub Release（仅需跑一次）。
+#      - 阶段一（~4 分钟极速出包）：PyInstaller 编译【单文件 EXE 版】与【绿色压缩包版】，
+#        通过冒烟校验后立即发布 GitHub Release，第一时间可供下载应急；
+#      - 阶段二（与阶段一并行编译，完成后自动追加）：Nuitka 编译【C++ 原生机器码单文件版】，
+#        通过冒烟校验后自动追加上传至同一个 GitHub Release 并更新说明。
 # 产物未签名，仅供内测/验证；正式分发前请做代码签名与杀软回归。
 
 on:
@@ -61,12 +64,15 @@ jobs:
         working-directory: feedback-v1/tools
         run: python -m unittest discover -s sender_py/tests -v
 
-  build-windows:
-    name: Windows package
+  # =========================================================================
+  # 阶段一：PyInstaller 快速打包（单文件 EXE + 绿色文件夹 ZIP），完成后立即发 Release
+  # =========================================================================
+  build-windows-pyinstaller:
+    name: Windows PyInstaller (Fast Release)
     needs: test
     if: startsWith(github.ref, 'refs/tags/sender-') || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[build-windows]')
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
     permissions:
       contents: write
     env:
@@ -84,14 +90,11 @@ jobs:
           cache: pip
           cache-dependency-path: feedback-v1/tools/sender_py/requirements.txt
 
-      - name: Setup MSVC developer environment
-        uses: ilammy/msvc-dev-cmd@v1
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r feedback-v1/tools/sender_py/requirements.txt
-          python -m pip install pyinstaller nuitka zstandard
+          python -m pip install pyinstaller
 
       - name: Inject sender token
         if: github.event_name != 'pull_request'
@@ -125,53 +128,56 @@ jobs:
           print("embedded token verified")
           PY
 
-      - name: Compile Python
-        run: python -m compileall -q feedback-v1/tools/sender_py
-
-      - name: Import smoke test
-        env:
-          PYTHONPATH: ${{ github.workspace }}/feedback-v1/tools
-        run: python -c "import sender_py.sender, sender_py.window_utils; print('imports OK')"
-
-      - name: Web edition smoke test
-        env:
-          PYTHONPATH: ${{ github.workspace }}/feedback-v1/tools
-        run: python -m sender_py.web_main --smoke-test
-
-      - name: Legacy Tkinter smoke test
+      - name: Compile Python & smoke tests
         env:
           PYTHONPATH: ${{ github.workspace }}/feedback-v1/tools
         run: |
-          python - <<'PY'
-          import tkinter as tk
-          from sender_py.sender import SenderApp
+          python -m compileall -q feedback-v1/tools/sender_py
+          python -c "import sender_py.sender, sender_py.window_utils; print('imports OK')"
+          python -m sender_py.web_main --smoke-test
 
-          root = tk.Tk()
-          root.withdraw()
-          SenderApp(
-              root,
-              [{"sid": "90001", "sname": "测试", "studentName": "90001测试",
-                "message": "测试话术"}],
-              "https://feedback.wxjifang.cn",
-              "测试 [第 1 周]",
-          )
-          root.update_idletasks()
-          root.update()
-          root.destroy()
-          print("Tkinter smoke OK (legacy)")
-          PY
+      - name: Prepare multisize favicon
+        run: |
+          mkdir -p dist dist_dir dist_onefile
+          python -c "from PIL import Image; im=Image.open('feedback-v1/favicon.ico'); img=im.copy(); im.close(); img.save('feedback-v1/favicon.ico', format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])" || true
 
-      # ---- 普通压缩包版 (--onedir 文件夹模式，解压即用，防360拦截) ----
+      # 1. PyInstaller 单文件 EXE 版（极速出包，开箱即用）
+      - name: Build Windows Web Edition (--onefile, PyInstaller)
+        env:
+          PYTHONPATH: ${{ github.workspace }}/feedback-v1/tools
+        run: |
+          python -m PyInstaller --noconfirm --clean --noupx --windowed --onefile \
+            --distpath dist_onefile \
+            --name "JiFangFeedbackWeb" \
+            --icon feedback-v1/favicon.ico \
+            --version-file feedback-v1/tools/sender_py/version_info.txt \
+            --add-data "feedback-v1/favicon.ico;." \
+            --add-data "feedback-v1/favicon.ico;sender_py" \
+            --add-data "feedback-v1/tools/example.png;." \
+            --add-data "feedback-v1/tools/example.png;sender_py" \
+            --add-data "feedback-v1/tools/sender_py/web_ui.html;sender_py" \
+            --add-data "feedback-v1/tools/sender_py/web_ui.html;." \
+            --add-data "feedback-v1/js/libs/xlsx.full.min.js;sender_py" \
+            --add-data "feedback-v1/js/libs/xlsx.full.min.js;." \
+            --paths feedback-v1/tools \
+            --paths feedback-v1/tools/sender_py \
+            --collect-submodules sender_py \
+            --exclude-module sender_py.tests \
+            --exclude-module unittest \
+            --exclude-module test \
+            --hidden-import sender_py.sender_token \
+            --hidden-import winocr \
+            --collect-all rapidocr_onnxruntime \
+            --collect-all winrt \
+            feedback-v1/tools/sender_py/web_main.py
+          cp "dist_onefile/JiFangFeedbackWeb.exe" "dist/JiFangFeedbackWeb-pyinstaller-onefile-windows-x64.exe"
+          cp "dist_onefile/JiFangFeedbackWeb.exe" "dist/极方每周反馈程序-Web版-PyInstaller单文件版.exe"
+
+      # 2. PyInstaller 绿色文件夹压缩包版 (--onedir)
       - name: Build Windows Web Edition (--onedir, PyInstaller)
         env:
           PYTHONPATH: ${{ github.workspace }}/feedback-v1/tools
         run: |
-          mkdir -p dist dist_dir
-
-          # 确保 ICO 包含 16~256px 多尺寸高清位图
-          python -c "from PIL import Image; im=Image.open('feedback-v1/favicon.ico'); img=im.copy(); im.close(); img.save('feedback-v1/favicon.ico', format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])" || true
-
-          # 极方每周反馈程序 Web 文件夹版（普通压缩包版）
           python -m PyInstaller --noconfirm --clean --noupx --windowed --onedir \
             --distpath dist_dir \
             --name "JiFangFeedbackWeb" \
@@ -183,6 +189,8 @@ jobs:
             --add-data "feedback-v1/tools/example.png;sender_py" \
             --add-data "feedback-v1/tools/sender_py/web_ui.html;sender_py" \
             --add-data "feedback-v1/tools/sender_py/web_ui.html;." \
+            --add-data "feedback-v1/js/libs/xlsx.full.min.js;sender_py" \
+            --add-data "feedback-v1/js/libs/xlsx.full.min.js;." \
             --paths feedback-v1/tools \
             --paths feedback-v1/tools/sender_py \
             --collect-submodules sender_py \
@@ -197,59 +205,154 @@ jobs:
           mv dist_dir/JiFangFeedbackWeb/JiFangFeedbackWeb.exe "dist_dir/JiFangFeedbackWeb/极方每周反馈程序-Web版.exe"
           mv dist_dir/JiFangFeedbackWeb "dist_dir/极方每周反馈程序-Web版-绿色文件夹版"
           powershell -NoProfile -Command "Compress-Archive -Path 'dist_dir/极方每周反馈程序-Web版-绿色文件夹版' -DestinationPath 'dist/极方每周反馈程序-Web版-绿色文件夹版.zip' -Force"
+          cp "dist/极方每周反馈程序-Web版-绿色文件夹版.zip" "dist/JiFangFeedbackWeb-onedir-windows-x64.zip"
 
-      # ---- Nuitka 原生机器码单文件版 (--onefile 独立 exe，彻底免疫杀软误报) ----
-      - name: Build Windows Web Edition (--onefile, Nuitka)
-        env:
-          PYTHONPATH: ${{ github.workspace }}/feedback-v1/tools
+      - name: Frozen PyInstaller smoke test
         run: |
-          python feedback-v1/tools/sender_py/build_nuitka.py onefile --skip-deps
-          cp "feedback-v1/tools/sender_py/dist_nuitka_onefile/极方每周反馈程序-Web版.exe" "dist/极方每周反馈程序-Web版-Nuitka单文件版.exe"
-          cp "feedback-v1/tools/sender_py/dist_nuitka_onefile/JiFangFeedbackWeb.exe" "dist/JiFangFeedbackWeb-nuitka-onefile-windows-x64.exe"
-
-      - name: Verify build output
-        run: |
-          test -f "dist/极方每周反馈程序-Web版-绿色文件夹版.zip"
-          test -f "dist/极方每周反馈程序-Web版-Nuitka单文件版.exe"
-          test -f "dist/JiFangFeedbackWeb-nuitka-onefile-windows-x64.exe"
-          ls -lh dist/
-
-      - name: Frozen exe smoke test
-        run: |
+          echo "Testing PyInstaller onefile executable..."
+          python -c "import subprocess, sys; p = subprocess.run(['dist/JiFangFeedbackWeb-pyinstaller-onefile-windows-x64.exe', '--smoke-test'], timeout=120); sys.exit(p.returncode)"
           echo "Testing PyInstaller onedir package..."
           python -c "import subprocess, sys; p = subprocess.run(['dist_dir/极方每周反馈程序-Web版-绿色文件夹版/极方每周反馈程序-Web版.exe', '--smoke-test'], timeout=120); sys.exit(p.returncode)"
-          echo "Testing Nuitka onefile executable..."
-          python -c "import subprocess, sys; p = subprocess.run(['dist/JiFangFeedbackWeb-nuitka-onefile-windows-x64.exe', '--smoke-test'], timeout=120); sys.exit(p.returncode)"
+          ls -lh dist/
 
-      - name: Prepare ASCII release assets (tags only)
-        if: startsWith(github.ref, 'refs/tags/sender-')
-        run: |
-          cp "dist/极方每周反馈程序-Web版-绿色文件夹版.zip" "dist/JiFangFeedbackWeb-onedir-windows-x64.zip"
-          test -f "dist/JiFangFeedbackWeb-nuitka-onefile-windows-x64.exe"
-
-      - name: Publish GitHub Release (tags only)
+      - name: Publish GitHub Release - Stage 1 (PyInstaller Fast Build, tags only)
         if: startsWith(github.ref, 'refs/tags/sender-')
         uses: softprops/action-gh-release@v3
         with:
           name: 极方每周反馈程序 ${{ github.ref_name }}
           files: |
+            dist/JiFangFeedbackWeb-pyinstaller-onefile-windows-x64.exe
             dist/JiFangFeedbackWeb-onedir-windows-x64.zip
-            dist/JiFangFeedbackWeb-nuitka-onefile-windows-x64.exe
           fail_on_unmatched_files: true
           body: |
             ### 附件说明 / Release Assets:
-            - **`JiFangFeedbackWeb-nuitka-onefile-windows-x64.exe`**：Nuitka 原生 C++ 机器码单文件版（独立 exe 便携运行，彻底免疫杀软误报，推荐优先使用）
+            - **`JiFangFeedbackWeb-pyinstaller-onefile-windows-x64.exe`**：PyInstaller 单文件版（快速编译已就绪，双击即用）
             - **`JiFangFeedbackWeb-onedir-windows-x64.zip`**：普通绿色解压文件夹版（解压后运行内含的 `极方每周反馈程序-Web版.exe`）
+            - ⏳ **`JiFangFeedbackWeb-nuitka-onefile-windows-x64.exe`**：Nuitka 原生 C++ 机器码单文件版正在后台编译中，完成后将自动追加到此 Release。
 
-      - name: Upload Windows artifact
+      - name: Upload PyInstaller Windows artifact (non-tag runs)
         if: ${{ !startsWith(github.ref, 'refs/tags/sender-') }}
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: JiFangFeedbackWeb-windows-x64
+          name: JiFangFeedbackWeb-pyinstaller-windows-x64
           path: |
+            dist/JiFangFeedbackWeb-pyinstaller-onefile-windows-x64.exe
             dist/极方每周反馈程序-Web版-绿色文件夹版.zip
-            dist/极方每周反馈程序-Web版-Nuitka单文件版.exe
-            dist/JiFangFeedbackWeb-nuitka-onefile-windows-x64.exe
           retention-days: 7
           if-no-files-found: error
+
+  # =========================================================================
+  # 阶段二：Nuitka 原生 C++ 单文件编译（与阶段一并行执行，编完自动追加发布 Release）
+  # =========================================================================
+  build-windows-nuitka:
+    name: Windows Nuitka C++ (Native Onefile)
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/sender-') || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[build-windows]')
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: 'utf-8'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: feedback-v1/tools/sender_py/requirements.txt
+
+      - name: Setup MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r feedback-v1/tools/sender_py/requirements.txt
+          python -m pip install nuitka zstandard
+
+      - name: Inject sender token
+        if: github.event_name != 'pull_request'
+        env:
+          SENDER_API_TOKEN: ${{ secrets.SENDER_API_TOKEN }}
+        run: |
+          if [ -z "$SENDER_API_TOKEN" ]; then
+            echo "缺少 GitHub Secret SENDER_API_TOKEN，无法生成零配置发送端"
+            exit 1
+          fi
+          python - <<'PY'
+          import os
+          token = os.environ["SENDER_API_TOKEN"]
+          path = "feedback-v1/tools/sender_py/sender_token.py"
+          with open(path, "w", encoding="utf-8") as f:
+              f.write("# generated by CI; do not commit\n")
+              f.write("SENDER_TOKEN = " + repr(token) + "\n")
+          print("sender_token.py generated")
+          PY
+
+      - name: Build Windows Web Edition (--onefile, Nuitka)
+        env:
+          PYTHONPATH: ${{ github.workspace }}/feedback-v1/tools
+        run: |
+          mkdir -p dist
+          python feedback-v1/tools/sender_py/build_nuitka.py onefile --skip-deps
+          cp "feedback-v1/tools/sender_py/dist_nuitka_onefile/极方每周反馈程序-Web版.exe" "dist/极方每周反馈程序-Web版-Nuitka单文件版.exe"
+          cp "feedback-v1/tools/sender_py/dist_nuitka_onefile/JiFangFeedbackWeb.exe" "dist/JiFangFeedbackWeb-nuitka-onefile-windows-x64.exe"
+          ls -lh dist/
+
+      - name: Frozen Nuitka smoke test
+        run: |
+          echo "Testing Nuitka onefile executable..."
+          python -c "import subprocess, sys; p = subprocess.run(['dist/JiFangFeedbackWeb-nuitka-onefile-windows-x64.exe', '--smoke-test'], timeout=120); sys.exit(p.returncode)"
+
+      - name: Upload Nuitka artifact for release staging
+        uses: actions/upload-artifact@v7
+        with:
+          name: JiFangFeedbackWeb-nuitka-windows-x64
+          path: |
+            dist/JiFangFeedbackWeb-nuitka-onefile-windows-x64.exe
+            dist/极方每周反馈程序-Web版-Nuitka单文件版.exe
+          retention-days: 7
+          if-no-files-found: error
+
+  # =========================================================================
+  # 阶段二追加发布：确保在阶段一 Release 创建后再追加 Nuitka C++ 单文件版，零竞态冲突
+  # =========================================================================
+  publish-nuitka-release:
+    name: Append Nuitka C++ to GitHub Release
+    needs:
+      - build-windows-pyinstaller
+      - build-windows-nuitka
+    if: startsWith(github.ref, 'refs/tags/sender-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download Nuitka artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: JiFangFeedbackWeb-nuitka-windows-x64
+          path: dist
+
+      - name: Verify Nuitka asset
+        run: |
+          test -f "dist/JiFangFeedbackWeb-nuitka-onefile-windows-x64.exe"
+          ls -lh dist/
+
+      - name: Publish GitHub Release - Stage 2 (Append Nuitka C++ Native Build)
+        uses: softprops/action-gh-release@v3
+        with:
+          name: 极方每周反馈程序 ${{ github.ref_name }}
+          files: |
+            dist/JiFangFeedbackWeb-nuitka-onefile-windows-x64.exe
+          fail_on_unmatched_files: true
+          body: |
+            ### 附件说明 / Release Assets:
+            - **`JiFangFeedbackWeb-nuitka-onefile-windows-x64.exe`**：Nuitka 原生 C++ 机器码单文件版（独立 exe 便携运行，彻底免疫杀软误报，**推荐优先使用**）
+            - **`JiFangFeedbackWeb-pyinstaller-onefile-windows-x64.exe`**：PyInstaller 单文件版（快速编译版，双击即用）
+            - **`JiFangFeedbackWeb-onedir-windows-x64.zip`**：普通绿色解压文件夹版（解压后运行内含的 `极方每周反馈程序-Web版.exe`）

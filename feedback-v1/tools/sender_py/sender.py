@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "2.1.1"
+APP_VERSION = "2.1.2"
 
 
 def asset_path(filename: str) -> str:
@@ -602,7 +602,8 @@ def _store_session_roi(session_cache, sig_key: str, roi: dict):
 
 def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
                token=None, log=print, force: bool = False, sample_name: str = None,
-               session_cache: dict = None, skip_sample_chat: bool = False):
+               session_cache: dict = None, skip_sample_chat: bool = False,
+               calibration_runner=None, should_stop=None):
     """获取当前窗口 ROI：已关闭本地持久化缓存命中，仅在当次发送会话缓存(session_cache)内按窗口签名复用；
     未命中或签名变化时立即重校准（优先 AI 自动框选，失败优雅回退手动校准）。返回 rel roi 或 None（放弃）。
     """
@@ -694,6 +695,7 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
     except Exception:
         auto_cal_enabled = True
 
+    ai_err_details = []
     if auto_cal_enabled:
         try:
             try:
@@ -703,8 +705,18 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
             log("正在使用云端多模态模型自动识别企微窗口区域...")
             if loading:
                 loading.set_status("正在使用 AI 智能分析视野区域...", "正在使用多模态大模型自动框选")
-            ai_roi = calibrate_roi(img, server=server or "https://feedback.wxjifang.cn", token=token)
+            try:
+                ai_roi = calibrate_roi(
+                    img,
+                    server=server or "https://feedback.wxjifang.cn",
+                    token=token,
+                    error_out=ai_err_details,
+                )
+            except TypeError:
+                # 兼容测试中未声明 error_out 参数的 mock 函数
+                ai_roi = calibrate_roi(img, server=server or "https://feedback.wxjifang.cn", token=token)
         except Exception as exc:
+            ai_err_details.append(str(exc))
             log(f"AI 自动识别网络异常：{exc}")
     else:
         log("云控策略已关闭 AI 自动窗口校准，直接弹出手动框选窗口...")
@@ -721,13 +733,23 @@ def ensure_roi(parent, rect, scale, config_path: str = None, server: str = None,
         else:
             log("AI 识别坐标超出有效范围，正在回退至手动校准...")
     else:
-        log("AI 自动定位未通过（可能未点进具体聊天），正在弹出手动校准窗口...")
+        reason_hint = f"原因: {ai_err_details[-1]}" if ai_err_details else "可能未点进具体聊天"
+        log(f"AI 自动定位未通过（{reason_hint}），正在弹出手动校准窗口...")
 
     if loading:
         loading.close()
 
-    # 2. 优雅回退到手动框选（弹出居中大窗口，若有 AI 坐标则自动预填）
-    roi = run_calibration(parent, img, initial_roi=ai_roi)
+    if should_stop is not None and should_stop():
+        return None
+
+    # 2. 优雅回退到手动框选（Web 版通过 calibration_runner 调度至主 Tkinter 线程，杜绝子线程建 tk.Tk() 死锁）
+    if callable(calibration_runner):
+        roi = calibration_runner(img, initial_roi=ai_roi, should_stop=should_stop)
+    elif parent is None and threading.current_thread() is not threading.main_thread():
+        log("⚠ 当前在后台线程运行且无主线程界面调度器，为防止 Tkinter 跨线程死锁已安全跳过弹窗；请先在企微打开聊天窗口后重试。")
+        return None
+    else:
+        roi = run_calibration(parent, img, initial_roi=ai_roi)
     if roi is None:
         return None
     save_roi(config_path, key, roi["title"], roi["input"], roi["chat"])
@@ -1108,7 +1130,7 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
                  verify_mode: str = "auto", search_wait: float = 1.5, enter_wait: float = 1.2,
                  enable_reply_analysis: bool = True, snapshot_policy: str = None,
                  check_sidebar: bool = False, roi_cache: dict = None,
-                 send_mode: str = "both") -> dict:
+                 send_mode: str = "both", calibration_runner=None) -> dict:
     """单个学生全流程：最多 3 候选机械 1→2→3。返回 {result, notes, ...}（notes 供待回名单）。"""
     try:
         from sender_py import window_utils as wu
@@ -1176,6 +1198,7 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
         roi = ensure_roi(
             parent, rect, scale, config_path, server=server, token=token,
             log=log, sample_name=name, session_cache=eff_roi_cache,
+            calibration_runner=calibration_runner, should_stop=should_stop,
         )
         if roi is None:
             log("⏹ 视野校准已放弃，安全中止后续发送任务。")
@@ -1293,6 +1316,7 @@ def send_student(item: dict, server: str, token=None, config_path: str = None,
                     new_roi = ensure_roi(
                         parent, rect, post_scale, config_path, server=server, token=token,
                         log=log, sample_name=name, session_cache=eff_roi_cache, skip_sample_chat=True,
+                        calibration_runner=calibration_runner, should_stop=should_stop,
                     )
                     if new_roi is None:
                         log("⏹ 视野校准已放弃，安全中止后续发送任务。")

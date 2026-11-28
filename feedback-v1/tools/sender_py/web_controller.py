@@ -957,6 +957,7 @@ class WebController:
                         check_sidebar=(not sidebar_checked),
                         roi_cache=roi_cache,
                         send_mode=eff_send_mode,
+                        calibration_runner=getattr(self, "native_roi_calibrator", None),
                     )
                 except Exception as exc:
                     res = {"result": "error", "reason": f"异常: {exc}", "notes": []}
@@ -1210,7 +1211,11 @@ class WebController:
                 return {"success": False, "message": msg}
 
             self.emit("  └ 正在通过云端多模态大模型自动智能框选...")
-            ai_roi = calibrate_roi(img, server=self.server, token=self.token)
+            ai_err_details = []
+            try:
+                ai_roi = calibrate_roi(img, server=self.server, token=self.token, error_out=ai_err_details)
+            except TypeError:
+                ai_roi = calibrate_roi(img, server=self.server, token=self.token)
 
             if ai_roi and isinstance(ai_roi, dict) and all(k in ai_roi for k in ("title", "input", "chat")):
                 if all(validate_rel(ai_roi[k]) for k in ("title", "input", "chat")):
@@ -1220,7 +1225,8 @@ class WebController:
                     self.emit(msg)
                     return {"success": True, "message": msg}
 
-            return {"success": False, "message": "AI 自动定位未通过（可能未点进具体聊天），建议打开聊天界面后重试。"}
+            detail = f"（{ai_err_details[-1]}）" if ai_err_details else "（可能未点进具体聊天）"
+            return {"success": False, "message": f"AI 自动定位未通过{detail}，建议打开聊天界面后重试。"}
         except Exception as exc:
             err = f"视野校准异常：{exc}"
             self.emit(f"✗ {err}")

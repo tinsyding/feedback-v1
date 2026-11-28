@@ -701,8 +701,45 @@ class WebCompanionWindow:
         hint_label.pack(side="bottom", fill="x")
 
     def _setup_hooks(self):
-        # 将原生文件选择器回调挂载到控制器上，供 Web 界面点击「选择本地文件」时线程安全调度
+        # 将原生文件选择器与手动视野校准弹窗回调挂载到控制器上，供 Web 后端线程安全调度至主 Tkinter 线程
         self.controller.native_file_picker = self.request_file_picker
+        self.controller.native_roi_calibrator = self.request_roi_calibration
+
+    def request_roi_calibration(self, base_image, initial_roi=None, should_stop=None):
+        """线程安全地在主 Tkinter 线程弹出手动视野校准窗口（Toplevel），彻底避免子线程建 tk.Tk() 死锁。"""
+        done_evt = threading.Event()
+        holder = {"roi": None}
+
+        def _open_on_main():
+            try:
+                try:
+                    from sender_py.roi_calibrator import run_calibration
+                except ModuleNotFoundError:
+                    from roi_calibrator import run_calibration
+                if should_stop is not None and should_stop():
+                    holder["roi"] = None
+                    return
+                holder["roi"] = run_calibration(self.root, base_image, initial_roi=initial_roi)
+            except Exception as exc:
+                try:
+                    self.controller.emit(f"打开手动校准窗口失败：{exc}", level="WARNING")
+                except Exception:
+                    pass
+                holder["roi"] = None
+            finally:
+                done_evt.set()
+
+        try:
+            self.root.after(0, _open_on_main)
+        except Exception:
+            return None
+
+        while not done_evt.wait(timeout=0.15):
+            if should_stop is not None and should_stop():
+                # 停止发送时继续等待主线程弹窗回调自然收尾，或最多等 0.5 秒后退出阻塞
+                done_evt.wait(timeout=0.5)
+                break
+        return holder["roi"]
 
     def open_browser(self):
         """在系统默认浏览器打开 Web 控制面板。"""

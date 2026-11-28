@@ -76,7 +76,7 @@ def safe_print(*args, **kwargs):
 
 
 APP_NAME = "极方每周反馈程序 (Web版)"
-APP_VERSION = "2.1.1"
+APP_VERSION = "2.1.2"
 
 
 def find_free_port(start: int = 8765, max_attempts: int = 100) -> int:
