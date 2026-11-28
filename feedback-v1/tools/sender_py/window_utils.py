@@ -649,7 +649,11 @@ class GlobalEscWatcher:
         if self._hook:
             try:
                 import ctypes
-                ctypes.windll.user32.UnhookWindowsHookEx(self._hook)
+                from ctypes import wintypes
+                user32 = ctypes.windll.user32
+                user32.UnhookWindowsHookEx.argtypes = [wintypes.HHOOK]
+                user32.UnhookWindowsHookEx.restype = wintypes.BOOL
+                user32.UnhookWindowsHookEx(self._hook)
             except Exception:
                 pass
             self._hook = None
@@ -668,10 +672,21 @@ class GlobalEscWatcher:
             user32 = ctypes.windll.user32
             kernel32 = ctypes.windll.kernel32
 
+            # 显式声明 64 位安全的 Win32 Hook 函数签名，防止 64 位句柄/指针被截断为 32 位 int 导致崩溃
+            LRESULT = ctypes.c_ssize_t
+            HOOKPROC = ctypes.WINFUNCTYPE(LRESULT, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
+
+            kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+            kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+            user32.SetWindowsHookExW.argtypes = [ctypes.c_int, HOOKPROC, wintypes.HINSTANCE, wintypes.DWORD]
+            user32.SetWindowsHookExW.restype = wintypes.HHOOK
+            user32.CallNextHookEx.argtypes = [wintypes.HHOOK, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM]
+            user32.CallNextHookEx.restype = LRESULT
+            user32.UnhookWindowsHookEx.argtypes = [wintypes.HHOOK]
+            user32.UnhookWindowsHookEx.restype = wintypes.BOOL
+
             # 清掉启动前残留的 ESC 击键状态
             user32.GetAsyncKeyState(0x1B)
-
-            HOOKPROC = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
 
             def _py_hook_proc(nCode, wParam, lParam):
                 if nCode >= 0 and wParam in (0x0100, 0x0104):  # WM_KEYDOWN, WM_SYSKEYDOWN
@@ -709,7 +724,11 @@ class GlobalEscWatcher:
             if self._hook:
                 try:
                     import ctypes
-                    ctypes.windll.user32.UnhookWindowsHookEx(self._hook)
+                    from ctypes import wintypes
+                    user32 = ctypes.windll.user32
+                    user32.UnhookWindowsHookEx.argtypes = [wintypes.HHOOK]
+                    user32.UnhookWindowsHookEx.restype = wintypes.BOOL
+                    user32.UnhookWindowsHookEx(self._hook)
                 except Exception:
                     pass
                 self._hook = None

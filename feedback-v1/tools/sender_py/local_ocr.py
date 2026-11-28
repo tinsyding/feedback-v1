@@ -228,17 +228,111 @@ def _preprocess_title_img(img):
 
 
 _RAPID_OCR_ENGINE = None
+_RAPID_OCR_PROBE_DONE = False
+_RAPID_OCR_PROBE_OK = False
+
+
+def reset_rapidocr_state_for_testing():
+    """供单元测试重置 RapidOCR 单例与探活缓存状态。"""
+    global _RAPID_OCR_ENGINE, _RAPID_OCR_PROBE_DONE, _RAPID_OCR_PROBE_OK
+    _RAPID_OCR_ENGINE = None
+    _RAPID_OCR_PROBE_DONE = False
+    _RAPID_OCR_PROBE_OK = False
+
+
+def _log_local_ocr_warning(msg: str, exc_info=None):
+    try:
+        try:
+            from sender_py.file_logger import write_log
+        except ModuleNotFoundError:
+            from file_logger import write_log
+        write_log(msg, level="WARNING", exc_info=exc_info)
+    except Exception:
+        pass
+
+
+def _is_frozen_binary() -> bool:
+    """判断当前是否运行在 Nuitka / PyInstaller 打包后的独立可执行文件中。"""
+    if getattr(sys, "frozen", False) or "__compiled__" in globals():
+        return True
+    exe_name = os.path.basename(sys.executable or "").lower()
+    return not (exe_name.startswith("python") or exe_name.startswith("pypy"))
+
+
+def _probe_rapidocr_safe(timeout: float = 15.0) -> tuple:
+    """在独立子进程中试加载并推理一次 RapidOCR，隔离 ONNXRuntime 原生层崩溃。
+
+    防止老旧 CPU (不支持 AVX/AVX2，触发 0xC000001D)、缺失 VC++ 运行库或杀软拦截
+    导致主进程瞬间闪退。返回 (ok: bool, detail: str)。
+    """
+    if os.environ.get("SENDER_SKIP_RAPIDOCR_PROBE") == "1":
+        return (True, "skipped_by_env")
+    if os.environ.get("SENDER_DISABLE_RAPIDOCR") == "1":
+        return (False, "disabled_by_env")
+
+    import subprocess
+
+    if _is_frozen_binary():
+        cmd = [sys.executable, "--probe-rapidocr"]
+    else:
+        probe_code = (
+            "from PIL import Image; "
+            "from rapidocr_onnxruntime import RapidOCR; "
+            "e = RapidOCR(); "
+            "e(Image.new('RGB', (120, 48), (255, 255, 255))); "
+            "print('RAPIDOCR_PROBE_OK')"
+        )
+        cmd = [sys.executable, "-c", probe_code]
+
+    kwargs = {
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "timeout": timeout,
+        "check": False,
+    }
+    if sys.platform == "win32":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+    try:
+        proc = subprocess.run(cmd, **kwargs)
+        if proc.returncode == 0:
+            return (True, "ok")
+        rc = proc.returncode
+        hex_code = f"0x{(rc & 0xFFFFFFFF):08X}" if rc is not None else "unknown"
+        stderr_tail = (proc.stderr or b"").decode("utf-8", errors="replace").strip()[-300:]
+        detail = f"exit_code={rc} ({hex_code})"
+        if stderr_tail:
+            detail += f", stderr={stderr_tail}"
+        return (False, detail)
+    except subprocess.TimeoutExpired:
+        return (False, f"timeout({timeout}s)")
+    except Exception as exc:
+        return (False, f"probe_error={exc}")
 
 
 def _get_rapidocr_engine():
-    """获取全局单例 RapidOCR 引擎（避免每次识别重复加载 ONNX 模型与字典）。"""
-    global _RAPID_OCR_ENGINE
+    """获取全局单例 RapidOCR 引擎（首次加载前先做子进程原生崩溃探活，失败则自动熔断禁用）。"""
+    global _RAPID_OCR_ENGINE, _RAPID_OCR_PROBE_DONE, _RAPID_OCR_PROBE_OK
     if _RAPID_OCR_ENGINE is None:
+        if not _RAPID_OCR_PROBE_DONE:
+            _RAPID_OCR_PROBE_DONE = True
+            ok, detail = _probe_rapidocr_safe()
+            _RAPID_OCR_PROBE_OK = ok
+            if not ok:
+                _RAPID_OCR_ENGINE = False
+                _log_local_ocr_warning(
+                    f"[本地OCR] RapidOCR 安全探活失败 ({detail})，已自动熔断禁用 RapidOCR 以防止主进程闪退"
+                )
+                return None
+        if not _RAPID_OCR_PROBE_OK:
+            _RAPID_OCR_ENGINE = False
+            return None
         try:
             from rapidocr_onnxruntime import RapidOCR
             _RAPID_OCR_ENGINE = RapidOCR()
-        except Exception:
+        except Exception as exc:
             _RAPID_OCR_ENGINE = False
+            _log_local_ocr_warning(f"[本地OCR] RapidOCR 初始化异常，已降级禁用: {exc}", exc_info=exc)
     return _RAPID_OCR_ENGINE if _RAPID_OCR_ENGINE is not False else None
 
 

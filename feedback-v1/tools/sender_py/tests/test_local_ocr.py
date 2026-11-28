@@ -146,6 +146,101 @@ class LocalOcrTest(unittest.TestCase):
             self.assertIn("winocr调用异常", args[0])
             self.assertEqual(kwargs.get("level"), "WARNING")
 
+    def test_rapidocr_probe_circuit_breaker_on_native_crash(self):
+        """模拟子进程探活因原生指令集/DLL 崩溃返回 0xC000001D 时，自动熔断禁用 RapidOCR 并不再重试。"""
+        from sender_py.local_ocr import (
+            _get_rapidocr_engine,
+            _probe_rapidocr_safe,
+            reset_rapidocr_state_for_testing,
+        )
+
+        reset_rapidocr_state_for_testing()
+        self.addCleanup(reset_rapidocr_state_for_testing)
+
+        class _FakeProc:
+            returncode = -1073741795  # 0xC000001D STATUS_ILLEGAL_INSTRUCTION
+            stderr = b""
+
+        with patch("subprocess.run", return_value=_FakeProc()) as mock_run, \
+             patch("sender_py.file_logger.write_log") as mock_write_log:
+            ok, detail = _probe_rapidocr_safe()
+            self.assertFalse(ok)
+            self.assertIn("0xC000001D", detail)
+
+            # 首次调用 _get_rapidocr_engine 触发探活并熔断
+            eng1 = _get_rapidocr_engine()
+            self.assertIsNone(eng1)
+            mock_write_log.assert_called()
+            self.assertIn("已自动熔断禁用 RapidOCR", mock_write_log.call_args[0][0])
+
+            # 再次调用 _get_rapidocr_engine 应直接命中熔断缓存，不再拉起子进程
+            call_count_after_first = mock_run.call_count
+            eng2 = _get_rapidocr_engine()
+            self.assertIsNone(eng2)
+            self.assertEqual(mock_run.call_count, call_count_after_first)
+
+    def test_rapidocr_probe_uses_cli_flag_when_frozen(self):
+        """打包为独立 exe 时，子进程探活必须走 --probe-rapidocr 而非 python -c。"""
+        from sender_py.local_ocr import _probe_rapidocr_safe
+
+        class _OkProc:
+            returncode = 0
+            stderr = b""
+
+        with patch("sender_py.local_ocr._is_frozen_binary", return_value=True), \
+             patch("subprocess.run", return_value=_OkProc()) as mock_run:
+            ok, _ = _probe_rapidocr_safe()
+            self.assertTrue(ok)
+            cmd = mock_run.call_args[0][0]
+            self.assertEqual(cmd[-1], "--probe-rapidocr")
+
+    def test_judge_candidate_api_mode_skips_local_ocr(self):
+        """verify_mode='api' 在 fast_title_only=True 时必须真正跳过本地 OCR，直接调用云端 API。"""
+        from PIL import Image
+        from sender_py import sender
+
+        fake_img = Image.new("RGB", (986, 650), (255, 255, 255))
+        fake_roi = {
+            "title": (0.3, 0.0, 0.7, 0.1),
+            "chat": (0.3, 0.1, 0.7, 0.6),
+            "input": (0.3, 0.7, 0.7, 0.3),
+        }
+        api_judgment = {
+            "matched": True,
+            "is_group": False,
+            "detected_title": "35404朱旻涵",
+            "reason": "云端匹配",
+        }
+
+        with patch("sender_py.capture.capture_wecom_window", return_value=fake_img), \
+             patch("sender_py.local_ocr.identify_title_local") as mock_local, \
+             patch("sender_py.vision_api.identify_title", return_value=dict(api_judgment)) as mock_api, \
+             patch("sender_py.debug_utils.save_candidate_snapshot", return_value={}):
+            judgment, title, err, _ = sender.judge_candidate(
+                (0, 0, 986, 650), fake_roi, "35404", "朱旻涵",
+                "https://feedback.wxjifang.cn", token="t",
+                fast_title_only=True, verify_mode="api",
+            )
+            mock_local.assert_not_called()
+            mock_api.assert_called_once()
+            self.assertIsNone(err)
+            self.assertTrue(judgment["matched"])
+            self.assertIn("[云端API直验]", judgment["reason"])
+            self.assertEqual(title, "35404朱旻涵")
+
+        # 云端报错时（非 ADMIN_FORCED_LOCAL_OCR），api 模式应返回错误而非静默触发本地 OCR
+        with patch("sender_py.capture.capture_wecom_window", return_value=fake_img), \
+             patch("sender_py.local_ocr.identify_title_local") as mock_local, \
+             patch("sender_py.vision_api.identify_title", side_effect=RuntimeError("network down")):
+            judgment, title, err, _ = sender.judge_candidate(
+                (0, 0, 986, 650), fake_roi, "35404", "朱旻涵",
+                "https://feedback.wxjifang.cn", token="t",
+                fast_title_only=True, verify_mode="api",
+            )
+            mock_local.assert_not_called()
+            self.assertIsNone(judgment)
+            self.assertIn("network down", err)
+
 
 if __name__ == "__main__":
     unittest.main()

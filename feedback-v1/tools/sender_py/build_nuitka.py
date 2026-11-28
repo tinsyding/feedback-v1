@@ -19,8 +19,8 @@ import subprocess
 os.environ["PYTHONUTF8"] = "1"
 os.environ["PYTHONIOENCODING"] = "utf-8"
 
-APP_VERSION = "2.1.0.0"
-APP_VERSION_SHORT = "2.1.0"
+APP_VERSION = "2.1.1.0"
+APP_VERSION_SHORT = "2.1.1"
 
 WINRT_PROJECTION_PACKAGES = [
     "winrt",

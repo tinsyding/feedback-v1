@@ -10,9 +10,9 @@ from sender_py.web_companion import apply_window_icon
 class AppMetadataTest(unittest.TestCase):
     def test_app_identity(self):
         self.assertEqual(APP_NAME, "极方每周反馈程序")
-        self.assertEqual(APP_VERSION, "2.1.0")
+        self.assertEqual(APP_VERSION, "2.1.1")
         from sender_py.web_main import APP_VERSION as WEB_APP_VERSION
-        self.assertEqual(WEB_APP_VERSION, "2.1.0")
+        self.assertEqual(WEB_APP_VERSION, "2.1.1")
 
     def test_website_icon_exists(self):
         path = app_icon_path()

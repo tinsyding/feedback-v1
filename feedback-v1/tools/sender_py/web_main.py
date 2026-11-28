@@ -3,12 +3,45 @@
 启动本地轻量 HTTP 服务，并在默认浏览器中自动打开 Web 控制面板。
 """
 
+import faulthandler
 import os
 import socket
 import sys
 import threading
 import time
 import webbrowser
+
+_FAULT_LOG_FILE = None
+
+
+def _enable_crash_faulthandler():
+    """启用 Python faulthandler，将 C/C++ 原生崩溃栈落盘至 ~/.sender_py/logs/crash_fault.log。"""
+    global _FAULT_LOG_FILE
+    try:
+        try:
+            from sender_py.file_logger import get_logs_dir
+        except ModuleNotFoundError:
+            from file_logger import get_logs_dir
+        logs_dir = get_logs_dir()
+        fault_path = os.path.join(logs_dir, "crash_fault.log")
+        _FAULT_LOG_FILE = open(fault_path, "a", encoding="utf-8", buffering=1)
+        faulthandler.enable(file=_FAULT_LOG_FILE, all_threads=True)
+    except Exception:
+        pass
+
+
+def run_rapidocr_probe() -> int:
+    """独立子进程探活模式：验证 RapidOCR/ONNXRuntime 加载与单次微型推理是否触发原生崩溃。"""
+    try:
+        from PIL import Image
+        from rapidocr_onnxruntime import RapidOCR
+        engine = RapidOCR()
+        engine(Image.new("RGB", (120, 48), (255, 255, 255)))
+        safe_print("RAPIDOCR_PROBE_OK")
+        return 0
+    except Exception as exc:
+        safe_print(f"RAPIDOCR_PROBE_FAILED: {exc}", file=sys.stderr)
+        return 2
 
 # 确保在各平台（尤其 Windows 终端默认 cp1252/gbk）下标准输出流支持 UTF-8，避免打印中文抛出 UnicodeEncodeError
 for _stream_name in ("stdout", "stderr"):
@@ -43,7 +76,7 @@ def safe_print(*args, **kwargs):
 
 
 APP_NAME = "极方每周反馈程序 (Web版)"
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.1.1"
 
 
 def find_free_port(start: int = 8765, max_attempts: int = 100) -> int:
@@ -101,6 +134,13 @@ def run_smoke_test() -> int:
 
 
 def main():
+    # 0. 最优先处理子进程探活模式（避免执行 DPI/GUI/HTTP 启动逻辑）
+    if "--probe-rapidocr" in sys.argv:
+        sys.exit(run_rapidocr_probe())
+
+    # 0.5 启用原生崩溃栈落盘（捕获 C/C++ 扩展层 Segfault / Access Violation / Illegal Instruction）
+    _enable_crash_faulthandler()
+
     # 1. 最优先启用 Per-Monitor DPI 感知与独立 AppUserModelID
     # (必须在创建任何窗口/Tk/Win32调用前执行，确保物理像素对齐与任务栏公司 Logo 正常显示)
     try:

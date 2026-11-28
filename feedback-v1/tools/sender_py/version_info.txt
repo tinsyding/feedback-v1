@@ -2,8 +2,8 @@
 # PyInstaller Windows VERSIONINFO：让 exe 属性页显示中文产品名与版本。
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(2, 1, 0, 0),
-    prodvers=(2, 1, 0, 0),
+    filevers=(2, 1, 1, 0),
+    prodvers=(2, 1, 1, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -17,12 +17,12 @@ VSVersionInfo(
         '080404B0',
         [StringStruct('CompanyName', '极方教育'),
          StringStruct('FileDescription', '极方教育 - 教师端企业微信反馈发送工具(Web版)'),
-         StringStruct('FileVersion', '2.1.0.0'),
+         StringStruct('FileVersion', '2.1.1.0'),
          StringStruct('InternalName', 'JiFangFeedbackWeb'),
          StringStruct('LegalCopyright', 'Copyright (C) 极方教育'),
          StringStruct('OriginalFilename', '极方每周反馈程序-Web版.exe'),
          StringStruct('ProductName', '极方每周反馈程序(Web版)'),
-         StringStruct('ProductVersion', '2.1.0'),
+         StringStruct('ProductVersion', '2.1.1'),
          StringStruct('Comments', '教师端企业微信反馈批量发送客户端(Web版)，需配合企业微信 PC 客户端使用。')]
       )
     ]),

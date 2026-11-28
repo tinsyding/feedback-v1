@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "极方每周反馈程序"
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.1.1"
 
 
 def asset_path(filename: str) -> str:
@@ -907,8 +907,24 @@ def judge_candidate(rect, roi, target_id: str, target_name: str, server: str,
                 from local_ocr import identify_title_local
             judgment = identify_title_local(title_img, target_id, target_name)
             judgment["reason"] = f"[本地OCR模式] {judgment.get('reason', '')}"
+        elif verify_mode == "api":
+            # 纯云端 API 直验模式：真正跳过本地 OCR (winocr / RapidOCR)，直接调用云端大模型核验
+            try:
+                judgment = identify_title(title_img, target_id, target_name, server, token)
+                if judgment and judgment.get("matched"):
+                    judgment["reason"] = f"[云端API直验] {judgment.get('reason', '')}"
+            except Exception as e:
+                if "ADMIN_FORCED_LOCAL_OCR" in str(e):
+                    try:
+                        from sender_py.local_ocr import identify_title_local
+                    except ModuleNotFoundError:
+                        from local_ocr import identify_title_local
+                    judgment = identify_title_local(title_img, target_id, target_name)
+                    judgment["reason"] = f"[强制本地OCR] {judgment.get('reason', '')}"
+                else:
+                    err = str(e)
         else:
-            # 三层阶梯式智能核验：
+            # 三层阶梯式智能核验 (auto 模式)：
             # 第 1 层 winocr (WinRT ~47ms) -> 第 2 层 RapidOCR 全流程 (Det+Rec ~800ms)
             try:
                 from sender_py.local_ocr import identify_title_local
